@@ -19,6 +19,7 @@
 #include <memory>
 #include <optional>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
@@ -707,6 +708,8 @@ struct ResourcePlan {
 		std::vector<ActiveTraceStep>                  active_trace;
 		std::vector<ActiveTreeNode>                   active_tree;
 		std::vector<uint8_t>                          active_tree_sources;
+		// ResolveInvariantPhi depends only on the immutable plan, so per-draw evaluation reuses it.
+		std::unordered_map<const Inst*, Value>        invariant_phis;
 	};
 	static constexpr uint32_t ScratchSlots = 2;
 	mutable std::array<Scratch, ScratchSlots> scratch;
