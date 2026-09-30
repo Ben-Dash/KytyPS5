@@ -112,6 +112,7 @@ public:
 	void               SynchronizeBdaLegacy(const RangeSet& mapped);
 	[[nodiscard]] bool SynchronizeBdaSelective(const RangeSet& mapped);
 	[[nodiscard]] bool CheckBdaHintInvariant(const RangeSet& mapped);
+	void               TickFrame();
 	void               RunGarbageCollector();
 
 private:

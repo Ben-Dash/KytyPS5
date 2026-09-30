@@ -76,6 +76,7 @@ public:
 	// Writes a GET_LOD_STATS report of `size` bytes to `dst` (see there), then starts counting
 	// anew if `reset`.
 	void ReportMipStats(void* dst, uint32_t size, bool reset);
+	void TickFrame();
 	void RunGarbageCollector();
 
 	void AddInterruptEq(LibKernel::EventQueue::KernelEqueue eq, int event_id);
