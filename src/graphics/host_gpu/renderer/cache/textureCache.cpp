@@ -2825,6 +2825,11 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 	}
 }
 
+void TextureCache::TickFrame() {
+	std::scoped_lock lock {m_lock};
+	++m_gc_tick;
+}
+
 void TextureCache::RunGarbageCollector() {
 	(void)CollectGarbage(false);
 }
@@ -2832,7 +2837,8 @@ void TextureCache::RunGarbageCollector() {
 bool TextureCache::CollectGarbage(bool pressure_only) {
 	ChurnReason reason("gc");
 	std::unique_lock lock {m_lock};
-	const uint64_t   tick = pressure_only ? m_gc_tick : m_gc_tick++;
+	// Ages are counted in presented frames (TickFrame); see BufferCache::RunGarbageCollector.
+	const uint64_t   tick = m_gc_tick;
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
 	}

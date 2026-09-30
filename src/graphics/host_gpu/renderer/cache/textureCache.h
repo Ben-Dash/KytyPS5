@@ -151,6 +151,7 @@ public:
 
 	void UnmapMemory(uint64_t address, uint64_t size);
 	void ProcessDownloadImages();
+	void TickFrame();
 	void RunGarbageCollector();
 
 private:

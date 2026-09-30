@@ -319,6 +319,7 @@ void RenderContext::ReportMipStats(void* dst, uint32_t size, bool reset) {
 }
 
 void RenderContext::TickFrame() {
+	m_texture_cache.TickFrame();
 	m_buffer_cache.TickFrame();
 }
 
