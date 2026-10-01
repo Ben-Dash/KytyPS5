@@ -172,8 +172,11 @@ static int GetHostPathStat(const std::string& host_path, LibKernel::FileSystem::
 	LibKernel::FileSystem::FileStat stat {};
 	stat.st_mode = 0000777u | (is_dir ? 0040000u : 0100000u);
 
-	auto at = Common::DateTime::FromSystemUTC();
-	auto wt = at;
+	// Game content is read-only on the console: report the write time for every timestamp (the
+	// host access time moves on each read) and a per-session constant for directories.
+	static const auto session_start = Common::DateTime::FromSystemUTC();
+	auto              at            = session_start;
+	auto              wt            = at;
 
 	if (is_dir) {
 		stat.st_size    = 0;
@@ -187,13 +190,11 @@ static int GetHostPathStat(const std::string& host_path, LibKernel::FileSystem::
 		Common::File::GetLastAccessAndWriteTimeUTC(host_path, &at, &wt);
 	}
 
-	stat.st_atim.tv_sec  = static_cast<int64_t>(at.ToUnix());
-	stat.st_atim.tv_nsec = static_cast<int64_t>(
-	    (at.ToUnix() - static_cast<double>(stat.st_atim.tv_sec)) * 1000000000.0);
 	stat.st_mtim.tv_sec  = static_cast<int64_t>(wt.ToUnix());
 	stat.st_mtim.tv_nsec = static_cast<int64_t>(
 	    (wt.ToUnix() - static_cast<double>(stat.st_mtim.tv_sec)) * 1000000000.0);
-	stat.st_ctim     = stat.st_atim;
+	stat.st_atim     = stat.st_mtim;
+	stat.st_ctim     = stat.st_mtim;
 	stat.st_birthtim = stat.st_mtim;
 	*st              = stat;
 
