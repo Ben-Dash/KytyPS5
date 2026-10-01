@@ -115,6 +115,23 @@ static void SecToTimespec(KernelTimespec* ts, double sec) {
 	ts->tv_nsec = static_cast<int64_t>((sec - static_cast<double>(ts->tv_sec)) * 1000000000.0);
 }
 
+// Game content sits on a read-only file system on the console, so its timestamps never move.
+// Fixed for the session: a "now" timestamp changes on every stat and looks like a modification.
+static Common::DateTime SessionStartTime() {
+	static const auto start = Common::DateTime::FromSystemUTC();
+	return start;
+}
+
+// All times come from the write time. The host access time changes whenever a file is read
+// (NTFS last-access updates), and engines that hot-reload assets on a changed st_ctim or
+// st_atim then reload the same files forever.
+static void FillStatTimes(FileStat* stat, const Common::DateTime& write_time) {
+	SecToTimespec(&stat->st_mtim, write_time.ToUnix());
+	stat->st_atim     = stat->st_mtim;
+	stat->st_ctim     = stat->st_mtim;
+	stat->st_birthtim = stat->st_mtim;
+}
+
 static uint64_t AlignDown(uint64_t value, uint64_t alignment) {
 	return (alignment != 0 ? value & ~(alignment - 1) : value);
 }
@@ -1085,7 +1102,7 @@ int KYTY_SYSV_ABI KernelStat(const char* path, FileStat* sb) {
 	FileStat stat {};
 	stat.st_mode = 0000777u | (is_dir ? 0040000u : 0100000u);
 
-	auto at = Common::DateTime::FromSystemUTC();
+	auto at = SessionStartTime();
 	auto wt = at;
 
 	if (is_dir) {
@@ -1101,10 +1118,7 @@ int KYTY_SYSV_ABI KernelStat(const char* path, FileStat* sb) {
 		Common::File::GetLastAccessAndWriteTimeUTC(real_file_name, &at, &wt);
 	}
 
-	SecToTimespec(&stat.st_atim, at.ToUnix());
-	SecToTimespec(&stat.st_mtim, wt.ToUnix());
-	stat.st_ctim     = stat.st_atim;
-	stat.st_birthtim = stat.st_mtim;
+	FillStatTimes(&stat, wt);
 	*sb              = stat;
 
 	return OK;
@@ -1134,17 +1148,14 @@ int KYTY_SYSV_ABI KernelFstat(int d, FileStat* sb) {
 	FileStat stat {};
 	stat.st_mode = 0000777u | (file->directory ? 0040000u : 0100000u);
 
-	auto at = Common::DateTime::FromSystemUTC();
+	auto at = SessionStartTime();
 	auto wt = at;
 
 	if (file->special != SpecialFile::None) {
 		stat.st_size    = 0;
 		stat.st_blksize = 512;
 		stat.st_blocks  = 0;
-		SecToTimespec(&stat.st_atim, at.ToUnix());
-		SecToTimespec(&stat.st_mtim, wt.ToUnix());
-		stat.st_ctim     = stat.st_atim;
-		stat.st_birthtim = stat.st_mtim;
+		FillStatTimes(&stat, wt);
 		*sb              = stat;
 
 		return OK;
@@ -1173,10 +1184,7 @@ int KYTY_SYSV_ABI KernelFstat(int d, FileStat* sb) {
 		stat.st_blocks  = stat.st_size / 512;
 	}
 
-	SecToTimespec(&stat.st_atim, at.ToUnix());
-	SecToTimespec(&stat.st_mtim, wt.ToUnix());
-	stat.st_ctim     = stat.st_atim;
-	stat.st_birthtim = stat.st_mtim;
+	FillStatTimes(&stat, wt);
 	*sb              = stat;
 
 	return OK;
