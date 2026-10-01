@@ -13,6 +13,7 @@
 #include "common/platform/sysTimer.h"
 #include "common/stringUtils.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -65,8 +66,30 @@ static DWORD GetCacheAccessType(sys_file_cache_type_t t) {
 
 void SysFileRead(void* data, uint32_t size, sys_file_t& f, uint32_t* bytes_read) {
 	if (f.type == SYS_FILE_FILE) {
+		LARGE_INTEGER start {};
+		LARGE_INTEGER zero {};
+		const bool    have_start = SetFilePointerEx(f.handle, zero, &start, FILE_CURRENT) != 0;
+
 		DWORD w = 0;
-		ReadFile(f.handle, data, size, &w, nullptr);
+		if (ReadFile(f.handle, data, size, &w, nullptr) == 0) {
+			// The kernel writes the destination directly, so it cannot fault in guest pages the
+			// emulator commits lazily or write-protects for tracking (ERROR_NOACCESS). Read into
+			// a host buffer and copy from user mode, where the emulator's fault handler runs.
+			const DWORD error = GetLastError();
+			std::fprintf(stderr, "SysFileRead: ReadFile(%u bytes) failed, error=%lu; retrying via bounce buffer\n",
+			             size, static_cast<unsigned long>(error));
+			w = 0;
+			if (have_start && SetFilePointerEx(f.handle, start, nullptr, FILE_BEGIN) != 0) {
+				std::vector<uint8_t> bounce(size);
+				if (ReadFile(f.handle, bounce.data(), size, &w, nullptr) != 0) {
+					std::memcpy(data, bounce.data(), w);
+				} else {
+					std::fprintf(stderr, "SysFileRead: bounce read failed, error=%lu\n",
+					             static_cast<unsigned long>(GetLastError()));
+					w = 0;
+				}
+			}
+		}
 		if (bytes_read != nullptr) {
 			*bytes_read = w;
 		}
