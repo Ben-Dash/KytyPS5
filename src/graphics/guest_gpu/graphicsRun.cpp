@@ -1006,6 +1006,26 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 			     total_dw - remaining_dw, packet_header, opcode, KYTY_PM4_LEN(packet_header));
 		}
 
+		// KYTY_DEBUG_PREDICATION_STATS=1 prints, every 5 s, how many predicated packets ran and how
+		// many were skipped, per opcode, to see whether predication drops whole passes.
+		static const bool predication_stats = std::getenv("KYTY_DEBUG_PREDICATION_STATS") != nullptr;
+		if (predication_stats && (packet_header & 1u) != 0) [[unlikely]] {
+			static std::array<std::array<uint64_t, 2>, 256> counts {};
+			static auto window = std::chrono::steady_clock::now();
+			counts[opcode & 0xffu][ShouldSkipPredicatedPackets() ? 1 : 0]++;
+			if (std::chrono::steady_clock::now() - window > std::chrono::seconds(5)) {
+				window = std::chrono::steady_clock::now();
+				std::string line = "predication:";
+				for (uint32_t op = 0; op < 256; op++) {
+					if (counts[op][0] + counts[op][1] != 0) {
+						line += fmt::format(" op{:02x}={}/{}", op, counts[op][0], counts[op][1]);
+					}
+				}
+				std::printf("%s (ran/skipped)\n", line.c_str());
+				std::fflush(stdout);
+				counts = {};
+			}
+		}
 		if ((packet_header & 1u) != 0 && ShouldSkipPredicatedPackets()) {
 			auto packet_dw = KYTY_PM4_LEN(packet_header);
 			EXIT_NOT_IMPLEMENTED(packet_dw == 0 || packet_dw > remaining_dw);
