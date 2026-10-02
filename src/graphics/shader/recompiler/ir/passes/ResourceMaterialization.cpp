@@ -7,6 +7,8 @@
 #include "graphics/shader/shaderBindings.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <atomic>
 #include <array>
 #include <bit>
 #include <cinttypes>
@@ -1198,6 +1200,18 @@ bool UpdateMemoKey(const CompiledResourcePlan& compiled, const SrtRuntime& runti
 	return same;
 }
 
+// KYTY_DEBUG_SRT_FAIL=1 reports the first 32 failed materializations by stage.
+bool ReportMaterializeFailure(const ResourcePlan& program, const char* stage, uint32_t index) {
+	static const bool enabled = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+	static std::atomic<uint32_t> reported {0};
+	if (enabled && reported.fetch_add(1, std::memory_order_relaxed) < 32u) {
+		std::printf("materialize-failed: shader=0x%016llx stage=%s index=%u\n",
+		            static_cast<unsigned long long>(program.shader_hash), stage, index);
+		std::fflush(stdout);
+	}
+	return false;
+}
+
 template <typename Roots>
 bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRuntime& runtime,
                  const SrtRuntime& observed, bool capture_reads, typename Roots::Walker& clean,
@@ -1207,7 +1221,7 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 	// The ordinary walker sends conditions that are not direct to its strict walker.
 	const auto active = walker.FindActiveSources();
 	if (!walker.RefreshFlatBuffer(snapshot.flattened_srt)) {
-		return false;
+		return ReportMaterializeFailure(program, "flat refresh", 0);
 	}
 	snapshot.uniform_fill = {};
 	const auto& fill = program.uniform_fill;
@@ -1249,7 +1263,7 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 	snapshot.buffers.resize(program.info.buffers.size());
 	for (uint32_t i = 0; i < program.info.buffers.size(); ++i) {
 		if (!evaluate(program.info.buffers[i].source, snapshot.buffers[i])) {
-			return false;
+			return ReportMaterializeFailure(program, "buffer", i);
 		}
 	}
 	if (capture_reads) {
@@ -1258,7 +1272,7 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			if (!buffer.written || (!active.empty() && !active[buffer.source])) continue;
 			DescriptorValue strict;
 			if (!clean.EvaluateDescriptor(buffer.source, strict) ||
-			    strict != snapshot.buffers[i]) return false;
+			    strict != snapshot.buffers[i]) return ReportMaterializeFailure(program, "strict buffer", i);
 		}
 	}
 	snapshot.images.resize(program.info.images.size());
@@ -1294,11 +1308,11 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			                 !clean.EvaluateDescriptor(indirect.table_source, table))) ||
 			    !MaterializeIndirectImage(program, roots, image.source, indirect, material, table,
 			                              i, observed, clean, snapshot, specialization)) {
-				return false;
+				return ReportMaterializeFailure(program, "indirect image", i);
 			}
 		} else {
 			if (!evaluate(image.source, snapshot.images[i])) {
-				return false;
+				return ReportMaterializeFailure(program, "image", i);
 			}
 			if (!ValidImageDescriptor(snapshot.images[i], image.r128)) {
 				snapshot.images[i].dwords.fill(0);
@@ -1308,10 +1322,11 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 	snapshot.samplers.resize(program.info.samplers.size());
 	for (uint32_t i = 0; i < program.info.samplers.size(); ++i) {
 		if (!evaluate(program.info.samplers[i].source, snapshot.samplers[i])) {
-			return false;
+			return ReportMaterializeFailure(program, "sampler", i);
 		}
 	}
-	if (capture_reads && !WrittenBuffersDisjoint(program, snapshot, reads)) return false;
+	if (capture_reads && !WrittenBuffersDisjoint(program, snapshot, reads))
+		return ReportMaterializeFailure(program, "written buffers overlap reads", 0);
 	snapshot.user_data.assign(runtime.user_data.begin(), runtime.user_data.end());
 	if (!BuildResourceSpecialization(program, snapshot, specialization)) {
 		return false;

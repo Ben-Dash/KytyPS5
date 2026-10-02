@@ -4,6 +4,7 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <atomic>
 #include <bit>
 #include <cmath>
@@ -2069,9 +2070,26 @@ std::span<const uint8_t> SrtEvaluator::FindActiveSources() {
 	return active;
 }
 
+// A failed refresh skips the draw or dispatch (KYTY_DEBUG_SRT_FAIL=1 reports the first 32: the
+// SRT read slot and the IR opcode its value comes from).
+static bool ReportSrtRefreshFailure(const ResourcePlan& program, const char* reason, uint32_t slot) {
+	static const bool enabled = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+	static std::atomic<uint32_t> reported {0};
+	if (enabled && reported.fetch_add(1, std::memory_order_relaxed) < 32u) {
+		// The IR behind srt_reads is discarded after compilation: report the read's flat offset
+		// and guest pc only.
+		const auto offset = slot < program.srt_reads.size() ? program.srt_reads[slot].flat_offset : 0u;
+		std::printf("srt-refresh-failed: shader=0x%016llx %s slot=%u/%zu flat_offset=%u\n",
+		            static_cast<unsigned long long>(program.shader_hash), reason, slot,
+		            program.srt_reads.size(), offset);
+		std::fflush(stdout);
+	}
+	return false;
+}
+
 bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 	if (!m_program.srt_plan_complete) {
-		return false;
+		return ReportSrtRefreshFailure(m_program, "plan incomplete", 0);
 	}
 	flat.resize(m_program.srt_reads.size());
 	// Run slots are ordinary: this walker evaluates them. A run that cannot be read whole
@@ -2085,7 +2103,7 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		for (uint32_t index = 0; index < info.count; index++) {
 			const auto slot = m_compiled.run_entries[info.first + index].slot;
 			if (!Evaluate(m_compiled.slots[slot], flat[m_program.srt_reads[slot].flat_offset])) {
-				return false;
+				return ReportSrtRefreshFailure(m_program, "run slot unreadable", slot);
 			}
 		}
 	}
@@ -2098,11 +2116,12 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		                   m_compiled.clean_slots[offset] != 0u;
 		if (clean &&
 		    (m_clean_evaluator == nullptr || m_runtime.read_specialization_memory == nullptr)) {
-			return false;
+			return ReportSrtRefreshFailure(m_program, "no clean reader", slot);
 		}
 		auto& evaluator = clean ? *m_clean_evaluator : *this;
 		if (offset >= flat.size() || !evaluator.Evaluate(m_compiled.slots[slot], flat[offset])) {
-			return false;
+			return ReportSrtRefreshFailure(m_program, clean ? "clean slot unreadable" : "slot unreadable",
+			                               slot);
 		}
 	}
 	// Only this walker's own contexts use the shortcut; nested EXEC walkers evaluate normally.
