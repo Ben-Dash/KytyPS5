@@ -24,8 +24,11 @@
 #include <string>
 #include <cstring>
 #include <filesystem>
+#include <chrono>
+#include <mutex>
 #include <random>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace Libs::LibKernel::FileSystem {
@@ -184,12 +187,83 @@ static bool TraceObjectHasName(uint64_t obj, const char* name) {
 // (0x90743ec30), log both of its {key, texture} work lists ([rbp-0x58, rbp-0x38) streams in,
 // [rbp-0x70, rbp-0x78) streams out), the entry of the texture whose name matches, and that
 // texture's first fields, to see why one texture keeps moving between the lists.
+static uint64_t TraceMs() {
+	static const auto start = std::chrono::steady_clock::now();
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+	                                 std::chrono::steady_clock::now() - start)
+	                                 .count());
+}
+
+// The streamer manager keeps its texture records in a list at manager+0x10: nodes are
+// {next, ?, value, texture} where the value's low float is the requested priority. Poll it about
+// every millisecond and log each change of the named texture's record, to see whether the request
+// really disappears between two streamer updates.
+static void TraceStreamerRequests(uint64_t manager, const char* name) {
+	std::thread([manager, name] {
+		uint64_t texture   = 0;
+		uint64_t last      = ~0ull;
+		bool     last_seen = true;
+		uint64_t last_size = 0;
+		for (;;) {
+			std::this_thread::sleep_for(std::chrono::microseconds(500));
+			if (!TraceReadable(manager + 0x10, 8)) {
+				continue;
+			}
+			const auto head = *reinterpret_cast<const uint64_t*>(manager + 0x10);
+			if (!TraceReadable(head, 8)) {
+				continue;
+			}
+			uint64_t node  = *reinterpret_cast<const uint64_t*>(head);
+			uint64_t size  = 0;
+			bool     seen  = false;
+			uint64_t value = 0;
+			for (; node != head && size < 20000; size++) {
+				if ((node & 7u) != 0 || !TraceReadable(node, 0x20)) {
+					break;
+				}
+				const auto node_value = *reinterpret_cast<const uint64_t*>(node + 0x10);
+				const auto node_tex   = *reinterpret_cast<const uint64_t*>(node + 0x18);
+				if (texture == 0 && TraceObjectHasName(node_tex, name)) {
+					texture = node_tex;
+					LOGF("STREAMREQ t=%" PRIu64 " found %s texture=%#" PRIx64 " node=%#" PRIx64 "\n",
+					     TraceMs(), name, texture, node);
+				}
+				if (texture != 0 && node_tex == texture) {
+					seen  = true;
+					value = node_value;
+				}
+				node = *reinterpret_cast<const uint64_t*>(node);
+			}
+			if (texture == 0) {
+				continue;
+			}
+			if (seen != last_seen || value != last || (size / 16) != (last_size / 16)) {
+				float prio = 0.0f;
+				std::memcpy(&prio, &value, 4);
+				const float tex_prio =
+				    TraceReadable(texture + 0x2c, 4) ? *reinterpret_cast<const float*>(texture + 0x2c) : -1.0f;
+				LOGF("STREAMREQ t=%" PRIu64 " list=%" PRIu64 " %s value=%#" PRIx64 " prio=%g tex+0x2c=%g\n",
+				     TraceMs(), size, seen ? "present" : "absent", value, prio, tex_prio);
+				last_seen = seen;
+				last      = value;
+				last_size = size;
+			}
+		}
+	}).detach();
+}
+
 static void TraceStreamerLists(const char* path, uint64_t rbp) {
 	static const char* name = std::getenv("KYTY_TRACE_LISTS");
 	if (name == nullptr || name[0] == '\0') {
 		return;
 	}
 	auto local = [rbp](uint64_t offset) { return *reinterpret_cast<const uint64_t*>(rbp - offset); };
+	static std::once_flag poller;
+	std::call_once(poller, [&] {
+		LOGF("STREAMREQ t=%" PRIu64 " streamer=%#" PRIx64 " manager=%#" PRIx64 "\n", TraceMs(),
+		     local(0x88), local(0x80));
+		TraceStreamerRequests(local(0x80), name);
+	});
 	struct List {
 		const char* label;
 		uint64_t    begin;
@@ -203,26 +277,30 @@ static void TraceStreamerLists(const char* path, uint64_t rbp) {
 			     list.label, list.begin, list.end);
 			continue;
 		}
+		// Entries are {key, record value}; the stream-in list's values are remembered so the next
+		// stream-out list can show how many of the textures just streamed in it drops again.
+		static std::vector<uint64_t> last_in;
 		const auto  count = (list.end - list.begin) / 16;
-		std::string line  = fmt::format("STREAMLIST path={} list={} count={}", path, list.label, count);
+		std::string line  = fmt::format("STREAMLIST t={} list={} count={}", TraceMs(), list.label, count);
+		std::vector<uint64_t> values;
+		uint64_t              dropped = 0;
 		for (uint64_t i = 0; i < count; i++) {
-			const auto key = *reinterpret_cast<const uint64_t*>(list.begin + i * 16);
-			const auto tex = *reinterpret_cast<const uint64_t*>(list.begin + i * 16 + 8);
-			if (i < 4) {
-				line += fmt::format(" [{}]key={:x},tex={:x}", i, key, tex);
+			const auto key   = *reinterpret_cast<const uint64_t*>(list.begin + i * 16);
+			const auto value = *reinterpret_cast<const uint64_t*>(list.begin + i * 16 + 8);
+			values.push_back(value);
+			if (std::strcmp(list.label, "in") == 0 && i < 40) {
+				line += fmt::format(" {:x}:{:x}", key, value);
 			}
-			if (!TraceObjectHasName(tex, name)) {
-				continue;
+			if (std::find(last_in.begin(), last_in.end(), value) != last_in.end()) {
+				dropped++;
 			}
-			float key_lo = 0.0f;
-			float key_hi = 0.0f;
-			std::memcpy(&key_lo, &key, 4);
-			std::memcpy(&key_hi, reinterpret_cast<const char*>(&key) + 4, 4);
-			line += fmt::format(" MATCH[{}] key={:x} ({} / {}) tex={:x} fields=", i, key, key_lo,
-			                    key_hi, tex);
-			for (uint64_t offset = 0; offset < 0x80; offset += 8) {
-				line += fmt::format("{:x} ", *reinterpret_cast<const uint64_t*>(tex + offset));
+		}
+		if (std::strcmp(list.label, "in") == 0) {
+			if (!values.empty()) {
+				last_in = values;
 			}
+		} else {
+			line += fmt::format(" of_last_in={}/{}", dropped, last_in.size());
 		}
 		LOGF("%s\n", line.c_str());
 	}
