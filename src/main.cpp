@@ -107,6 +107,8 @@ static void PrintUsage() {
 	         "compiling instead of stalling; they appear a few frames late. Default: false.\n");
 	::printf("  --relaxed-readback <true|false>      Let game threads read memory the GPU is still "
 	         "writing without waiting; a value can be a frame old. Default: false.\n");
+	::printf("  --fxaa <true|false>                  Smooth jagged edges of the presented frame "
+	         "with FXAA. Default: false.\n");
 	::printf("  --speculative-draws <true|false>     Prepare draws' shader resources on a second "
 	         "thread ahead of the GPU thread. Default: true.\n");
 	::printf("  --record-thread <true|false>         Record the GPU thread's Vulkan commands on the "
@@ -486,6 +488,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--relaxed-readback") {
 			if (!ParseBool(value, options.config.relaxed_readback_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--fxaa") {
+			if (!ParseBool(value, options.config.fxaa_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}

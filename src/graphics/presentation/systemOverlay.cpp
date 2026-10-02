@@ -1118,6 +1118,18 @@ struct SystemOverlay::Impl {
 		ImGui::PopTextWrapPos();
 		ImGui::Separator();
 
+		bool fxaa = Config::FxaaEnabled();
+		if (ImGui::Checkbox("FXAA anti-aliasing", &fxaa)) {
+			Config::SetFxaaEnabled(fxaa);
+			settings_save_failed = !Common::SettingsFile::Save("fxaa", fxaa ? "true" : "false");
+		}
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextDisabled(
+		    "Smooths jagged edges of the finished frame before it is shown. Costs well under a "
+		    "millisecond of GPU time; fine detail and text get slightly softer.");
+		ImGui::PopTextWrapPos();
+		ImGui::Separator();
+
 		bool speculative_draws = Config::SpeculativeDrawsEnabled();
 		if (ImGui::Checkbox("Prepare draws ahead", &speculative_draws)) {
 			Config::SetSpeculativeDrawsEnabled(speculative_draws);

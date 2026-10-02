@@ -50,10 +50,11 @@ public:
 
 	// Draws level `level` (extent `source`, at most twice `target` on each axis) of `source_view`
 	// over all of `target_view`. The source view covers every level and is in
-	// eShaderReadOnlyOptimal; the target is in eColorAttachmentOptimal.
+	// eShaderReadOnlyOptimal; the target is in eColorAttachmentOptimal. With `fxaa`, the level
+	// is drawn through FXAA instead (any scale up to 2x down, see gpu_video_out_fxaa.frag).
 	void Record(vk::Device device, vk::CommandBuffer command, vk::ImageView source_view,
 	            uint32_t level, vk::Extent2D source, vk::ImageView target_view,
-	            vk::Format target_format, vk::Extent2D target);
+	            vk::Format target_format, vk::Extent2D target, bool fxaa = false);
 	void Release(vk::Device device);
 
 private:
@@ -62,6 +63,7 @@ private:
 	vk::DescriptorSetLayout m_descriptors = nullptr;
 	vk::PipelineLayout      m_layout      = nullptr;
 	vk::Pipeline            m_pipeline    = nullptr;
+	vk::Pipeline            m_fxaa        = nullptr;
 };
 
 struct WindowLoopState {

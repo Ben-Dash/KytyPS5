@@ -6,6 +6,7 @@
 #include "common/threads.h"
 #include "gpu_blit_shaders/gpu_blit_fs_triangle_spv.h"
 #include "gpu_blit_shaders/gpu_video_out_downscale_spv.h"
+#include "gpu_blit_shaders/gpu_video_out_fxaa_spv.h"
 #include "gpu_blit_shaders/gpu_video_out_overlay_spv.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
@@ -404,7 +405,7 @@ bool PresentNeedsFilter(vk::Extent2D source, vk::Extent2D target) noexcept {
 
 void PresentFilter::Record(vk::Device device, vk::CommandBuffer command, vk::ImageView source_view,
                            uint32_t level, vk::Extent2D source, vk::ImageView target_view,
-                           vk::Format target_format, vk::Extent2D target) {
+                           vk::Format target_format, vk::Extent2D target, bool fxaa) {
 	struct Constants {
 		int32_t  size[2];
 		float    scale[2];
@@ -433,14 +434,20 @@ void PresentFilter::Record(vk::Device device, vk::CommandBuffer command, vk::Ima
 		RequireVulkanSuccess(device.createPipelineLayout(&layout, nullptr, &m_layout),
 		                     "create video-out downscale pipeline layout");
 	}
-	if (m_pipeline != nullptr && m_format != target_format) {
+	if (m_format != target_format) {
 		device.destroyPipeline(m_pipeline, nullptr);
+		device.destroyPipeline(m_fxaa, nullptr);
 		m_pipeline = nullptr;
-	}
-	if (m_pipeline == nullptr) {
-		m_pipeline = CreateFullscreenPipeline(device, m_layout, GPU_VIDEO_OUT_DOWNSCALE_SPV,
-		                                      target_format, false);
+		m_fxaa     = nullptr;
 		m_format   = target_format;
+	}
+	auto& pipeline = fxaa ? m_fxaa : m_pipeline;
+	if (pipeline == nullptr) {
+		pipeline = CreateFullscreenPipeline(
+		    device, m_layout,
+		    fxaa ? std::span<const uint32_t>(GPU_VIDEO_OUT_FXAA_SPV)
+		         : std::span<const uint32_t>(GPU_VIDEO_OUT_DOWNSCALE_SPV),
+		    target_format, false);
 	}
 
 	const vk::DescriptorImageInfo image {m_sampler, source_view,
@@ -458,7 +465,7 @@ void PresentFilter::Record(vk::Device device, vk::CommandBuffer command, vk::Ima
 	    level};
 	command.pushConstants(m_layout, vk::ShaderStageFlagBits::eFragment, 0, sizeof(constants),
 	                      &constants);
-	command.bindPipeline(vk::PipelineBindPoint::eGraphics, m_pipeline);
+	command.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 	vk::RenderingAttachmentInfo attachment {};
 	attachment.imageView   = target_view;
 	attachment.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
@@ -482,10 +489,12 @@ void PresentFilter::Record(vk::Device device, vk::CommandBuffer command, vk::Ima
 
 void PresentFilter::Release(vk::Device device) {
 	device.destroyPipeline(m_pipeline, nullptr);
+	device.destroyPipeline(m_fxaa, nullptr);
 	device.destroyPipelineLayout(m_layout, nullptr);
 	device.destroyDescriptorSetLayout(m_descriptors, nullptr);
 	device.destroySampler(m_sampler, nullptr);
 	m_pipeline    = nullptr;
+	m_fxaa        = nullptr;
 	m_layout      = nullptr;
 	m_descriptors = nullptr;
 	m_sampler     = nullptr;
@@ -929,12 +938,16 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	uint32_t     source_level = 0;
 	vk::Extent2D blit_extent {};
 	bool         filtered = false;
+	bool         fxaa     = false;
 	if (source != nullptr) {
 		const vk::Extent2D source_extent {source->image.extent.width, source->image.extent.height};
 		source_level = PresentSourceLevel(source_extent, m_extent, source->image.mip_levels);
 		RecordPresentDownscale(vk_command, source->image.image, source_extent, source_level);
 		blit_extent = MipExtent(source_extent, source_level);
-		filtered    = PresentNeedsFilter(blit_extent, m_extent);
+		// FXAA draws every frame through the filter, at any scale the filter takes.
+		fxaa        = Config::FxaaEnabled() && blit_extent.width <= 2u * m_extent.width &&
+		              blit_extent.height <= 2u * m_extent.height;
+		filtered    = fxaa || PresentNeedsFilter(blit_extent, m_extent);
 		if (filtered) {
 			if (source->mips_view == nullptr) {
 				vk::ImageViewCreateInfo view {};
@@ -975,7 +988,7 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 
 	if (filtered) {
 		m_filter.Record(m_window.graphic_ctx.device, vk_command, source->mips_view, source_level,
-		                blit_extent, m_image_views[m_image_index], m_format, m_extent);
+		                blit_extent, m_image_views[m_image_index], m_format, m_extent, fxaa);
 	} else if (source != nullptr) {
 		vk::ImageBlit region {};
 		region.srcSubresource.aspectMask     = vk::ImageAspectFlagBits::eColor;

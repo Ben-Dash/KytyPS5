@@ -82,6 +82,7 @@ struct ConfigOptions {
 	bool                   pipeline_libraries_enabled  = true;
 	bool                   async_pipelines_enabled     = false;
 	bool                   relaxed_readback_enabled    = false;
+	bool                   fxaa_enabled                = false;
 	bool                   speculative_draws_enabled   = true;
 	bool                   record_thread_enabled       = true;
 	bool                   hardware_buffer_bounds      = true;
@@ -166,6 +167,9 @@ void SetAsyncPipelinesEnabled(bool enabled);
 bool RelaxedReadbackEnabled();
 // Changes it while running (the settings panel).
 void SetRelaxedReadbackEnabled(bool enabled);
+// FXAA over the presented frame (--fxaa, the F2 menu).
+bool FxaaEnabled();
+void SetFxaaEnabled(bool enabled);
 // A second thread prepares draws' shader resources ahead of the GPU thread, which takes them
 // when they are still what it would prepare itself. Faster in scenes with many draws; uses one
 // more CPU core.

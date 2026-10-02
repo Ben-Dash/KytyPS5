@@ -243,6 +243,17 @@ void SetRelaxedReadbackEnabled(bool enabled) {
 	g_relaxed_readback_override.store(enabled ? 1 : 0, std::memory_order_relaxed);
 }
 
+static std::atomic<int> g_fxaa_override {-1};
+
+bool FxaaEnabled() {
+	const auto enabled = g_fxaa_override.load(std::memory_order_relaxed);
+	return enabled >= 0 ? enabled != 0 : g_config->fxaa_enabled;
+}
+
+void SetFxaaEnabled(bool enabled) {
+	g_fxaa_override.store(enabled ? 1 : 0, std::memory_order_relaxed);
+}
+
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 bool RedZoneProtectionEnabled() {
