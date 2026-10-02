@@ -4,8 +4,10 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fmt/format.h>
 #include <map>
@@ -474,7 +476,10 @@ bool SrtWalker::EvaluateRawRead(const Inst& inst, uint64_t& result) {
 		                      ? static_cast<uint64_t>(static_cast<uint32_t>(records))
 		                      : static_cast<uint64_t>(stride) * static_cast<uint32_t>(records);
 		if (byte_offset > size || size - byte_offset < sizeof(uint32_t)) {
-			return false;
+			// A scalar buffer read past num_records returns zero on the hardware ("reads return
+			// zero, writes ignored"), as the shader's own load does on the GPU.
+			result = 0;
+			return true;
 		}
 		address = (base & ~uint64_t {3}) + byte_offset;
 	} else {
@@ -487,6 +492,19 @@ bool SrtWalker::EvaluateRawRead(const Inst& inst, uint64_t& result) {
 	uint32_t word = 0;
 	if (m_runtime.read_memory != nullptr) {
 		if (!m_runtime.read_memory(m_runtime.userdata, address, {&word, 1})) {
+			// A load through a null base sits on a path the shader guards with a null-pointer
+			// test and never executes; its value cannot matter.
+			if (base == 0) {
+				result = 0;
+				return true;
+			}
+			static std::atomic<uint32_t> reported {0};
+			if (reported.fetch_add(1, std::memory_order_relaxed) < 16) {
+				std::fprintf(stderr,
+				             "SRT raw read failed: guest memory unreadable at 0x%llx (base 0x%llx)\n",
+				             static_cast<unsigned long long>(address),
+				             static_cast<unsigned long long>(base));
+			}
 			return false;
 		}
 	} else {
