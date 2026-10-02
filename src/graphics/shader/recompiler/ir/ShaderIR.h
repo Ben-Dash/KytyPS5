@@ -76,10 +76,13 @@ struct MemoryInfo {
 	// formats, low bits for integer ones), which the backend converts by the buffer's format.
 	bool                    d16                                                   = false;
 
-	// Raw loads through a GPU-selected descriptor read guest memory by address (BDA).
+	// Loads through a GPU-selected descriptor read guest memory by address (BDA); a formatted
+	// load decodes the descriptor's format at run time (see LoadIndirectFormattedBuffer).
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
-		if (formatted || typed) {
-			return false;
+		if (formatted) {
+			return data_bits == 32u &&
+			       (opcode == ValueOpcode::LoadBufferU32 || opcode == ValueOpcode::LoadBufferU32x2 ||
+			        opcode == ValueOpcode::LoadBufferU32x3 || opcode == ValueOpcode::LoadBufferU32x4);
 		}
 		switch (data_bits) {
 			case 8u: return opcode == ValueOpcode::LoadBufferU8;
