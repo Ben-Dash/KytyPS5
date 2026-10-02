@@ -19,6 +19,8 @@
 #include <atomic>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <cstring>
 #include <filesystem>
 #include <random>
@@ -113,6 +115,39 @@ static void FillRandomBuffer(void* buf, size_t nbytes) {
 static void SecToTimespec(KernelTimespec* ts, double sec) {
 	ts->tv_sec  = static_cast<int64_t>(sec);
 	ts->tv_nsec = static_cast<int64_t>((sec - static_cast<double>(ts->tv_sec)) * 1000000000.0);
+}
+
+// KYTY_TRACE_TEXTURE=<substring>[,<substring>...]: print the guest destination of every read
+// from a matching file to stdout, next to KYTY_DEBUG_IMAGE_CHURN's image creation and release,
+// to follow a streamed texture from its file read to its GPU image.
+static void TraceTextureRead(const std::filesystem::path& path, const void* buf, uint32_t bytes,
+                             int64_t offset) {
+	static const std::vector<std::string> filters = [] {
+		std::vector<std::string> list;
+		if (const char* value = std::getenv("KYTY_TRACE_TEXTURE"); value != nullptr) {
+			std::string all(value);
+			for (size_t start = 0; start < all.size();) {
+				const auto end = std::min(all.find(',', start), all.size());
+				if (end > start) {
+					list.push_back(all.substr(start, end - start));
+				}
+				start = end + 1;
+			}
+		}
+		return list;
+	}();
+	if (filters.empty()) {
+		return;
+	}
+	const auto name = Common::PathToString(path);
+	for (const auto& filter: filters) {
+		if (name.find(filter) != std::string::npos) {
+			std::printf("tex-read: 0x%016" PRIx64 " size=0x%x pos=%" PRId64 " %s\n",
+			            reinterpret_cast<uint64_t>(buf), bytes, offset,
+			            name.substr(name.find_last_of("/\\") + 1).c_str());
+			return;
+		}
+	}
 }
 
 // Game content sits on a read-only file system on the console, so its timestamps never move.
@@ -665,6 +700,7 @@ int64_t KYTY_SYSV_ABI KernelRead(int d, void* buf, size_t nbytes) {
 	}
 
 	LOGF("\tRead %u bytes from: %s\n", bytes_read, Common::PathToString(file->real_name).c_str());
+	TraceTextureRead(file->real_name, buf, bytes_read, -1);
 
 	return bytes_read;
 }
@@ -793,6 +829,7 @@ int64_t KYTY_SYSV_ABI KernelPread(int d, void* buf, size_t nbytes, int64_t offse
 
 	LOGF("\tRead %u bytes (pos = %" PRId64 ") from: %s\n", bytes_read, offset,
 	     Common::PathToString(file->real_name).c_str());
+	TraceTextureRead(file->real_name, buf, bytes_read, offset);
 
 	return bytes_read;
 }
