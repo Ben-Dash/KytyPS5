@@ -270,11 +270,47 @@ static void TraceStreamerRequests(uint64_t manager, const char* name) {
 						}
 					}
 				}
+				// The slot's usage record: a map at +0xb0 from slot to a pointer to {mip info, priority};
+				// the streamer reads the priority as the low float of the second qword.
+				uint64_t usage_ptr = 0;
+				uint64_t usage_lo  = 0;
+				uint64_t usage_hi  = 0;
+				if (state == 2 && TraceReadable(0x90ec99a18ull, 8)) {
+					const auto table = *reinterpret_cast<const uint64_t*>(0x90ec99a18ull) + 0x3158b0;
+					if (TraceReadable(table + 0xb0, 8)) {
+						const auto head = *reinterpret_cast<const uint64_t*>(table + 0xb0);
+						if (TraceReadable(head, 0x20)) {
+							uint64_t at = *reinterpret_cast<const uint64_t*>(head + 8);
+							for (int depth = 0; depth < 64 && TraceReadable(at, 0x30) &&
+							                    *reinterpret_cast<const uint8_t*>(at + 0x19) == 0;
+							     depth++) {
+								const auto key = *reinterpret_cast<const uint16_t*>(at + 0x20);
+								if (key == slot) {
+									usage_ptr = *reinterpret_cast<const uint64_t*>(at + 0x28);
+									if (TraceReadable(usage_ptr, 16)) {
+										usage_lo = *reinterpret_cast<const uint64_t*>(usage_ptr);
+										usage_hi = *reinterpret_cast<const uint64_t*>(usage_ptr + 8);
+									}
+									break;
+								}
+								at = *reinterpret_cast<const uint64_t*>(at + (slot < key ? 0 : 0x10));
+							}
+						}
+					}
+				}
+				static uint64_t last_lo = ~0ull;
+				static uint64_t last_hi = ~0ull;
 				const uint32_t packed = state | (static_cast<uint32_t>(slot) << 8);
-				if (packed != last_table) {
-					LOGF("STREAMUSE t=%" PRIu64 " %s slot=%u map_size=%" PRIu64 "\n", TraceMs(),
-					     state == 2 ? "present" : (state == 1 ? "absent" : "unreadable"), slot, map_size);
+				if (packed != last_table || usage_lo != last_lo || usage_hi != last_hi) {
+					float prio = 0.0f;
+					std::memcpy(&prio, &usage_hi, 4);
+					LOGF("STREAMUSE t=%" PRIu64 " %s slot=%u map_size=%" PRIu64 " usage=%#" PRIx64
+					     " {%#" PRIx64 ", %#" PRIx64 "} prio=%g\n",
+					     TraceMs(), state == 2 ? "present" : (state == 1 ? "absent" : "unreadable"), slot,
+					     map_size, usage_ptr, usage_lo, usage_hi, prio);
 					last_table = packed;
+					last_lo    = usage_lo;
+					last_hi    = usage_hi;
 				}
 			}
 			if (seen != last_seen || value != last || (size / 16) != (last_size / 16)) {
