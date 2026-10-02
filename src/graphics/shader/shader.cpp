@@ -509,6 +509,8 @@ static void ShaderApplyAttribSemantics(ShaderVertexInputInfo& info,
 		r.fields[1]       = sharp[1];
 		r.fields[2]       = sharp[2];
 		r.fields[3]       = sharp[3];
+		EXIT_NOT_IMPLEMENTED(r.AddTid());
+		EXIT_NOT_IMPLEMENTED(r.SwizzleEnabled());
 		if (format != Prospero::VertexAttribFormat::kInvalid) {
 			const auto                   format_raw    = static_cast<uint32_t>(format);
 			const auto                   buffer_format = format_raw >> 2u;
@@ -752,7 +754,8 @@ void BuildStageStaticKey(const ShaderVertexInputInfo& info, std::vector<uint32_t
 		key.insert(key.end(), {mesh.wave_size, mesh.host_subgroup_size, mesh.lds_size_dwords,
 		                       mesh.scratch_size_dwords, mesh.input_primitive,
 		                       mesh.primitives_per_group, mesh.vertices_per_group,
-		                       mesh.max_vertices, mesh.max_primitives, mesh.provoking_vertex});
+		                       mesh.max_vertices, mesh.max_primitives, mesh.provoking_vertex,
+		                       static_cast<uint32_t>(mesh.fast_launch)});
 	}
 	key.push_back(info.tess.input_control_points);
 	if (info.tess.input_control_points != 0) {
@@ -764,12 +767,9 @@ void BuildStageStaticKey(const ShaderVertexInputInfo& info, std::vector<uint32_t
 	for (int i = 0; i < info.resources_num; i++) {
 		const auto& resource    = info.resources[i];
 		const auto& destination = info.resources_dst[i];
-		key.push_back(destination.register_start);
 		key.push_back(destination.registers_num);
-		key.push_back(destination.fetch_index);
 		key.push_back(static_cast<uint32_t>(destination.attr_id));
-		key.push_back(resource.fields[1] & 0xbfff0000u); // Stride and swizzle enable.
-		key.push_back(resource.fields[3] & 0x3087ffffu); // Channels, format, OOB, and add TID.
+		key.push_back(resource.fields[3] & 0x7ffffu); // Channels and format used by embedded fetch.
 	}
 }
 
@@ -854,6 +854,9 @@ ShaderParams PrepareProgram(const HW::VertexShaderInfo& regs, const HW::Context&
 	mesh.provoking_vertex    = context.GetModeControl().provoking_vtx_last ? 2u : 0u;
 	mesh.lds_size_dwords     = static_cast<uint32_t>(regs.gs_regs.rsrc2.lds_size) * 128u;
 	mesh.scratch_size_dwords = data.scratch_size_dwords;
+	const auto fast_launch = (context.GetShaderStages() >> 19u) & 3u;
+	EXIT_NOT_IMPLEMENTED(fast_launch > 1u);
+	mesh.fast_launch = fast_launch != 0;
 	if (data.type == Prospero::ShaderBinaryType::kGsFront) {
 		EXIT_IF(regs.gs_regs.data_addr == 0);
 		const auto back = ShaderGetMappedData(regs.gs_regs.data_addr, "ShaderGetInputInfoGS():");
@@ -866,9 +869,20 @@ ShaderParams PrepareProgram(const HW::VertexShaderInfo& regs, const HW::Context&
 		params.hash = XXH3_64bits(hashes, sizeof(hashes));
 		mesh.scratch_size_dwords = std::max(mesh.scratch_size_dwords, back.scratch_size_dwords);
 	}
-	EXIT_NOT_IMPLEMENTED(regs.gs_regs.rsrc1.gs_vgpr_component_count != 3u ||
-	                     regs.gs_regs.rsrc2.es_vgpr_component_count != 3u);
 	const auto& group = user_config.GetGeControl();
+	if (mesh.fast_launch) {
+		const auto& user_vgpr = user_config.GetGeUserVgprEn();
+		EXIT_NOT_IMPLEMENTED(data.type != Prospero::ShaderBinaryType::kGs ||
+		                     regs.gs_regs.rsrc1.gs_vgpr_component_count != 0u ||
+		                     regs.gs_regs.rsrc2.es_vgpr_component_count != 1u ||
+		                     user_config.GetPrimType() != Prospero::PrimitiveType::kPointList ||
+		                     group.primitive_group_size != 1u || group.vertex_group_size != 1u ||
+		                     user_vgpr.vgpr1 || user_vgpr.vgpr2 || user_vgpr.vgpr3 ||
+		                     mesh.max_vertices != sh.m_vgtGsMaxVertOut);
+	} else {
+		EXIT_NOT_IMPLEMENTED(regs.gs_regs.rsrc1.gs_vgpr_component_count != 3u ||
+		                     regs.gs_regs.rsrc2.es_vgpr_component_count != 3u);
+	}
 	if ((user_config.GetPrimType() != Prospero::PrimitiveType::kPointList &&
 	     user_config.GetPrimType() != Prospero::PrimitiveType::kLineList &&
 	     user_config.GetPrimType() != Prospero::PrimitiveType::kTriFan &&
@@ -881,7 +895,8 @@ ShaderParams PrepareProgram(const HW::VertexShaderInfo& regs, const HW::Context&
 		     mesh.input_primitive, sh.m_vgtGsOutPrimType, sh.m_vgtGsMaxVertOut,
 		     group.primitive_group_size, group.vertex_group_size, mesh.max_vertices);
 	}
-	mesh.max_primitives       = group.primitive_group_size * (sh.m_vgtGsMaxVertOut - 2u);
+	mesh.max_primitives = mesh.fast_launch ? mesh.max_vertices :
+	                      group.primitive_group_size * (sh.m_vgtGsMaxVertOut - 2u);
 	mesh.primitives_per_group = std::min({static_cast<uint32_t>(group.primitive_group_size),
 	                                      mesh.InputPrimitiveCount(group.vertex_group_size),
 	                                      mesh.max_vertices / sh.m_vgtGsMaxVertOut});

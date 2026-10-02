@@ -278,8 +278,16 @@ bool MaterializeIndirectImage(const ResourcePlan& program, const Roots& roots, u
                               const SrtRuntime& runtime, typename Roots::Walker& clean,
                               ResourceSnapshot& snapshot,
                               ResourceSpecialization& specialization) {
+	// A finite GPU-selected image lists its candidate descriptors as sources: entry i is the
+	// i-th candidate (upstream 7804eef9).
+	const auto& listed = indirect.sources;
+	auto&       keys   = program.ThreadScratch().material_keys;
 	uint64_t table_base = 0;
 	uint64_t table_size = UINT64_MAX; // Scalar addresses have no buffer descriptor bounds.
+	if (!listed.empty()) {
+		keys.resize(listed.size());
+		std::iota(keys.begin(), keys.end(), 0u);
+	} else {
 	ShaderBufferResource table;
 	if (table_value.dword_count == 2u) {
 		table_base = (static_cast<uint64_t>(table_value.dwords[1]) << 32u) | table_value.dwords[0];
@@ -289,7 +297,6 @@ bool MaterializeIndirectImage(const ResourcePlan& program, const Roots& roots, u
 	} else {
 		return false;
 	}
-	auto& keys = program.ThreadScratch().material_keys;
 	keys.clear();
 	if (indirect.material_source == UINT32_MAX) {
 		uint32_t key_count = 0;
@@ -355,6 +362,7 @@ bool MaterializeIndirectImage(const ResourcePlan& program, const Roots& roots, u
 		std::ranges::sort(keys);
 		keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
 	}
+	}
 
 	const auto children_begin = snapshot.images.size();
 	const auto mapping_offset = snapshot.flattened_srt.size();
@@ -365,8 +373,12 @@ bool MaterializeIndirectImage(const ResourcePlan& program, const Roots& roots, u
 		const auto key = keys[entry];
 		DescriptorValue candidate;
 		candidate.dword_count = 8u;
-		const auto table_offset = (key << 5u) + indirect.table_offset;
-		if (!ReadScalarTable(table_base, table_size, table_offset, runtime, candidate.dwords)) {
+		if (!listed.empty()) {
+			if (!clean.EvaluateDescriptor(listed[entry], candidate)) {
+				return false;
+			}
+		} else if (!ReadScalarTable(table_base, table_size, (key << 5u) + indirect.table_offset, runtime,
+		                            candidate.dwords)) {
 			return false;
 		}
 		if (NullImageDescriptor(candidate) ||
@@ -1276,9 +1288,10 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			const auto& indirect = *source->indirect_image;
 			DescriptorValue material;
 			DescriptorValue table;
-			if ((indirect.material_source != UINT32_MAX &&
-			     !clean.EvaluateDescriptor(indirect.material_source, material)) ||
-			    !clean.EvaluateDescriptor(indirect.table_source, table) ||
+			const bool listed = !indirect.sources.empty();
+			if ((!listed && ((indirect.material_source != UINT32_MAX &&
+			                  !clean.EvaluateDescriptor(indirect.material_source, material)) ||
+			                 !clean.EvaluateDescriptor(indirect.table_source, table))) ||
 			    !MaterializeIndirectImage(program, roots, image.source, indirect, material, table,
 			                              i, observed, clean, snapshot, specialization)) {
 				return false;

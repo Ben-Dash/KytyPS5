@@ -4,6 +4,7 @@
 #include "graphics/shader/recompiler/ir/Reg.h"
 #include "graphics/shader/recompiler/ir/opcodes/ValueOpcodes.h"
 
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <cstring>
@@ -133,7 +134,6 @@ public:
 	void SetArg(size_t index, Value value);
 	void AddPhiOperand(Block* predecessor, Value value);
 	void ReplaceUsesWith(Value replacement, bool preserve = true);
-	void ReplaceOpcode(ValueOpcode opcode);
 	void Invalidate();
 
 	template <typename T>
@@ -152,17 +152,27 @@ public:
 	}
 
 private:
+	friend void EliminateDeadCode(const std::vector<Block*>& blocks);
+
 	void AddUse(Inst* used, size_t operand);
 	void RemoveUse(Inst* used, size_t operand);
 	void ClearArgs();
 
+	static constexpr uint8_t InlineArity = 4;
+	static constexpr uint8_t PhiArity = UINT8_MAX;
+
 	ValueOpcode         opcode;
+	uint8_t             num_args;
+	bool                live = false;
+	mutable uint32_t    evaluation_index = UINT32_MAX;
 	uint64_t            flags;
 	Block*              parent = nullptr;
-	std::vector<Value>  args;
-	std::vector<Block*> phi_blocks;
+	union {
+		std::array<Value, InlineArity> fixed_args {};
+		std::vector<Value> large_args;
+		std::vector<std::pair<Block*, Value>> phi_args;
+	};
 	std::vector<Use>    uses;
-	mutable uint32_t    evaluation_index = UINT32_MAX;
 };
 
 // Hot accessors used by per-draw resource evaluation; defined inline so they do not cost a call.
@@ -205,12 +215,16 @@ inline ValueOpcode Inst::GetOpcode() const {
 }
 
 inline size_t Inst::NumArgs() const {
-	return args.size();
+	return num_args == PhiArity ? phi_args.size() : num_args;
 }
 
 inline Value Inst::Arg(size_t index) const {
-	EXIT_IF(index >= args.size());
-	return args[index];
+	EXIT_IF(index >= NumArgs());
+	if (num_args <= InlineArity) {
+		return fixed_args[index];
+	}
+	return num_args == PhiArity ? phi_args[index].second : large_args[index];
 }
+static_assert(sizeof(Inst) <= 112, "Inst operand storage unintentionally increased");
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR

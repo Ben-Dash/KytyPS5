@@ -1328,6 +1328,15 @@ void TestBdaHintSummary() {
         [&]() noexcept {
           (void)tracker.IsRegionCpuModified(address, page_size);
         });
+  } else if (std::strcmp(name, "recursive-tracking-lock") == 0) {
+    Libs::Graphics::TrackingSpinLock lock;
+    lock.lock();
+    lock.lock();
+  } else if (std::strcmp(name, "non-owner-tracking-unlock") == 0) {
+    Libs::Graphics::TrackingSpinLock lock;
+    lock.lock();
+    std::thread worker([&] { lock.unlock(); });
+    worker.join();
   }
   std::_Exit(0x7f);
 }
@@ -1385,7 +1394,8 @@ void CheckDeathCase(const char *name) {
 }
 
 void TestFatalPaths() {
-  for (const char *name : {"gpu-dirty-explicit-cpu", "reentrant-upload"}) {
+  for (const char *name : {"gpu-dirty-explicit-cpu", "reentrant-upload",
+                           "recursive-tracking-lock", "non-owner-tracking-unlock"}) {
     CheckDeathCase(name);
   }
 }

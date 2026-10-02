@@ -1349,6 +1349,14 @@ void AnalyzeMemo(const ResourcePlan& program, CompiledResourcePlan& compiled) {
 	}
 	for (const auto& image: program.info.images) {
 		if (!visit_source(image.source)) return;
+		// A finite GPU-selected image depends on each listed candidate as well.
+		if (image.source < program.descriptor_sources.size()) {
+			if (const auto& indirect = program.descriptor_sources[image.source].indirect_image) {
+				for (const auto listed: indirect->sources) {
+					if (!visit_source(listed)) return;
+				}
+			}
+		}
 	}
 	for (const auto& sampler: program.info.samplers) {
 		if (!visit_source(sampler.source)) return;

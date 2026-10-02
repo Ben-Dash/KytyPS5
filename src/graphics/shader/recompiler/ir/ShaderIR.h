@@ -31,6 +31,7 @@ enum class ResourceKind {
 	Buffer,
 	IndirectBuffer,
 	Flat,
+	FlatLocal,
 	Global,
 	Scratch,
 	Lds,
@@ -41,7 +42,8 @@ enum class ResourceKind {
 
 [[nodiscard]] constexpr bool IsAddressResourceKind(ResourceKind kind) {
 	return kind == ResourceKind::ScalarAddress || kind == ResourceKind::Flat ||
-	       kind == ResourceKind::Global || kind == ResourceKind::Scratch;
+	       kind == ResourceKind::FlatLocal || kind == ResourceKind::Global ||
+	       kind == ResourceKind::Scratch;
 }
 
 struct MemoryInfo {
@@ -485,6 +487,7 @@ struct DescriptorSource {
 		uint32_t table_offset    = 0;
 		Value    key_count;
 		Value    selector_mask;
+		std::vector<uint32_t> sources;
 
 		bool operator==(const IndirectImage& other) const = default;
 	};
@@ -508,6 +511,7 @@ struct ResourceBlock {
 	Value                 condition;
 	std::vector<uint32_t> successors;
 	std::vector<uint32_t> sources;
+	std::vector<uint32_t> srt_reads;
 };
 
 // Stable shader metadata consumed by the renderer after native IR has been discarded.
@@ -519,6 +523,7 @@ struct CompiledShaderInfo {
 	uint32_t                      user_data_count     = 64;
 	uint32_t                      scratch_dwords      = 0;
 	uint32_t                      param_export_mask   = 0;
+	bool                          has_address_writes  = false;
 	ShaderInfo                    info;
 	BindingLayout                 bindings;
 };
