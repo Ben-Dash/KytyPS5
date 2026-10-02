@@ -18,9 +18,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
-#include <mutex>
 #include <shared_mutex>
-#include <utility>
 #include <vector>
 
 namespace Libs::VideoOut {
@@ -64,22 +62,12 @@ public:
 	void               PrepareBda();
 	// Starts a new epoch for PrepareBda (see there): the next draw that reads memory through
 	// addresses uploads every CPU write made so far.
-	// `site` (1-16, 0: other) names the caller; KYTY_DEBUG_BDA_SITES=1 prints which sites start
-	// the epochs that PrepareBda then synchronizes.
-	void AdvanceBdaEpoch(uint8_t site = 0) noexcept {
-		m_bda_last_site.store(site, std::memory_order_relaxed);
-		m_bda_sync_epoch.fetch_add(1, std::memory_order_release);
-		m_bda_epoch.fetch_add(1, std::memory_order_release);
-	}
+	void AdvanceBdaEpoch() noexcept { m_bda_epoch.fetch_add(1, std::memory_order_release); }
 	// The current epoch, or 0 while epochs are off (KYTY_DEBUG_BDA_EPOCH=0 and its A/B).
 	[[nodiscard]] uint64_t CurrentBdaEpoch() const noexcept;
 	// The GPU thread wrote guest memory itself: a page that is not write-protected takes the
-	// write without a fault, so the write starts an epoch. A small write of known range
-	// (`vaddr`, `size`) starts one for the speculation and stream-copy checks only, and the next
-	// PrepareBda synchronizes just that range: the GPU's own label writes imply no new CPU
-	// writes (KYTY_BDA_GPU_WRITE_RANGES=0: a whole synchronization again).
-	void AdvanceBdaEpochForGpuWrite(uint8_t site = 0, uint64_t vaddr = 0,
-	                                uint64_t size = 0) noexcept;
+	// write without a fault, so the write starts an epoch.
+	void AdvanceBdaEpochForGpuWrite() noexcept;
 	// Counts a draw's sampled texture in its mip statistics counter (the descriptor's
 	// MIP_STATS_CNT_ID) for the next GET_LOD_STATS report (Thread_Gpu only).
 	void MarkMipStatsCounter(uint32_t id) noexcept {
@@ -118,18 +106,7 @@ private:
 	bool                      m_fault_process_pending = false;
 	// PrepareBda's current epoch and the epoch of its last synchronization (Thread_Gpu only).
 	std::atomic<uint64_t>     m_bda_epoch {1};
-	// The epochs that need a whole synchronization (all but small GPU writes), and those writes.
-	std::atomic<uint64_t>     m_bda_sync_epoch {1};
 	uint64_t                  m_bda_synced_epoch = 0;
-	std::mutex                m_bda_ranges_mutex;
-	std::atomic<bool>         m_bda_ranges_pending {false};
-	std::vector<std::pair<uint64_t, uint64_t>> m_bda_ranges;
-	std::atomic<uint8_t>      m_bda_last_site {0};
-	// KYTY_DEBUG_BDA_SITES: syncs per site and their time since the last report.
-	std::array<uint32_t, 17>  m_bda_site_syncs {};
-	uint64_t                  m_bda_passes      = 0;
-	uint64_t                  m_bda_sync_ns     = 0;
-	int64_t                   m_bda_report_time = 0;
 	// Mip statistics (Thread_Gpu only): the counters sampled since the last report, one bit each,
 	// the reports made, the last report in which each counter, and any, was sampled, and when the
 	// current relief from a streaming thrash ends (0: none) and the next may start (steady_clock

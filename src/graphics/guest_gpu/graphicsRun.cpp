@@ -31,7 +31,6 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <deque>
 #include <fmt/format.h>
 #include <memory>
@@ -40,7 +39,6 @@
 #include <semaphore>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -193,59 +191,6 @@ public:
 private:
 	Common::Mutex& m_mutex;
 };
-
-// Labels the command processors wrote themselves (end-of-pipe writes, WRITE_DATA). A wait on
-// such a label orders the submission after GPU work, not after CPU writes, so while the label
-// still holds the value the GPU wrote it starts no BDA epoch (Astro Bot waits on compute labels
-// about 120 times a second, and each epoch re-uploads every page the CPU dirtied since).
-// KYTY_BDA_GPU_LABELS=0 starts an epoch at every wait again.
-class GpuLabels {
-public:
-	static bool Enabled() {
-		static const bool enabled = [] {
-			const char* text = std::getenv("KYTY_BDA_GPU_LABELS");
-			return text == nullptr || std::strcmp(text, "0") != 0;
-		}();
-		return enabled;
-	}
-
-	void Note(const void* address, uint64_t value, uint32_t bytes) {
-		if (!Enabled()) {
-			return;
-		}
-		std::scoped_lock lock(m_mutex);
-		if (m_labels.size() >= MaxLabels) {
-			m_labels.clear();
-		}
-		m_labels[reinterpret_cast<uint64_t>(address)] = {value, bytes};
-	}
-
-	// Whether `address` holds the value the GPU last wrote there, in a write of `bytes`.
-	[[nodiscard]] bool Holds(const void* address, uint32_t bytes) {
-		if (!Enabled()) {
-			return false;
-		}
-		std::scoped_lock lock(m_mutex);
-		const auto found = m_labels.find(reinterpret_cast<uint64_t>(address));
-		if (found == m_labels.end() || found->second.bytes != bytes) {
-			return false;
-		}
-		uint64_t current = 0;
-		std::memcpy(&current, address, bytes);
-		return current == found->second.value;
-	}
-
-private:
-	static constexpr size_t MaxLabels = 4096;
-	struct Label {
-		uint64_t value = 0;
-		uint32_t bytes = 0;
-	};
-	std::mutex                              m_mutex;
-	std::unordered_map<uint64_t, Label>     m_labels;
-};
-
-static GpuLabels g_gpu_labels;
 
 static bool GraphicsRunDebugDumpEnabled() {
 	return Config::GraphicsDebugDumpEnabled() &&
@@ -561,8 +506,8 @@ bool TestWaitRegMemValue(uint64_t value, uint64_t ref, uint64_t mask, uint32_t f
 	return false;
 }
 
-void CommandProcessor::AdvanceBdaEpoch(uint8_t site) {
-	m_renderer.AdvanceBdaEpoch(site);
+void CommandProcessor::AdvanceBdaEpoch() {
+	m_renderer.AdvanceBdaEpoch();
 }
 
 void CommandProcessor::ReportMipStats(void* dst, uint32_t size, bool reset) {
@@ -578,11 +523,8 @@ void CommandProcessor::WaitRegMem(uint32_t func, const T* addr, T ref, T mask, u
 	}
 
 	(void)poll;
-	// The CPU may have written the data this wait guards just before its flag; a label the GPU
-	// wrote orders nothing the CPU wrote (see GpuLabels).
-	if (!g_gpu_labels.Holds(addr, sizeof(T))) {
-		AdvanceBdaEpoch(4);
-	}
+	// The CPU may have written the data this wait guards just before its flag.
+	AdvanceBdaEpoch();
 	if (!TestWaitRegMemValue(*addr, ref, mask, func)) {
 		SuspendPm4();
 	}
@@ -614,24 +556,11 @@ void CommandProcessor::WriteData(uint32_t* dst, const uint32_t* src, uint32_t dw
 		for (uint32_t i = 0; i < dw_num; i++) {
 			dst[0] = src[i];
 		}
-		g_gpu_labels.Note(dst, src[dw_num - 1u], sizeof(uint32_t));
 	} else {
 		memcpy(dst, src, static_cast<size_t>(dw_num) * sizeof(uint32_t));
-		if (dw_num <= 2u) {
-			for (uint32_t i = 0; i < dw_num; i++) {
-				g_gpu_labels.Note(dst + i, src[i], sizeof(uint32_t));
-			}
-			if (dw_num == 2u) {
-				uint64_t pair = 0;
-				std::memcpy(&pair, src, sizeof(pair));
-				g_gpu_labels.Note(dst, pair, sizeof(pair));
-			}
-		}
 	}
 	// Later draws of this submission must see the write, including through addresses.
-	m_renderer.AdvanceBdaEpochForGpuWrite(
-	    5, reinterpret_cast<uint64_t>(dst),
-	    static_cast<uint64_t>(write_one_address ? 1u : dw_num) * sizeof(uint32_t));
+	m_renderer.AdvanceBdaEpochForGpuWrite();
 }
 
 void CommandProcessor::WriteReferenceClock(uint64_t dst_address, uint32_t num_bytes) {
@@ -642,7 +571,7 @@ void CommandProcessor::WriteReferenceClock(uint64_t dst_address, uint32_t num_by
 	}
 	const auto value = GuestGpuTimestamp();
 	std::memcpy(reinterpret_cast<void*>(dst_address), &value, num_bytes);
-	m_renderer.AdvanceBdaEpochForGpuWrite(6, dst_address, num_bytes); // As WriteData.
+	m_renderer.AdvanceBdaEpochForGpuWrite(); // As WriteData.
 	DrainStats::Record(DrainStats::Kind::GpuTimestamp, 1);
 	LogTimestampWrite("clock", num_bytes, dst_address, value);
 	static std::atomic<uint32_t> clock_log_count {0};
@@ -1001,7 +930,7 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 	execution.m_suspended     = false;
 	execution.m_made_progress = false;
 	// A submission starting or resuming: its draws must see the CPU writes made before it.
-	AdvanceBdaEpoch(7);
+	AdvanceBdaEpoch();
 	if (DrawSpeculator::Enabled() && !IsAsyncComputeQueue() && !m_constant_stream &&
 	    !execution.m_buffer_stack.empty()) {
 		if (m_speculator == nullptr) {
@@ -1509,7 +1438,7 @@ void CommandProcessor::SetPredication(uint32_t condition, uint32_t op, uint32_t 
 	(void)count_in_dwords;
 	uint64_t value = 0;
 	if (op != 0) {
-		AdvanceBdaEpoch(8);
+		AdvanceBdaEpoch();
 	}
 
 	switch (op) {
@@ -1888,7 +1817,6 @@ void CommandProcessor::WriteAtEndOfPipe(uint32_t cache_policy, uint32_t event_wr
 		auto* dst  = static_cast<uint32_t*>(dst_gpu_addr);
 		auto  data = static_cast<uint32_t>(value);
 		std::memcpy(dst, &data, sizeof(data));
-		g_gpu_labels.Note(dst, data, sizeof(data));
 
 		if (with_interrupt) {
 			if (with_writeback) {
@@ -1946,7 +1874,6 @@ void CommandProcessor::WriteAtEndOfPipe(uint32_t cache_policy, uint32_t event_wr
 				auto write64 = [&](bool with_writeback) {
 					auto* dst = static_cast<uint64_t*>(dst_gpu_addr);
 					std::memcpy(dst, &value, sizeof(value));
-					g_gpu_labels.Note(dst, value, sizeof(value));
 
 					if (with_interrupt) {
 						if (with_writeback) {

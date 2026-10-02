@@ -153,8 +153,7 @@ public:
 	void WaitRegMem(uint32_t func, const T* addr, T ref, T mask, uint32_t poll, uint32_t wait_op);
 	// A packet decides on guest memory the CPU may have just written: later draws reading memory
 	// through addresses must see the CPU's writes (RenderContext::PrepareBda).
-	// `site` names the caller for KYTY_DEBUG_BDA_SITES (see RenderContext::AdvanceBdaEpoch).
-	void AdvanceBdaEpoch(uint8_t site = 0);
+	void AdvanceBdaEpoch();
 	// GET_LOD_STATS: see RenderContext::ReportMipStats.
 	void ReportMipStats(void* dst, uint32_t size, bool reset);
 	void WriteData(uint32_t* dst, const uint32_t* src, uint32_t dw_num, uint32_t write_control);

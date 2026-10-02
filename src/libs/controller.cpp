@@ -17,8 +17,6 @@
 #include <array>
 #include <atomic>
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -156,12 +154,6 @@ private:
 };
 
 static GameController* g_controller = nullptr;
-
-// KYTY_DEBUG_PAD_TRIGGERS=1 prints the trigger effects the game sets and the trigger values.
-static bool PadTriggerDebug() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_PAD_TRIGGERS") != nullptr;
-	return enabled;
-}
 
 static void pad_fill_data(PadData* data, const ControllerState& state, bool connected,
                           int connected_count) {
@@ -459,16 +451,6 @@ void GameController::Axis(int id, Controller::Axis axis, int value) {
 		}
 		if (trigger != 0) {
 			m_state.buttons = value > 0 ? m_state.buttons | trigger : m_state.buttons & ~trigger;
-			if (PadTriggerDebug()) [[unlikely]] {
-				static int last[2] = {-100, -100};
-				auto&      previous = last[trigger == PAD_BUTTON_L2 ? 0 : 1];
-				if (std::abs(value - previous) >= 32 || ((value == 0 || value == 255) && value != previous)) {
-					std::printf("pad-trigger: t=%.2f %s value=%d\n",
-					            static_cast<double>(LibKernel::KernelGetProcessTime()) / 1e6,
-					            trigger == PAD_BUTTON_L2 ? "L2" : "R2", value);
-					previous = value;
-				}
-			}
 		}
 
 		AddState();
@@ -676,22 +658,7 @@ void GameController::SetLightBar(uint8_t r, uint8_t g, uint8_t b) {
 
 bool GameController::SetTriggerEffect(const PadTriggerEffectParam& param) {
 	Common::LockGuard lock(m_mutex);
-	const bool sent = SendTriggerEffect(param);
-	if (PadTriggerDebug()) [[unlikely]] {
-		for (int i = 0; i < 2; i++) {
-			if ((param.trigger_mask & (1u << i)) == 0) {
-				continue;
-			}
-			const auto& command = param.command[i];
-			std::printf("pad-trigger: t=%.2f %s mode=%u data=", static_cast<double>(LibKernel::KernelGetProcessTime()) / 1e6,
-			            i == 0 ? "L2" : "R2", command.mode);
-			for (int b = 0; b < 12; b++) {
-				std::printf("%02x", command.data[b]);
-			}
-			std::printf(" sent=%d\n", sent ? 1 : 0);
-		}
-	}
-	if (!sent) {
+	if (!SendTriggerEffect(param)) {
 		return false;
 	}
 	for (int i = 0; i < 2; i++) {

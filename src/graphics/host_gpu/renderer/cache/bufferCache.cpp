@@ -92,7 +92,7 @@ void BufferCache::ChangeRegister(BufferId id) {
 		// Publish the full resulting owner, including pages newly reachable after a merge. The new
 		// page-table entries make it readable through addresses before its next upload.
 		m_memory_tracker.PublishBdaHints(buffer.CpuAddress(), buffer.Size());
-		m_scheduler.Context().AdvanceBdaEpoch(9);
+		m_scheduler.Context().AdvanceBdaEpoch();
 	} else {
 		const auto found = m_buffers.find(buffer.CpuAddress());
 		EXIT_IF(found == m_buffers.end() || found->second != id);
@@ -373,7 +373,7 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	}
 	if (is_write) {
 		m_memory_tracker.MarkRegionAsCpuModified(vaddr, size);
-		m_scheduler.Context().AdvanceBdaEpoch(10);
+		m_scheduler.Context().AdvanceBdaEpoch();
 	}
 }
 
@@ -868,7 +868,7 @@ void BufferCache::FillBuffer(uint64_t vaddr, uint64_t size, uint32_t value, bool
 		// that is already CPU-dirty does not fault: start a BDA epoch either way.
 		auto* destination = reinterpret_cast<uint32_t*>(vaddr);
 		std::fill(destination, destination + size / sizeof(uint32_t), value);
-		m_scheduler.Context().AdvanceBdaEpochForGpuWrite(11);
+		m_scheduler.Context().AdvanceBdaEpochForGpuWrite();
 		return;
 	}
 
@@ -895,7 +895,7 @@ void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t si
 	    !IsRegionGpuModified(src_vaddr, size) && !m_texture_cache.FindImageFromRange(src_vaddr, size)) {
 		std::memcpy(reinterpret_cast<void*>(dst_vaddr), reinterpret_cast<const void*>(src_vaddr),
 		            size);
-		m_scheduler.Context().AdvanceBdaEpochForGpuWrite(12); // As FillBuffer.
+		m_scheduler.Context().AdvanceBdaEpochForGpuWrite(); // As FillBuffer.
 		return;
 	}
 
