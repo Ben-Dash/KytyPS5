@@ -17,6 +17,7 @@
 #include "libs/network.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <climits>
 #include <cstdio>
@@ -119,6 +120,63 @@ static void FillRandomBuffer(void* buf, size_t nbytes) {
 static void SecToTimespec(KernelTimespec* ts, double sec) {
 	ts->tv_sec  = static_cast<int64_t>(sec);
 	ts->tv_nsec = static_cast<int64_t>((sec - static_cast<double>(ts->tv_sec)) * 1000000000.0);
+}
+
+} // namespace Libs::LibKernel::FileSystem
+
+namespace Libs::Graphics {
+void NoteStreamingThrash() noexcept;
+} // namespace Libs::Graphics
+
+namespace Libs::LibKernel::FileSystem {
+
+// Like libAmpr's NoteRepeatedRead for APR reads: a texture streamer asked to keep more than it
+// fits reloads the same textures in turn, and ASTRO BOT's warp to Sky Garden reads them through
+// plain read(): the same large file read again and again starts the mip statistics relief
+// (Graphics::NoteStreamingThrash), without which the warp could reload them forever.
+// KYTY_DEBUG_FILE_THRASH=0 turns this off.
+static void NoteRepeatedFileRead(const std::filesystem::path& path, int64_t offset, uint64_t size) {
+	constexpr uint64_t MinSize = 1024 * 1024;
+	constexpr uint32_t Repeats = 4;
+	constexpr auto     Window  = std::chrono::seconds(10);
+	static const bool  enabled = [] {
+		const char* text = std::getenv("KYTY_DEBUG_FILE_THRASH");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	if (!enabled || size < MinSize) {
+		return;
+	}
+	struct Read {
+		uint64_t                              key   = 0;
+		uint32_t                              count = 0;
+		std::chrono::steady_clock::time_point first;
+	};
+	static std::mutex            mutex;
+	static std::array<Read, 256> reads;
+	const uint64_t key = (std::hash<std::filesystem::path::string_type> {}(path.native()) *
+	                      0x9E3779B97F4A7C15ull) ^
+	                     (static_cast<uint64_t>(offset) * 0xC2B2AE3D27D4EB4Full) ^ size;
+	const auto now  = std::chrono::steady_clock::now();
+	bool       note = false;
+	{
+		std::scoped_lock lock(mutex);
+		auto&            read = reads[(key ^ (key >> 29u)) % reads.size()];
+		if (read.key != key || now - read.first > Window) {
+			read = {key, 1, now};
+		} else if (++read.count >= Repeats) {
+			read = {key, 0, now};
+			note = true;
+		}
+	}
+	if (note) {
+		static std::atomic<uint32_t> notes {0};
+		if (notes.fetch_add(1) < 8) {
+			std::printf("file-thrash: %s re-read (%" PRIu64 " bytes)\n", Common::PathToString(path).c_str(),
+			            size);
+			std::fflush(stdout);
+		}
+		Libs::Graphics::NoteStreamingThrash();
+	}
 }
 
 // KYTY_TRACE_TEXTURE=<substring>[,<substring>...]: print the guest destination of every read
@@ -1047,6 +1105,7 @@ int64_t KYTY_SYSV_ABI KernelRead(int d, void* buf, size_t nbytes) {
 
 	LOGF("\tRead %u bytes from: %s\n", bytes_read, Common::PathToString(file->real_name).c_str());
 	TraceTextureRead(file->real_name, buf, bytes_read, -1);
+	NoteRepeatedFileRead(file->real_name, -1, bytes_read);
 
 	return bytes_read;
 }
@@ -1176,6 +1235,7 @@ int64_t KYTY_SYSV_ABI KernelPread(int d, void* buf, size_t nbytes, int64_t offse
 	LOGF("\tRead %u bytes (pos = %" PRId64 ") from: %s\n", bytes_read, offset,
 	     Common::PathToString(file->real_name).c_str());
 	TraceTextureRead(file->real_name, buf, bytes_read, offset);
+	NoteRepeatedFileRead(file->real_name, offset, bytes_read);
 
 	return bytes_read;
 }
