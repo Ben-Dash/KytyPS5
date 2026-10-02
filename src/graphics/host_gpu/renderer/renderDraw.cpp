@@ -1365,14 +1365,19 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 					continue;
 				}
 				std::printf("mrt-shader:   slot=%u addr=0x%010" PRIx64 " target_mask=0x%x shader_mask=0x%x"
-				            " out_mode=%u fmt=%u nfmt=%u order=%u %ux%u blend=%d src=%u dst=%u op=%u\n",
+				            " out_mode=%u fmt=%u nfmt=%u order=%u %ux%u blend=%d src=%u dst=%u op=%u"
+				            " fast_clear=%d dcc=%d cmask=0x%010" PRIx64 " dcc_addr=0x%010" PRIx64
+				            " clear=%08x/%08x color_mode=%u\n",
 				            slot, rt.base.addr, render_target_mask_slot(ctx.GetRenderTargetMask(), slot),
 				            render_target_mask_slot(sh_regs.m_cbShaderMask, slot),
 				            sh_regs.target_output_mode[slot], static_cast<uint32_t>(rt.info.format),
 				            static_cast<uint32_t>(rt.info.channel_type),
 				            static_cast<uint32_t>(rt.info.channel_order), rt.attrib2.width + 1,
 				            rt.attrib2.height + 1, bc.enable ? 1 : 0, bc.color_srcblend,
-				            bc.color_destblend, bc.color_comb_fcn);
+				            bc.color_destblend, bc.color_comb_fcn, rt.info.cmask_fast_clear_enable ? 1 : 0,
+				            rt.info.dcc_compression_enable ? 1 : 0, rt.cmask.addr, rt.dcc_addr.addr,
+				            rt.clear_word0.word0, rt.clear_word1.word1,
+				            static_cast<uint32_t>(ctx.GetColorControl().mode));
 			}
 			std::fflush(stdout);
 			if (printed.load() <= 3) {
