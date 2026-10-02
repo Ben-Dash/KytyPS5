@@ -11,10 +11,12 @@
 #include "kytyGitVersion.h"
 
 #include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 #include <fmt/format.h>
 #include <magic_enum.hpp>
@@ -526,7 +528,25 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 	return show_help || (!options.app0_dir.empty() && !options.elf.empty());
 }
 
+#if defined(KYTY_PGO_GENERATE)
+// A profile-generating build (-fprofile-generate) writes its counters every 20 s: the emulator
+// usually ends without running atexit handlers, which is when the profile runtime would write.
+extern "C" int __llvm_profile_write_file(void);
+
+static void StartProfileWriter() {
+	std::thread([] {
+		for (;;) {
+			std::this_thread::sleep_for(std::chrono::seconds(20));
+			(void)__llvm_profile_write_file();
+		}
+	}).detach();
+}
+#endif
+
 static int Main(int argc, char* argv[]) {
+#if defined(KYTY_PGO_GENERATE)
+	StartProfileWriter();
+#endif
 	VirtualMemory::Init();
 	InitializeThreads();
 
