@@ -326,6 +326,9 @@ private:
 
 	RenderContext&                        m_context;
 	std::array<ColorTargetSource, RENDER_COLOR_ATTACHMENTS_MAX> m_color_target_sources;
+	// Colour slots PrepareDrawRenderState may bind: all but one pass of a draw that binds one
+	// surface to several slots (see AliasedColorSlots in renderDraw.cpp).
+	uint32_t                              m_color_slot_filter = ~0u;
 	DepthTargetSource                     m_depth_target_source;
 	std::vector<PendingWrite>             m_pending_writes;
 	GraphicsBindings                     m_graphics_bindings;

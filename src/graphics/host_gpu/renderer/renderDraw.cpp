@@ -975,6 +975,39 @@ static uint32_t DrawColorOutputMask(const HW::Context& ctx) {
 	return output_mask;
 }
 
+// Slots that write the same surface as a lower writable slot, each with its own channels: ASTRO
+// BOT's foliage interaction stamps write RG (blended) through MRT0 and BA through MRT1 of one
+// surface. Vulkan leaves two attachments on one image undefined (NVIDIA lost the stamps), so such
+// a draw runs once per slot, each pass binding one attachment and keeping its blend and mask.
+// KYTY_DEBUG_MRT_SPLIT=0 binds them together as before.
+static uint32_t AliasedColorSlots(const HW::Context& ctx) {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_DEBUG_MRT_SPLIT");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	if (!enabled) {
+		return 0;
+	}
+	const auto writable = DrawColorWriteMask(ctx);
+	uint32_t   aliased  = 0;
+	for (uint32_t later = 1; later < RENDER_COLOR_ATTACHMENTS_MAX; later++) {
+		if ((writable & (1u << later)) == 0) {
+			continue;
+		}
+		const auto later_addr = ctx.GetRenderTarget(later).base.addr;
+		const auto later_mask = render_target_mask_slot(ctx.GetRenderTargetMask(), later);
+		for (uint32_t first = 0; first < later; first++) {
+			if ((writable & (1u << first)) != 0 && later_addr != 0 &&
+			    ctx.GetRenderTarget(first).base.addr == later_addr &&
+			    (render_target_mask_slot(ctx.GetRenderTargetMask(), first) & later_mask) == 0) {
+				aliased |= 1u << later;
+				break;
+			}
+		}
+	}
+	return aliased;
+}
+
 enum class CbColorMode : uint8_t {
 	Disable            = 0,
 	Normal             = 1,
@@ -1298,7 +1331,7 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	// Attachments follow the write masks, not the export format: in Astro Bot's Sky Garden the tall
 	// grass beside the path (an alpha-tested shader, so it runs anyway) writes a slot whose format
 	// register reads 0 at the draw, and binding only formatted slots dropped that grass.
-	mrt_mask &= DrawColorWriteMask(buffer.GetRegisters());
+	mrt_mask &= DrawColorWriteMask(buffer.GetRegisters()) & m_color_slot_filter;
 	// KYTY_DEBUG_MRT_SHADER=<pixel shader hash>: print that shader's colour slots (target address,
 	// target and shader write masks, export format, blend) for its first 16 draws, to see how a draw
 	// that binds one surface to several slots splits the channels.
@@ -2292,29 +2325,42 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 	const DrawCallInfo draw {CommandBufferDebugOp::DrawIndex, args.index_count,
 	                        args.instance_count, args.first_instance, args.indirect_args};
-	DrawRenderState state;
-	if (!PrepareDrawRenderState(buffer, draw, args.render_target_slice_offset, state)) {
-		g_pm4_ops.outcome = Pm4OpTimer::NotPrepared;
+	// One pass, or one per group of slots when the draw binds one surface to several slots.
+	const auto aliased    = AliasedColorSlots(buffer.GetRegisters());
+	uint64_t   pixel_hash = 0;
+	for (const uint32_t filter: {~aliased, aliased}) {
+		if (filter == 0) {
+			continue;
+		}
+		m_color_slot_filter = filter;
+		DrawRenderState state;
+		const bool      prepared =
+		    PrepareDrawRenderState(buffer, draw, args.render_target_slice_offset, state);
+		m_color_slot_filter = ~0u;
+		if (!prepared) {
+			g_pm4_ops.outcome = Pm4OpTimer::NotPrepared;
+			ResetBindings();
+			return;
+		}
+
+		LogDrawStateIfNeeded(buffer, draw, state, args.index_type_and_size,
+		                     args.index_addr);
+
+		const bool indirect = args.offset_source == DrawOffsetSource::IndirectArgs;
+		const auto [vertex_offset, instance_offset] =
+		    indirect ? std::pair<int32_t, uint32_t> {0, args.first_instance}
+		             : ResolveDrawOffsets(ucfg.GetIndexOffset(), state.vertex_info[0]);
+
+		DrawEmitInfo emit {};
+		emit.vertex_offset  = vertex_offset + args.base_vertex;
+		emit.first_instance = instance_offset;
+
+		ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source,
+		                    primitive_restart);
 		ResetBindings();
-		return;
+		pixel_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
 	}
-
-	LogDrawStateIfNeeded(buffer, draw, state, args.index_type_and_size,
-	                     args.index_addr);
-
-	const bool indirect = args.offset_source == DrawOffsetSource::IndirectArgs;
-	const auto [vertex_offset, instance_offset] =
-	    indirect ? std::pair<int32_t, uint32_t> {0, args.first_instance}
-	             : ResolveDrawOffsets(ucfg.GetIndexOffset(), state.vertex_info[0]);
-
-	DrawEmitInfo emit {};
-	emit.vertex_offset  = vertex_offset + args.base_vertex;
-	emit.first_instance = instance_offset;
-
-	ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source,
-	                    primitive_restart);
-	ResetBindings();
-	g_draw_phases.End(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0);
+	g_draw_phases.End(pixel_hash);
 }
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
@@ -2384,42 +2430,56 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 		ResetBindings();
 		return;
 	}
-	DrawRenderState state;
-	if (!PrepareDrawRenderState(buffer, draw, args.render_target_slice_offset, state)) {
-		g_pm4_ops.outcome = Pm4OpTimer::NotPrepared;
-		ResetBindings();
-		return;
-	}
-
-	const bool rect_list = Prospero::IsRectList(ucfg.GetPrimType());
-	if (rect_list && state.vertex_info[0].buffers_num == 0 &&
-	    state.vertex_info[0].stage.program->param_export_mask == 0 &&
-	    state.ps_input_info.input_num != 0) {
-		if (graphics_debug_dump_enabled()) {
-			LOGF("DrawIndexAuto: skipping rect-list draw with no VS param exports and PS inputs: "
-			     "ps_inputs=%u ps=0x%016" PRIx64 " es=0x%016" PRIx64 " gs=0x%016" PRIx64 "\n",
-			     state.ps_input_info.input_num, sh_ctx.GetPs().ps_regs.data_addr,
-			     sh_ctx.GetVs().es_regs.data_addr, sh_ctx.GetVs().gs_regs.data_addr);
+	// One pass, or one per group of slots when the draw binds one surface to several slots.
+	const auto aliased    = AliasedColorSlots(buffer.GetRegisters());
+	uint64_t   pixel_hash = 0;
+	for (const uint32_t filter: {~aliased, aliased}) {
+		if (filter == 0) {
+			continue;
 		}
-		g_pm4_ops.outcome = Pm4OpTimer::RectListSkip;
+		m_color_slot_filter = filter;
+		DrawRenderState state;
+		const bool      prepared =
+		    PrepareDrawRenderState(buffer, draw, args.render_target_slice_offset, state);
+		m_color_slot_filter = ~0u;
+		if (!prepared) {
+			g_pm4_ops.outcome = Pm4OpTimer::NotPrepared;
+			ResetBindings();
+			return;
+		}
+
+		const bool rect_list = Prospero::IsRectList(ucfg.GetPrimType());
+		if (rect_list && state.vertex_info[0].buffers_num == 0 &&
+		    state.vertex_info[0].stage.program->param_export_mask == 0 &&
+		    state.ps_input_info.input_num != 0) {
+			if (graphics_debug_dump_enabled()) {
+				LOGF("DrawIndexAuto: skipping rect-list draw with no VS param exports and PS inputs: "
+				     "ps_inputs=%u ps=0x%016" PRIx64 " es=0x%016" PRIx64 " gs=0x%016" PRIx64 "\n",
+				     state.ps_input_info.input_num, sh_ctx.GetPs().ps_regs.data_addr,
+				     sh_ctx.GetVs().es_regs.data_addr, sh_ctx.GetVs().gs_regs.data_addr);
+			}
+			g_pm4_ops.outcome = Pm4OpTimer::RectListSkip;
+			ResetBindings();
+			return;
+		}
+
+		LogDrawStateIfNeeded(buffer, draw, state, 0, nullptr);
+
+		const bool indirect = args.offset_source == DrawOffsetSource::IndirectArgs;
+		const auto [vertex_offset, instance_offset] =
+		    indirect ? std::pair<int32_t, uint32_t> {0, args.first_instance}
+		             : ResolveDrawOffsets(ucfg.GetIndexOffset(), state.vertex_info[0]);
+		DrawEmitInfo emit {};
+		emit.first_vertex =
+		    static_cast<uint32_t>(vertex_offset + static_cast<int32_t>(args.first_vertex));
+		emit.first_instance = instance_offset;
+
+		DrawIndexBufferSource index_source {};
+		ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source, false);
 		ResetBindings();
-		return;
+		pixel_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
 	}
-
-	LogDrawStateIfNeeded(buffer, draw, state, 0, nullptr);
-
-	const bool indirect = args.offset_source == DrawOffsetSource::IndirectArgs;
-	const auto [vertex_offset, instance_offset] =
-	    indirect ? std::pair<int32_t, uint32_t> {0, args.first_instance}
-	             : ResolveDrawOffsets(ucfg.GetIndexOffset(), state.vertex_info[0]);
-	DrawEmitInfo emit {};
-	emit.first_vertex = static_cast<uint32_t>(vertex_offset + static_cast<int32_t>(args.first_vertex));
-	emit.first_instance = instance_offset;
-
-	DrawIndexBufferSource index_source {};
-	ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source, false);
-	ResetBindings();
-	g_draw_phases.End(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0);
+	g_draw_phases.End(pixel_hash);
 }
 
 bool RenderExecutor::ResolveColorTargets(CommandBuffer& buffer, uint32_t render_target_slice_offset) {
