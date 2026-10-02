@@ -2018,7 +2018,22 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 			for (uint32_t db = 0; db < 16u; db++) {
 				results[db * 2u] = value;
 			}
-			m_synthetic_occlusion_counter = (m_synthetic_occlusion_counter + 1u) & counter_mask;
+			// KYTY_DEBUG_OCCLUSION_HIDDEN_FILE=<path>: while that file exists, the counter stands
+			// still, so every query reports no samples and the game drops what it tests: an upper
+			// bound for what real occlusion queries could save, and which objects they cover.
+			static const char* hidden_file = std::getenv("KYTY_DEBUG_OCCLUSION_HIDDEN_FILE");
+			static bool        hidden      = false;
+			static uint32_t    checks      = 0;
+			if (hidden_file != nullptr && checks++ % 256 == 0) {
+				FILE* probe = std::fopen(hidden_file, "rb");
+				hidden      = probe != nullptr;
+				if (probe != nullptr) {
+					std::fclose(probe);
+				}
+			}
+			if (!hidden) {
+				m_synthetic_occlusion_counter = (m_synthetic_occlusion_counter + 1u) & counter_mask;
+			}
 			break;
 		}
 		default:
