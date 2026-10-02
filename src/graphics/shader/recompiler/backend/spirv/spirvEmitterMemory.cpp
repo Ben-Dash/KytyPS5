@@ -462,10 +462,17 @@ uint32_t FormattedLoadPrepared(ValueEmitContext& ctx, const IR::Inst& inst,
 	    });
 }
 
+uint32_t D16LoadComponent(ValueEmitContext& ctx, const Format::BufferFormatInfo& info,
+                          uint32_t value);
+
 uint32_t FormattedLoad(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem) {
 	return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
 		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
-		return FormattedLoadPrepared(ctx, inst, mem, 0u, resource);
+		const auto value    = FormattedLoadPrepared(ctx, inst, mem, 0u, resource);
+		const auto info     = Format::GetFormatInfo(BufferFormat(ctx, mem));
+		return mem.d16 && info.type != Format::ComponentType::Unknown
+		           ? D16LoadComponent(ctx, info, value)
+		           : value;
 	});
 }
 
@@ -720,6 +727,46 @@ uint32_t FormattedOutOfBoundsValue(ValueEmitContext& ctx, const IR::MemoryInfo& 
 	return ConstructU32Composite(ctx.state, components, values);
 }
 
+bool IsD16FloatLike(Format::ComponentType type) {
+	return type == Format::ComponentType::Float || type == Format::ComponentType::Unorm ||
+	       type == Format::ComponentType::Snorm;
+}
+
+// A D16 load returns each formatted component as 16 bits: a half for float-like formats, the low
+// bits otherwise.
+uint32_t D16LoadComponent(ValueEmitContext& ctx, const Format::BufferFormatInfo& info,
+                          uint32_t value) {
+	if (IsD16FloatLike(info.type)) {
+		const auto pair = EmitCompositeConstructF32x2(
+		    ctx.state, EmitBitCastF32U32(ctx.state, value), ConstantF32Value(ctx.state, 0.0f));
+		return EmitPackHalf2x16(ctx.state, pair);
+	}
+	return Binary(ctx.state, spv::OpBitwiseAnd, TypeU32(ctx.state), value,
+	              ConstantU32(ctx.state, 0xffffu));
+}
+
+// A D16 store takes each component as 16 bits (see D16LoadComponent).
+uint32_t D16StoreComponent(ValueEmitContext& ctx, const Format::BufferFormatInfo& info,
+                           uint32_t value) {
+	auto& state = ctx.state;
+	if (IsD16FloatLike(info.type)) {
+		const auto unpacked = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpExtInst, TypeF32Vector(state, 2), unpacked,
+		                          GlslStd450(state), GLSLstd450UnpackHalf2x16, value);
+		const auto low = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), low, unpacked, 0u);
+		return Unary(state, spv::OpBitcast, TypeU32(state), low);
+	}
+	if (IsSignedFormatComponent(info.type)) {
+		const auto extended = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), extended,
+		                          Unary(state, spv::OpBitcast, TypeI32(state), value),
+		                          ConstantU32(state, 0u), ConstantU32(state, 16u));
+		return Unary(state, spv::OpBitcast, TypeU32(state), extended);
+	}
+	return Binary(state, spv::OpBitwiseAnd, TypeU32(state), value, ConstantU32(state, 0xffffu));
+}
+
 uint32_t EncodeFormattedStoreComponent(ValueEmitContext& ctx,
                                        const Format::BufferFormatInfo& info,
                                        uint32_t component, uint32_t data) {
@@ -762,6 +809,9 @@ void StoreFormattedPrepared(ValueEmitContext& ctx, const IR::Inst& inst,
 					value = ctx.state.builder.AllocateId();
 					ctx.state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(ctx.state),
 					                              value, data, component);
+				}
+				if (mem.d16) {
+					value = D16StoreComponent(ctx, info, value);
 				}
 			}
 			value = EncodeFormattedStoreComponent(ctx, info, component, value);
@@ -888,6 +938,9 @@ uint32_t LoadWideBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t co
 					        std::array<uint32_t, 4> values {};
 					        for (uint32_t component = 0; component < components; component++) {
 						        values[component] = LoadFormattedInBounds(ctx, mem, plan, component);
+						        if (mem.d16) {
+							        values[component] = D16LoadComponent(ctx, info, values[component]);
+						        }
 					        }
 					        return ConstructU32Composite(state, components, values);
 				        });
@@ -901,6 +954,9 @@ uint32_t LoadWideBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t co
 				        Select(state, TypeU32(state), plan.in_bounds,
 				               LoadFormattedInBounds(ctx, mem, plan, component),
 				               FormattedConstant(ctx, plan.info, source.kind));
+			    if (mem.d16) {
+				    values[component] = D16LoadComponent(ctx, info, values[component]);
+			    }
 			    }
 			    return ConstructU32Composite(state, components, values);
 		    }

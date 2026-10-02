@@ -1894,8 +1894,12 @@ private:
 			               memory.resource * 4u, handle, source)) {
 				if (memory.kind != ResourceKind::Buffer || !memory.SupportsIndirectBufferLoad(op)) {
 					Fail(flags.pc,
-					     "buffer descriptor is not a valid runtime value; GPU-selected access "
-					     "requires a raw DWORD x2/x3/x4 load");
+					     fmt::format("buffer descriptor is not a valid runtime value; GPU-selected "
+					                 "access requires a raw DWORD x2/x3/x4 load (op={} kind={} bits={} "
+					                 "dwords={} formatted={} typed={})",
+					                 ValueOpcodeName(op), static_cast<uint32_t>(memory.kind),
+					                 memory.data_bits, memory.data_dwords, memory.formatted,
+					                 memory.typed));
 				}
 				m_program.memory_info[flags.index].kind = ResourceKind::IndirectBuffer;
 				m_info.uses_dma                         = true;

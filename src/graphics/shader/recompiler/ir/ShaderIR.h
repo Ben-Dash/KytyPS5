@@ -72,6 +72,9 @@ struct MemoryInfo {
 	bool                    offen                                                 = false;
 	bool                    coherent                                              = false;
 	bool                    planning_only                                         = false;
+	// A D16 formatted buffer access: components move as 16 bits each (halves for float-like
+	// formats, low bits for integer ones), which the backend converts by the buffer's format.
+	bool                    d16                                                   = false;
 
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
 		return !formatted && !typed && data_bits == 32u &&

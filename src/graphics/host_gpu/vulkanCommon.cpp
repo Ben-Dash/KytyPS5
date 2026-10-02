@@ -46,6 +46,10 @@ constexpr FormatMapping kFormatMappings[] = {
     {Prospero::BufferFormat::k16_16SInt, vk::Format::eR16G16Sint},
     {Prospero::BufferFormat::k16_16Float, vk::Format::eR16G16Sfloat},
     {Prospero::BufferFormat::k11_11_10Float, vk::Format::eB10G11R11UfloatPack32},
+    // Vulkan has no 11/11/10 unorm format. The float format has the same bit fields, so render
+    // targets, sampling and filtering work; only data the CPU writes in the unorm encoding reads
+    // back as different values (Ghost of Yotei renders and samples these on the GPU).
+    {Prospero::BufferFormat::k11_11_10UNorm, vk::Format::eB10G11R11UfloatPack32},
     {Prospero::BufferFormat::k10_10_10_2UNorm, vk::Format::eA2B10G10R10UnormPack32},
     {Prospero::BufferFormat::k10_10_10_2SNorm, vk::Format::eA2B10G10R10SnormPack32},
     {Prospero::BufferFormat::k10_10_10_2UInt, vk::Format::eA2B10G10R10UintPack32},

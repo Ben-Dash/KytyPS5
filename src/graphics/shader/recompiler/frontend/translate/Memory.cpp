@@ -432,7 +432,12 @@ void Translator::S_LOAD(const Decoder::Instruction& inst, bool raw) {
 }
 
 void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
-	const auto      memory = MemoryInfoFromDecoded(inst);
+	const bool d16 = inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_X ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW;
+	auto memory = MemoryInfoFromDecoded(inst);
+	memory.d16  = d16;
 	IR::ValueOpcode opcode;
 	const auto      bits = memory.data_bits;
 	const auto      sign = memory.data_signed;
@@ -460,24 +465,18 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 	const auto loaded =
 	    ir.Emit(opcode, {resource, address.index, address.offset, address.soffset, ir.GetExec()},
 	            AddMemoryInfo(memory, inst.pc));
-	const bool d16 = inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_X ||
-	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY ||
-	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ ||
-	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW;
 	if (d16) {
-		// Packs the formatted components as halves, two per register. The number format is a
-		// runtime property of the descriptor; float formats are by far the common D16 case.
+		// The backend returns each component as 16 bits (MemoryInfo::d16); two per register.
 		const auto component = [&](uint32_t index) {
 			if (index >= memory.data_dwords) {
-				return IR::F32(IR::Value::F32(0.0f));
+				return IR::U32(IR::Value(0u));
 			}
-			const IR::Value word = memory.data_dwords == 1u ? loaded
-			                                                : ir.CompositeExtract(loaded, index);
-			return ir.BitCastF32(IR::U32(word));
+			return IR::U32(memory.data_dwords == 1u ? loaded : ir.CompositeExtract(loaded, index));
 		};
 		for (uint32_t pair = 0; pair < (memory.data_dwords + 1u) / 2u; pair++) {
-			WriteOperand(OffsetOperand(inst.dst, pair),
-			             PackHalf2x16(component(pair * 2u), component(pair * 2u + 1u)));
+			const auto low  = ir.BitwiseAnd(component(pair * 2u), IR::U32(IR::Value(0xffffu)));
+			const auto high = ir.ShiftLeftLogical(component(pair * 2u + 1u), IR::U32(IR::Value(16u)));
+			WriteOperand(OffsetOperand(inst.dst, pair), ir.BitwiseOr(low, high));
 		}
 	} else if (bits != 32u && (inst.opcode == Decoder::Opcode::BUFFER_LOAD_UBYTE_D16 ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_LOAD_SBYTE_D16 ||
@@ -504,26 +503,24 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 }
 
 void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
-	const auto      memory   = MemoryInfoFromDecoded(inst);
-	const auto      resource = GetBufferResource(memory);
-	const auto      address  = ReadBufferAddress(inst, 1);
-	const auto      data_src = MemorySourceAt(inst, 0);
-	auto            data     = ReadU32(data_src);
 	const bool      d16      = inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XY ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZ ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZW;
-	// D16 formatted stores take two half components per register; the formatted store takes
-	// 32-bit floats. Float formats are by far the common D16 case (as for the D16 loads).
+	auto memory = MemoryInfoFromDecoded(inst);
+	memory.d16  = d16;
+	const auto      resource = GetBufferResource(memory);
+	const auto      address  = ReadBufferAddress(inst, 1);
+	const auto      data_src = MemorySourceAt(inst, 0);
+	auto            data     = ReadU32(data_src);
+	// D16 formatted stores take two 16-bit components per register; the backend converts them
+	// by the buffer's format (MemoryInfo::d16).
 	const auto d16_component = [&](uint32_t index) {
 		auto word = ReadU32(OffsetOperand(data_src, index / 2u));
 		if (index % 2u != 0u) {
 			word = ir.ShiftRightLogical(word, IR::U32(IR::Value(16u)));
 		}
-		const auto half16 = ir.Emit(IR::ValueOpcode::ConvertU16U32, {word});
-		const auto half   = ir.Emit(IR::ValueOpcode::BitCastF16U16, {half16});
-		const auto single = ir.Emit(IR::ValueOpcode::ConvertF32F16, {half});
-		return IR::U32(ir.Emit(IR::ValueOpcode::BitCastU32F32, {single}));
+		return ir.BitwiseAnd(word, IR::U32(IR::Value(0xffffu)));
 	};
 	const auto component = [&](uint32_t index) {
 		return d16 ? d16_component(index) : ReadU32(OffsetOperand(data_src, index));
