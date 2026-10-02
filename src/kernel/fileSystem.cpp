@@ -237,6 +237,46 @@ static void TraceStreamerRequests(uint64_t manager, const char* name) {
 			if (texture == 0) {
 				continue;
 			}
+			// The usage table the streamer asks (0x907070fd0): [0x90ec99a18] + 0x3158b0, a map at
+			// +0x108 from texture id (record+0x28) to a usage slot. Absent means "not wanted".
+			{
+				static uint32_t last_table = ~0u;
+				uint32_t        state      = 0; // 0 unreadable, 1 absent, 2 present
+				uint64_t        map_size   = 0;
+				uint16_t        slot       = 0xffff;
+				if (TraceReadable(0x90ec99a18ull, 8) && TraceReadable(texture + 0x28, 4)) {
+					const auto table = *reinterpret_cast<const uint64_t*>(0x90ec99a18ull) + 0x3158b0;
+					const auto id    = *reinterpret_cast<const uint32_t*>(texture + 0x28);
+					if (TraceReadable(table + 0x108, 16)) {
+						const auto head = *reinterpret_cast<const uint64_t*>(table + 0x108);
+						map_size        = *reinterpret_cast<const uint64_t*>(table + 0x110);
+						if (TraceReadable(head, 0x20)) {
+							state       = 1;
+							uint64_t at = *reinterpret_cast<const uint64_t*>(head + 8);
+							for (int depth = 0; depth < 64 && TraceReadable(at, 0x38) &&
+							                    *reinterpret_cast<const uint8_t*>(at + 0x19) == 0;
+							     depth++) {
+								const auto key = *reinterpret_cast<const uint32_t*>(at + 0x20);
+								if (key == id) {
+									state           = 2;
+									const auto slot_ptr = *reinterpret_cast<const uint64_t*>(at + 0x30);
+									if (TraceReadable(slot_ptr, 2)) {
+										slot = *reinterpret_cast<const uint16_t*>(slot_ptr);
+									}
+									break;
+								}
+								at = *reinterpret_cast<const uint64_t*>(at + (id < key ? 0 : 0x10));
+							}
+						}
+					}
+				}
+				const uint32_t packed = state | (static_cast<uint32_t>(slot) << 8);
+				if (packed != last_table) {
+					LOGF("STREAMUSE t=%" PRIu64 " %s slot=%u map_size=%" PRIu64 "\n", TraceMs(),
+					     state == 2 ? "present" : (state == 1 ? "absent" : "unreadable"), slot, map_size);
+					last_table = packed;
+				}
+			}
 			if (seen != last_seen || value != last || (size / 16) != (last_size / 16)) {
 				float prio = 0.0f;
 				std::memcpy(&prio, &value, 4);
