@@ -1487,7 +1487,14 @@ void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stag
 	static auto window_start = std::chrono::steady_clock::now();
 	const auto  address      = ImageUsersAddress();
 	const auto& shaders      = ImageUsersShaders();
-	const bool  every        = std::ranges::find(shaders, pixel_hash) != shaders.end() ||
+	// KYTY_DEBUG_IMAGE_USERS_VERTEX=1 lists every draw whose vertex-side stages sample images too:
+	// rare, and how foliage and water read interaction or displacement maps.
+	static const bool vertex_images = std::getenv("KYTY_DEBUG_IMAGE_USERS_VERTEX") != nullptr;
+	const bool        reads_in_vertex =
+	    vertex_images && pixel_hash != 0 && std::ranges::any_of(stages, [](const PreparedBindings* stage) {
+		    return stage->runtime->program->stage != ShaderType::Pixel && !stage->images.empty();
+	    });
+	const bool every = reads_in_vertex || std::ranges::find(shaders, pixel_hash) != shaders.end() ||
 	                   std::ranges::find(shaders, vertex_hash) != shaders.end();
 	// KYTY_DEBUG_IMAGE_USERS_TRACE=1 also prints each draw's or dispatch's uses in order, one line
 	// per call, with a run of identical calls collapsed into a count: the order of the passes
