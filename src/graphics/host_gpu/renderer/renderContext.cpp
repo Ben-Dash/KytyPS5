@@ -100,8 +100,10 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		m_buffer_cache.InvalidateMemory(fault_vaddr, fault_size);
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
 		if (gpu_thread) {
-			// The command stream writes this (WRITE_DATA, fills): later draws must see it.
-			AdvanceBdaEpoch(13);
+			// The command stream writes this (WRITE_DATA, fills): later draws must see it. The
+			// GPU's own write implies no new CPU writes, so the next BDA pass synchronizes just
+			// this page (see AdvanceBdaEpochForGpuWrite).
+			AdvanceBdaEpochForGpuWrite(13, fault_vaddr & ~uint64_t {0xfff}, 0x1000);
 		}
 	} else {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadReadFault
@@ -200,10 +202,11 @@ void RenderContext::AdvanceBdaEpochForGpuWrite(uint8_t site, uint64_t vaddr,
 		const char* text = std::getenv("KYTY_BDA_GPU_WRITE_RANGES");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
+	static const bool ranges_ab = AbSelected("gpulabels");
 	if (ab && AbFeatureOff()) {
 		return;
 	}
-	if (!ranges || vaddr == 0 || size == 0 || size > 0x1000) {
+	if (!ranges || (ranges_ab && AbFeatureOff()) || vaddr == 0 || size == 0 || size > 0x1000) {
 		AdvanceBdaEpoch(site);
 		return;
 	}

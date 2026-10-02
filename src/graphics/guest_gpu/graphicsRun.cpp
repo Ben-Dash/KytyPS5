@@ -198,7 +198,8 @@ private:
 // such a label orders the submission after GPU work, not after CPU writes, so while the label
 // still holds the value the GPU wrote it starts no BDA epoch (Astro Bot waits on compute labels
 // about 120 times a second, and each epoch re-uploads every page the CPU dirtied since).
-// KYTY_BDA_GPU_LABELS=0 starts an epoch at every wait again.
+// KYTY_BDA_GPU_LABELS=0 starts an epoch at every wait again; KYTY_DEBUG_AB=gpulabels alternates
+// (with the GPU write ranges of RenderContext::AdvanceBdaEpochForGpuWrite).
 class GpuLabels {
 public:
 	static bool Enabled() {
@@ -206,7 +207,8 @@ public:
 			const char* text = std::getenv("KYTY_BDA_GPU_LABELS");
 			return text == nullptr || std::strcmp(text, "0") != 0;
 		}();
-		return enabled;
+		static const bool ab = AbSelected("gpulabels");
+		return enabled && !(ab && AbFeatureOff());
 	}
 
 	void Note(const void* address, uint64_t value, uint32_t bytes) {
