@@ -136,8 +136,10 @@ namespace Libs::LibKernel::FileSystem {
 // (Graphics::NoteStreamingThrash), without which the warp could reload them forever.
 // KYTY_DEBUG_FILE_THRASH=0 turns this off.
 static void NoteRepeatedFileRead(const std::filesystem::path& path, int64_t offset, uint64_t size) {
+	// The warp reloads each texture several times a second; the hub re-reads a few files now and
+	// then, which with APR's 4 repeats started reliefs (and their brief coarse textures) for nothing.
 	constexpr uint64_t MinSize = 1024 * 1024;
-	constexpr uint32_t Repeats = 4;
+	constexpr uint32_t Repeats = 12;
 	constexpr auto     Window  = std::chrono::seconds(10);
 	static const bool  enabled = [] {
 		const char* text = std::getenv("KYTY_DEBUG_FILE_THRASH");
