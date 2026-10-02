@@ -182,7 +182,14 @@ static TextureCache::ImageDesc MakeDepthTargetDesc(const CommandBuffer& buffer,
 			DepthFatal("invalid HTile metadata address");
 		}
 		if (z.depth_view.slice_max >= 32) {
-			DepthFatal("HTile clear tracking supports at most 32 slices");
+			// Clear tracking keeps 32 slices (TextureCache::TouchMeta); later slices of a deeper
+			// array (Ghost of Yotei) are left untracked rather than ending the session.
+			static std::atomic_flag warned = ATOMIC_FLAG_INIT;
+			if (!warned.test_and_set(std::memory_order_relaxed)) {
+				std::printf("Warning: depth target with %u slices; HTile clears are tracked for "
+				            "the first 32 only\n",
+				            static_cast<uint32_t>(z.depth_view.slice_max) + 1u);
+			}
 		}
 	}
 	if (!z.size.valid) {

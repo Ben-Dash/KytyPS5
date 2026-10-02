@@ -838,8 +838,30 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferForImage(uint64_t vaddr, u
 	}
 
 	auto [staging, stage_offset] = m_staging_buffer.Map(size, 16);
-	if (staging == nullptr || !Libs::LibKernel::Memory::TryReadSparseBacking(vaddr, staging, size)) {
-		EXIT("BufferCache: failed to read mapped guest image backing\n");
+	if (staging == nullptr) {
+		EXIT("BufferCache: failed to map staging for guest image backing\n");
+	}
+	if (!Libs::LibKernel::Memory::TryReadSparseBacking(vaddr, staging, size)) {
+		// Part of the range is unmapped (Ghost of Yotei: a texture whose layout reaches past its
+		// allocation). Read the mapped 4 KiB pages and leave the rest zero.
+		static constexpr uint64_t Page = 0x1000;
+		auto* bytes = static_cast<uint8_t*>(staging);
+		std::memset(bytes, 0, size);
+		uint64_t missing = 0;
+		for (uint64_t done = 0; done < size;) {
+			const auto count = std::min(size - done, Page - ((vaddr + done) & (Page - 1u)));
+			if (!Libs::LibKernel::Memory::TryReadSparseBacking(vaddr + done, bytes + done, count)) {
+				std::memset(bytes + done, 0, count);
+				missing += count;
+			}
+			done += count;
+		}
+		static std::atomic<uint32_t> reports {0};
+		if (reports.fetch_add(1, std::memory_order_relaxed) < 8u) {
+			std::printf("Warning: image source 0x%016" PRIx64 " size=0x%" PRIx64
+			            " is partly unmapped (0x%" PRIx64 " bytes read as zero)\n",
+			            vaddr, size, missing);
+		}
 	}
 	m_staging_buffer.Commit();
 	RecordUpload(UploadSource::Image, vaddr, size);
