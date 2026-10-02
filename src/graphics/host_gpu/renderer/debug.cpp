@@ -698,6 +698,28 @@ static bool LiveSkipListed(const char* file, uint64_t shader_hash) {
 // Each shader is printed the first time it is skipped ("skip-shader: ps <hash>"), so a bisection
 // ends with the list of the shaders in its last half.
 bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) noexcept {
+	// KYTY_DEBUG_SHADER_ACTIVITY=1 prints each shader the first time it runs and again whenever it
+	// runs after 3 s unused, to find the shaders behind a short effect (a splash, a flash).
+	static const bool activity = std::getenv("KYTY_DEBUG_SHADER_ACTIVITY") != nullptr;
+	if (activity && shader_hash != 0) {
+		static std::mutex                             mutex;
+		static std::unordered_map<uint64_t, int64_t> last_used;
+		static const auto                            start = std::chrono::steady_clock::now();
+		const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		                        std::chrono::steady_clock::now() - start)
+		                        .count();
+		const std::lock_guard lock(mutex);
+		auto [it, inserted] = last_used.try_emplace(shader_hash, now_ms);
+		if (inserted || now_ms - it->second > 3000) {
+			std::printf("shader-active t=%.2f %s %016" PRIx64 "%s\n", static_cast<double>(now_ms) / 1000.0,
+			            kind == DebugShaderKind::Pixel    ? "ps"
+			            : kind == DebugShaderKind::Vertex ? "vs"
+			                                              : "cs",
+			            shader_hash, inserted ? " new" : "");
+			std::fflush(stdout);
+		}
+		it->second = now_ms;
+	}
 	static const char* live_file = std::getenv("KYTY_DEBUG_SKIP_SHADERS_LIVE");
 	if (live_file != nullptr && shader_hash != 0 && kind != DebugShaderKind::Compute &&
 	    LiveSkipListed(live_file, shader_hash)) {
