@@ -999,7 +999,8 @@ void BufferCache::RunGarbageCollector() {
 	DrainStats::ReasonScope reason(DrainStats::Reason::BufferGc);
 
 	const bool     aggressive = m_total_used_memory >= m_critical_gc_memory;
-	const uint64_t age        = std::min<uint64_t>(aggressive ? 80 : 160, tick);
+	// Ages count presented frames (TickFrame): the former submission ages divided by 8.
+	const uint64_t age        = std::min<uint64_t>(aggressive ? 10 : 20, tick);
 	const size_t   limit      = aggressive ? 64 : 32;
 
 	std::vector<BufferId> dirty_buffers;

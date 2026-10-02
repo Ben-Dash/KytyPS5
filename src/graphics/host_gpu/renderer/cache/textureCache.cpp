@@ -2850,7 +2850,8 @@ bool TextureCache::CollectGarbage(bool pressure_only) {
 	const auto collect = [&](bool allow_aggressive) {
 		bool           pressured  = m_total_used_memory >= m_pressure_gc_memory;
 		bool           aggressive = allow_aggressive && m_total_used_memory >= m_critical_gc_memory;
-		const uint64_t minimum_age = aggressive ? 160 : pressured ? 80 : 16;
+		// Ages count presented frames (TickFrame): the former submission ages divided by 8.
+		const uint64_t minimum_age = aggressive ? 20 : pressured ? 10 : 2;
 		if (pressure_only && tick < minimum_age) {
 			return;
 		}
