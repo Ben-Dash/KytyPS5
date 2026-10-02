@@ -460,7 +460,38 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 	const auto loaded =
 	    ir.Emit(opcode, {resource, address.index, address.offset, address.soffset, ir.GetExec()},
 	            AddMemoryInfo(memory, inst.pc));
-	if (bits != 32u) {
+	const bool d16 = inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_X ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW;
+	if (d16) {
+		// Packs the formatted components as halves, two per register. The number format is a
+		// runtime property of the descriptor; float formats are by far the common D16 case.
+		const auto component = [&](uint32_t index) {
+			if (index >= memory.data_dwords) {
+				return IR::F32(IR::Value::F32(0.0f));
+			}
+			const IR::Value word = memory.data_dwords == 1u ? loaded
+			                                                : ir.CompositeExtract(loaded, index);
+			return ir.BitCastF32(IR::U32(word));
+		};
+		for (uint32_t pair = 0; pair < (memory.data_dwords + 1u) / 2u; pair++) {
+			WriteOperand(OffsetOperand(inst.dst, pair),
+			             PackHalf2x16(component(pair * 2u), component(pair * 2u + 1u)));
+		}
+	} else if (bits != 32u && (inst.opcode == Decoder::Opcode::BUFFER_LOAD_UBYTE_D16 ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_LOAD_SBYTE_D16 ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_LOAD_SHORT_D16)) {
+		const auto value = ir.BitwiseAnd(WidenSubdword(loaded, bits, sign), IR::U32(IR::Value(0xffffu)));
+		const auto kept  = ir.BitwiseAnd(ReadU32(inst.dst), IR::U32(IR::Value(0xffff0000u)));
+		WriteOperand(inst.dst, ir.BitwiseOr(kept, value));
+	} else if (bits != 32u && (inst.opcode == Decoder::Opcode::BUFFER_LOAD_UBYTE_D16_HI ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_LOAD_SBYTE_D16_HI ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_LOAD_SHORT_D16_HI)) {
+		const auto value = ir.ShiftLeftLogical(WidenSubdword(loaded, bits, sign), IR::U32(IR::Value(16u)));
+		const auto kept  = ir.BitwiseAnd(ReadU32(inst.dst), IR::U32(IR::Value(0xffffu)));
+		WriteOperand(inst.dst, ir.BitwiseOr(kept, value));
+	} else if (bits != 32u) {
 		WriteOperand(inst.dst, WidenSubdword(loaded, bits, sign));
 	} else if (memory.data_dwords == 1u) {
 		WriteOperand(inst.dst, loaded);
@@ -477,7 +508,11 @@ void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
 	const auto      resource = GetBufferResource(memory);
 	const auto      address  = ReadBufferAddress(inst, 1);
 	const auto      data_src = MemorySourceAt(inst, 0);
-	const auto      data     = ReadU32(data_src);
+	auto            data     = ReadU32(data_src);
+	if (inst.opcode == Decoder::Opcode::BUFFER_STORE_BYTE_D16_HI ||
+	    inst.opcode == Decoder::Opcode::BUFFER_STORE_SHORT_D16_HI) {
+		data = ir.ShiftRightLogical(data, IR::U32(IR::Value(16u)));
+	}
 	IR::ValueOpcode opcode;
 	IR::Value       value;
 	switch (memory.data_bits) {
@@ -935,6 +970,16 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_XY:
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_XYZ:
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_XYZW:
+		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_X:
+		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY:
+		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ:
+		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW:
+		case Decoder::Opcode::BUFFER_LOAD_UBYTE_D16:
+		case Decoder::Opcode::BUFFER_LOAD_UBYTE_D16_HI:
+		case Decoder::Opcode::BUFFER_LOAD_SBYTE_D16:
+		case Decoder::Opcode::BUFFER_LOAD_SBYTE_D16_HI:
+		case Decoder::Opcode::BUFFER_LOAD_SHORT_D16:
+		case Decoder::Opcode::BUFFER_LOAD_SHORT_D16_HI:
 		case Decoder::Opcode::TBUFFER_LOAD_FORMAT_X:
 		case Decoder::Opcode::TBUFFER_LOAD_FORMAT_XY:
 		case Decoder::Opcode::TBUFFER_LOAD_FORMAT_XYZ:
@@ -946,6 +991,8 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::BUFFER_STORE_DWORDX4:
 		case Decoder::Opcode::BUFFER_STORE_BYTE:
 		case Decoder::Opcode::BUFFER_STORE_SHORT:
+		case Decoder::Opcode::BUFFER_STORE_BYTE_D16_HI:
+		case Decoder::Opcode::BUFFER_STORE_SHORT_D16_HI:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_X:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XY:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XYZ:

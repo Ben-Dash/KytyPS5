@@ -5,6 +5,8 @@
 
 #include <magic_enum.hpp>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -13,6 +15,11 @@ namespace Libs::Graphics::ShaderRecompiler::Decoder {
 // PS5 flat stack addresses use these SH_MEM_BASES aperture tags in VA[63:32].
 constexpr uint32_t PrivateApertureHigh = 0x70000000u;
 constexpr uint32_t SharedApertureHigh = 0x80000000u;
+// Thrown for an encoding the decoder does not understand; the shader is then skipped.
+struct DecodeError: std::runtime_error {
+	DecodeError(uint32_t pc, const std::string& message): std::runtime_error(message), pc(pc) {}
+	uint32_t pc;
+};
 
 enum class Family {
 	Unknown,
@@ -432,6 +439,9 @@ enum class Opcode {
 	V_CMPX_LT_U16,
 	V_CMPX_EQ_U16,
 	V_CMPX_GT_U16,
+	V_CMPX_LE_U16,
+	V_CMPX_NE_U16,
+	V_CMPX_GE_U16,
 	V_CMP_NE_U16,
 	V_CMP_GE_U16,
 	V_CMP_F_U32,
@@ -454,6 +464,9 @@ enum class Opcode {
 	V_CMPX_NE_I64,
 	V_CMPX_LE_U64,
 	V_CMPX_NE_U64,
+	V_CMPX_LT_U64,
+	V_CMPX_EQ_U64,
+	V_CMPX_GT_U64,
 	V_CMPX_LT_U32,
 	V_CMPX_EQ_U32,
 	V_CMPX_LE_U32,
@@ -476,6 +489,18 @@ enum class Opcode {
 	BUFFER_LOAD_FORMAT_XY,
 	BUFFER_LOAD_FORMAT_XYZ,
 	BUFFER_LOAD_FORMAT_XYZW,
+	BUFFER_LOAD_FORMAT_D16_X,
+	BUFFER_LOAD_FORMAT_D16_XY,
+	BUFFER_LOAD_FORMAT_D16_XYZ,
+	BUFFER_LOAD_FORMAT_D16_XYZW,
+	BUFFER_STORE_BYTE_D16_HI,
+	BUFFER_STORE_SHORT_D16_HI,
+	BUFFER_LOAD_UBYTE_D16,
+	BUFFER_LOAD_UBYTE_D16_HI,
+	BUFFER_LOAD_SBYTE_D16,
+	BUFFER_LOAD_SBYTE_D16_HI,
+	BUFFER_LOAD_SHORT_D16,
+	BUFFER_LOAD_SHORT_D16_HI,
 	BUFFER_STORE_FORMAT_X,
 	BUFFER_STORE_FORMAT_XY,
 	BUFFER_STORE_FORMAT_XYZ,

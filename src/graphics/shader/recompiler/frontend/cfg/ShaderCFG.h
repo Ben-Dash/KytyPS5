@@ -5,9 +5,16 @@
 #include "common/stringUtils.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
 
+#include <stdexcept>
 #include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler::CFG {
+
+// Thrown when a shader cannot be turned into a graph (an unimplemented instruction, say); the
+// shader is then skipped instead of ending the emulator (KYTY_STRICT_SHADER_CFG=1 restores the exit).
+struct BuildError: std::runtime_error {
+	using std::runtime_error::runtime_error;
+};
 
 enum class BranchCondition {
 	Always,

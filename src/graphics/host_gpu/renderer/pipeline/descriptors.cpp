@@ -142,7 +142,16 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	const auto adjustment     = offset - aligned_offset;
 	const auto max_range      = graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange;
 	if (adjustment % sizeof(uint32_t) != 0 || adjustment >= 256 || size > max_range - adjustment) {
-		EXIT("storage buffer offset adjustment is unsupported\n");
+		// The shader takes the adjustment in whole dwords. Bind the null buffer instead of ending
+		// the session (Ghost of Yotei binds byte-aligned buffers); its accesses then read zero.
+		static std::atomic_flag warned = ATOMIC_FLAG_INIT;
+		if (!warned.test_and_set(std::memory_order_relaxed)) {
+			std::printf("Warning: unsupported storage buffer offset adjustment (address=0x%016" PRIx64
+			            " size=0x%" PRIx64 " adjustment=%" PRIu64 "); binding a null buffer\n",
+			            static_cast<uint64_t>(address), static_cast<uint64_t>(size),
+			            static_cast<uint64_t>(adjustment));
+		}
+		return {context.GetBufferCache().GetBuffer(NULL_BUFFER_ID).Handle(), 0, 16};
 	}
 	buffer_offset = static_cast<uint32_t>(adjustment);
 	auto range = size + adjustment;
@@ -659,8 +668,15 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		TileGetTextureTotalSize(format, width, height, volume ? depth : image_layers,
 		                        physical_levels, tile, volume, size);
 	}
-	EXIT_NOT_IMPLEMENTED(size.size == 0 || size.align == 0 ||
-	                     (address & (static_cast<uint64_t>(size.align) - 1u)) != 0);
+	// Ghost of Yotei places small swizzled textures (16x16 in a 4 KiB mode) inside a block, so
+	// only the descriptor's own 256-byte address granularity is required.
+	if (size.size == 0 || size.align == 0 || (address & 0xffu) != 0) {
+		EXIT("unsupported texture layout: format=%u tile=%u type=%u extent=%ux%ux%u levels=%u "
+		     "address=0x%016" PRIx64 " size=%u align=%u\n",
+		     static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
+		     static_cast<uint32_t>(type), width, height, depth, physical_levels, address,
+		     static_cast<uint32_t>(size.size), static_cast<uint32_t>(size.align));
+	}
 	if (storage) {
 		ValidateStorageTexture(resource, descriptor, size.size);
 	}

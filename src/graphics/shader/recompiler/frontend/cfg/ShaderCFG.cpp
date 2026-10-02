@@ -3,6 +3,7 @@
 #include "common/assert.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fmt/format.h>
 #include <iterator>
 #include <deque>
@@ -39,8 +40,14 @@ void SetFailure(Graph& graph, FailureKind kind, uint32_t block_id, const std::st
 [[noreturn]] void ExitBuildFailure(Graph& graph, FailureKind kind, uint32_t block_id,
                                    const std::string& message) {
 	SetFailure(graph, kind, block_id, message);
-	EXIT("shader CFG build failed: %s", message.c_str());
-	std::abort();
+	static const bool strict = [] {
+		const char* env = std::getenv("KYTY_STRICT_SHADER_CFG");
+		return env != nullptr && env[0] == '1';
+	}();
+	if (strict) {
+		EXIT("shader CFG build failed: %s", message.c_str());
+	}
+	throw BuildError("shader CFG build failed: " + message);
 }
 
 uint32_t InstructionEndPc(const Instruction& inst) {

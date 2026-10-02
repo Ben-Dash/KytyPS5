@@ -63,6 +63,21 @@ constexpr MemoryOpcodeInfo MUBUF_OPCODE_LIST[] = {
     {0x50u, Opcode::BUFFER_ATOMIC_SWAP_X2, 2, 32},
     {0x59u, Opcode::BUFFER_ATOMIC_AND_X2, 2, 32},
     {0x5au, Opcode::BUFFER_ATOMIC_OR_X2, 2, 32},
+    // D16: the formatted components come back as packed halves, two per register.
+    // D16 sub-dword accesses: loads fill one half of the register, keeping the other; _HI
+    // stores take their data from the high half.
+    {0x19u, Opcode::BUFFER_STORE_BYTE_D16_HI, 1, 8},
+    {0x1bu, Opcode::BUFFER_STORE_SHORT_D16_HI, 1, 16},
+    {0x20u, Opcode::BUFFER_LOAD_UBYTE_D16, 1, 8},
+    {0x21u, Opcode::BUFFER_LOAD_UBYTE_D16_HI, 1, 8},
+    {0x22u, Opcode::BUFFER_LOAD_SBYTE_D16, 1, 8, true},
+    {0x23u, Opcode::BUFFER_LOAD_SBYTE_D16_HI, 1, 8, true},
+    {0x24u, Opcode::BUFFER_LOAD_SHORT_D16, 1, 16},
+    {0x25u, Opcode::BUFFER_LOAD_SHORT_D16_HI, 1, 16},
+    {0x80u, Opcode::BUFFER_LOAD_FORMAT_D16_X, 1, 32, false, false, true},
+    {0x81u, Opcode::BUFFER_LOAD_FORMAT_D16_XY, 2, 32, false, false, true},
+    {0x82u, Opcode::BUFFER_LOAD_FORMAT_D16_XYZ, 3, 32, false, false, true},
+    {0x83u, Opcode::BUFFER_LOAD_FORMAT_D16_XYZW, 4, 32, false, false, true},
 };
 
 constexpr MemoryOpcodeInfo MTBUF_OPCODE_LIST[] = {

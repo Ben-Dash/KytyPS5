@@ -248,7 +248,8 @@ constexpr VopcOpcodeInfo VOPC_OPCODE_LIST[] = {
     {0xabu, Opcode::V_CMP_LE_U16},         {0xacu, Opcode::V_CMP_GT_U16},
     {0xadu, Opcode::V_CMP_NE_U16},         {0xaeu, Opcode::V_CMP_GE_U16},
     {0xb9u, Opcode::V_CMPX_LT_U16, false}, {0xbau, Opcode::V_CMPX_EQ_U16, false},
-    {0xbcu, Opcode::V_CMPX_GT_U16},        {0xc0u, Opcode::V_CMP_F_U32},
+    {0xbbu, Opcode::V_CMPX_LE_U16},        {0xbcu, Opcode::V_CMPX_GT_U16},
+    {0xbdu, Opcode::V_CMPX_NE_U16},        {0xbeu, Opcode::V_CMPX_GE_U16},        {0xc0u, Opcode::V_CMP_F_U32},
     {0xc1u, Opcode::V_CMP_LT_U32},         {0xc2u, Opcode::V_CMP_EQ_U32},
     {0xc3u, Opcode::V_CMP_LE_U32},         {0xc4u, Opcode::V_CMP_GT_U32},
     {0xc5u, Opcode::V_CMP_NE_U32},         {0xc6u, Opcode::V_CMP_GE_U32},
@@ -261,6 +262,8 @@ constexpr VopcOpcodeInfo VOPC_OPCODE_LIST[] = {
     {0xe2u, Opcode::V_CMP_EQ_U64, false},  {0xe3u, Opcode::V_CMP_LE_U64, false},
     {0xe4u, Opcode::V_CMP_GT_U64, false},  {0xe5u, Opcode::V_CMP_NE_U64, false},
     {0xe6u, Opcode::V_CMP_GE_U64, false},  {0xf3u, Opcode::V_CMPX_LE_U64, false},
+    {0xf1u, Opcode::V_CMPX_LT_U64, false}, {0xf2u, Opcode::V_CMPX_EQ_U64, false},
+    {0xf4u, Opcode::V_CMPX_GT_U64, false},
     {0xf5u, Opcode::V_CMPX_NE_U64, false}, {0xc9u, Opcode::V_CMP_LT_F16},
     {0xcau, Opcode::V_CMP_EQ_F16},         {0xcbu, Opcode::V_CMP_LE_F16},
     {0xccu, Opcode::V_CMP_GT_F16},         {0xcdu, Opcode::V_CMP_LG_F16},
@@ -1100,8 +1103,10 @@ void DecodeVop2Dpp(uint32_t pc, std::span<const uint32_t> code, uint32_t word_in
 	DecodeVectorGpr(vsrc1, inst.src1);
 	DecodeScalarSource(src0 + 256u, pc, inst.src0);
 	ApplyDppModifier(inst.src0, modifier, code[word_index] & 0x1ffu);
-	inst.src1.negate       = ((modifier >> 22u) & 0x1u) != 0u;
-	inst.src1.absolute     = ((modifier >> 23u) & 0x1u) != 0u;
+	// DPP8 has lane selects where DPP16 keeps its source modifiers.
+	const bool dpp8        = (code[word_index] & 0x1ffu) == 233u;
+	inst.src1.negate       = !dpp8 && ((modifier >> 22u) & 0x1u) != 0u;
+	inst.src1.absolute     = !dpp8 && ((modifier >> 23u) & 0x1u) != 0u;
 	const bool packed_fmac = inst.opcode == Opcode::V_PK_FMAC_F16;
 	if (packed_fmac) {
 		inst.src0.negate_hi = inst.src0.negate;
@@ -1514,9 +1519,15 @@ bool IsVopcCompareExec(Opcode opcode) {
 		case Opcode::V_CMPX_GT_I16:
 		case Opcode::V_CMPX_NE_I16:
 		case Opcode::V_CMPX_GE_I16:
+		case Opcode::V_CMPX_LT_U64:
+		case Opcode::V_CMPX_EQ_U64:
+		case Opcode::V_CMPX_GT_U64:
 		case Opcode::V_CMPX_LT_U16:
 		case Opcode::V_CMPX_EQ_U16:
 		case Opcode::V_CMPX_GT_U16:
+		case Opcode::V_CMPX_LE_U16:
+		case Opcode::V_CMPX_NE_U16:
+		case Opcode::V_CMPX_GE_U16:
 		case Opcode::V_CMPX_LT_F16:
 		case Opcode::V_CMPX_EQ_F16:
 		case Opcode::V_CMPX_LE_F16:
@@ -1551,6 +1562,7 @@ void DecodeVop2(uint32_t pc, std::span<const uint32_t> code, uint32_t word_index
 		return;
 	}
 	switch (src0) {
+		case 233u: DecodeVop2Dpp(pc, code, word_index, opcode, vdst, vsrc1, inst); return;
 		case 249u: DecodeVop2Sdwa(pc, code, word_index, opcode, vdst, vsrc1, inst); return;
 		case 250u: DecodeVop2Dpp(pc, code, word_index, opcode, vdst, vsrc1, inst); return;
 		default: break;

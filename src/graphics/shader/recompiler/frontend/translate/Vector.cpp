@@ -113,6 +113,15 @@ void Translator::EmitVector(const Decoder::Instruction& inst) {
 		case O::V_CMPX_NE_U64:
 			EmitIntegerCompare(inst, IR::ValueOpcode::INotEqual64, IR::Type::U64, false, true);
 			return;
+		case O::V_CMPX_LT_U64:
+			EmitIntegerCompare(inst, IR::ValueOpcode::ULessThan64, IR::Type::U64, false, true);
+			return;
+		case O::V_CMPX_EQ_U64:
+			EmitIntegerCompare(inst, IR::ValueOpcode::IEqual64, IR::Type::U64, false, true);
+			return;
+		case O::V_CMPX_GT_U64:
+			EmitIntegerCompare(inst, IR::ValueOpcode::UGreaterThan64, IR::Type::U64, false, true);
+			return;
 
 		case O::V_CMP_LT_I64:
 			EmitIntegerCompare(inst, IR::ValueOpcode::SLessThan64, IR::Type::U64, false, false);
@@ -153,6 +162,15 @@ void Translator::EmitVector(const Decoder::Instruction& inst) {
 			return;
 		case O::V_CMPX_GT_U16:
 			EmitInteger16Compare(inst, IR::ValueOpcode::UGreaterThan32, false, true);
+			return;
+		case O::V_CMPX_LE_U16:
+			EmitInteger16Compare(inst, IR::ValueOpcode::ULessThanEqual32, false, true);
+			return;
+		case O::V_CMPX_NE_U16:
+			EmitInteger16Compare(inst, IR::ValueOpcode::INotEqual32, false, true);
+			return;
+		case O::V_CMPX_GE_U16:
+			EmitInteger16Compare(inst, IR::ValueOpcode::UGreaterThanEqual32, false, true);
 			return;
 		case O::V_CMP_GE_U16:
 			EmitInteger16Compare(inst, IR::ValueOpcode::UGreaterThanEqual32, false, false);

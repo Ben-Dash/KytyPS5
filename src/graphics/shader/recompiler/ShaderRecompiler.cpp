@@ -491,7 +491,8 @@ bool HardwareStorageBufferBounds() {
 	return g_hardware_storage_buffer_bounds.load(std::memory_order_relaxed);
 }
 
-TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOptions& options) {
+static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
+                                               const CompileOptions&     options) {
 	if (code.empty()) {
 		EXIT("shader recompiler input is empty\n");
 	}
@@ -628,7 +629,14 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 			     MakeIrDump(cfg_dump, ir).c_str());
 		}
 	}
-	IR::TrackResources(ir, decoded, native_cfg);
+	try {
+		IR::TrackResources(ir, decoded, native_cfg);
+	} catch (const IR::ResourceTrackingError& error) {
+		Log::WriteToConsoleAndLog(
+		    fmt::format("Warning: skipping shader with unsupported resources: {}\n", error.what()));
+		return {.skip_dispatch = true};
+	}
+	IR::EliminateDeadCode(ir.blocks);
 	TranslateResult result;
 	result.program = std::move(ir);
 	if (options.dump_ir) {
@@ -636,6 +644,24 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 		result.cfg_dump     = std::move(cfg_dump);
 	}
 	return result;
+}
+
+TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOptions& options) {
+	try {
+		return TranslateProgramChecked(code, options);
+	} catch (const Decoder::DecodeError& error) {
+		const auto word = error.pc / 4u;
+		Log::WriteToConsoleAndLog(fmt::format(
+		    "Warning: skipping shader 0x{:016x}: {} raw=[0x{:08x} 0x{:08x} 0x{:08x}]\n",
+		    options.shader_hash, error.what(), word < code.size() ? code[word] : 0u,
+		    word + 1u < code.size() ? code[word + 1u] : 0u,
+		    word + 2u < code.size() ? code[word + 2u] : 0u));
+		return {.skip_dispatch = true};
+	} catch (const CFG::BuildError& error) {
+		Log::WriteToConsoleAndLog(fmt::format("Warning: skipping shader 0x{:016x}: {}\n",
+		                                      options.shader_hash, error.what()));
+		return {.skip_dispatch = true};
+	}
 }
 
 CompileResult CompileProgram(TranslateResult translated, const CompileOptions& options,

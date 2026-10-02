@@ -41,11 +41,13 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <shared_mutex>
 #include <span>
 #include <spirv-tools/libspirv.hpp>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <xxhash.h>
@@ -132,16 +134,27 @@ bool ReadShaderGuestMemory(void*, uint64_t address, std::span<uint32_t> values) 
 	       Libs::LibKernel::Memory::TryReadGpuCleanBacking(address, values.data(), values.size_bytes());
 }
 
+// Guest memory never lives in the lowest megabyte. A walk through a null base there is on a
+// path the shader guards with its own null test (seen in Ghost of Yotei), so it reads zero.
+constexpr uint64_t NullGuestRegionEnd = 0x100000;
+
 // Per-draw resource tables can share a tracker page with GPU-written data, which protects the
 // whole page. Reading their clean bytes from the backing avoids a fault and a GPU wait; bytes
 // the GPU did write still fault and read back.
 bool ReadShaderGuestMemoryOnGpuThread(void*, uint64_t address, std::span<uint32_t> values) {
+	if (address < NullGuestRegionEnd) {
+		std::fill(values.begin(), values.end(), 0u);
+		return true;
+	}
 	Libs::LibKernel::Memory::ReadGuestOnGpuThread(address, values.data(), values.size_bytes());
 	return true;
 }
 
 // A whole 64-byte block for the reads above, when each of them would be a plain copy.
 bool ReadShaderGuestBlockOnGpuThread(void*, uint64_t address, std::span<uint32_t> values) {
+	if (address < NullGuestRegionEnd) {
+		return false;
+	}
 	return Libs::LibKernel::Memory::TryReadGuestPlainOnGpuThread(address, values.data(),
 	                                                             values.size_bytes());
 }
@@ -175,6 +188,18 @@ void DumpShaderSpirv(const char* stage_name, uint64_t shader_hash,
 		return;
 	}
 	file.Write(spirv.data(), spirv.size() * sizeof(uint32_t));
+}
+
+// A skipped draw or dispatch is visible in the frame; name the shader once per hash.
+void ReportMaterializeFailure(uint64_t shader_hash) {
+	static std::mutex                   mutex;
+	static std::unordered_set<uint64_t> reported;
+	std::scoped_lock                    lock(mutex);
+	if (reported.insert(shader_hash).second) {
+		std::printf("Shader 0x%016" PRIx64 ": resource materialization failed; skipping its "
+		            "draws/dispatches until it resolves\n",
+		            shader_hash);
+	}
 }
 
 void DumpShaderOriginal(const char* stage_name, uint64_t shader_hash,
@@ -660,9 +685,13 @@ struct PipelineCache::ProgramCache {
 		const auto existing = [&](SourceEntry& source) -> std::optional<ShaderProgram> {
 			if (!AdoptSpeculation(source, stage, user_data, params.Base(), runtime, wait)) {
 				DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::ResourceRefresh);
-				EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(
-				    source.resource_plan, runtime, source.resources, source.specialization,
-				    &source.memo));
+				if (!ShaderRecompiler::IR::MaterializeResources(
+				        source.resource_plan, runtime, source.resources, source.specialization,
+				        &source.memo)) {
+					// Skip this draw or dispatch, not the session; the next use materializes again.
+					ReportMaterializeFailure(params.hash);
+					return ShaderProgram {};
+				}
 				// Sources the precompile replay inserted get here for their first refresh.
 				if (!source.speculable.load(std::memory_order_relaxed)) {
 					source.speculable.store(true, std::memory_order_release);
@@ -778,14 +807,24 @@ struct PipelineCache::ProgramCache {
 			if (!translated) {
 				translated = ShaderRecompiler::TranslateProgram(params.code, options);
 			}
+			if (translated->skip_dispatch) {
+				std::unique_lock lock(programs_mutex);
+				entry = programs.try_emplace(lookup_key, ShaderRecompiler::IR::ResourcePlan {}).first;
+				entry->second.skip_dispatch = true;
+				return {};
+			}
 			{
 				std::unique_lock lock(programs_mutex);
 				entry = programs.try_emplace(lookup_key,
 				    ShaderRecompiler::IR::ExtractResourcePlan(translated->program)).first;
 			}
-			EXIT_IF(!ShaderRecompiler::IR::MaterializeResources(
-			    entry->second.resource_plan, runtime, entry->second.resources,
-			    entry->second.specialization, &entry->second.memo));
+			if (!ShaderRecompiler::IR::MaterializeResources(
+			        entry->second.resource_plan, runtime, entry->second.resources,
+			        entry->second.specialization, &entry->second.memo)) {
+				// Skip this draw or dispatch, not the session; the next use materializes again.
+				ReportMaterializeFailure(params.hash);
+				return {};
+			}
 			entry->second.speculable.store(true, std::memory_order_release);
 		}
 		auto& source = entry->second;
@@ -1370,7 +1409,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 			auto         translated = ShaderRecompiler::TranslateProgram(params.code, options);
 			// Reject inconsistent metadata before ApplyResourceSpecialization's hard assertions.
 			// Live guest lookups still compile normally if a record cannot be replayed.
-			if (!translated.program.resource_tracking_complete ||
+			if (translated.skip_dispatch || !translated.program.resource_tracking_complete ||
 			    translated.program.info.buffers.size() != record.specialization.buffers.size() ||
 			    translated.program.info.images.size() > record.specialization.images.size()) {
 				continue;

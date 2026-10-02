@@ -836,7 +836,12 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanDebugMessengerCallback(
 		default: severity_str = "?";
 	}
 
-	if (error) {
+	// KYTY_DEBUG_VK_ERRORS_NONFATAL=1 logs validation errors and carries on, to collect them all.
+	static const bool nonfatal = [] {
+		const char* env = std::getenv("KYTY_DEBUG_VK_ERRORS_NONFATAL");
+		return env != nullptr && env[0] == '1';
+	}();
+	if (error && !nonfatal) {
 		EXIT_COLOR(severity_style, "[Vulkan][%s][%u]: %s\n", severity_str,
 		           static_cast<uint32_t>(message_types), callback_data->pMessage);
 	}

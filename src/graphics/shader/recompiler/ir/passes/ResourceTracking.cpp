@@ -6,6 +6,7 @@
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <fmt/format.h>
 #include <map>
 #include <numeric>
@@ -364,8 +365,14 @@ private:
 		const auto message =
 		    fmt::format("shader resource tracking: hash=0x{:016x} stage={} pc=0x{:08x} {}",
 		                m_program.shader_hash, StageName(m_program.stage), pc, reason);
-		EXIT("%s", message.c_str());
-		std::abort();
+		static const bool strict = [] {
+			const char* env = std::getenv("KYTY_STRICT_RESOURCE_TRACKING");
+			return env != nullptr && env[0] == '1';
+		}();
+		if (strict) {
+			EXIT("%s", message.c_str());
+		}
+		throw ResourceTrackingError(message);
 	}
 
 	Value NativeDescriptorSource(Value value, uint32_t reg, uint32_t use_pc) const {

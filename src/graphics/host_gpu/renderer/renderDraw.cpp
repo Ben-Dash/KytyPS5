@@ -1317,6 +1317,16 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 		// Asynchronous pipelines: a shader is still translating; skip the draw until it is ready.
 		return false;
 	}
+	// A stage the recompiler skipped (unsupported instruction or resources) has no program: skip
+	// the draw.
+	for (uint32_t stage = 0; stage < state.programs.VertexStageCount(); stage++) {
+		if (!state.programs.vertex[stage]) {
+			return false;
+		}
+	}
+	if (state.ps_active && !state.programs.pixel) {
+		return false;
+	}
 	if (DebugSkipShader(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0,
 	                    DebugShaderKind::Pixel, draw.index_count > 6 || draw.indirect_args != 0) ||
 	    DebugSkipShader(state.vertex_info[0].stage.program->shader_hash, DebugShaderKind::Vertex))
