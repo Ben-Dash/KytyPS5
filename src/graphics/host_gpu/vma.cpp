@@ -25,9 +25,69 @@
 #include <atomic>
 #include <chrono>
 #include <cinttypes>
+#include <cstdlib>
+#include <cstring>
 #include <mutex>
+#include <vulkan/vulkan_format_traits.hpp>
 
 namespace Libs::Graphics {
+
+// Small images come from a pool of 64 MiB blocks. The driver prefers a dedicated allocation for
+// render targets, so without the pool each one is a kernel allocation of its own: Astro Bot
+// recreates a 960x540 depth surface as a color image and back every frame (~3% of the GPU
+// thread in allocation and free calls). KYTY_SMALL_IMAGE_POOL=0 turns the pool off;
+// KYTY_DEBUG_AB=imagepool alternates.
+namespace {
+constexpr uint64_t SmallImageBytes     = 8u * 1024u * 1024u;
+constexpr uint64_t SmallImageBlockSize = 64u * 1024u * 1024u;
+
+struct SmallImagePool {
+	std::mutex mutex;
+	VmaPool    pool   = VK_NULL_HANDLE;
+	bool       failed = false;
+};
+SmallImagePool g_small_image_pool;
+
+bool SmallImagePoolEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_SMALL_IMAGE_POOL");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("imagepool");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// An upper bound of the image's memory: every texel at the format's block size, all levels.
+uint64_t EstimateImageBytes(const vk::ImageCreateInfo& info) {
+	const uint64_t texels = uint64_t {info.extent.width} * info.extent.height * info.extent.depth *
+	                        info.arrayLayers * static_cast<uint32_t>(info.samples);
+	const uint64_t bytes  = texels * std::max<uint32_t>(vk::blockSize(info.format), 1u);
+	return info.mipLevels > 1 ? bytes + bytes / 2u : bytes;
+}
+
+VmaPool GetSmallImagePool(VmaAllocator allocator, const vk::ImageCreateInfo& image_info,
+                          const VmaAllocationCreateInfo& alloc_info) {
+	std::scoped_lock lock(g_small_image_pool.mutex);
+	if (g_small_image_pool.pool != VK_NULL_HANDLE || g_small_image_pool.failed) {
+		return g_small_image_pool.pool;
+	}
+	uint32_t type_index = 0;
+	if (vmaFindMemoryTypeIndexForImageInfo(
+	        allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info),
+	        &alloc_info, &type_index) != VK_SUCCESS) {
+		g_small_image_pool.failed = true;
+		return VK_NULL_HANDLE;
+	}
+	VmaPoolCreateInfo pool_info {};
+	pool_info.memoryTypeIndex = type_index;
+	pool_info.blockSize       = SmallImageBlockSize;
+	if (vmaCreatePool(allocator, &pool_info, &g_small_image_pool.pool) != VK_SUCCESS) {
+		g_small_image_pool.pool   = VK_NULL_HANDLE;
+		g_small_image_pool.failed = true;
+	}
+	return g_small_image_pool.pool;
+}
+} // namespace
 
 namespace {
 
@@ -152,6 +212,13 @@ void GraphicContext::DestroyAllocator() {
 	if (allocator == nullptr) {
 		return;
 	}
+	{
+		std::scoped_lock lock(g_small_image_pool.mutex);
+		if (g_small_image_pool.pool != VK_NULL_HANDLE) {
+			vmaDestroyPool(allocator, g_small_image_pool.pool);
+			g_small_image_pool.pool = VK_NULL_HANDLE;
+		}
+	}
 	vmaDestroyAllocator(allocator);
 	allocator = nullptr;
 }
@@ -224,6 +291,7 @@ uint64_t GraphicContext::GetTotalMemoryBudget() const {
 	return std::max(local, available > system_reserve ? available - system_reserve : uint64_t {0});
 }
 
+
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(allocator == nullptr || image.image != nullptr || image.allocation != nullptr);
@@ -232,9 +300,27 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 	alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
 	vk::Image::CType native_image = VK_NULL_HANDLE;
-	const auto        result       = static_cast<vk::Result>(
-	    vmaCreateImage(allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info),
-	                   &alloc_info, &native_image, &image.allocation, nullptr));
+	vk::Result       result       = vk::Result::eErrorUnknown;
+	if (SmallImagePoolEnabled() && EstimateImageBytes(image_info) <= SmallImageBytes) {
+		if (const auto pool = GetSmallImagePool(allocator, image_info, alloc_info);
+		    pool != VK_NULL_HANDLE) {
+			auto pooled = alloc_info;
+			pooled.pool = pool;
+			result      = static_cast<vk::Result>(vmaCreateImage(
+			         allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info),
+			         &pooled, &native_image, &image.allocation, nullptr));
+			if (result != vk::Result::eSuccess) {
+				// Another memory type, or the pool is out of memory: allocate as before.
+				native_image     = VK_NULL_HANDLE;
+				image.allocation = nullptr;
+			}
+		}
+	}
+	if (native_image == VK_NULL_HANDLE) {
+		result = static_cast<vk::Result>(
+		    vmaCreateImage(allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info),
+		                   &alloc_info, &native_image, &image.allocation, nullptr));
+	}
 	image.image = native_image;
 	if (result != vk::Result::eSuccess) {
 		LogMemoryBudget();
