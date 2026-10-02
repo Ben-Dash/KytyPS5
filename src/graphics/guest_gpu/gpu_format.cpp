@@ -40,6 +40,8 @@ constexpr FormatInfo kFormatInfo[] = {
 	{BufferFormat::k16_16SInt, 4, 0, 4, true, false, true},
 	{BufferFormat::k16_16Float, 4, 0, 4, true, false},
 	{BufferFormat::k11_11_10UInt, 4, 0, 4, true, true},
+	// Sampled through a 32-bit integer view and unpacked in the shader (RemapTextureFormat).
+	{BufferFormat::k11_11_10UNorm, 4, 0, 4, true, true},
 	{BufferFormat::k11_11_10Float, 4, 0, 4, true, false},
 	{BufferFormat::k10_10_10_2UNorm, 4, 0, 4, true, false},
 	{BufferFormat::k10_10_10_2UInt, 4, 0, 4, true, true},
@@ -231,7 +233,9 @@ TextureNumericClass SampledTextureNumericClass(BufferFormat format) {
 }
 
 BufferFormat RemapTextureFormat(BufferFormat format) {
-	return format == BufferFormat::k11_11_10UInt ? BufferFormat::k32UInt : format;
+	return format == BufferFormat::k11_11_10UInt || format == BufferFormat::k11_11_10UNorm
+	           ? BufferFormat::k32UInt
+	           : format;
 }
 
 } // namespace Libs::Graphics::Prospero
