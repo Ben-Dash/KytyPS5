@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fmt/format.h>
+#include <string>
 
 namespace Libs::Graphics {
 
@@ -99,7 +101,7 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
 		if (gpu_thread) {
 			// The command stream writes this (WRITE_DATA, fills): later draws must see it.
-			AdvanceBdaEpoch();
+			AdvanceBdaEpoch(13);
 		}
 	} else {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadReadFault
@@ -117,7 +119,7 @@ bool RenderContext::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 	RecordUpload(UploadSource::Kernel, vaddr, size);
 	m_buffer_cache.InvalidateMemory(vaddr, size);
 	m_texture_cache.InvalidateMemory(vaddr, size);
-	AdvanceBdaEpoch();
+	AdvanceBdaEpoch(14);
 	return true;
 }
 
@@ -133,7 +135,7 @@ void RenderContext::MapMemory(uint64_t vaddr, uint64_t size) {
 	std::lock_guard lock(m_mapped_ranges_mutex);
 	m_mapped_ranges.Add(vaddr, size);
 	m_buffer_cache.PublishBdaHints(vaddr, size);
-	AdvanceBdaEpoch();
+	AdvanceBdaEpoch(15);
 }
 
 void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size) {
@@ -164,7 +166,7 @@ void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size) {
 		m_texture_cache.UnmapMemory(vaddr, size);
 		std::lock_guard lock(m_mapped_ranges_mutex);
 		m_mapped_ranges.Subtract(vaddr, size);
-		AdvanceBdaEpoch();
+		AdvanceBdaEpoch(16);
 	};
 	// Shutdown still owns the GPU while queued rendering drains, but its command lane no
 	// longer accepts external work. Use the guest GPU's state for the teardown route.
@@ -191,11 +193,33 @@ uint64_t RenderContext::CurrentBdaEpoch() const noexcept {
 }
 
 // KYTY_DEBUG_AB=cpwrite alternates.
-void RenderContext::AdvanceBdaEpochForGpuWrite() noexcept {
-	static const bool ab = AbSelected("cpwrite");
-	if (!(ab && AbFeatureOff())) {
-		AdvanceBdaEpoch();
+void RenderContext::AdvanceBdaEpochForGpuWrite(uint8_t site, uint64_t vaddr,
+                                               uint64_t size) noexcept {
+	static const bool ab     = AbSelected("cpwrite");
+	static const bool ranges = [] {
+		const char* text = std::getenv("KYTY_BDA_GPU_WRITE_RANGES");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	if (ab && AbFeatureOff()) {
+		return;
 	}
+	if (!ranges || vaddr == 0 || size == 0 || size > 0x1000) {
+		AdvanceBdaEpoch(site);
+		return;
+	}
+	{
+		std::scoped_lock lock(m_bda_ranges_mutex);
+		if (m_bda_ranges.size() >= 256) {
+			// Too many to keep: synchronize everything instead.
+			m_bda_ranges.clear();
+			m_bda_ranges_pending.store(false, std::memory_order_relaxed);
+			AdvanceBdaEpoch(site);
+			return;
+		}
+		m_bda_ranges.emplace_back(vaddr, size);
+		m_bda_ranges_pending.store(true, std::memory_order_release);
+	}
+	m_bda_epoch.fetch_add(1, std::memory_order_release);
 }
 
 // Draws reading memory through addresses must see the CPU writes made before their submission,
@@ -207,23 +231,81 @@ void RenderContext::AdvanceBdaEpochForGpuWrite() noexcept {
 // (waits, conditions, predication), new page-table entries (buffer registration), GPU mappings,
 // kernel invalidations and the GPU thread's own writes.
 void RenderContext::PrepareBda() {
+	static const bool sites = std::getenv("KYTY_DEBUG_BDA_SITES") != nullptr;
 	RecordUpload(UploadSource::BdaPass, 0, 0);
 	m_fault_process_pending = true;
-	const auto epoch        = m_bda_epoch.load(std::memory_order_acquire);
+	m_bda_passes++;
+	const auto epoch        = m_bda_sync_epoch.load(std::memory_order_acquire);
 	if (epoch == m_bda_synced_epoch && BdaEpochEnabled()) {
+		if (m_bda_ranges_pending.load(std::memory_order_acquire)) [[unlikely]] {
+			// Only the GPU's own small writes since the last synchronization.
+			std::vector<std::pair<uint64_t, uint64_t>> ranges;
+			{
+				std::scoped_lock lock(m_bda_ranges_mutex);
+				ranges.swap(m_bda_ranges);
+				m_bda_ranges_pending.store(false, std::memory_order_relaxed);
+			}
+			std::shared_lock lock(m_mapped_ranges_mutex);
+			for (const auto& [vaddr, size]: ranges) {
+				m_buffer_cache.SynchronizeBuffersInRange(vaddr, size);
+			}
+		}
 		return;
 	}
 	// An epoch started during the synchronization below leaves the next call synchronizing.
 	m_bda_synced_epoch = epoch;
-	RecordUpload(UploadSource::BdaSync, 0, 0);
-	std::shared_lock lock(m_mapped_ranges_mutex);
-	const auto       mode = Config::GetBdaSyncMode();
-	if (mode == Config::BdaSyncMode::Legacy ||
-	    !m_buffer_cache.SynchronizeBdaSelective(m_mapped_ranges)) {
-		m_buffer_cache.SynchronizeBdaLegacy(m_mapped_ranges);
+	// The whole synchronization covers the GPU's small writes too.
+	if (m_bda_ranges_pending.load(std::memory_order_acquire)) {
+		std::scoped_lock lock(m_bda_ranges_mutex);
+		m_bda_ranges.clear();
+		m_bda_ranges_pending.store(false, std::memory_order_relaxed);
 	}
-	if (mode == Config::BdaSyncMode::SelectiveChecked) {
-		EXIT_IF(!m_buffer_cache.CheckBdaHintInvariant(m_mapped_ranges));
+	const auto begin   = sites ? std::chrono::steady_clock::now()
+	                           : std::chrono::steady_clock::time_point {};
+	if (sites) [[unlikely]] {
+		m_bda_site_syncs[std::min<size_t>(m_bda_last_site.load(std::memory_order_relaxed),
+		                                  m_bda_site_syncs.size() - 1u)]++;
+	}
+	RecordUpload(UploadSource::BdaSync, 0, 0);
+	{
+		std::shared_lock lock(m_mapped_ranges_mutex);
+		const auto       mode = Config::GetBdaSyncMode();
+		if (mode == Config::BdaSyncMode::Legacy ||
+		    !m_buffer_cache.SynchronizeBdaSelective(m_mapped_ranges)) {
+			m_buffer_cache.SynchronizeBdaLegacy(m_mapped_ranges);
+		}
+		if (mode == Config::BdaSyncMode::SelectiveChecked) {
+			EXIT_IF(!m_buffer_cache.CheckBdaHintInvariant(m_mapped_ranges));
+		}
+	}
+	if (sites) [[unlikely]] {
+		const auto now = std::chrono::steady_clock::now();
+		m_bda_sync_ns += static_cast<uint64_t>(
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(now - begin).count());
+		const auto now_ms =
+		    std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+		if (m_bda_report_time == 0) {
+			m_bda_report_time = now_ms;
+		} else if (now_ms - m_bda_report_time >= 5000) {
+			// Sites: 1 rewind, 2 cond-exec, 3 branch, 4 wait-reg-mem, 5 write-data, 6 cp write,
+			// 7 submission, 8 predication, 9 buffer register, 10 read fault, 11/12 fill,
+			// 13 GPU-thread write fault, 14 kernel invalidate, 15 map, 16 unmap, 0 other.
+			std::string line = fmt::format("bda-sites: passes/s={:.0f} sync-ms/s={:.1f} |",
+			                               static_cast<double>(m_bda_passes) * 1000.0 /
+			                                   static_cast<double>(now_ms - m_bda_report_time),
+			                               static_cast<double>(m_bda_sync_ns) / 1e6 * 1000.0 /
+			                                   static_cast<double>(now_ms - m_bda_report_time));
+			for (size_t site = 0; site < m_bda_site_syncs.size(); site++) {
+				if (m_bda_site_syncs[site] != 0) {
+					line += fmt::format(" {}:{}", site, m_bda_site_syncs[site]);
+				}
+			}
+			std::printf("%s\n", line.c_str());
+			m_bda_site_syncs.fill(0);
+			m_bda_passes      = 0;
+			m_bda_sync_ns     = 0;
+			m_bda_report_time = now_ms;
+		}
 	}
 }
 
