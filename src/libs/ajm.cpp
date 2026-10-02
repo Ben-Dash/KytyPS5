@@ -11,6 +11,7 @@
 #include "libs/libs.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
@@ -161,8 +162,15 @@ int KYTY_SYSV_ABI AjmDecAt9ParseConfigData(const void*              config_data,
 		return AJM_ERROR_INVALID_PARAMETER;
 	}
 
+	// The config data starts with the 0xFE sync byte. Ghost of Yotei passes it as a stored
+	// little-endian word (30 72 c0 fe); take the bytes in stream order then. Untested.
+	std::array<uint8_t, 4> config {};
+	std::memcpy(config.data(), config_data, config.size());
+	if (config[0] != 0xfe && config[3] == 0xfe) {
+		std::reverse(config.begin(), config.end());
+	}
 	Atrac9CodecInfo codec_info {};
-	const int       init_result = AjmAt9InitDecoder(handle, static_cast<const uint8_t*>(config_data));
+	const int       init_result = AjmAt9InitDecoder(handle, config.data());
 	const int       info_result =
 	    init_result == 0 ? Atrac9GetCodecInfo(handle, &codec_info) : init_result;
 	Atrac9ReleaseHandle(handle);
@@ -170,6 +178,18 @@ int KYTY_SYSV_ABI AjmDecAt9ParseConfigData(const void*              config_data,
 	if (info_result != 0 || codec_info.channels <= 0 || codec_info.samplingRate <= 0 ||
 	    codec_info.frameSamples <= 0 || codec_info.framesInSuperframe <= 0 ||
 	    codec_info.superframeSize <= 0) {
+		// A caller that ignores the error divides by the frame size it never got (Ghost of
+		// Yotei crashes so); name the config data.
+		static std::atomic<uint32_t> reports {0};
+		if (reports.fetch_add(1, std::memory_order_relaxed) < 16u) {
+			const auto* bytes = static_cast<const uint8_t*>(config_data);
+			std::printf("AjmDecAt9ParseConfigData failed: config=%02x %02x %02x %02x init=%d "
+			            "info=%d channels=%d rate=%d frame=%d frames=%d superframe=%d\n",
+			            bytes[0], bytes[1], bytes[2], bytes[3], init_result, info_result,
+			            codec_info.channels, codec_info.samplingRate, codec_info.frameSamples,
+			            codec_info.framesInSuperframe, codec_info.superframeSize);
+			std::fflush(stdout);
+		}
 		return AJM_ERROR_INVALID_PARAMETER;
 	}
 
