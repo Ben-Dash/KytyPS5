@@ -657,11 +657,52 @@ bool DebugFullBarriers() noexcept {
 	return present.load(std::memory_order_relaxed);
 }
 
+// KYTY_DEBUG_SKIP_SHADERS_LIVE=<path>: the file holds pixel or vertex shader hashes (hex,
+// separated by commas or whitespace), read again twice a second, so groups of draws can be left
+// out and brought back while the game runs, to see what they cost and what they draw.
+static bool LiveSkipListed(const char* file, uint64_t shader_hash) {
+	static std::mutex            mutex;
+	static std::vector<uint64_t> hashes;
+	static int64_t               next_check = 0;
+	const std::lock_guard        lock(mutex);
+	const auto                   now = std::chrono::steady_clock::now().time_since_epoch().count();
+	if (now >= next_check) {
+		next_check = now + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+		                       std::chrono::milliseconds(500))
+		                       .count();
+		hashes.clear();
+		if (auto* in = std::fopen(file, "rb"); in != nullptr) {
+			char text[4096] {};
+			const auto read = std::fread(text, 1, sizeof(text) - 1, in);
+			std::fclose(in);
+			text[read] = '\0';
+			for (const char* p = text; *p != '\0';) {
+				char*      end   = nullptr;
+				const auto value = std::strtoull(p, &end, 16);
+				if (end == p) {
+					p++;
+					continue;
+				}
+				if (value != 0) {
+					hashes.push_back(value);
+				}
+				p = end;
+			}
+		}
+	}
+	return std::ranges::find(hashes, shader_hash) != hashes.end();
+}
+
 // KYTY_DEBUG_SKIP_SHADERS_FILE=<path> skips them only while that file exists (checked twice a
 // second), like KYTY_DEBUG_FULL_BARRIERS_FILE.
 // Each shader is printed the first time it is skipped ("skip-shader: ps <hash>"), so a bisection
 // ends with the list of the shaders in its last half.
 bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) noexcept {
+	static const char* live_file = std::getenv("KYTY_DEBUG_SKIP_SHADERS_LIVE");
+	if (live_file != nullptr && shader_hash != 0 && kind != DebugShaderKind::Compute &&
+	    LiveSkipListed(live_file, shader_hash)) {
+		return true;
+	}
 	struct Entry {
 		uint64_t value;
 		uint64_t mask;
