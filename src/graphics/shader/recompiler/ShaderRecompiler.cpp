@@ -551,7 +551,9 @@ TranslateResult TranslateProgram(std::span<const uint32_t> code, const CompileOp
 	if (options.dump_ir) {
 		decoded_dump = Decoder::ProgramToString(decoded);
 		if (options.early_dump) {
-			LOGF("%s decoded RDNA2 (early):\n%s", GetDumpLabel(options), decoded_dump.c_str());
+			// The hash, since shaders translate on several threads and their dumps interleave.
+			LOGF("%s decoded RDNA2 (early) hash=0x%016" PRIx64 ":\n%s", GetDumpLabel(options),
+			     options.shader_hash, decoded_dump.c_str());
 		}
 	}
 
