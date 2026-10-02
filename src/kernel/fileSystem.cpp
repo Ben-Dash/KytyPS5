@@ -10,6 +10,7 @@
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "graphics/host_gpu/hostMemory.h"
 #include "kernel/memory.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
@@ -148,6 +149,117 @@ static void TraceTextureRead(const std::filesystem::path& path, const void* buf,
 			return;
 		}
 	}
+}
+
+// KYTY_TRACE_OPEN=<substring>: for every opened path containing the substring, log the guest
+// return addresses found by walking the frame-pointer chain, and dump the code around each new
+// one to _TraceCode/<address>.bin, to find the guest code that keeps reopening a file.
+static void TraceOpenCaller(const char* path, uint64_t return_address, const void* frame) {
+	static const char* filter = std::getenv("KYTY_TRACE_OPEN");
+	if (filter == nullptr || filter[0] == '\0' || std::strstr(path, filter) == nullptr) {
+		return;
+	}
+	static Common::Mutex         mutex;
+	static std::vector<uint64_t> dumped;
+
+	// The host/guest transition breaks the frame-pointer chain, so scan the stack above this
+	// frame for return addresses into the main module's code.
+	constexpr uint64_t kModuleBegin = 0x900000000ull;
+	constexpr uint64_t kModuleEnd   = 0x910000000ull;
+	constexpr int      kScanWords   = 0x800;
+	constexpr int      kMaxCallers  = 16;
+
+	// The stack also holds data pointers into the module (vtables, function tables); only a value
+	// right behind a call instruction is a return address.
+	auto follows_call = [](uint64_t ret) {
+		const auto* code = reinterpret_cast<const uint8_t*>(ret);
+		if (code[-5] == 0xe8) { // call rel32
+			return true;
+		}
+		// call r/m64 (FF /2) with register, disp8, disp32 or SIB operands.
+		for (int len = 2; len <= 7; len++) {
+			if (code[-len] == 0xff && ((code[-len + 1] >> 3) & 7) == 2) {
+				return true;
+			}
+		}
+		return false;
+	};
+
+	std::vector<uint64_t> callers;
+	callers.push_back(return_address);
+	const auto* stack = static_cast<const uint64_t*>(frame);
+	// Guest thread stacks can end a few KB above this frame; never scan past what is mapped.
+	uint64_t readable = 0;
+	if (!Libs::Graphics::HostMemoryQueryReadable(reinterpret_cast<uint64_t>(frame),
+	                                            kScanWords * sizeof(uint64_t), readable)) {
+		readable = 0;
+	}
+	const int scan_words = static_cast<int>(std::min<uint64_t>(kScanWords, readable / sizeof(uint64_t)));
+	for (int i = 0; i < scan_words && static_cast<int>(callers.size()) < kMaxCallers; i++) {
+		const auto value = stack[i];
+		if (value >= kModuleBegin + 8 && value < kModuleEnd && follows_call(value) &&
+		    std::find(callers.begin(), callers.end(), value) == callers.end()) {
+			callers.push_back(value);
+		}
+	}
+
+	// KYTY_TRACE_FRAME=<ret>,<ret>,...: for each listed return address found on the stack, the
+	// callee saved the caller's rbp right below it; log the caller's locals [rbp-0xb0, rbp-0x28).
+	static const std::vector<uint64_t> frame_returns = [] {
+		std::vector<uint64_t> list;
+		if (const char* value = std::getenv("KYTY_TRACE_FRAME"); value != nullptr) {
+			for (const char* p = value; *p != '\0';) {
+				char*      end    = nullptr;
+				const auto parsed = std::strtoull(p, &end, 16);
+				if (end == p) {
+					break;
+				}
+				list.push_back(parsed);
+				p = (*end == ',') ? end + 1 : end;
+			}
+		}
+		return list;
+	}();
+	for (int i = 1; i < scan_words && !frame_returns.empty(); i++) {
+		if (std::find(frame_returns.begin(), frame_returns.end(), stack[i]) == frame_returns.end()) {
+			continue;
+		}
+		const auto slot = reinterpret_cast<uint64_t>(&stack[i]);
+		const auto rbp  = stack[i - 1];
+		const auto stack_end = reinterpret_cast<uint64_t>(frame) + readable;
+		if (rbp <= slot || rbp > stack_end || rbp - 0xb0 < slot || (rbp & 7u) != 0) {
+			continue;
+		}
+		std::string locals = fmt::format("FRAMETRACE path={} ret={:#x} rbp={:#x} locals(-0xb0..-0x28)=",
+		                                 path, stack[i], rbp);
+		for (uint64_t offset = 0xb0; offset > 0x28; offset -= 8) {
+			locals += fmt::format("{:x} ", *reinterpret_cast<const uint64_t*>(rbp - offset));
+		}
+		LOGF("%s\n", locals.c_str());
+	}
+
+	std::string line = fmt::format("OPENTRACE path={} stack=", path);
+	for (const auto ret: callers) {
+		line += fmt::format("{:#x} ", ret);
+
+		constexpr uint64_t kCodeDumpBefore = 0x2000;
+		constexpr uint64_t kCodeDumpAfter  = 0x200;
+		if (ret < kModuleBegin || ret >= kModuleEnd) {
+			continue;
+		}
+		Common::LockGuard lock(mutex);
+		if (std::find(dumped.begin(), dumped.end(), ret) == dumped.end()) {
+			dumped.push_back(ret);
+			std::filesystem::create_directories("_TraceCode");
+			const auto name = fmt::format("_TraceCode/{:x}.bin", ret - kCodeDumpBefore);
+			if (auto* out = std::fopen(name.c_str(), "wb"); out != nullptr) {
+				std::fwrite(reinterpret_cast<const void*>(ret - kCodeDumpBefore), 1,
+				            kCodeDumpBefore + kCodeDumpAfter, out);
+				std::fclose(out);
+			}
+		}
+	}
+	LOGF("%s\n", line.c_str());
 }
 
 // Game content sits on a read-only file system on the console, so its timestamps never move.
@@ -467,6 +579,8 @@ int KYTY_SYSV_ABI KernelOpen(const char* path, int flags, uint16_t mode) {
 	     "\t flags = %08" PRIx32 "\n"
 	     "\t mode = %04" PRIx16 "\n",
 	     path, flags_u, mode);
+	TraceOpenCaller(path, reinterpret_cast<uint64_t>(__builtin_return_address(0)),
+	                __builtin_frame_address(0));
 
 	bool append    = (flags_u & 0x0008u) != 0;
 	bool fsync     = (flags_u & 0x0080u) != 0;
