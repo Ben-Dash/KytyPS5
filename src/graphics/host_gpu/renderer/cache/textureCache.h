@@ -151,6 +151,9 @@ public:
 
 	void UnmapMemory(uint64_t address, uint64_t size);
 	void ProcessDownloadImages();
+	// KYTY_DEBUG_DUMP_IMAGES (see textureCache.cpp): writes the listed images to files at a frame's
+	// end while the trigger file exists.
+	void DebugDumpImages();
 	void TickFrame();
 	void RunGarbageCollector();
 

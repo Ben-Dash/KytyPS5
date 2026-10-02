@@ -2825,7 +2825,76 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 	}
 }
 
+// KYTY_DEBUG_DUMP_IMAGES=<guest address, hex>[,...] with KYTY_DEBUG_DUMP_IMAGES_FILE=<path>: when
+// that file exists at a frame's end (checked every 15 frames), mip 0, layer 0 of every cached image
+// starting at a listed address is copied out in its host format, tightly packed, to
+// _ImageDump/<address>_<frame>_<width>x<height>_<format>.raw, and the file is removed: one snapshot
+// per trigger, to see what a GPU-written surface holds.
+void TextureCache::DebugDumpImages() {
+	static const std::vector<uint64_t> addresses = [] {
+		std::vector<uint64_t> list;
+		for (const char* text = std::getenv("KYTY_DEBUG_DUMP_IMAGES"); text != nullptr && *text != '\0';) {
+			char*      end   = nullptr;
+			const auto value = std::strtoull(text, &end, 16);
+			if (end == text) {
+				break;
+			}
+			list.push_back(value);
+			text = *end == ',' ? end + 1 : nullptr;
+		}
+		return list;
+	}();
+	static const char* trigger = std::getenv("KYTY_DEBUG_DUMP_IMAGES_FILE");
+	static uint64_t    frame   = 0;
+	frame++;
+	if (addresses.empty() || trigger == nullptr || frame % 15 != 0) {
+		return;
+	}
+	std::error_code error;
+	if (!std::filesystem::exists(trigger, error)) {
+		return;
+	}
+	std::filesystem::remove(trigger, error);
+	std::filesystem::create_directories("_ImageDump", error);
+	std::vector<ImageId> ids;
+	m_slot_images.ForEach([&](ImageId id, const Image& image) {
+		if (image.backing.image != nullptr &&
+		    std::ranges::find(addresses, image.info.data.address) != addresses.end()) {
+			ids.push_back(id);
+		}
+	});
+	for (const auto id: ids) {
+		auto&      image  = m_slot_images[id];
+		const auto format = image.backing.format;
+		const auto bytes  = vk::blockSize(format);
+		const auto width  = image.info.extent.width;
+		const auto height = image.info.extent.height;
+		if (bytes == 0 || vk::blockExtent(format)[0] != 1 || image.info.IsDepth()) {
+			std::printf("image-dump: 0x%" PRIx64 " skipped (format %s)\n", image.info.data.address,
+			            vk::to_string(format).c_str());
+			continue;
+		}
+		const uint64_t size = static_cast<uint64_t>(width) * height * bytes;
+		Buffer         buffer(m_graphics, m_scheduler, MemoryUsage::Download, 0, AllFlags, size);
+		vk::BufferImageCopy copy {};
+		copy.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+		copy.imageExtent      = vk::Extent3D {width, height, 1};
+		image.Download(std::span(&copy, 1), buffer.Handle(), 0, size);
+		m_scheduler.FlushAndWait();
+		buffer.Invalidate(0, size);
+		const auto path = fmt::format("_ImageDump/{:x}_{}_{}x{}_{}.raw", image.info.data.address, frame,
+		                              width, height, vk::to_string(format));
+		if (auto* out = std::fopen(path.c_str(), "wb"); out != nullptr) {
+			std::fwrite(buffer.Mapped().data(), 1, size, out);
+			std::fclose(out);
+		}
+		std::printf("image-dump: %s gpu_mod=%d\n", path.c_str(), image.IsGpuModified() ? 1 : 0);
+	}
+	std::fflush(stdout);
+}
+
 void TextureCache::TickFrame() {
+	DebugDumpImages();
 	std::scoped_lock lock {m_lock};
 	++m_gc_tick;
 }
