@@ -59,6 +59,9 @@
 
 namespace Libs::Graphics {
 
+// graphicsRun.cpp: prints the GPU thread's last PM4 packets (KYTY_DEBUG_MRT_SHADER).
+void DebugDumpRecentPm4();
+
 std::pair<int32_t, uint32_t> ResolveDrawOffsets(uint32_t index_offset,
 	                                           const ShaderVertexInputInfo& vs_input_info) {
 	auto     vertex_offset   = static_cast<int32_t>(index_offset);
@@ -1372,6 +1375,9 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 				            bc.color_destblend, bc.color_comb_fcn);
 			}
 			std::fflush(stdout);
+			if (printed.load() <= 3) {
+				DebugDumpRecentPm4();
+			}
 		}
 	}
 	if (draw.IsIndexed()) {

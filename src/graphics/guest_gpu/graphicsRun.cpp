@@ -106,6 +106,46 @@ static void DebugFrameLimit() {
 	last = std::chrono::steady_clock::now();
 }
 
+// With KYTY_DEBUG_MRT_SHADER set, the GPU thread keeps its last 96 PM4 packets (header and up to 8
+// dwords) so that DebugDumpRecentPm4 can print what led up to a traced draw: clears, fills and
+// register writes for its targets.
+struct RecentPm4 {
+	std::array<uint32_t, 9> dwords {};
+	uint32_t                count = 0;
+};
+static thread_local std::array<RecentPm4, 96> t_recent_pm4 {};
+static thread_local uint32_t                  t_recent_pm4_next = 0;
+
+static void RecordRecentPm4(const uint32_t* packet, uint32_t remaining_dw) {
+	static const bool enabled = std::getenv("KYTY_DEBUG_MRT_SHADER") != nullptr;
+	if (!enabled) {
+		return;
+	}
+	auto& slot = t_recent_pm4[t_recent_pm4_next++ % t_recent_pm4.size()];
+	slot.count = std::min<uint32_t>(remaining_dw, static_cast<uint32_t>(slot.dwords.size()));
+	if ((packet[0] >> 30u) == 3u) {
+		slot.count = std::min<uint32_t>(slot.count, KYTY_PM4_LEN(packet[0]));
+	}
+	std::copy_n(packet, slot.count, slot.dwords.begin());
+}
+
+void DebugDumpRecentPm4() {
+	std::printf("recent-pm4: last %zu packets, oldest first (header op=bits 8-15, then dwords)\n",
+	            t_recent_pm4.size());
+	for (uint32_t i = 0; i < t_recent_pm4.size(); i++) {
+		const auto& slot = t_recent_pm4[(t_recent_pm4_next + i) % t_recent_pm4.size()];
+		if (slot.count == 0) {
+			continue;
+		}
+		std::string line = fmt::format("recent-pm4: op=0x{:02x}", (slot.dwords[0] >> 8u) & 0xffu);
+		for (uint32_t k = 0; k < slot.count; k++) {
+			line += fmt::format(" {:08x}", slot.dwords[k]);
+		}
+		std::printf("%s\n", line.c_str());
+	}
+	std::fflush(stdout);
+}
+
 static uint64_t GuestGpuTimestamp() {
 	const uint64_t percent = Config::GetGpuTimestampScalePercent();
 	const auto     now     = Sync::ReadReferenceClock();
@@ -991,6 +1031,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 		const auto        packet_header = packet[0];
 		const auto        opcode        = (packet_header >> 8u) & 0xffu;
 		EXIT_NOT_IMPLEMENTED(remaining_dw > total_dw);
+		RecordRecentPm4(packet, remaining_dw);
 
 		if (packet_header == 0x80000000u) {
 			cursor.offset_dw++;
