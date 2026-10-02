@@ -954,7 +954,8 @@ constexpr Vop2SdwaRule VOP2_SDWA_RULES[] = {
     {SdwaSelFull(), SdwaSelAll(), SdwaSelAll(), false, false},
     {SdwaSelAll(), SdwaSelAll(), SdwaSelAll(), true, false},
     {SdwaSelFull(), SdwaSelAll(), SdwaSelAll(), false, false},
-    {SdwaSelFull(), SdwaSelAll(), SdwaSelAll(), false, false},
+    // V_LSHLREV_B32: the shifted value goes into the selected field (Ghost of Yotei writes BYTE_1).
+    {SdwaSelAll(), SdwaSelAll(), SdwaSelAll(), true, false},
     {SdwaSelWords() | SdwaSelFull(), SdwaSelAll(), SdwaSelAll(), true, false},
 };
 static_assert(sizeof(VOP2_SDWA_RULES) / sizeof(VOP2_SDWA_RULES[0]) ==

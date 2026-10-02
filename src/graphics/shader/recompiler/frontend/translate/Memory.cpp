@@ -509,6 +509,28 @@ void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
 	const auto      address  = ReadBufferAddress(inst, 1);
 	const auto      data_src = MemorySourceAt(inst, 0);
 	auto            data     = ReadU32(data_src);
+	const bool      d16      = inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XY ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZ ||
+	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZW;
+	// D16 formatted stores take two half components per register; the formatted store takes
+	// 32-bit floats. Float formats are by far the common D16 case (as for the D16 loads).
+	const auto d16_component = [&](uint32_t index) {
+		auto word = ReadU32(OffsetOperand(data_src, index / 2u));
+		if (index % 2u != 0u) {
+			word = ir.ShiftRightLogical(word, IR::U32(IR::Value(16u)));
+		}
+		const auto half16 = ir.Emit(IR::ValueOpcode::ConvertU16U32, {word});
+		const auto half   = ir.Emit(IR::ValueOpcode::BitCastF16U16, {half16});
+		const auto single = ir.Emit(IR::ValueOpcode::ConvertF32F16, {half});
+		return IR::U32(ir.Emit(IR::ValueOpcode::BitCastU32F32, {single}));
+	};
+	const auto component = [&](uint32_t index) {
+		return d16 ? d16_component(index) : ReadU32(OffsetOperand(data_src, index));
+	};
+	if (d16) {
+		data = d16_component(0);
+	}
 	if (inst.opcode == Decoder::Opcode::BUFFER_STORE_BYTE_D16_HI ||
 	    inst.opcode == Decoder::Opcode::BUFFER_STORE_SHORT_D16_HI) {
 		data = ir.ShiftRightLogical(data, IR::U32(IR::Value(16u)));
@@ -533,20 +555,20 @@ void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
 				case 2u:
 					opcode = IR::ValueOpcode::StoreBufferU32x2;
 					value  = ir.Emit(IR::ValueOpcode::CompositeConstructU32x2,
-					                 {data, ReadU32(OffsetOperand(data_src, 1u))});
+					                 {data, component(1u)});
 					break;
 				case 3u:
 					opcode = IR::ValueOpcode::StoreBufferU32x3;
 					value  = ir.Emit(IR::ValueOpcode::CompositeConstructU32x3,
-					                 {data, ReadU32(OffsetOperand(data_src, 1u)),
-					                  ReadU32(OffsetOperand(data_src, 2u))});
+					                 {data, component(1u),
+					                  component(2u)});
 					break;
 				case 4u:
 					opcode = IR::ValueOpcode::StoreBufferU32x4;
 					value  = ir.Emit(IR::ValueOpcode::CompositeConstructU32x4,
-					                 {data, ReadU32(OffsetOperand(data_src, 1u)),
-					                  ReadU32(OffsetOperand(data_src, 2u)),
-					                  ReadU32(OffsetOperand(data_src, 3u))});
+					                 {data, component(1u),
+					                  component(2u),
+					                  component(3u)});
 					break;
 				default:
 					EXIT("opcode %s at pc 0x%08x has unsupported buffer store dword count %u",
@@ -997,6 +1019,10 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XY:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XYZ:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XYZW:
+		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X:
+		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XY:
+		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZ:
+		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZW:
 		case Decoder::Opcode::TBUFFER_STORE_FORMAT_X:
 		case Decoder::Opcode::TBUFFER_STORE_FORMAT_XY:
 		case Decoder::Opcode::TBUFFER_STORE_FORMAT_XYZ:
