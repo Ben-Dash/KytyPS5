@@ -1299,6 +1299,48 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	// grass beside the path (an alpha-tested shader, so it runs anyway) writes a slot whose format
 	// register reads 0 at the draw, and binding only formatted slots dropped that grass.
 	mrt_mask &= DrawColorWriteMask(buffer.GetRegisters());
+	// KYTY_DEBUG_MRT_SHADER=<pixel shader hash>: print that shader's colour slots (target address,
+	// target and shader write masks, export format, blend) for its first 16 draws, to see how a draw
+	// that binds one surface to several slots splits the channels.
+	static const uint64_t mrt_shader = [] {
+		const char* text = std::getenv("KYTY_DEBUG_MRT_SHADER");
+		return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
+	}();
+	if (mrt_shader != 0 && state.ps_active &&
+	    state.ps_input_info.stage.program->shader_hash == mrt_shader) [[unlikely]] {
+		static std::atomic<uint32_t> printed {0};
+		if (printed.fetch_add(1) < 16) {
+			const auto& ctx     = buffer.GetRegisters();
+			const auto& sh_regs = ctx.GetShaderRegisters();
+			std::string outputs;
+			for (const auto& output: state.ps_input_info.stage.program->info.outputs) {
+				if (output.kind == ShaderRecompiler::IR::StageOutputKind::Mrt) {
+					outputs += fmt::format(" mrt{}", output.index);
+				}
+			}
+			std::printf("mrt-shader: ps=%016" PRIx64 " rt_mask=0x%08" PRIx32 " cb_shader_mask=0x%08" PRIx32
+			            " bound=0x%02" PRIx32 " exports:%s\n",
+			            mrt_shader, ctx.GetRenderTargetMask(), sh_regs.m_cbShaderMask, mrt_mask,
+			            outputs.c_str());
+			for (uint32_t slot = 0; slot < 8; slot++) {
+				const auto& rt = ctx.GetRenderTarget(slot);
+				const auto& bc = ctx.GetBlendControl(slot);
+				if (rt.base.addr == 0 && sh_regs.target_output_mode[slot] == 0) {
+					continue;
+				}
+				std::printf("mrt-shader:   slot=%u addr=0x%010" PRIx64 " target_mask=0x%x shader_mask=0x%x"
+				            " out_mode=%u fmt=%u nfmt=%u order=%u %ux%u blend=%d src=%u dst=%u op=%u\n",
+				            slot, rt.base.addr, render_target_mask_slot(ctx.GetRenderTargetMask(), slot),
+				            render_target_mask_slot(sh_regs.m_cbShaderMask, slot),
+				            sh_regs.target_output_mode[slot], static_cast<uint32_t>(rt.info.format),
+				            static_cast<uint32_t>(rt.info.channel_type),
+				            static_cast<uint32_t>(rt.info.channel_order), rt.attrib2.width + 1,
+				            rt.attrib2.height + 1, bc.enable ? 1 : 0, bc.color_srcblend,
+				            bc.color_destblend, bc.color_comb_fcn);
+			}
+			std::fflush(stdout);
+		}
+	}
 	if (draw.IsIndexed()) {
 		LogDrawPhase(draw.Name(), "ResolveRenderColorTarget");
 	}
