@@ -1892,7 +1892,10 @@ private:
 		if (buffer != BufferAccess::None) {
 			if (!GetHandle(inst.Arg(0), ValueOpcode::GetBufferResource, 4, flags.pc,
 			               memory.resource * 4u, handle, source)) {
-				if (memory.kind != ResourceKind::Buffer || !memory.SupportsIndirectBufferLoad(op)) {
+				const bool scalar_read =
+				    memory.kind == ResourceKind::ScalarBuffer && op == ValueOpcode::ReadConstBuffer;
+				if ((memory.kind != ResourceKind::Buffer && !scalar_read) ||
+				    !memory.SupportsIndirectBufferLoad(op)) {
 					Fail(flags.pc,
 					     fmt::format("buffer descriptor is not a valid runtime value; GPU-selected "
 					                 "access requires a raw DWORD x2/x3/x4 load (op={} kind={} bits={} "

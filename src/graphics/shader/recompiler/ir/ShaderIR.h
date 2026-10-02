@@ -76,10 +76,20 @@ struct MemoryInfo {
 	// formats, low bits for integer ones), which the backend converts by the buffer's format.
 	bool                    d16                                                   = false;
 
+	// Raw loads through a GPU-selected descriptor read guest memory by address (BDA).
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
-		return !formatted && !typed && data_bits == 32u &&
-		       (opcode == ValueOpcode::LoadBufferU32x2 || opcode == ValueOpcode::LoadBufferU32x3 ||
-		        opcode == ValueOpcode::LoadBufferU32x4);
+		if (formatted || typed) {
+			return false;
+		}
+		switch (data_bits) {
+			case 8u: return opcode == ValueOpcode::LoadBufferU8;
+			case 16u: return opcode == ValueOpcode::LoadBufferU16;
+			case 32u:
+				return opcode == ValueOpcode::ReadConstBuffer || opcode == ValueOpcode::LoadBufferU32 ||
+				       opcode == ValueOpcode::LoadBufferU32x2 ||
+				       opcode == ValueOpcode::LoadBufferU32x3 || opcode == ValueOpcode::LoadBufferU32x4;
+			default: return false;
+		}
 	}
 
 	bool operator==(const MemoryInfo& other) const = default;
