@@ -12,6 +12,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 
 namespace Libs::Graphics {
 
@@ -24,6 +25,8 @@ struct ImageMetadataInfo {
 	ImageMetadataKind   kind                 = ImageMetadataKind::None;
 	uint32_t            control              = 0;
 	uint32_t            clear_word           = 0;
+	// CB_COLOR_CLEAR_WORD1: the upper half of a 64-bit format's register clear.
+	uint32_t            clear_word_hi        = 0;
 	VideoOutCompression compression          = VideoOutCompression::Uncompressed;
 	bool                stencil_compressed   = false;
 	bool                clear_register_valid = false;
@@ -373,6 +376,70 @@ inline constexpr std::array<VideoOutFormatPolicy, 7> VIDEO_OUT_FORMAT_POLICIES {
 	return false;
 }
 
+[[nodiscard]] inline float DecodeClearHalf(uint32_t bits) {
+	const uint32_t sign     = (bits >> 15u) & 0x1u;
+	const uint32_t exponent = (bits >> 10u) & 0x1fu;
+	const uint32_t mantissa = bits & 0x3ffu;
+	float          value    = 0.0f;
+	if (exponent == 0) {
+		value = std::ldexp(static_cast<float>(mantissa), -24);
+	} else if (exponent == 31) {
+		value = mantissa == 0 ? std::numeric_limits<float>::infinity()
+		                      : std::numeric_limits<float>::quiet_NaN();
+	} else {
+		value = std::ldexp(static_cast<float>(mantissa | 0x400u), static_cast<int>(exponent) - 25);
+	}
+	return sign != 0 ? -value : value;
+}
+
+// A register clear of a format wider than 32 bits: CB_COLOR_CLEAR_WORD0 holds the low 32 bits and
+// WORD1 the high ones. ASTRO BOT fast-clears its RGBA16F foliage interaction stamps this way; with
+// only 32-bit formats decoded the clear was dropped and the stamps piled up frame after frame.
+[[nodiscard]] inline bool DecodePackedColorClear64(vk::Format format, uint32_t low, uint32_t high,
+                                                   vk::ClearColorValue& clear) {
+	vk::ClearColorValue next {};
+	const auto          snorm16 = [](uint32_t value) {
+        return std::max(static_cast<float>(static_cast<int16_t>(value & 0xffffu)) / 32767.0f, -1.0f);
+	};
+	switch (format) {
+		case vk::Format::eR16G16B16A16Sfloat:
+			next.float32[0] = DecodeClearHalf(low & 0xffffu);
+			next.float32[1] = DecodeClearHalf(low >> 16u);
+			next.float32[2] = DecodeClearHalf(high & 0xffffu);
+			next.float32[3] = DecodeClearHalf(high >> 16u);
+			break;
+		case vk::Format::eR16G16B16A16Unorm:
+			next.float32[0] = static_cast<float>(low & 0xffffu) / 65535.0f;
+			next.float32[1] = static_cast<float>(low >> 16u) / 65535.0f;
+			next.float32[2] = static_cast<float>(high & 0xffffu) / 65535.0f;
+			next.float32[3] = static_cast<float>(high >> 16u) / 65535.0f;
+			break;
+		case vk::Format::eR16G16B16A16Snorm:
+			next.float32[0] = snorm16(low);
+			next.float32[1] = snorm16(low >> 16u);
+			next.float32[2] = snorm16(high);
+			next.float32[3] = snorm16(high >> 16u);
+			break;
+		case vk::Format::eR16G16B16A16Uint:
+			next.uint32[0] = low & 0xffffu;
+			next.uint32[1] = low >> 16u;
+			next.uint32[2] = high & 0xffffu;
+			next.uint32[3] = high >> 16u;
+			break;
+		case vk::Format::eR32G32Sfloat:
+			next.float32[0] = std::bit_cast<float>(low);
+			next.float32[1] = std::bit_cast<float>(high);
+			break;
+		case vk::Format::eR32G32Uint:
+			next.uint32[0] = low;
+			next.uint32[1] = high;
+			break;
+		default: return false;
+	}
+	clear = next;
+	return true;
+}
+
 [[nodiscard]] inline bool DecodePackedColorClear(vk::Format format, uint32_t packed,
                                                  vk::ClearColorValue& clear) {
 	vk::ClearColorValue next {};
@@ -386,6 +453,11 @@ inline constexpr std::array<VideoOutFormatPolicy, 7> VIDEO_OUT_FORMAT_POLICIES {
 		// depth decoder below uses. Without this the clear is discarded and the target keeps stale
 		// contents.
 		case vk::Format::eR32Sfloat: next.float32[0] = std::bit_cast<float>(packed); break;
+		case vk::Format::eR16Sfloat: next.float32[0] = DecodeClearHalf(packed & 0xffffu); break;
+		case vk::Format::eR16G16Sfloat:
+			next.float32[0] = DecodeClearHalf(packed & 0xffffu);
+			next.float32[1] = DecodeClearHalf(packed >> 16u);
+			break;
 		case vk::Format::eR32Uint: next.uint32[0] = packed; break;
 		case vk::Format::eR32Sint: next.int32[0] = static_cast<int32_t>(packed); break;
 		case vk::Format::eR8G8B8A8Srgb:

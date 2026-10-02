@@ -115,7 +115,8 @@ void LogZoneBufferWrite(const Image& image, uint64_t address, uint64_t size,
 		// Register clears belong to the color buffer; the texture pipe cannot decode them.
 		return desc.type == TextureCache::BindingType::RenderTarget &&
 		       metadata.clear_register_valid &&
-		       DecodePackedColorClear(format, metadata.clear_word, clear);
+		       (DecodePackedColorClear(format, metadata.clear_word, clear) ||
+		        DecodePackedColorClear64(format, metadata.clear_word, metadata.clear_word_hi, clear));
 	}
 	if (cmask) {
 		return false;
