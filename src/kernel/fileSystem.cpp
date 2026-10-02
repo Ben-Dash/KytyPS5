@@ -151,6 +151,83 @@ static void TraceTextureRead(const std::filesystem::path& path, const void* buf,
 	}
 }
 
+static bool TraceReadable(uint64_t addr, uint64_t size) {
+	uint64_t readable = 0;
+	return addr >= 0x10000 && Libs::Graphics::HostMemoryQueryReadable(addr, size, readable) &&
+	       readable >= size;
+}
+
+// Whether the object holds the name inline or one pointer away (the texture's file name).
+static bool TraceObjectHasName(uint64_t obj, const char* name) {
+	const auto len = std::strlen(name);
+	if (!TraceReadable(obj, 0x200)) {
+		return false;
+	}
+	const auto* bytes = reinterpret_cast<const char*>(obj);
+	if (std::search(bytes, bytes + 0x200, name, name + len) != bytes + 0x200) {
+		return true;
+	}
+	for (uint64_t offset = 0; offset < 0x200; offset += 8) {
+		const auto ptr = *reinterpret_cast<const uint64_t*>(obj + offset);
+		if ((ptr & 7u) != 0 || !TraceReadable(ptr, 0x100)) {
+			continue;
+		}
+		const auto* str = reinterpret_cast<const char*>(ptr);
+		if (std::search(str, str + 0x100, name, name + len) != str + 0x100) {
+			return true;
+		}
+	}
+	return false;
+}
+
+// KYTY_TRACE_LISTS=<name>: with a KYTY_TRACE_FRAME hit inside ASTRO BOT's texture streamer update
+// (0x90743ec30), log both of its {key, texture} work lists ([rbp-0x58, rbp-0x38) streams in,
+// [rbp-0x70, rbp-0x78) streams out), the entry of the texture whose name matches, and that
+// texture's first fields, to see why one texture keeps moving between the lists.
+static void TraceStreamerLists(const char* path, uint64_t rbp) {
+	static const char* name = std::getenv("KYTY_TRACE_LISTS");
+	if (name == nullptr || name[0] == '\0') {
+		return;
+	}
+	auto local = [rbp](uint64_t offset) { return *reinterpret_cast<const uint64_t*>(rbp - offset); };
+	struct List {
+		const char* label;
+		uint64_t    begin;
+		uint64_t    end;
+	};
+	const List lists[] = {{"in", local(0x58), local(0x38)}, {"out", local(0x70), local(0x78)}};
+	for (const auto& list: lists) {
+		if (list.end < list.begin || list.end - list.begin > 0x100000 ||
+		    (list.end != list.begin && !TraceReadable(list.begin, list.end - list.begin))) {
+			LOGF("STREAMLIST path=%s list=%s begin=%#" PRIx64 " end=%#" PRIx64 " unreadable\n", path,
+			     list.label, list.begin, list.end);
+			continue;
+		}
+		const auto  count = (list.end - list.begin) / 16;
+		std::string line  = fmt::format("STREAMLIST path={} list={} count={}", path, list.label, count);
+		for (uint64_t i = 0; i < count; i++) {
+			const auto key = *reinterpret_cast<const uint64_t*>(list.begin + i * 16);
+			const auto tex = *reinterpret_cast<const uint64_t*>(list.begin + i * 16 + 8);
+			if (i < 4) {
+				line += fmt::format(" [{}]key={:x},tex={:x}", i, key, tex);
+			}
+			if (!TraceObjectHasName(tex, name)) {
+				continue;
+			}
+			float key_lo = 0.0f;
+			float key_hi = 0.0f;
+			std::memcpy(&key_lo, &key, 4);
+			std::memcpy(&key_hi, reinterpret_cast<const char*>(&key) + 4, 4);
+			line += fmt::format(" MATCH[{}] key={:x} ({} / {}) tex={:x} fields=", i, key, key_lo,
+			                    key_hi, tex);
+			for (uint64_t offset = 0; offset < 0x80; offset += 8) {
+				line += fmt::format("{:x} ", *reinterpret_cast<const uint64_t*>(tex + offset));
+			}
+		}
+		LOGF("%s\n", line.c_str());
+	}
+}
+
 // KYTY_TRACE_OPEN=<substring>: for every opened path containing the substring, log the guest
 // return addresses found by walking the frame-pointer chain, and dump the code around each new
 // one to _TraceCode/<address>.bin, to find the guest code that keeps reopening a file.
@@ -236,6 +313,7 @@ static void TraceOpenCaller(const char* path, uint64_t return_address, const voi
 			locals += fmt::format("{:x} ", *reinterpret_cast<const uint64_t*>(rbp - offset));
 		}
 		LOGF("%s\n", locals.c_str());
+		TraceStreamerLists(path, rbp);
 	}
 
 	std::string line = fmt::format("OPENTRACE path={} stack=", path);
