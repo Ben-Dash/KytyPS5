@@ -2160,6 +2160,11 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		}
 		auto& evaluator = clean ? *m_clean_evaluator : *this;
 		if (offset >= flat.size() || !evaluator.Evaluate(m_compiled.slots[slot], flat[offset])) {
+			static std::atomic<uint32_t> described {0};
+			if (std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr &&
+			    described.fetch_add(1, std::memory_order_relaxed) < 6u) {
+				evaluator.DescribeFailure(m_compiled.slots[slot], 0);
+			}
 			return ReportSrtRefreshFailure(m_program, clean ? "clean slot unreadable" : "slot unreadable",
 			                               slot);
 		}
