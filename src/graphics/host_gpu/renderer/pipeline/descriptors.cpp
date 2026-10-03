@@ -32,6 +32,7 @@
 #include "kernel/memory.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -1131,6 +1132,16 @@ static void RecordImageGroup(RenderContext& context, PreparedBindings& prepared,
 	group.program = &program;
 }
 
+struct FrameRepeat {
+	std::array<std::unordered_set<uint64_t>, 5> frames;
+	size_t                                      current = 0;
+	uint64_t                                    stages = 0;
+	uint64_t                                    full = 0;
+	uint64_t                                    without_buffers = 0;
+	uint64_t                                    flips = 0;
+};
+static FrameRepeat g_frame_repeat;
+
 // Debugging aid for the draw-phases line: counts stages whose program and descriptors repeat the
 // previous draw's.
 static void NoteBindingRepeat(PreparedBindings& prepared, const ShaderStageRuntime& runtime) {
@@ -1156,6 +1167,46 @@ static void NoteBindingRepeat(PreparedBindings& prepared, const ShaderStageRunti
 	                            : 0,
 	                        std::memory_order_relaxed);
 	prepared.repeat_key = key;
+	// KYTY_DEBUG_FRAME_REPEAT=1 (with KYTY_DEBUG_DRAW_PHASES): how many stages bind a program with
+	// descriptors (image, buffer and sampler values) that a stage of one of the last four frames
+	// bound too, and how many of those have the same buffers but other images or the reverse:
+	// what a cache of prepared bindings kept across frames could serve.
+	static const bool frame_repeat = std::getenv("KYTY_DEBUG_FRAME_REPEAT") != nullptr;
+	if (frame_repeat) {
+		auto&          state = g_frame_repeat;
+		const uint64_t program_key = reinterpret_cast<uint64_t>(key.program) * 0x9E3779B97F4A7C15ull;
+		const uint64_t full        = program_key ^ key.images ^ (key.buffers * 3u) ^ (key.samplers * 7u);
+		const uint64_t no_buffers  = program_key ^ key.images ^ (key.samplers * 7u) ^ 0x5555u;
+		state.stages++;
+		bool seen_full = false;
+		bool seen_part = false;
+		for (const auto& frame: state.frames) {
+			seen_full = seen_full || frame.contains(full);
+			seen_part = seen_part || frame.contains(no_buffers);
+		}
+		state.full += seen_full ? 1 : 0;
+		state.without_buffers += seen_part ? 1 : 0;
+		state.frames[state.current].insert(full);
+		state.frames[state.current].insert(no_buffers);
+	}
+}
+
+void DebugFrameRepeatFlip() {
+	auto& state = g_frame_repeat;
+	if (state.stages == 0) {
+		return;
+	}
+	if (++state.flips % 120 == 0) {
+		std::printf("frame-repeat: stages/frame=%llu seen in last 4 frames: all=%.1f%% all but buffers=%.1f%%\n",
+		            static_cast<unsigned long long>(state.stages / 120),
+		            100.0 * static_cast<double>(state.full) / static_cast<double>(state.stages),
+		            100.0 * static_cast<double>(state.without_buffers) /
+		                static_cast<double>(state.stages));
+		std::fflush(stdout);
+		state.stages = state.full = state.without_buffers = 0;
+	}
+	state.current = (state.current + 1) % state.frames.size();
+	state.frames[state.current].clear();
 }
 
 void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,

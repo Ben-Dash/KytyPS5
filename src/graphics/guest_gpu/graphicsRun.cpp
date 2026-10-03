@@ -80,6 +80,7 @@ static std::atomic<uint64_t> g_timestamp_anchor {0};
 // the previous one, as a slow render thread would, to see how the game's timing copes with low
 // frame rates. With KYTY_DEBUG_FRAME_LIMIT_FILE=<path> it applies only while that file exists.
 static void DebugFrameLimit() {
+	DebugFrameRepeatFlip();
 	if (StampTraceEnabled()) [[unlikely]] {
 		StampTraceFrame();
 	}

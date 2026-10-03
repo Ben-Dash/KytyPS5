@@ -221,6 +221,9 @@ inline thread_local Pm4OpTimer g_pm4_ops;
 // E = eliminate, D = stamp draw, O = another draw into the surface, S = the simulation's dispatch
 // (fb948a435a4e295e). A digit names the surface. A frame's sequence is printed when its shape
 // differs from the previous frame's. GPU thread only.
+// KYTY_DEBUG_FRAME_REPEAT=1: see NoteBindingRepeat (descriptors.cpp). Called once per flip.
+void DebugFrameRepeatFlip();
+
 [[nodiscard]] bool StampTraceEnabled() noexcept;
 void               StampTraceDraw(uint64_t pixel_hash, uint64_t target_address) noexcept;
 void               StampTraceEvent(char event, uint64_t address) noexcept;
