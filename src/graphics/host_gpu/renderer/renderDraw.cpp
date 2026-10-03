@@ -1020,17 +1020,53 @@ enum class CbColorMode : uint8_t {
 	DccDecompress      = 6,
 };
 
-static bool ConsumeMetadataColorOperation(const CommandBuffer& buffer) {
+// KYTY_CB_METADATA_MATERIALIZE=0 drops fast-clear-eliminate and DCC-decompress operations as before.
+static bool MetadataColorMaterializeEnabled() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_CB_METADATA_MATERIALIZE");
+		return value == nullptr || std::strcmp(value, "0") != 0;
+	}();
+	return enabled;
+}
+
+bool RenderExecutor::ConsumeMetadataColorOperation(CommandBuffer& buffer,
+                                                   uint32_t       render_target_slice_offset) {
 	const auto& ctx  = buffer.GetRegisters();
 	const auto  mode = ctx.GetColorControl().mode;
 	// These special modes run color-buffer metadata or decompression operations. The shader is a
 	// vehicle for that operation, and its exported color must not be applied as a normal draw.
 	// Kyty stores expanded Vulkan images rather than compressed guest surfaces, so no equivalent
-	// hardware pass is emitted. Tracked DCC clear state is materialized on attachment bind;
-	// future CMask/FMask support can consume its state through the same TextureCache path.
-	return mode == static_cast<uint8_t>(CbColorMode::EliminateFastClear) ||
-	       mode == static_cast<uint8_t>(CbColorMode::FmaskDecompress) ||
-	       mode == static_cast<uint8_t>(CbColorMode::DccDecompress);
+	// hardware pass is emitted.
+	if (mode != static_cast<uint8_t>(CbColorMode::EliminateFastClear) &&
+	    mode != static_cast<uint8_t>(CbColorMode::FmaskDecompress) &&
+	    mode != static_cast<uint8_t>(CbColorMode::DccDecompress)) {
+		return false;
+	}
+	// On hardware an eliminate or decompress writes the cleared values into the surface, for
+	// readers that carry no metadata (a texture without CMASK or DCC, buffer reads). A pending
+	// fast clear is otherwise only written when a draw binds the target, so a surface that is
+	// cleared, eliminated and sampled without a draw in between would show its old contents
+	// (ASTRO BOT: interaction and water inputs). Resolving the target as an attachment writes it.
+	if (mode == static_cast<uint8_t>(CbColorMode::FmaskDecompress) ||
+	    !MetadataColorMaterializeEnabled()) {
+		return true;
+	}
+	const auto target_mask = ctx.GetRenderTargetMask();
+	for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
+		const auto& rt = ctx.GetRenderTarget(slot);
+		if (rt.base.addr == 0 || (slot != 0 && render_target_mask_slot(target_mask, slot) == 0)) {
+			continue;
+		}
+		const bool dcc   = rt.info.dcc_compression_enable && rt.dcc_addr.addr != 0;
+		const bool cmask = mode == static_cast<uint8_t>(CbColorMode::EliminateFastClear) &&
+		                   rt.info.cmask_fast_clear_enable && rt.cmask.addr != 0;
+		if ((dcc || cmask) && rt.attrib3.tile_mode == Prospero::TileMode::kRenderTarget &&
+		    rt.attrib.num_samples == 0 && rt.attrib.num_fragments == 0) {
+			RenderColorInfo target {};
+			ResolveRenderColorTarget(buffer, target, render_target_slice_offset, slot, true, false);
+		}
+	}
+	return true;
 }
 
 struct DrawEmitInfo {
@@ -2268,7 +2304,8 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 	// A color metadata operation, depth copy or resolve instead of a draw.
 	const auto operation =
-	    ConsumeMetadataColorOperation(buffer) ? Pm4OpTimer::MetadataOp
+	    ConsumeMetadataColorOperation(buffer, args.render_target_slice_offset)
+	        ? Pm4OpTimer::MetadataOp
 	    : DepthStencilCopy(buffer)            ? Pm4OpTimer::DepthCopy
 	    : ResolveColorTargets(buffer, args.render_target_slice_offset) ? Pm4OpTimer::Resolve
 	                                                                   : Pm4OpTimer::Drawn;
@@ -2411,7 +2448,8 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 
 	// A color metadata operation, depth copy or resolve instead of a draw.
 	const auto operation =
-	    ConsumeMetadataColorOperation(buffer) ? Pm4OpTimer::MetadataOp
+	    ConsumeMetadataColorOperation(buffer, args.render_target_slice_offset)
+	        ? Pm4OpTimer::MetadataOp
 	    : DepthStencilCopy(buffer)            ? Pm4OpTimer::DepthCopy
 	    : ResolveColorTargets(buffer, args.render_target_slice_offset) ? Pm4OpTimer::Resolve
 	                                                                   : Pm4OpTimer::Drawn;
