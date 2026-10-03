@@ -955,6 +955,26 @@ void ReadGuestOnGpuThread(uint64_t vaddr, void* data, uint64_t size) {
 			return;
 		}
 	}
+	// Another thread preparing draws ahead of the GPU thread (the draw speculator reads vertex
+	// tables through here): on a page the hint calls GPU-dirty it reads the backing instead of the
+	// guest address. Reading the address faulted, and the fault handler waited for a GPU readback:
+	// the walk stood still for that long (several times a frame in ASTRO BOT's Sky Garden, each
+	// time losing its lead, so that the GPU thread prepared one draw in ten itself) and the
+	// readback was forced early. The GPU thread repeats these reads before it adopts a prepared
+	// draw, so stale backing bytes only cost that draw's adoption.
+	// KYTY_SPEC_BACKING_READS=0 reads the guest address as before.
+	if (size != 0 && g_gpu_resources != nullptr && !Graphics::GuestGpu::IsGpuThread()) {
+		static const bool enabled = [] {
+			const char* value = std::getenv("KYTY_SPEC_BACKING_READS");
+			return value == nullptr || std::strcmp(value, "0") != 0;
+		}();
+		const auto& buffers = GetGpuResources().GetBufferCache();
+		if (enabled &&
+		    (buffers.IsPageGpuDirtyHint(vaddr) || buffers.IsPageGpuDirtyHint(vaddr + size - 1)) &&
+		    TryReadBacking(vaddr, data, size)) {
+			return;
+		}
+	}
 	if (size == sizeof(uint32_t)) {
 		// Most reads are single SRT dwords; a fixed-size copy avoids a memmove call.
 		std::memcpy(data, reinterpret_cast<const void*>(vaddr), sizeof(uint32_t));

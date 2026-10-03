@@ -399,6 +399,12 @@ void StartThreadSampler(const char* name) {
 	if (value == nullptr) {
 		return;
 	}
+	// KYTY_DEBUG_SAMPLE_ONLY=<name>: only that thread (gpu, submit, spec). Sampling several
+	// threads at once crashed the emulator within seconds.
+	if (const char* only = std::getenv("KYTY_DEBUG_SAMPLE_ONLY");
+	    only != nullptr && std::strcmp(only, name) != 0) {
+		return;
+	}
 	auto period_us = static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
 	if (period_us < 100) {
 		period_us = 500;

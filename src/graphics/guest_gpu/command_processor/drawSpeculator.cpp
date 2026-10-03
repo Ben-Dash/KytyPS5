@@ -10,6 +10,7 @@
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/threadSampler.h"
 #include "kernel/memory.h"
 
 #include <algorithm>
@@ -317,6 +318,7 @@ bool DrawSpeculator::WaitForGpu(uint64_t seq, uint64_t epoch) {
 
 void DrawSpeculator::Run() {
 	KYTY_PROFILER_THREAD("DrawSpeculator");
+	StartThreadSampler("spec");
 	ShaderRecompiler::IR::t_resource_scratch_slot = 1;
 	auto shadow   = std::make_unique<CommandProcessor>(m_renderer, m_interrupt_event_id);
 	auto snapshot = std::vector<Cursor> {};
