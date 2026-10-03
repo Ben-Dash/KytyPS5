@@ -1126,6 +1126,16 @@ private:
 		size_t     count      = 0;
 		const auto arithmetic = ArithmeticOp(op, count);
 		if (arithmetic == NodeOp::Fail || inst.NumArgs() < count) {
+			// KYTY_DEBUG_SRT_FAIL=1: name the IR opcodes the compiled evaluator cannot evaluate.
+			static const bool report = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+			static std::atomic<uint32_t> reported {0};
+			if (report && reported.fetch_add(1, std::memory_order_relaxed) < 64u) {
+				const auto name = ValueOpcodeName(op);
+				std::printf("srt-node-fail: shader=0x%016llx opcode=%.*s args=%zu\n",
+				            static_cast<unsigned long long>(m_program.shader_hash),
+				            static_cast<int>(name.size()), name.data(), inst.NumArgs());
+				std::fflush(stdout);
+			}
 			return node;
 		}
 		for (size_t index = 0; index < count; index++) {
@@ -2087,6 +2097,31 @@ static bool ReportSrtRefreshFailure(const ResourcePlan& program, const char* rea
 	return false;
 }
 
+void SrtEvaluator::DescribeFailure(uint32_t index, uint32_t depth) {
+	if (index == ResourceNode::NoNode || depth > 48u) {
+		std::printf("srt-fail-node: depth=%u no node\n", depth);
+		return;
+	}
+	const auto& node = m_nodes[index];
+	std::array<uint64_t, 5> values {};
+	for (size_t arg = 0; arg < node.args.size(); arg++) {
+		if (node.args[arg] == ResourceNode::NoNode) {
+			continue;
+		}
+		if (!EvaluateWide(node.args[arg], values[arg])) {
+			DescribeFailure(node.args[arg], depth + 1u);
+			return;
+		}
+	}
+	std::printf("srt-fail-node: depth=%u op=%u aux=%u imm=0x%llx args=0x%llx,0x%llx,0x%llx,0x%llx,0x%llx\n",
+	            depth, static_cast<uint32_t>(node.op), node.aux,
+	            static_cast<unsigned long long>(node.imm),
+	            static_cast<unsigned long long>(values[0]), static_cast<unsigned long long>(values[1]),
+	            static_cast<unsigned long long>(values[2]), static_cast<unsigned long long>(values[3]),
+	            static_cast<unsigned long long>(values[4]));
+	std::fflush(stdout);
+}
+
 bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 	if (!m_program.srt_plan_complete) {
 		return ReportSrtRefreshFailure(m_program, "plan incomplete", 0);
@@ -2103,6 +2138,11 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		for (uint32_t index = 0; index < info.count; index++) {
 			const auto slot = m_compiled.run_entries[info.first + index].slot;
 			if (!Evaluate(m_compiled.slots[slot], flat[m_program.srt_reads[slot].flat_offset])) {
+				static std::atomic<uint32_t> described {0};
+				if (std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr &&
+				    described.fetch_add(1, std::memory_order_relaxed) < 4u) {
+					DescribeFailure(m_compiled.slots[slot], 0);
+				}
 				return ReportSrtRefreshFailure(m_program, "run slot unreadable", slot);
 			}
 		}

@@ -136,6 +136,10 @@ struct EmitterState {
 	uint32_t                                         current_label             = 0;
 	const IR::Block*                                 current_block             = nullptr;
 	uint32_t                                         pixel_valid_mask_variable = 0;
+	// KYTY_DEBUG_LOOP_GUARD=<n>: a function-local count of loop iterations; past <n> the shader
+	// returns (a guest loop that never ends on the host would otherwise hang the GPU).
+	uint32_t                                         loop_guard_variable       = 0;
+	uint32_t                                         loop_guard_limit          = 0;
 	uint32_t                                         subgroup_local_invocation_id_variable = 0;
 	uint32_t                                         helper_invocation_variable            = 0;
 	uint32_t                                         per_vertex_variable                   = 0;

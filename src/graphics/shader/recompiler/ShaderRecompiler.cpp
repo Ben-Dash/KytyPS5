@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <fmt/format.h>
 #include <map>
 #include <span>
@@ -722,6 +724,18 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 	     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 	                               std::chrono::steady_clock::now() - emit_begin)
 	                               .count()));
+	// KYTY_DEBUG_DUMP_SPIRV=<hash>: writes that shader's module to spv_<hash>.spv.
+	static const uint64_t dump_hash = [] {
+		const char* text = std::getenv("KYTY_DEBUG_DUMP_SPIRV");
+		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
+	}();
+	if (dump_hash != 0 && dump_hash == ir.shader_hash) {
+		const auto name = fmt::format("spv_{:016x}.spv", ir.shader_hash);
+		if (auto* file = std::fopen(name.c_str(), "wb"); file != nullptr) {
+			std::fwrite(spirv.data(), sizeof(uint32_t), spirv.size(), file);
+			std::fclose(file);
+		}
+	}
 	CompileResult result;
 	result.spirv   = std::move(spirv);
 	result.program = std::move(ir);

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstdlib>
 #include <functional>
 #include <optional>
 #include <type_traits>
@@ -96,11 +97,56 @@ void EmitReturn(ValueEmitContext& ctx) {
 	ctx.state.builder.AddFunction(spv::OpReturn);
 }
 
+// KYTY_DEBUG_LOOP_GUARD: counts an iteration and returns whether the limit is passed.
+uint32_t EmitLoopGuardExceeded(EmitterState& state) {
+	const auto count = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeU32(state), count, state.loop_guard_variable);
+	const auto next = EmitBinaryU32(state, spv::OpIAdd, count, ConstantU32(state, 1));
+	state.builder.AddFunction(spv::OpStore, state.loop_guard_variable, next);
+	const auto exceeded = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpUGreaterThan, TypeBool(state), exceeded, next,
+	                          ConstantU32(state, state.loop_guard_limit));
+	return exceeded;
+}
+
+// KYTY_DEBUG_LOOP_GUARD: a loop header returns from the shader past the limit. Returns whether
+// it emitted the header's OpLoopMerge (the block then continues under a new label).
+bool EmitStructuredLoopGuard(ValueEmitContext& ctx, const IR::BlockInfo& info) {
+	auto&       state = ctx.state;
+	const auto& term  = info.terminator;
+	if (state.loop_guard_variable == 0 || !term.loop_header) {
+		return false;
+	}
+	const auto* merge = TargetBlock(state.program, term.merge_block);
+	const auto* cont  = TargetBlock(state.program, term.continue_block);
+	if (merge == nullptr || cont == nullptr) {
+		return false;
+	}
+	const auto exceeded = EmitLoopGuardExceeded(state);
+	const auto check    = state.builder.AllocateId();
+	const auto bail     = state.builder.AllocateId();
+	const auto resume   = state.builder.AllocateId();
+	// The header may branch to one new block only, so the test is a selection of its own.
+	state.builder.AddFunction(spv::OpLoopMerge, ctx.Label(merge), ctx.Label(cont),
+	                          spv::LoopControlMaskNone);
+	state.builder.AddFunction(spv::OpBranch, check);
+	EmitLabel(state, check);
+	state.builder.AddFunction(spv::OpSelectionMerge, resume, spv::SelectionControlMaskNone);
+	state.builder.AddFunction(spv::OpBranchConditional, exceeded, bail, resume);
+	EmitLabel(state, bail);
+	state.builder.AddFunction(spv::OpReturn);
+	EmitLabel(state, resume);
+	return true;
+}
+
 void EmitStructuredTerminator(ValueEmitContext& ctx, const IR::Block* block,
-                              const IR::BlockInfo& info) {
+                              const IR::BlockInfo& info, bool loop_merge_emitted) {
 	const auto& program    = ctx.state.program;
 	const auto& term       = info.terminator;
 	const auto  emit_merge = [&]() {
+		if (loop_merge_emitted) {
+			return;
+		}
 		if (term.loop_header) {
 			const auto* merge = TargetBlock(program, term.merge_block);
 			const auto* cont  = TargetBlock(program, term.continue_block);
@@ -526,8 +572,9 @@ void EmitStructuredFunction(ValueEmitContext& ctx) {
 		EmitBlock(ctx, block, [&](ValueEmitContext& lane, const IR::Inst& inst) {
 			EmitStructuredInstruction(lane, structured, inst);
 		});
+		const bool guarded = EmitStructuredLoopGuard(ctx, program.block_info[index]);
 		structured.block_exit_labels.emplace(block, ctx.state.current_label);
-		EmitStructuredTerminator(ctx, block, program.block_info[index]);
+		EmitStructuredTerminator(ctx, block, program.block_info[index], guarded);
 	}
 	PatchStructuredPhis(ctx, structured);
 }
@@ -549,9 +596,15 @@ void EmitDispatcherFunction(ValueEmitContext& ctx, const DispatcherFunctionState
 	const auto next_pc = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpPhi, TypeU32(state), pc, initial_pc, initial_parent, next_pc,
 	                          dispatcher.continue_label);
-	const auto done = state.builder.AllocateId();
+	auto done = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpIEqual, TypeBool(state), done, pc,
 	                          ConstantU32(ctx.state, UINT32_MAX));
+	if (state.loop_guard_variable != 0) {
+		const auto exceeded = EmitLoopGuardExceeded(state);
+		const auto either   = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLogicalOr, TypeBool(state), either, done, exceeded);
+		done = either;
+	}
 	state.builder.AddFunction(spv::OpLoopMerge, dispatcher.merge_label, dispatcher.continue_label,
 	                          spv::LoopControlMaskNone);
 	state.builder.AddFunction(spv::OpBranchConditional, done, dispatcher.merge_label,
@@ -823,6 +876,14 @@ void EmitProgram(EmitterState& state) {
 		state.pixel_valid_mask_variable = state.builder.AllocateId();
 		state.builder.AddName(state.pixel_valid_mask_variable, "pixel_valid_mask_active");
 	}
+	static const uint32_t loop_guard_limit = [] {
+		const char* text = std::getenv("KYTY_DEBUG_LOOP_GUARD");
+		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 0)) : 0u;
+	}();
+	if (loop_guard_limit != 0 && !program.blocks.empty()) {
+		state.loop_guard_variable = state.builder.AllocateId();
+		state.loop_guard_limit    = loop_guard_limit;
+	}
 	for (const auto* block: program.blocks) {
 		const auto label = state.builder.AllocateId();
 		state.labels.emplace(block, label);
@@ -920,6 +981,11 @@ void EmitProgram(EmitterState& state) {
 		                          TypePointer(state, spv::StorageClassFunction, TypeU32(state)),
 		                          state.pixel_valid_mask_variable, spv::StorageClassFunction);
 	}
+	if (state.loop_guard_variable != 0) {
+		state.builder.AddFunction(spv::OpVariable,
+		                          TypePointer(state, spv::StorageClassFunction, TypeU32(state)),
+		                          state.loop_guard_variable, spv::StorageClassFunction);
+	}
 	for (uint32_t half = 0; half < state.lane_count; half++) {
 		auto& lane = half == 0 ? ctx : high;
 		if (state.program.dispatcher_fallback) {
@@ -948,6 +1014,9 @@ void EmitProgram(EmitterState& state) {
 	if (state.pixel_valid_mask_variable != 0) {
 		state.builder.AddFunction(spv::OpStore, state.pixel_valid_mask_variable,
 		                          ConstantU32(state, 1));
+	}
+	if (state.loop_guard_variable != 0) {
+		state.builder.AddFunction(spv::OpStore, state.loop_guard_variable, ConstantU32(state, 0));
 	}
 	EmitMemoryOffsets(state);
 	if (program.blocks.empty()) {

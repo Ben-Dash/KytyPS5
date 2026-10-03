@@ -692,6 +692,14 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		pipeline_library.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext      = &pipeline_library;
 	}
+	vk::PhysicalDeviceFaultFeaturesEXT device_fault {};
+	graphics.device_fault_enabled =
+	    HasExtension(device_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
+	if (graphics.device_fault_enabled) {
+		device_fault.deviceFault = VK_TRUE;
+		device_fault.pNext       = const_cast<void*>(create_info.pNext);
+		create_info.pNext        = &device_fault;
+	}
 	graphics.pipeline_executable_info_enabled =
 	    executable_properties_extension && executable_properties.pipelineExecutableInfo;
 	if (graphics.pipeline_executable_info_enabled) {
@@ -1085,6 +1093,11 @@ void WindowContext::CreateVulkan() {
 		    HasExtension(available_extensions,
 		                 VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
+		}
+		// Debugging aid: a lost device reports the faulting address (see masterSemaphore.cpp).
+		if (std::getenv("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
+		    HasExtension(available_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
 		if (HasExtension(available_extensions,
 		                 VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME)) {

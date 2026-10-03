@@ -24,13 +24,17 @@
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 #include "graphics/shader/shader.h"
 #include "kernel/eventQueue.h"
+#include "kernel/memory.h"
 #include "kernel/pthread.h"
 #include "libs/errno.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cinttypes>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <mutex>
@@ -39,6 +43,129 @@
 #include <vector>
 
 namespace Libs::Graphics {
+// KYTY_DEBUG_BVH_CHECK=<hash>: walks, on the CPU, the BVH that compute shader traverses (its
+// header pointer is at SRT+40) and reports its shape: a cycle or garbage there makes the
+// shader's traversal loop endless.
+static void DebugCheckBvh(const ShaderRecompiler::IR::CompiledShaderInfo& program,
+                          const ShaderRecompiler::IR::ResourceSnapshot& resources,
+                          const uint32_t* groups) {
+	static const uint64_t hash = [] {
+		const char* text = std::getenv("KYTY_DEBUG_BVH_CHECK");
+		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
+	}();
+	if (hash == 0 || program.shader_hash != hash) {
+		return;
+	}
+	static std::atomic<uint32_t> calls {0};
+	const auto call = calls.fetch_add(1, std::memory_order_relaxed);
+	if (call >= 6u && call % 200u != 0u) {
+		return;
+	}
+	const auto read = [](uint64_t address, uint32_t* words, uint32_t count) {
+		return LibKernel::Memory::TryReadBacking(address, words, count * sizeof(uint32_t));
+	};
+	std::printf("bvh-check: call=%u groups=%ux%ux%u user_data_base=%u user_data=%zu\n", call,
+	            groups[0], groups[1], groups[2], program.user_data_base,
+	            resources.user_data.size());
+	if (resources.user_data.size() < 2u) {
+		std::fflush(stdout);
+		return;
+	}
+	const uint64_t srt = resources.user_data[0] | (uint64_t {resources.user_data[1]} << 32u);
+	std::array<uint32_t, 24> table {};
+	if (!read(srt, table.data(), 24)) {
+		std::printf("bvh-check: srt=0x%016" PRIx64 " unreadable\n", srt);
+		std::fflush(stdout);
+		return;
+	}
+	std::printf("bvh-check: srt=0x%016" PRIx64 " :", srt);
+	for (const auto word: table) {
+		std::printf(" %08x", word);
+	}
+	const uint64_t header = table[10] | (uint64_t {table[11]} << 32u);
+	std::array<uint32_t, 32> head {};
+	if (!read(header, head.data(), 32)) {
+		std::printf("\nbvh-check: header=0x%016" PRIx64 " unreadable\n", header);
+		std::fflush(stdout);
+		return;
+	}
+	std::printf("\nbvh-check: header=0x%016" PRIx64 " :", header);
+	for (const auto word: head) {
+		std::printf(" %08x", word);
+	}
+	const uint64_t base      = header & ~uint64_t {0xff};
+	const uint64_t instances = header + (head[12] | (uint64_t {head[13]} << 32u));
+	const uint64_t last      = head[22] | (uint64_t {head[23] & 0x3ffu} << 32u);
+	std::printf("\nbvh-check: instances=0x%016" PRIx64 " last_index=%" PRIu64 "\n", instances, last);
+	std::fflush(stdout);
+
+	std::vector<uint32_t>        stack {37u};
+	std::unordered_map<uint32_t, uint32_t> seen;
+	uint32_t boxes = 0, leaves = 0, revisits = 0, out_of_range = 0, unreadable = 0, zero = 0;
+	uint32_t printed = 0, steps = 0, odd_kind = 0, dead_instances = 0;
+	while (!stack.empty() && steps < 40000u) {
+		const auto id = stack.back();
+		stack.pop_back();
+		steps++;
+		if (seen[id]++ != 0u) {
+			revisits++;
+			continue;
+		}
+		const auto kind  = id & 7u;
+		const auto index = id >> 3u;
+		if (kind == 4u || kind == 5u) {
+			std::array<uint32_t, 16> node {};
+			if (index + (kind == 5u ? 1u : 0u) > last) {
+				out_of_range++;
+				continue;
+			}
+			if (!read(base + (uint64_t {index} << 6u), node.data(), 16)) {
+				unreadable++;
+				continue;
+			}
+			boxes++;
+			if (std::ranges::all_of(node, [](uint32_t word) { return word == 0u; })) {
+				zero++;
+			}
+			if (printed < 6u) {
+				printed++;
+				std::printf("bvh-check: box id=0x%x children=%08x %08x %08x %08x w4=%08x w5=%08x\n",
+				            id, node[0], node[1], node[2], node[3], node[4], node[5]);
+			}
+			for (uint32_t child = 0; child < 4u; child++) {
+				if (node[child] != ~0u) {
+					stack.push_back(node[child]);
+				}
+			}
+		} else if (kind == 6u) {
+			odd_kind++;
+		} else {
+			std::array<uint32_t, 16> record {};
+			const auto address = kind == 7u ? header + 0x80u : instances + (uint64_t {index} << 7u);
+			if (!read(address, record.data(), 16)) {
+				unreadable++;
+				continue;
+			}
+			leaves++;
+			if (record[15] <= 0x00ffffffu) {
+				dead_instances++;
+			}
+			if (leaves <= 4u) {
+				std::printf("bvh-check: leaf id=0x%x record=0x%016" PRIx64 " :", id, address);
+				for (const auto word: record) {
+					std::printf(" %08x", word);
+				}
+				std::printf("\n");
+			}
+		}
+	}
+	std::printf("bvh-check: steps=%u boxes=%u leaves=%u dead_instances=%u revisits=%u "
+	            "out_of_range=%u unreadable=%u zero_boxes=%u kind6=%u left=%zu\n",
+	            steps, boxes, leaves, dead_instances, revisits, out_of_range, unreadable, zero,
+	            odd_kind, stack.size());
+	std::fflush(stdout);
+}
+
 static bool FillSourcesDisjoint(std::span<const ShaderRecompiler::IR::DescriptorValue> sources,
                                  GuestRange destination, uint32_t output_buffer = UINT32_MAX) {
 	for (uint32_t i = 0; i < sources.size(); ++i) {
@@ -276,6 +403,10 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 
 	const auto& program   = *input_info.stage.program;
 	const auto& resources = *input_info.stage.resources;
+	{
+		const std::array groups {thread_group_x, thread_group_y, thread_group_z};
+		DebugCheckBvh(program, resources, groups.data());
+	}
 	if (resources.specialization_reads.empty() &&
 	    (TryConsumeComputeMetaClear(input_info, buffer) ||
 	     TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
@@ -457,6 +588,11 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	PrepareBindings(input_info.stage, bindings);
 	FindBuffers(bindings);
 	const auto& program = *input_info.stage.program;
+	{
+		std::array<uint32_t, 3> groups {};
+		LibKernel::Memory::TryReadBacking(args_addr, groups.data(), sizeof(groups));
+		DebugCheckBvh(program, *input_info.stage.resources, groups.data());
+	}
 	if (program.info.uses_dma) {
 		m_context.PrepareBda();
 	}

@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -173,6 +174,20 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 	std::memset(data, 0, sizeof(*data));
 
 	data->buttons           = state.buttons;
+	// KYTY_DEBUG_PAD_AUTOPRESS=<seconds>: holds Cross for 150 ms every <seconds> (from 15 s on),
+	// so an unattended test run gets past the title screen.
+	static const double auto_period = [] {
+		const char* text = std::getenv("KYTY_DEBUG_PAD_AUTOPRESS");
+		return text != nullptr ? std::atof(text) : 0.0;
+	}();
+	if (auto_period > 0.0) {
+		static const auto start = std::chrono::steady_clock::now();
+		const double seconds =
+		    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+		if (seconds > 15.0 && std::fmod(seconds, auto_period) < 0.15) {
+			data->buttons |= PAD_BUTTON_CROSS;
+		}
+	}
 	data->left_stick_x      = state.axes[static_cast<int>(Axis::LeftX)];
 	data->left_stick_y      = state.axes[static_cast<int>(Axis::LeftY)];
 	data->right_stick_x     = state.axes[static_cast<int>(Axis::RightX)];

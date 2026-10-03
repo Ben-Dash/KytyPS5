@@ -104,6 +104,8 @@ private:
 	bool EvaluateWide(uint32_t node, uint64_t& result);
 	bool EvaluateInst(const ResourceNode& node, uint64_t& result);
 	bool EvaluateRawRead(const ResourceNode& node, uint64_t& result);
+	// KYTY_DEBUG_SRT_FAIL: prints the innermost node that fails to evaluate under `node`.
+	void DescribeFailure(uint32_t node, uint32_t depth);
 	// Reads a run's dwords into their flat slots; false leaves them unchanged.
 	bool ReadFlatRun(const CompiledResourcePlan::FlatRun& run, std::vector<uint32_t>& flat);
 
