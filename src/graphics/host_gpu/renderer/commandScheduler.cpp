@@ -1,5 +1,7 @@
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 
+#include "graphics/host_gpu/renderer/threadSampler.h"
+
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
@@ -688,6 +690,7 @@ void CommandScheduler::EnableAsyncSubmit() {
 
 void CommandScheduler::SubmitThread(std::stop_token stop) {
 	KYTY_PROFILER_THREAD("GpuQueueSubmit");
+	StartThreadSampler("submit");
 	if (m_stream != nullptr) {
 		m_stream->Consume(stop);
 		return;

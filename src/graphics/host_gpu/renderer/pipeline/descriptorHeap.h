@@ -7,6 +7,7 @@
 #include <array>
 #include <deque>
 #include <unordered_map>
+#include <vector>
 
 namespace Libs::Graphics {
 
@@ -24,20 +25,24 @@ public:
 private:
 	static constexpr uint32_t DescriptorSetBatch = 32;
 
-	struct Batch {
-		std::array<vk::DescriptorSet, DescriptorSetBatch> sets {};
-		uint32_t                                          size       = 0;
-		uint32_t                                          allocation = DescriptorSetBatch;
+	// A pool keeps every set it allocated, by layout: when the GPU has finished with the pool,
+	// its sets are handed out again as they are, instead of resetting the pool and allocating
+	// them from the driver once more (about 5% of the GPU thread in ASTRO BOT's Sky Garden).
+	struct Pool {
+		vk::DescriptorPool                                                      pool = nullptr;
+		std::unordered_map<vk::DescriptorSetLayout, std::vector<vk::DescriptorSet>> sets;
 	};
 
-	[[nodiscard]] bool Allocate(vk::DescriptorSetLayout layout, Batch& batch);
+	[[nodiscard]] bool Allocate(vk::DescriptorSetLayout layout, std::vector<vk::DescriptorSet>& sets);
 	void               CreateDescriptorPool();
 
-	GraphicContext&                                     m_graphics;
-	MasterSemaphore&                                    m_master_semaphore;
-	vk::DescriptorPool                                  m_current_pool = nullptr;
-	std::deque<std::pair<vk::DescriptorPool, uint64_t>> m_pending_pools;
-	std::unordered_map<vk::DescriptorSetLayout, Batch>  m_sets;
+	GraphicContext&                                       m_graphics;
+	MasterSemaphore&                                      m_master_semaphore;
+	Pool                                                  m_current;
+	std::deque<std::pair<Pool, uint64_t>>                 m_pending_pools;
+	// Sets of the current pool handed out since it became current, by layout and in total.
+	std::unordered_map<vk::DescriptorSetLayout, uint32_t> m_next;
+	uint32_t                                              m_handed = 0;
 };
 
 } // namespace Libs::Graphics
