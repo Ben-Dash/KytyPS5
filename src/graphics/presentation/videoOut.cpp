@@ -22,6 +22,11 @@
 #include "libs/libs.h"
 #include "loader/systemContent.h"
 
+namespace Libs::Graphics {
+void DebugRegisterDumpAddress(uint64_t address);
+void DebugNoteFlipAddress(uint64_t address);
+} // namespace Libs::Graphics
+
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -1169,6 +1174,7 @@ void FlipQueue::Prepare(uint64_t request_id, Graphics::CommandBuffer& buffer) {
 		frame = &m_presenter.PrepareBlankFrame(width, height, index == VIDEO_OUT_BUFFER_INDEX_BLACK,
 		                                       &buffer);
 	} else {
+		Libs::Graphics::DebugNoteFlipAddress(source_info.data.address);
 		frame = &m_presenter.PrepareFrame(buffer, source_info);
 	}
 
@@ -1601,6 +1607,11 @@ KYTY_SYSV_ABI int VideoOutRegisterBuffers2(int handle, int set_index, int buffer
 	for (int i = 0; i < buffer_num; i++) {
 		ctx->buffers[buffer_index_start + i] = registrations[static_cast<size_t>(i)];
 		const auto& buffer                   = registrations[static_cast<size_t>(i)];
+		// KYTY_DEBUG_DUMP_VIDEO_OUT=1: the display buffers join the images that
+		// KYTY_DEBUG_DUMP_IMAGES_FILE dumps, to look at the picture without a screen.
+		if (std::getenv("KYTY_DEBUG_DUMP_VIDEO_OUT") != nullptr) {
+			Libs::Graphics::DebugRegisterDumpAddress(buffer.data_address);
+		}
 		LOGF("\tbuffers[%d] = %016" PRIx64 " metadata = %016" PRIx64 " dcc = %08" PRIx32 "\n",
 		     buffer_index_start + i, buffer.data_address, buffer.metadata_address,
 		     attribute->dcc_control);

@@ -2829,6 +2829,10 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 // per trigger, to see what a GPU-written surface holds.
 // Addresses added at run time (the images of a shader under KYTY_DEBUG_BVH_CHECK). GPU thread only.
 static std::vector<uint64_t> g_debug_dump_extra;
+static std::atomic<uint64_t> g_debug_dump_flip_address {0};
+void DebugNoteFlipAddress(uint64_t address) {
+	g_debug_dump_flip_address.store(address, std::memory_order_relaxed);
+}
 void DebugRegisterDumpAddress(uint64_t address) {
 	if (std::ranges::find(g_debug_dump_extra, address) == g_debug_dump_extra.end()) {
 		g_debug_dump_extra.push_back(address);
@@ -2854,14 +2858,30 @@ void TextureCache::DebugDumpImages() {
 	static const char* trigger = std::getenv("KYTY_DEBUG_DUMP_IMAGES_FILE");
 	static uint64_t    frame   = 0;
 	frame++;
-	if (addresses.empty() || trigger == nullptr || frame % 15 != 0) {
+	// KYTY_DEBUG_DUMP_VIDEO_OUT=<n> with n > 1: while the trigger file exists, every n-th frame
+	// dumps the display buffer being flipped and the listed images (a film of the picture).
+	static const uint64_t film = [] {
+		const char* text = std::getenv("KYTY_DEBUG_DUMP_VIDEO_OUT");
+		return text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
+	}();
+	const bool filming = film > 1;
+	if (trigger == nullptr || frame % (filming ? film : 15) != 0) {
+		return;
+	}
+	if (filming) {
+		addresses = listed;
+		addresses.push_back(g_debug_dump_flip_address.load(std::memory_order_relaxed));
+	}
+	if (addresses.empty()) {
 		return;
 	}
 	std::error_code error;
 	if (!std::filesystem::exists(trigger, error)) {
 		return;
 	}
-	std::filesystem::remove(trigger, error);
+	if (!filming) {
+		std::filesystem::remove(trigger, error);
+	}
 	std::filesystem::create_directories("_ImageDump", error);
 	std::vector<ImageId> ids;
 	m_slot_images.ForEach([&](ImageId id, const Image& image) {

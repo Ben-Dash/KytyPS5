@@ -240,6 +240,34 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 				data->analog_buttons_r2 = static_cast<uint8_t>(event.values[5]);
 			}
 		}
+		// KYTY_DEBUG_PAD_LIVE=<file>: while the file holds "<buttons hex> <lx> <ly> <rx> <ry> <l2>
+		// <r2>", it replaces the controller (read every 50 ms), so a test can be steered from
+		// outside by rewriting the file.
+		static const char* live_path = std::getenv("KYTY_DEBUG_PAD_LIVE");
+		if (live_path != nullptr) {
+			static PadEvent live {};
+			static bool     live_valid = false;
+			static double   live_read  = -1.0;
+			if (now - live_read >= 0.05) {
+				live_read  = now;
+				live_valid = false;
+				if (auto* file = std::fopen(live_path, "r"); file != nullptr) {
+					live_valid = std::fscanf(file, "%x %d %d %d %d %d %d", &live.buttons,
+					                         &live.values[0], &live.values[1], &live.values[2],
+					                         &live.values[3], &live.values[4], &live.values[5]) == 7;
+					std::fclose(file);
+				}
+			}
+			if (live_valid) {
+				data->buttons           = live.buttons;
+				data->left_stick_x      = static_cast<uint8_t>(live.values[0]);
+				data->left_stick_y      = static_cast<uint8_t>(live.values[1]);
+				data->right_stick_x     = static_cast<uint8_t>(live.values[2]);
+				data->right_stick_y     = static_cast<uint8_t>(live.values[3]);
+				data->analog_buttons_l2 = static_cast<uint8_t>(live.values[4]);
+				data->analog_buttons_r2 = static_cast<uint8_t>(live.values[5]);
+			}
+		}
 		static std::FILE* record = [] {
 			const char* path = std::getenv("KYTY_DEBUG_PAD_RECORD");
 			return path != nullptr ? std::fopen(path, "w") : nullptr;
