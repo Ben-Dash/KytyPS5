@@ -128,6 +128,7 @@ public:
 	void BeginRendering(const RenderState& state) const;
 	// Ends the rendering instance, then records the barrier of any deferred shader writes.
 	void EndRendering() const;
+	[[nodiscard]] bool IsRendering() const noexcept { return m_rendering; }
 	// A draw whose shaders wrote buffers leaves the barrier that makes the writes visible pending
 	// while rendering continues. Every command other than a draw ends rendering before it records,
 	// which records the barrier; a later draw that may read the writes ends rendering first.

@@ -216,6 +216,8 @@ void RenderContext::PrepareBda() {
 	// An epoch started during the synchronization below leaves the next call synchronizing.
 	m_bda_synced_epoch = epoch;
 	RecordUpload(UploadSource::BdaSync, 0, 0);
+	const bool stats = BufferCache::BdaStatsEnabled();
+	const auto start = stats ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
 	std::shared_lock lock(m_mapped_ranges_mutex);
 	const auto       mode = Config::GetBdaSyncMode();
 	if (mode == Config::BdaSyncMode::Legacy ||
@@ -224,6 +226,11 @@ void RenderContext::PrepareBda() {
 	}
 	if (mode == Config::BdaSyncMode::SelectiveChecked) {
 		EXIT_IF(!m_buffer_cache.CheckBdaHintInvariant(m_mapped_ranges));
+	}
+	if (stats) {
+		m_buffer_cache.NoteBdaPass(static_cast<uint64_t>(
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+		        .count()));
 	}
 }
 

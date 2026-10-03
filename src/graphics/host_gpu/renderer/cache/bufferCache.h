@@ -118,6 +118,9 @@ public:
 	void               SynchronizeBdaLegacy(const RangeSet& mapped);
 	[[nodiscard]] bool SynchronizeBdaSelective(const RangeSet& mapped);
 	[[nodiscard]] bool CheckBdaHintInvariant(const RangeSet& mapped);
+	// KYTY_DEBUG_BDA_STATS: accounts one PrepareBda synchronization (see bufferCache.cpp).
+	[[nodiscard]] static bool BdaStatsEnabled();
+	void                      NoteBdaPass(uint64_t elapsed_ns);
 	void               TickFrame();
 	void               RunGarbageCollector();
 

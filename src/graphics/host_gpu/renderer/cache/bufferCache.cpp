@@ -617,18 +617,107 @@ BufferId BufferCache::CreateBuffer(uint64_t vaddr, uint64_t size) {
 	return id;
 }
 
+// KYTY_DEBUG_BDA_STATS=1: every 5 s, how the GPU thread's buffer synchronization spends its time,
+// for PrepareBda's dirty-page passes and for the other callers (mostly bound buffers): the tracker
+// walk, the copies into the staging buffer and the recording of the copy commands, and how many
+// uploads ended a render pass.
+namespace {
+struct SyncStats {
+	static bool Enabled() {
+		static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
+		return enabled;
+	}
+	static uint64_t Now() {
+		return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+		                                 std::chrono::steady_clock::now().time_since_epoch())
+		                                 .count());
+	}
+	uint64_t passes  = 0;
+	uint64_t pass_ns = 0;
+	// [0]: PrepareBda's passes, [1]: other callers.
+	std::array<uint64_t, 2> calls {};
+	std::array<uint64_t, 2> uploads {};
+	std::array<uint64_t, 2> copies {};
+	std::array<uint64_t, 2> bytes {};
+	std::array<uint64_t, 2> walk_ns {};
+	std::array<uint64_t, 2> copy_ns {};
+	std::array<uint64_t, 2> record_ns {};
+	std::array<uint64_t, 2> breaks {};
+	uint64_t                window_start = 0;
+};
+thread_local SyncStats t_sync_stats;
+} // namespace
+
+bool BufferCache::BdaStatsEnabled() {
+	return SyncStats::Enabled();
+}
+
+void BufferCache::NoteBdaPass(uint64_t elapsed_ns) {
+	auto& stats = t_sync_stats;
+	stats.passes++;
+	stats.pass_ns += elapsed_ns;
+	const auto now = SyncStats::Now();
+	if (stats.window_start == 0) {
+		stats.window_start = now;
+		return;
+	}
+	const auto window = now - stats.window_start;
+	if (window < 5'000'000'000ull) {
+		return;
+	}
+	const double seconds = static_cast<double>(window) / 1e9;
+	const auto   per_s   = [&](uint64_t value) { return static_cast<double>(value) / seconds; };
+	const auto   ms_s    = [&](uint64_t ns) { return static_cast<double>(ns) / 1e6 / seconds; };
+	std::printf("bda-stats: passes/s=%.0f pass-ms/s=%.1f", per_s(stats.passes), ms_s(stats.pass_ns));
+	for (int kind = 0; kind < 2; kind++) {
+		std::printf(" | %s calls/s=%.0f uploads/s=%.0f copies/s=%.0f MB/s=%.1f walk-ms/s=%.1f "
+		            "copy-ms/s=%.1f record-ms/s=%.1f breaks/s=%.0f",
+		            kind == 0 ? "bda" : "other", per_s(stats.calls[kind]), per_s(stats.uploads[kind]),
+		            per_s(stats.copies[kind]), per_s(stats.bytes[kind]) / 1e6,
+		            ms_s(stats.walk_ns[kind]), ms_s(stats.copy_ns[kind]),
+		            ms_s(stats.record_ns[kind]), per_s(stats.breaks[kind]));
+	}
+	std::printf("\n");
+	std::fflush(stdout);
+	stats              = {};
+	stats.window_start = now;
+}
+
 bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size, bool is_written,
                                     bool is_texel_buffer) {
 	std::vector<vk::BufferCopy> copies;
 	uint64_t                    total_size = 0;
 	vk::Buffer                  source;
+	const bool     stats_on = SyncStats::Enabled();
+	const int      kind     = t_upload_source == UploadSource::Bda ? 0 : 1;
+	const uint64_t start    = stats_on ? SyncStats::Now() : 0;
+	uint64_t       copy_ns  = 0;
 	m_memory_tracker.ForEachUploadRange(
 	    vaddr, size, is_written,
 	    [&](uint64_t address, uint64_t bytes) noexcept {
 		    copies.emplace_back(total_size, buffer.Offset(address), bytes);
 		    total_size += bytes;
 	    },
-	    [&]() noexcept { source = UploadCopies(buffer, copies, total_size); });
+	    [&]() noexcept {
+		    const uint64_t copy_start = stats_on ? SyncStats::Now() : 0;
+		    source = UploadCopies(buffer, copies, total_size);
+		    if (stats_on) {
+			    copy_ns = SyncStats::Now() - copy_start;
+		    }
+	    });
+	const uint64_t walked = stats_on ? SyncStats::Now() : 0;
+	if (stats_on) {
+		auto& stats = t_sync_stats;
+		stats.calls[kind]++;
+		stats.walk_ns[kind] += walked - start - copy_ns;
+		stats.copy_ns[kind] += copy_ns;
+		if (source) {
+			stats.uploads[kind]++;
+			stats.copies[kind] += copies.size();
+			stats.bytes[kind] += total_size;
+			stats.breaks[kind] += m_scheduler.Current().IsRendering() ? 1 : 0;
+		}
+	}
 	if (source) {
 		auto& command = m_scheduler.Current();
 		command.EndRendering();
@@ -655,6 +744,9 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 		native.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
 		                       vk::PipelineStageFlagBits::eAllCommands,
 		                       vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &after, 0, nullptr);
+		if (stats_on) {
+			t_sync_stats.record_ns[kind] += SyncStats::Now() - walked;
+		}
 	}
 	if (is_texel_buffer && !is_written) {
 		return SynchronizeBufferFromImage(buffer, vaddr, size);
@@ -1388,6 +1480,14 @@ bool BufferCache::SynchronizeBdaRegion(uint64_t region, const RangeSet& mapped) 
 	return consistent;
 }
 
+static bool BdaRunSyncEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_BDA_RUN_SYNC");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 bool BufferCache::SynchronizeDirtyOwners(const RegionBits& dirty, uint64_t region_begin,
                                          uint64_t begin, uint64_t end) {
 	uint64_t   synced_end = begin;
@@ -1411,8 +1511,13 @@ bool BufferCache::SynchronizeDirtyOwners(const RegionBits& dirty, uint64_t regio
 			if (buffer == nullptr || buffer->is_deleted || !buffer->IsInBounds(cursor, 1)) {
 				return false;
 			}
-			const auto owner_begin = std::max(buffer->CpuAddress(), begin);
-			const auto owner_end   = std::min(buffer->CpuAddress() + buffer->Size(), end);
+			// Only the dirty run: the rest of the owner had no dirty page in the snapshot, and a
+			// write since publishes the region's hint again. Walking the whole owner (as before;
+			// KYTY_BDA_RUN_SYNC=0) cost Sky Garden ~18 us per synchronized owner.
+			const auto owner_begin = BdaRunSyncEnabled() ? cursor
+			                                             : std::max(buffer->CpuAddress(), begin);
+			const auto owner_end   = std::min(buffer->CpuAddress() + buffer->Size(),
+                                            BdaRunSyncEnabled() ? run_end : end);
 			(void)SynchronizeBuffer(*buffer, owner_begin, owner_end - owner_begin, false, false);
 			synced_end = owner_end;
 			cursor     = owner_end;
