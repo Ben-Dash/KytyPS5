@@ -17,6 +17,10 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "kernel/memory.h"
 
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#endif
 #include <algorithm>
 #include <condition_variable>
 #include <cstring>
@@ -742,8 +746,96 @@ void JoinAsyncUploads() noexcept {
 	g_async_uploads.Join();
 }
 
+// KYTY_DEBUG_HOST_IMPORT_TEST=1: once, tries to import 64 KiB of guest memory at `address` as the
+// memory of a storage buffer (VK_EXT_external_memory_host), both as a host allocation and as
+// mapped foreign memory, and prints what the driver answers: whether guest memory could back
+// buffers directly instead of being copied.
+static void DebugHostImportTest(GraphicContext& graphics, uint64_t address) {
+	static bool done = std::getenv("KYTY_DEBUG_HOST_IMPORT_TEST") == nullptr;
+	if (done) {
+		return;
+	}
+	done = true;
+	constexpr uint64_t Size = 64 * 1024;
+	// Pass 0: guest memory as it is. Pass 1: the same after making it writable. Pass 2: private
+	// memory of the emulator, to see whether the driver imports anything at all.
+	for (int pass = 0; pass < 3; pass++) {
+	auto* pointer = reinterpret_cast<void*>(address & ~uint64_t {0xfff});
+	if (pass == 1) {
+		DWORD old = 0;
+		(void)VirtualProtect(pointer, Size, PAGE_READWRITE, &old);
+	} else if (pass == 2) {
+		pointer = VirtualAlloc(nullptr, Size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+	}
+	MEMORY_BASIC_INFORMATION info {};
+	(void)VirtualQuery(pointer, &info, sizeof(info));
+	std::printf("host-import: pass=%d protect=0x%lx type=0x%lx state=0x%lx\n", pass, info.Protect,
+	            info.Type, info.State);
+	// Variants: with and without a device address, and each memory type the driver offers.
+	for (int variant = 0; variant < 4; variant++) {
+		const auto type           = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT;
+		const bool device_address = (variant & 1) == 0;
+		const bool second_type    = (variant & 2) != 0;
+		vk::MemoryHostPointerPropertiesEXT properties {};
+		const auto queried =
+		    graphics.device.getMemoryHostPointerPropertiesEXT(type, pointer, &properties);
+		vk::ExternalMemoryBufferCreateInfo external {};
+		external.handleTypes = type;
+		vk::BufferCreateInfo create {};
+		create.pNext = &external;
+		create.size  = Size;
+		create.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferSrc |
+		               vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer;
+		if (device_address) {
+			create.usage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
+		}
+		vk::Buffer buffer;
+		const auto created = graphics.device.createBuffer(&create, nullptr, &buffer);
+		vk::Result allocated = vk::Result::eErrorUnknown;
+		vk::Result bound     = vk::Result::eErrorUnknown;
+		uint32_t   required  = 0;
+		int        index     = -1;
+		if (created == vk::Result::eSuccess) {
+			const auto requirements = graphics.device.getBufferMemoryRequirements(buffer);
+			required                = requirements.memoryTypeBits;
+			const auto usable       = requirements.memoryTypeBits & properties.memoryTypeBits;
+			if (queried == vk::Result::eSuccess && usable != 0) {
+				index = std::countr_zero(usable);
+				if (second_type && (usable & (usable - 1u)) != 0) {
+					index = std::countr_zero(usable & (usable - 1u));
+				}
+				vk::ImportMemoryHostPointerInfoEXT import {};
+				import.handleType   = type;
+				import.pHostPointer = pointer;
+				vk::MemoryAllocateFlagsInfo flags {};
+				flags.flags = vk::MemoryAllocateFlagBits::eDeviceAddress;
+				flags.pNext = &import;
+				vk::MemoryAllocateInfo allocate {};
+				allocate.pNext = device_address ? static_cast<const void*>(&flags)
+				                                : static_cast<const void*>(&import);
+				allocate.allocationSize  = Size;
+				allocate.memoryTypeIndex = static_cast<uint32_t>(index);
+				vk::DeviceMemory memory;
+				allocated = graphics.device.allocateMemory(&allocate, nullptr, &memory);
+				if (allocated == vk::Result::eSuccess) {
+					bound = graphics.device.bindBufferMemory(buffer, memory, 0);
+				}
+			}
+		}
+		std::printf("host-import: variant=%d address=0x%016" PRIx64 " type=%s query=%s types=0x%x buffer=%s "
+		            "required=0x%x index=%d allocate=%s bind=%s\n",
+		            variant, reinterpret_cast<uint64_t>(pointer), vk::to_string(type).c_str(),
+		            vk::to_string(queried).c_str(), properties.memoryTypeBits,
+		            vk::to_string(created).c_str(), required, index, vk::to_string(allocated).c_str(),
+		            vk::to_string(bound).c_str());
+		std::fflush(stdout);
+	}
+	}
+}
+
 vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
                                      uint64_t total_size) {
+	DebugHostImportTest(m_graphics, buffer.CpuAddress());
 	if (copies.empty()) {
 		return nullptr;
 	}

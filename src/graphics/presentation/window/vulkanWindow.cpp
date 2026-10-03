@@ -1094,6 +1094,11 @@ void WindowContext::CreateVulkan() {
 		                 VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 		}
+		// Experiment: importing guest memory as buffer memory (see DebugHostImportTest).
+		if (std::getenv("KYTY_DEBUG_HOST_IMPORT_TEST") != nullptr &&
+		    HasExtension(available_extensions, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+		}
 		// Debugging aid: a lost device reports the faulting address (see masterSemaphore.cpp).
 		if (std::getenv("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
 		    HasExtension(available_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
