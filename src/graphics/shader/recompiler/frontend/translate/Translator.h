@@ -37,6 +37,26 @@ struct PsTap {
 };
 const PsTap& DebugPsTap();
 
+// Debug: KYTY_DEBUG_CS_TAP=<hash>:<item>[:<item>...] (up to four) makes that compute shader's
+// IMAGE_STORE write, in place of its data, one value per item. <pc>v<reg>: the VGPR's float
+// after the last time the wave ran <pc>; <pc>i<reg> / <pc>h<reg>: its bits 0-10 / 11-21 as a
+// number; <pc>c: how often the wave ran <pc>. PC is hexadecimal, the register decimal.
+struct CsTap {
+	static constexpr uint32_t FirstRegister = 240; // Spare VGPRs holding the tapped values.
+	struct Item {
+		uint32_t pc   = UINT32_MAX;
+		char     kind = 0;
+		uint32_t reg  = 0;
+	};
+	uint64_t            hash = 0;
+	std::array<Item, 4> items {};
+
+	[[nodiscard]] bool Active(const IR::Program& program) const {
+		return hash != 0 && program.shader_hash == hash && program.stage == ShaderType::Compute;
+	}
+};
+const CsTap& DebugCsTap();
+
 // Whether a wave32 guest program may run in a 64-lane host subgroup: pixel and compute pipelines
 // require the guest's wave size, but drivers need not take a required size for vertex stages
 // (AMD runs them as wave64). Host lanes 32-63 are then a second guest wave: their EXEC, VCC and
@@ -56,6 +76,8 @@ public:
 	void TranslateInstruction(const Decoder::Instruction& inst);
 	void CountLoopHeat(uint32_t counter);
 	void CopyPsTap();
+	void CopyCsTap(uint32_t pc);
+	void StoreCsTap(const Decoder::Instruction& store);
 	void TranslateEmbeddedFetch(const Decoder::Instruction& inst, uint32_t attribute,
 	                            uint32_t component_count, const ShaderBufferResource& resource);
 	void AddBranchCondition(const CFG::Graph& graph, const CFG::BasicBlock& source, IR::BlockInfo& info);

@@ -482,6 +482,27 @@ void BufferCache::RecordEagerReadbacks() {
 	}
 }
 
+void BufferCache::DebugDescribePage(uint64_t vaddr) {
+	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
+	if (owner == nullptr || !*owner) {
+		std::printf("bda-page: 0x%016llx has no cache buffer (table index %llu)\n",
+		            static_cast<unsigned long long>(vaddr),
+		            static_cast<unsigned long long>(PageIndex(vaddr)));
+	} else {
+		auto& buffer = m_slot_buffers[*owner];
+		std::printf("bda-page: 0x%016llx owner cpu=0x%016llx size=0x%llx bda=0x%016llx table index "
+		            "%llu (first %llu) deleted=%d\n",
+		            static_cast<unsigned long long>(vaddr),
+		            static_cast<unsigned long long>(buffer.CpuAddress()),
+		            static_cast<unsigned long long>(buffer.Size()),
+		            static_cast<unsigned long long>(buffer.BufferDeviceAddress()),
+		            static_cast<unsigned long long>(PageIndex(vaddr)),
+		            static_cast<unsigned long long>(PageIndex(buffer.CpuAddress())),
+		            buffer.is_deleted ? 1 : 0);
+	}
+	std::fflush(stdout);
+}
+
 BufferId BufferCache::FindBuffer(uint64_t vaddr, uint64_t size) {
 	if (vaddr == 0) {
 		return NULL_BUFFER_ID;

@@ -43,6 +43,79 @@
 #include <vector>
 
 namespace Libs::Graphics {
+void DebugRegisterDumpAddress(uint64_t address);
+
+// A BVH traversal reads its nodes, instance records and bottom-level BVHs by address. A page
+// missing from the BDA page table reads zero until the fault is processed, a frame later; Astro
+// Bot relights each probe once, so the rays of those first dispatches all missed and the probes
+// stayed black. The SDK's BVHs start with "PSR_BVHL" and give their size at +16: this finds the
+// ones a compute shader's SRT points to and has the buffer cache hold them (and the BVHs their
+// instance records name) before the dispatch.
+static void PrefetchBvhs(BufferCache& buffers,
+                         const ShaderRecompiler::IR::ResourceSnapshot& resources) {
+	constexpr uint32_t MagicLow    = 0x5f525350u; // "PSR_"
+	constexpr uint32_t MagicHigh   = 0x4c485642u; // "BVHL"
+	constexpr uint64_t MaxBvhBytes = 1ull << 30u;
+	if (resources.user_data.size() < 2u) {
+		return;
+	}
+	const auto read = [](uint64_t address, uint32_t* words, uint32_t count) {
+		return address >= 0x100000u && (address & 3u) == 0u &&
+		       LibKernel::Memory::TryReadBacking(address, words, count * sizeof(uint32_t));
+	};
+	// Returns the BVH's size when `header` starts one and all of it is mapped.
+	const auto bvh_size = [&](uint64_t header, std::array<uint32_t, 24>& head) -> uint64_t {
+		if (!read(header, head.data(), 24) || head[0] != MagicLow || head[1] != MagicHigh) {
+			return 0;
+		}
+		const uint64_t size = head[4] | (uint64_t {head[5]} << 32u);
+		uint32_t       last = 0;
+		if (size < 256u || size > MaxBvhBytes || !read((header + size - 4u) & ~uint64_t {3}, &last, 1)) {
+			return 0;
+		}
+		return size;
+	};
+	const uint64_t srt = resources.user_data[0] | (uint64_t {resources.user_data[1]} << 32u);
+	std::array<uint32_t, 24> table {};
+	if (!read(srt, table.data(), 24)) {
+		return;
+	}
+	static std::unordered_map<uint64_t, uint64_t> held; // Bottom-level header -> size.
+	for (uint32_t word = 0; word + 1u < table.size(); word += 2u) {
+		const uint64_t header = table[word] | (uint64_t {table[word + 1u]} << 32u);
+		std::array<uint32_t, 24> head {};
+		const auto size = bvh_size(header, head);
+		if (size == 0) {
+			continue;
+		}
+		(void)buffers.FindBuffer(header, size);
+		// Instance records (128 bytes, the bottom-level pointer / 8 in dwords 12 and 13) follow
+		// the nodes.
+		const uint64_t nodes     = (uint64_t {head[22]} + 1u) << 6u;
+		const uint64_t instances = head[12] | (uint64_t {head[13]} << 32u);
+		if (instances < 0x100u || instances >= size || nodes > size) {
+			continue;
+		}
+		const auto count = std::min<uint64_t>((size - instances) >> 7u, 1u << 16u);
+		for (uint64_t index = 0; index < count; index++) {
+			std::array<uint32_t, 2> pointer {};
+			if (!read(header + instances + (index << 7u) + 48u, pointer.data(), 2)) {
+				break;
+			}
+			const uint64_t bottom =
+			    (pointer[0] | (uint64_t {pointer[1] & 0x003fffffu} << 32u)) << 3u;
+			if (bottom == 0 || held.contains(bottom)) {
+				continue;
+			}
+			std::array<uint32_t, 24> bottom_head {};
+			const auto bottom_size = bvh_size(bottom, bottom_head);
+			held.emplace(bottom, bottom_size);
+			if (bottom_size != 0) {
+				(void)buffers.FindBuffer(bottom, bottom_size);
+			}
+		}
+	}
+}
 // KYTY_DEBUG_BVH_CHECK=<hash>: walks, on the CPU, the BVH that compute shader traverses (its
 // header pointer is at SRT+40) and reports its shape: a cycle or garbage there makes the
 // shader's traversal loop endless.
@@ -67,6 +140,17 @@ static void DebugCheckBvh(const ShaderRecompiler::IR::CompiledShaderInfo& progra
 	std::printf("bvh-check: call=%u groups=%ux%ux%u user_data_base=%u user_data=%zu\n", call,
 	            groups[0], groups[1], groups[2], program.user_data_base,
 	            resources.user_data.size());
+	for (size_t i = 0; i < resources.images.size(); i++) {
+		const auto&    image   = resources.images[i];
+		const uint64_t address = ((uint64_t {image.dwords[1] & 0xffu} << 32u) | image.dwords[0]) << 8u;
+		DebugRegisterDumpAddress(address);
+		if (call < 2u) {
+			std::printf("bvh-check: image %zu address=0x%" PRIx64 " : %08x %08x %08x %08x %08x %08x %08x %08x\n",
+			            i, address, image.dwords[0], image.dwords[1], image.dwords[2],
+			            image.dwords[3], image.dwords[4], image.dwords[5], image.dwords[6],
+			            image.dwords[7]);
+		}
+	}
 	if (resources.user_data.size() < 2u) {
 		std::fflush(stdout);
 		return;
@@ -131,6 +215,15 @@ static void DebugCheckBvh(const ShaderRecompiler::IR::CompiledShaderInfo& progra
 				printed++;
 				std::printf("bvh-check: box id=0x%x children=%08x %08x %08x %08x w4=%08x w5=%08x\n",
 				            id, node[0], node[1], node[2], node[3], node[4], node[5]);
+				std::array<float, 32> wide {};
+				if (read(base + (uint64_t {index} << 6u), reinterpret_cast<uint32_t*>(wide.data()),
+				         32)) {
+					std::printf("bvh-check: box floats:");
+					for (uint32_t w = 4; w < 32; w++) {
+						std::printf(" %g", static_cast<double>(wide[w]));
+					}
+					std::printf("\n");
+				}
 			}
 			for (uint32_t child = 0; child < 4u; child++) {
 				if (node[child] != ~0u) {
@@ -510,7 +603,19 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	PrepareBindings(input_info.stage, bindings);
 	FindBuffers(bindings);
 	if (program.info.uses_dma) {
+		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 		m_context.PrepareBda();
+	}
+	if (std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr && program.shader_hash == 0x380bb9d636390baeull) {
+		static uint32_t described = 0;
+		const auto&     user      = resources.user_data;
+		std::array<uint32_t, 12> table {};
+		if (described++ % 25u == 0u && user.size() >= 2u &&
+		    LibKernel::Memory::TryReadBacking(user[0] | (uint64_t {user[1]} << 32u), table.data(),
+		                                      sizeof(table))) {
+			m_context.GetBufferCache().DebugDescribePage((table[10] | (uint64_t {table[11]} << 32u)) +
+			                                             0x100u);
+		}
 	}
 	RebindImages(bindings);
 	if (ImageUsersEnabled()) [[unlikely]] {
@@ -594,7 +699,19 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		DebugCheckBvh(program, *input_info.stage.resources, groups.data());
 	}
 	if (program.info.uses_dma) {
+		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 		m_context.PrepareBda();
+	}
+	if (std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr && program.shader_hash == 0x380bb9d636390baeull) {
+		static uint32_t described = 0;
+		const auto&     user      = input_info.stage.resources->user_data;
+		std::array<uint32_t, 12> table {};
+		if (described++ % 25u == 0u && user.size() >= 2u &&
+		    LibKernel::Memory::TryReadBacking(user[0] | (uint64_t {user[1]} << 32u), table.data(),
+		                                      sizeof(table))) {
+			m_context.GetBufferCache().DebugDescribePage((table[10] | (uint64_t {table[11]} << 32u)) +
+			                                             0x100u);
+		}
 	}
 	RebindImages(bindings);
 	if (ImageUsersEnabled()) [[unlikely]] {

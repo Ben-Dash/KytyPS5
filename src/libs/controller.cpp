@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -194,6 +195,73 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 	data->right_stick_y     = state.axes[static_cast<int>(Axis::RightY)];
 	data->analog_buttons_l2 = state.axes[static_cast<int>(Axis::TriggerLeft)];
 	data->analog_buttons_r2 = state.axes[static_cast<int>(Axis::TriggerRight)];
+	// KYTY_DEBUG_PAD_RECORD=<file> writes every change of buttons, sticks and triggers with its
+	// time since the first pad read; KYTY_DEBUG_PAD_REPLAY=<file> plays such a file back in place
+	// of the controller (until its last entry), so a test run can reach a level unattended.
+	{
+		struct PadEvent {
+			double   time;
+			uint32_t buttons;
+			int      values[6];
+		};
+		static const auto  pad_start = std::chrono::steady_clock::now();
+		const double       now =
+		    std::chrono::duration<double>(std::chrono::steady_clock::now() - pad_start).count();
+		static std::mutex  pad_mutex;
+		const std::lock_guard pad_lock(pad_mutex);
+		static const std::vector<PadEvent> replay = [] {
+			std::vector<PadEvent> list;
+			const char*           path = std::getenv("KYTY_DEBUG_PAD_REPLAY");
+			if (auto* file = path != nullptr ? std::fopen(path, "r") : nullptr; file != nullptr) {
+				PadEvent event {};
+				while (std::fscanf(file, "%lf %x %d %d %d %d %d %d", &event.time, &event.buttons,
+				                   &event.values[0], &event.values[1], &event.values[2],
+				                   &event.values[3], &event.values[4], &event.values[5]) == 8) {
+					list.push_back(event);
+				}
+				std::fclose(file);
+			}
+			return list;
+		}();
+		if (!replay.empty() && now <= replay.back().time + 0.5) {
+			static size_t cursor = 0;
+			while (cursor + 1 < replay.size() && replay[cursor + 1].time <= now) {
+				cursor++;
+			}
+			const auto& event = replay[cursor];
+			if (event.time <= now) {
+				data->buttons           = event.buttons;
+				data->left_stick_x      = static_cast<uint8_t>(event.values[0]);
+				data->left_stick_y      = static_cast<uint8_t>(event.values[1]);
+				data->right_stick_x     = static_cast<uint8_t>(event.values[2]);
+				data->right_stick_y     = static_cast<uint8_t>(event.values[3]);
+				data->analog_buttons_l2 = static_cast<uint8_t>(event.values[4]);
+				data->analog_buttons_r2 = static_cast<uint8_t>(event.values[5]);
+			}
+		}
+		static std::FILE* record = [] {
+			const char* path = std::getenv("KYTY_DEBUG_PAD_RECORD");
+			return path != nullptr ? std::fopen(path, "w") : nullptr;
+		}();
+		if (record != nullptr) {
+			static PadEvent last {-1.0, 0, {}};
+			PadEvent        event {now, data->buttons,
+			                       {data->left_stick_x, data->left_stick_y, data->right_stick_x,
+			                        data->right_stick_y, data->analog_buttons_l2,
+			                        data->analog_buttons_r2}};
+			bool changed = last.time < 0.0 || event.buttons != last.buttons;
+			for (int i = 0; i < 6; i++) {
+				changed |= std::abs(event.values[i] - last.values[i]) > 6;
+			}
+			if (changed) {
+				std::fprintf(record, "%.3f %x %d %d %d %d %d %d\n", event.time, event.buttons,
+				             event.values[0], event.values[1], event.values[2], event.values[3],
+				             event.values[4], event.values[5]);
+				std::fflush(record);
+				last = event;
+			}
+		}
+	}
 	data->acceleration_x     = state.accel[0];
 	data->acceleration_y     = state.accel[1];
 	data->acceleration_z     = state.accel[2];

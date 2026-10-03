@@ -2831,8 +2831,16 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 // starting at a listed address is copied out in its host format, tightly packed, to
 // _ImageDump/<address>_<frame>_<width>x<height>_<format>.raw, and the file is removed: one snapshot
 // per trigger, to see what a GPU-written surface holds.
+// Addresses added at run time (the images of a shader under KYTY_DEBUG_BVH_CHECK). GPU thread only.
+static std::vector<uint64_t> g_debug_dump_extra;
+void DebugRegisterDumpAddress(uint64_t address) {
+	if (std::ranges::find(g_debug_dump_extra, address) == g_debug_dump_extra.end()) {
+		g_debug_dump_extra.push_back(address);
+	}
+}
+
 void TextureCache::DebugDumpImages() {
-	static const std::vector<uint64_t> addresses = [] {
+	static const std::vector<uint64_t> listed = [] {
 		std::vector<uint64_t> list;
 		for (const char* text = std::getenv("KYTY_DEBUG_DUMP_IMAGES"); text != nullptr && *text != '\0';) {
 			char*      end   = nullptr;
@@ -2845,6 +2853,8 @@ void TextureCache::DebugDumpImages() {
 		}
 		return list;
 	}();
+	auto addresses = listed;
+	addresses.insert(addresses.end(), g_debug_dump_extra.begin(), g_debug_dump_extra.end());
 	static const char* trigger = std::getenv("KYTY_DEBUG_DUMP_IMAGES_FILE");
 	static uint64_t    frame   = 0;
 	frame++;

@@ -169,6 +169,101 @@ const PsTap& DebugPsTap() {
 	return tap;
 }
 
+const CsTap& DebugCsTap() {
+	static const CsTap tap = [] {
+		CsTap       result;
+		const char* text = std::getenv("KYTY_DEBUG_CS_TAP");
+		if (text == nullptr) {
+			return result;
+		}
+		char* end   = nullptr;
+		result.hash = std::strtoull(text, &end, 16);
+		for (auto& item: result.items) {
+			if (end == nullptr || *end != ':') {
+				break;
+			}
+			// <pc>/<kind>[<reg>]: the slash keeps the kind letter out of the hexadecimal PC.
+			item.pc   = static_cast<uint32_t>(std::strtoul(end + 1, &end, 16));
+			item.kind = *end == '/' ? *++end : char {0};
+			if (item.kind == 0) {
+				item.pc = UINT32_MAX;
+				break;
+			}
+			end++;
+			if (item.kind != 'c' && item.kind != 'e') {
+				item.reg = static_cast<uint32_t>(std::strtoul(end, &end, 10));
+			}
+		}
+		return result;
+	}();
+	return tap;
+}
+
+void Translator::CopyCsTap(uint32_t pc) {
+	const auto& tap = DebugCsTap();
+	for (uint32_t i = 0; i < tap.items.size(); i++) {
+		const auto& item = tap.items[i];
+		if (item.pc != pc) {
+			continue;
+		}
+		const auto target = static_cast<IR::VectorReg>(CsTap::FirstRegister + i);
+		if (item.kind == 'c') {
+			ir.SetVectorReg(target, ir.IAdd(ir.GetVectorReg(target), IR::U32(IR::Value(1u))));
+			continue;
+		}
+		// 's'/'t': an SGPR's bits 0-10 / 11-21; 'z': 1 when the SGPR is nonzero; 'e': 1 when
+		// EXEC (either half) is nonzero.
+		if (item.kind == 's' || item.kind == 't' || item.kind == 'z' || item.kind == 'e') {
+			auto scalar = item.kind == 'e' ? ir.BitwiseOr(ir.GetExecLo(), ir.GetExecHi())
+			                               : ir.GetScalarReg(static_cast<IR::ScalarReg>(item.reg));
+			if (item.kind == 't') {
+				scalar = ir.ShiftRightLogical(scalar, IR::U32(IR::Value(11u)));
+			}
+			if (item.kind == 's' || item.kind == 't') {
+				scalar = ir.BitwiseAnd(scalar, IR::U32(IR::Value(0x7ffu)));
+			} else {
+				scalar = ir.Select(ir.INotEqual(scalar, IR::U32(IR::Value(0u))),
+				                   IR::U32(IR::Value(1u)), IR::U32(IR::Value(0u)));
+			}
+			ir.SetVectorReg(target, scalar);
+			continue;
+		}
+		auto value = IR::U32(ir.GetVectorReg(static_cast<IR::VectorReg>(item.reg)));
+		if (item.kind == 'h') {
+			value = ir.ShiftRightLogical(value, IR::U32(IR::Value(11u)));
+		}
+		if (item.kind == 'f') {
+			// The float from the first time the wave ran <pc> (while the tap is still zero).
+			const auto held = IR::U32(ir.GetVectorReg(target));
+			value = ir.Select(ir.INotEqual(held, IR::U32(IR::Value(0u))), held, value);
+		} else if (item.kind != 'v') {
+			value = ir.BitwiseAnd(value, IR::U32(IR::Value(0x7ffu)));
+		}
+		ir.SetVectorReg(target, value);
+	}
+}
+
+// Replaces the store's data registers with the tapped values (counts and bit fields as floats).
+void Translator::StoreCsTap(const Decoder::Instruction& store) {
+	const auto& tap  = DebugCsTap();
+	const auto  data = store.dst.reg; // MIMG stores name their data register first.
+	// Keep the shader's own results alive, so its resources (and the recorded specializations
+	// that index them) stay the same.
+	for (uint32_t i = 0; i < 4u; i++) {
+		ir.Emit(IR::ValueOpcode::ReferenceU32,
+		        {IR::U32(ir.GetVectorReg(static_cast<IR::VectorReg>(data + i)))});
+	}
+	for (uint32_t i = 0; i < tap.items.size(); i++) {
+		auto value = IR::U32(ir.GetVectorReg(static_cast<IR::VectorReg>(CsTap::FirstRegister + i)));
+		if (tap.items[i].pc == UINT32_MAX) {
+			value = IR::U32(IR::Value(0u));
+		} else if (tap.items[i].kind != 'v' && tap.items[i].kind != 'f') {
+			value = ir.BitCastU32(IR::F32(ir.Emit(IR::ValueOpcode::ConvertF32U32, {value})));
+		}
+		ir.SetVectorReg(static_cast<IR::VectorReg>(data + i), value);
+	}
+}
+
 void Translator::CopyPsTap() {
 	const auto& tap = DebugPsTap();
 	for (uint32_t i = 0; i < tap.vgprs.size(); i++) {
@@ -1232,6 +1327,12 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 				                      IR::U32(IR::Value(0u)));
 			}
 		}
+		if (DebugCsTap().Active(result)) {
+			for (uint32_t i = 0; i < 4u; i++) {
+				entry_ir.SetVectorReg(static_cast<IR::VectorReg>(CsTap::FirstRegister + i),
+				                      IR::U32(IR::Value(0u)));
+			}
+		}
 		if (DebugPsTap().Active(result)) {
 			for (uint32_t i = 0; i < 3u; i++) {
 				entry_ir.SetVectorReg(static_cast<IR::VectorReg>(PsTap::FirstRegister + i),
@@ -1480,6 +1581,7 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 	const auto& heat        = DebugLoopHeat();
 	const bool  heat_active = heat.Active(result);
 	const bool  tap_active  = DebugPsTap().Active(result);
+	const bool  cs_tap      = DebugCsTap().Active(result);
 	const bool flush_f32_inputs = options.stage == ShaderType::Compute &&
 	                             (options.input_info.compute->float_mode & 0x10u) == 0;
 	for (const auto& cfg_block: cfg.blocks) {
@@ -1510,7 +1612,13 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 				                                  options.input_info.vertex->resources[resource]);
 				continue;
 			}
+			if (cs_tap && instruction.opcode == Decoder::Opcode::IMAGE_STORE) [[unlikely]] {
+				translator.StoreCsTap(instruction);
+			}
 			translator.TranslateInstruction(instruction);
+			if (cs_tap) [[unlikely]] {
+				translator.CopyCsTap(instruction.pc);
+			}
 			if (tap_active && instruction.pc == DebugPsTap().pc) [[unlikely]] {
 				translator.CopyPsTap();
 			}

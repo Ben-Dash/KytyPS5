@@ -12,6 +12,8 @@
 
 #include <bit>
 #include <cinttypes>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 
@@ -141,6 +143,14 @@ void FaultManager::ProcessFaultBuffer() {
 			const auto address = BufferCache::GuestAddress(faults[index]);
 			fault_ranges.Add(address, BufferCache::CACHING_PAGESIZE);
 			LOGF("Accessed non-GPU cached memory at 0x%016" PRIx64 "\n", address);
+			// KYTY_DEBUG_BDA_FAULTS=1 prints the pages shaders found missing in the BDA page table.
+			static const bool print   = std::getenv("KYTY_DEBUG_BDA_FAULTS") != nullptr;
+			static uint32_t   printed = 0;
+			if (print && (printed < 200u || printed % 500u == 0u)) {
+				std::printf("bda-fault: #%u 0x%016" PRIx64 " (%u this pass)\n", printed, address, count);
+				std::fflush(stdout);
+			}
+			printed += print ? 1u : 0u;
 		}
 		fault_ranges.ForEach([this](uint64_t start, uint64_t end) {
 			EXIT_IF(end - start > std::numeric_limits<uint32_t>::max());
