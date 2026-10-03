@@ -122,6 +122,7 @@ public:
 	int  GetActiveControllerId();
 	void SetLightBar(uint8_t r, uint8_t g, uint8_t b);
 	bool SetTriggerEffect(const PadTriggerEffectParam& param);
+	void GetTriggerEffectState(int32_t* state);
 	void  CycleSetting(Setting setting);
 	float GetSettingScale(Setting setting) const;
 	void ReadState(ControllerState* state, bool* flag, int* count);
@@ -881,6 +882,50 @@ void GameController::GetConnectionInfo(bool* flag, int* count) {
 	*count = m_connected_count;
 }
 
+// What the DualSense reports about a trigger effect: whether the trigger has reached the effect's
+// zones (0 = no effect, 1/2 = feedback idle/pushing, 3/4/5 = weapon before/within/past its
+// resistance, 6/7 = vibration idle/active). Derived from the game's effect and the trigger value,
+// as the host controller does not hand over that part of its input report.
+static int32_t trigger_effect_state(const PadTriggerEffectCommand& command, int value) {
+	const int zone = std::clamp(value, 0, 255) * 10 / 256;
+	switch (command.mode) {
+		case 1: return zone >= command.data[0] ? 2 : 1;
+		case 2: return zone >= command.data[1] ? 5 : (zone >= command.data[0] ? 4 : 3);
+		case 3: return zone >= command.data[0] ? 7 : 6;
+		case 4: {
+			int first = 0;
+			while (first < 10 && command.data[first] == 0) {
+				first++;
+			}
+			return zone >= first ? 2 : 1;
+		}
+		case 5: return zone >= command.data[0] ? 2 : 1;
+		case 6: return command.data[1 + zone] != 0 ? 7 : 6;
+		default: return 0;
+	}
+}
+
+void GameController::GetTriggerEffectState(int32_t* state) {
+	Common::LockGuard lock(m_mutex);
+	for (int i = 0; i < 2; i++) {
+		const auto axis = i == 0 ? Axis::TriggerLeft : Axis::TriggerRight;
+		state[i] = (m_trigger_effect.trigger_mask & (1u << i)) != 0
+		               ? trigger_effect_state(m_trigger_effect.command[i],
+		                                      m_state.axes[static_cast<int>(axis)])
+		               : 0;
+		if (PadTriggerDebug()) [[unlikely]] {
+			static int32_t last[2] = {-1, -1};
+			if (state[i] != last[i]) {
+				std::printf("pad-trigger: t=%.2f %s effect state=%d\n",
+				            static_cast<double>(LibKernel::KernelGetProcessTime()) / 1e6,
+				            i == 0 ? "L2" : "R2", state[i]);
+				std::fflush(stdout);
+				last[i] = state[i];
+			}
+		}
+	}
+}
+
 void GameController::ReadState(ControllerState* state, bool* flag, int* count) {
 	EXIT_IF(flag == nullptr);
 	EXIT_IF(count == nullptr);
@@ -1204,6 +1249,21 @@ int KYTY_SYSV_ABI PadSetTriggerEffect(int handle, const PadTriggerEffectParam* p
 	}
 
 	return g_controller->SetTriggerEffect(*param) ? OK : PAD_ERROR_INVALID_ARG;
+}
+
+int KYTY_SYSV_ABI PadGetTriggerEffectState(int handle, PadTriggerEffectStateInformation* info) {
+	PRINT_NAME();
+
+	if (handle != 1) {
+		return PAD_ERROR_INVALID_HANDLE;
+	}
+	if (info == nullptr) {
+		return PAD_ERROR_INVALID_ARG;
+	}
+
+	g_controller->GetTriggerEffectState(info->state);
+
+	return OK;
 }
 
 } // namespace Libs::Controller
