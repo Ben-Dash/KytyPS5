@@ -399,7 +399,10 @@ void ValidateProgram(const Program& program, bool require_ssa) {
 					                        ValueOpcodeName(inst.GetOpcode())));
 				}
 				const auto& memory = program.memory_info[memory_index];
-				if (memory.kind != ResourceKind::ScalarBuffer) {
+				// A GPU-selected descriptor makes the read an indirect one (read by address).
+				const bool indirect = memory.kind == ResourceKind::IndirectBuffer &&
+				                      memory.SupportsIndirectBufferLoad(inst.GetOpcode());
+				if (memory.kind != ResourceKind::ScalarBuffer && !indirect) {
 					return Fail(fmt::format("{} has an invalid scalar-memory resource kind",
 					                        ValueOpcodeName(inst.GetOpcode())));
 				}

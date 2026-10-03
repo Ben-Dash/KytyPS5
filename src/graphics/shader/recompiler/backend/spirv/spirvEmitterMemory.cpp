@@ -1254,6 +1254,17 @@ void DefineGetBdaPointer(EmitterState& state) {
 	const auto page64        = Binary(state, spv::OpShiftRightLogical, type, packed,
 	                                  ConstantDeviceAddress(state, BufferCache::CACHING_PAGEBITS));
 	const auto page          = Unary(state, spv::OpUConvert, TypeU32(state), page64);
+	// An address outside guest memory (a load whose address the GPU computes can produce one)
+	// must not index past the page table or the fault bitmap: that faults the device.
+	const auto in_range =
+	    Binary(state, spv::OpULessThan, TypeBool(state), page64,
+	           ConstantDeviceAddress(state, BufferCache::CACHING_NUMPAGES));
+	const auto lookup_label = state.builder.AllocateId();
+	const auto result_label = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpSelectionMerge, result_label, spv::SelectionControlMaskNone);
+	state.builder.AddFunction(spv::OpBranchConditional, in_range, lookup_label, result_label);
+
+	EmitLabel(state, lookup_label);
 	const auto entry_pointer = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferU64ElementPointer(state),
 	                          entry_pointer, state.bda_pagetable_variable, ConstantU32(state, 0),
@@ -1279,9 +1290,15 @@ void DefineGetBdaPointer(EmitterState& state) {
 	state.builder.AddFunction(spv::OpBranch, merge_label);
 
 	EmitLabel(state, merge_label);
+	const auto found = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpPhi, type, found, ConstantDeviceAddress(state, 0),
+	                          fault_label, available, available_label);
+	state.builder.AddFunction(spv::OpBranch, result_label);
+
+	EmitLabel(state, result_label);
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpPhi, type, result, ConstantDeviceAddress(state, 0),
-	                          fault_label, available, available_label);
+	                          entry_label, found, merge_label);
 	state.builder.AddFunction(spv::OpReturnValue, result);
 	state.builder.AddFunction(spv::OpFunctionEnd);
 }

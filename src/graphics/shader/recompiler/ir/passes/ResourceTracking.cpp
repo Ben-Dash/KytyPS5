@@ -655,6 +655,10 @@ private:
 			if (memory == nullptr) continue;
 			const auto offset = inst->Arg(1).Resolve();
 			if (!offset.IsImmediate() || offset.GetType() != Type::U32) continue;
+			// A read the CPU cannot evaluate before the draw (its address depends on a value
+			// carried around a loop, as in a BVH traversal) stays a GPU load: flattened, it would
+			// fail every refresh and skip the shader (Astro Bot 0x380bb9d636390bae).
+			if (!ValidateRuntimeValue(m_program, Value(inst))) continue;
 			m_scalar_reads.push_back(inst);
 		}
 	}
