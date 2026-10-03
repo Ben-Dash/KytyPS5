@@ -732,7 +732,7 @@ struct ResourcePlan {
 		// ResolveInvariantPhi depends only on the immutable plan, so per-draw evaluation reuses it.
 		std::unordered_map<const Inst*, Value>        invariant_phis;
 	};
-	static constexpr uint32_t ScratchSlots = 2;
+	static constexpr uint32_t ScratchSlots = 4;
 	mutable std::array<Scratch, ScratchSlots> scratch;
 	[[nodiscard]] Scratch& ThreadScratch() const;
 };

@@ -68,6 +68,10 @@ private:
 
 class CommandProcessor {
 public:
+	// Where the last Process call left its execution (see Process: a resume keeps the walk).
+	const Pm4Execution* m_spec_execution = nullptr;
+	const uint32_t*     m_spec_packet    = nullptr;
+
 	struct FlipInfo {
 		int     handle    = 0;
 		int     index     = 0;

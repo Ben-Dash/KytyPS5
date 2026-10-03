@@ -60,18 +60,24 @@ private:
 		SpeculatedDraw        draw;
 	};
 	struct Snapshot;
-	static constexpr uint32_t RingSize = 32;
+	static constexpr uint32_t RingSize = 64;
+	// Workers share the walk's draws by sequence number (draw seq belongs to worker seq % count):
+	// one worker prepares a draw about as fast as the GPU thread executes one, so alone it only
+	// slowly gets ahead after each restart and the GPU thread prepared one draw in twelve itself.
+	// KYTY_SPECULATE_THREADS=<1..3> sets the count (default 2).
+	static constexpr uint32_t MaxWorkers = 3;
 	static constexpr uint64_t NotStopped = UINT64_MAX;
 	// Draws within this many of the GPU thread's next draw are not speculated (see Walk).
 	static constexpr uint64_t SpeculationLead = 2;
 
-	void Run();
-	// Walks from the current snapshot until it stops, speculating the draws it meets.
-	void Walk(CommandProcessor& shadow, std::vector<Cursor> stack, uint64_t epoch, uint64_t seq);
+	void Run(uint32_t worker);
+	// Walks from the current snapshot until it stops, speculating the worker's draws it meets.
+	void Walk(CommandProcessor& shadow, std::vector<Cursor> stack, uint64_t epoch, uint64_t seq,
+	          uint32_t worker);
 	// A free slot for draw `seq`, or null when a restart or shutdown interrupted the wait.
-	Slot* AcquireSlot(uint64_t seq, uint64_t epoch);
+	Slot* AcquireSlot(uint64_t seq, uint64_t epoch, uint32_t worker);
 	// Waits until the GPU thread has finished draw `seq`; false when interrupted.
-	bool  WaitForGpu(uint64_t seq, uint64_t epoch);
+	bool  WaitForGpu(uint64_t seq, uint64_t epoch, uint32_t worker);
 	[[nodiscard]] bool Interrupted(uint64_t epoch) const;
 	// GPU thread: whether `draw`'s reads still give what they gave (see Take).
 	[[nodiscard]] bool ReadsCurrent(const SpeculatedDraw& draw);
@@ -95,20 +101,20 @@ private:
 
 	std::mutex                 m_mutex;
 	std::condition_variable    m_wake;
-	std::unique_ptr<Snapshot>  m_snapshot; // Pending restart, under m_mutex.
-	std::unique_ptr<Snapshot>  m_spare;    // The worker's; swapped with m_snapshot to take it.
-	bool                       m_restart = false;
-	// Set with m_restart, read without the lock: the worker spins on it before sleeping.
-	std::atomic<bool>          m_restart_pending {false};
+	std::unique_ptr<Snapshot>  m_snapshot; // The latest restart, under m_mutex; workers copy it.
+	uint64_t                   m_restart_count = 0; // Under m_mutex.
+	// m_restart_count, read without the lock: the workers spin on it before sleeping.
+	std::atomic<uint64_t>      m_restart_hint {0};
 	bool                       m_quit    = false;
-	std::atomic<bool>          m_waiting {false};
-	// While the worker waits: the GPU thread's draw count that wakes it (a waking per draw would
+	uint32_t                   m_workers = 2;
+	std::array<std::atomic<bool>, MaxWorkers> m_waiting {};
+	// While a worker waits: the GPU thread's draw count that wakes it (a waking per draw would
 	// cost the GPU thread a kernel call each).
-	std::atomic<uint64_t>      m_wake_at {0};
+	std::array<std::atomic<uint64_t>, MaxWorkers> m_wake_at {};
 	std::atomic<bool>          m_quitting {false};
 	// Bumped when the worker may stop waiting for a slot (a draw finished, a restart, shutdown).
 	std::atomic<uint64_t>      m_signal {0};
-	std::thread                m_thread;
+	std::vector<std::thread>   m_threads;
 
 	// Counters, printed with KYTY_DEBUG_SPEC_STATS=1.
 	struct Stats {

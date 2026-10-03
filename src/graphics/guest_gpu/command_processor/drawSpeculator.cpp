@@ -99,7 +99,12 @@ struct DrawSpeculator::Snapshot {
 
 DrawSpeculator::DrawSpeculator(RenderContext& renderer, int interrupt_event_id)
     : m_renderer(renderer), m_interrupt_event_id(interrupt_event_id),
-      m_snapshot(std::make_unique<Snapshot>()), m_spare(std::make_unique<Snapshot>()) {}
+      m_snapshot(std::make_unique<Snapshot>()) {
+	if (const char* value = std::getenv("KYTY_SPECULATE_THREADS"); value != nullptr) {
+		m_workers = std::clamp<uint32_t>(static_cast<uint32_t>(std::strtoul(value, nullptr, 10)), 1u,
+		                                 MaxWorkers);
+	}
+}
 
 DrawSpeculator::~DrawSpeculator() {
 	{
@@ -107,10 +112,10 @@ DrawSpeculator::~DrawSpeculator() {
 		m_quit = true;
 	}
 	m_quitting.store(true, std::memory_order_release);
-	m_wake.notify_one();
+	m_wake.notify_all();
 	Signal();
-	if (m_thread.joinable()) {
-		m_thread.join();
+	for (auto& thread: m_threads) {
+		thread.join();
 	}
 }
 
@@ -124,7 +129,7 @@ bool DrawSpeculator::Enabled() {
 
 void DrawSpeculator::Signal() {
 	m_signal.fetch_add(1, std::memory_order_release);
-	m_signal.notify_one();
+	m_signal.notify_all();
 }
 
 bool DrawSpeculator::Interrupted(uint64_t epoch) const {
@@ -152,13 +157,15 @@ void DrawSpeculator::Restart(const CommandProcessor& processor, std::span<const 
 		snapshot.stack.assign(stack.begin(), stack.end());
 		snapshot.epoch = epoch;
 		snapshot.seq   = m_gpu_seq;
-		m_restart      = true;
-		m_restart_pending.store(true, std::memory_order_release);
+		m_restart_count++;
+		m_restart_hint.store(m_restart_count, std::memory_order_release);
 	}
-	m_wake.notify_one();
+	m_wake.notify_all();
 	Signal();
-	if (!m_thread.joinable()) {
-		m_thread = std::thread([this] { Run(); });
+	if (m_threads.empty()) {
+		for (uint32_t worker = 0; worker < m_workers; worker++) {
+			m_threads.emplace_back([this, worker] { Run(worker); });
+		}
 	}
 	m_stats.restarts.fetch_add(1, std::memory_order_relaxed);
 }
@@ -218,9 +225,12 @@ void DrawSpeculator::Release(SpeculatedDraw* draw) {
 	}
 	m_gpu_seq++;
 	m_gpu_next.store(m_gpu_seq, std::memory_order_release);
-	if (m_waiting.load(std::memory_order_acquire) &&
-	    m_gpu_seq >= m_wake_at.load(std::memory_order_acquire)) {
-		Signal();
+	for (uint32_t worker = 0; worker < m_workers; worker++) {
+		if (m_waiting[worker].load(std::memory_order_acquire) &&
+		    m_gpu_seq >= m_wake_at[worker].load(std::memory_order_acquire)) {
+			Signal();
+			break;
+		}
 	}
 	static const bool stats = EnvEnabled("KYTY_DEBUG_SPEC_STATS");
 	if (stats && m_gpu_seq % 100000u == 0) {
@@ -266,7 +276,7 @@ void DrawSpeculator::PrintStats() {
 	            sizeof(HW::Context), sizeof(HW::Shader));
 }
 
-DrawSpeculator::Slot* DrawSpeculator::AcquireSlot(uint64_t seq, uint64_t epoch) {
+DrawSpeculator::Slot* DrawSpeculator::AcquireSlot(uint64_t seq, uint64_t epoch, uint32_t worker) {
 	auto& slot = m_ring[seq % RingSize];
 	for (;;) {
 		if (Interrupted(epoch)) {
@@ -285,20 +295,47 @@ DrawSpeculator::Slot* DrawSpeculator::AcquireSlot(uint64_t seq, uint64_t epoch) 
 			slot.state.compare_exchange_strong(state, Free, std::memory_order_acq_rel);
 			continue;
 		}
-		// The ring is a full lap ahead: wait until the GPU thread has freed half of it.
+		// The ring is a full lap ahead. Spin for the slot first: the GPU thread frees it within
+		// a few hundred microseconds, and waking from a sleep took long enough for the GPU thread
+		// to use up the other half of the ring and prepare the following draws itself (one draw
+		// in ten in ASTRO BOT's Sky Garden). KYTY_SPEC_SLOT_SPIN_US=<microseconds> (default 2000).
+		static const auto SlotSpin = [] {
+			const char* value = std::getenv("KYTY_SPEC_SLOT_SPIN_US");
+			return std::chrono::microseconds(value != nullptr ? std::strtoul(value, nullptr, 10)
+			                                                  : 2000u);
+		}();
+		bool       freed    = false;
+		const auto deadline = std::chrono::steady_clock::now() + SlotSpin;
+		for (uint32_t i = 1; !Interrupted(epoch); i++) {
+			const auto now_state = slot.state.load(std::memory_order_acquire);
+			if (now_state == Free ||
+			    (now_state == Ready && slot.seq < m_gpu_next.load(std::memory_order_acquire))) {
+				freed = true;
+				break;
+			}
+			_mm_pause();
+			if (i % 64 == 0 && std::chrono::steady_clock::now() >= deadline) {
+				break;
+			}
+		}
+		if (freed) {
+			continue;
+		}
+		// Wait until the GPU thread has freed half of the ring.
 		const auto signal = m_signal.load(std::memory_order_acquire);
-		m_wake_at.store(seq >= RingSize / 2u ? seq - RingSize / 2u : 0u, std::memory_order_relaxed);
-		m_waiting.store(true, std::memory_order_seq_cst);
+		m_wake_at[worker].store(seq >= RingSize / 2u ? seq - RingSize / 2u : 0u,
+		                        std::memory_order_relaxed);
+		m_waiting[worker].store(true, std::memory_order_seq_cst);
 		const auto again = slot.state.load(std::memory_order_acquire);
 		if (again == state && !(again == Ready && slot.seq < m_gpu_next.load()) &&
 		    !Interrupted(epoch)) {
 			m_signal.wait(signal, std::memory_order_acquire);
 		}
-		m_waiting.store(false, std::memory_order_relaxed);
+		m_waiting[worker].store(false, std::memory_order_relaxed);
 	}
 }
 
-bool DrawSpeculator::WaitForGpu(uint64_t seq, uint64_t epoch) {
+bool DrawSpeculator::WaitForGpu(uint64_t seq, uint64_t epoch, uint32_t worker) {
 	for (;;) {
 		if (Interrupted(epoch)) {
 			return false;
@@ -307,21 +344,25 @@ bool DrawSpeculator::WaitForGpu(uint64_t seq, uint64_t epoch) {
 			return true;
 		}
 		const auto signal = m_signal.load(std::memory_order_acquire);
-		m_wake_at.store(seq + 1u, std::memory_order_relaxed);
-		m_waiting.store(true, std::memory_order_seq_cst);
+		m_wake_at[worker].store(seq + 1u, std::memory_order_relaxed);
+		m_waiting[worker].store(true, std::memory_order_seq_cst);
 		if (m_gpu_next.load(std::memory_order_acquire) <= seq && !Interrupted(epoch)) {
 			m_signal.wait(signal, std::memory_order_acquire);
 		}
-		m_waiting.store(false, std::memory_order_relaxed);
+		m_waiting[worker].store(false, std::memory_order_relaxed);
 	}
 }
 
-void DrawSpeculator::Run() {
+void DrawSpeculator::Run(uint32_t worker) {
 	KYTY_PROFILER_THREAD("DrawSpeculator");
-	StartThreadSampler("spec");
-	ShaderRecompiler::IR::t_resource_scratch_slot = 1;
-	auto shadow   = std::make_unique<CommandProcessor>(m_renderer, m_interrupt_event_id);
-	auto snapshot = std::vector<Cursor> {};
+	if (worker == 0) {
+		StartThreadSampler("spec");
+	}
+	ShaderRecompiler::IR::t_resource_scratch_slot = 1u + worker;
+	auto     shadow   = std::make_unique<CommandProcessor>(m_renderer, m_interrupt_event_id);
+	auto     mine     = std::make_unique<Snapshot>();
+	uint64_t seen     = 0;
+	auto     snapshot = std::vector<Cursor> {};
 	for (;;) {
 		uint64_t epoch = 0;
 		uint64_t seq   = 0;
@@ -332,9 +373,14 @@ void DrawSpeculator::Run() {
 		// KYTY_DEBUG_AB=specspin sleeps at once in every other window.
 		static const bool spin_ab = AbSelected("specspin");
 		if (!(spin_ab && AbFeatureOff())) {
-			constexpr auto SpinTime = std::chrono::microseconds(500);
-			const auto     deadline = std::chrono::steady_clock::now() + SpinTime;
-			for (uint32_t i = 1; !m_restart_pending.load(std::memory_order_acquire) &&
+			// KYTY_SPEC_SPIN_US=<microseconds> sets how long (default 500).
+			static const auto SpinTime = [] {
+				const char* value = std::getenv("KYTY_SPEC_SPIN_US");
+				return std::chrono::microseconds(value != nullptr ? std::strtoul(value, nullptr, 10)
+				                                                  : 500u);
+			}();
+			const auto deadline = std::chrono::steady_clock::now() + SpinTime;
+			for (uint32_t i = 1; m_restart_hint.load(std::memory_order_acquire) == seen &&
 			                     !m_quitting.load(std::memory_order_acquire);
 			     i++) {
 				_mm_pause();
@@ -345,16 +391,14 @@ void DrawSpeculator::Run() {
 		}
 		{
 			std::unique_lock lock(m_mutex);
-			m_wake.wait(lock, [&] { return m_restart || m_quit; });
+			m_wake.wait(lock, [&] { return m_restart_count != seen || m_quit; });
 			if (m_quit) {
 				return;
 			}
-			m_restart = false;
-			m_restart_pending.store(false, std::memory_order_relaxed);
-			std::swap(m_snapshot, m_spare);
+			seen  = m_restart_count;
+			*mine = *m_snapshot;
 		}
-		// The GPU thread fills the other snapshot meanwhile.
-		const auto& taken              = *m_spare;
+		const auto& taken              = *mine;
 		shadow->m_ctx                  = taken.ctx;
 		shadow->m_context_state_pushed = taken.context_state_pushed;
 		if (taken.context_state_pushed) {
@@ -366,13 +410,13 @@ void DrawSpeculator::Run() {
 		snapshot                   = taken.stack;
 		epoch                      = taken.epoch;
 		seq                        = taken.seq;
-		Walk(*shadow, std::move(snapshot), epoch, seq);
+		Walk(*shadow, std::move(snapshot), epoch, seq, worker);
 		snapshot = {};
 	}
 }
 
 void DrawSpeculator::Walk(CommandProcessor& shadow, std::vector<Cursor> stack, uint64_t epoch,
-                          uint64_t seq) {
+                          uint64_t seq, uint32_t worker) {
 	auto&              pipelines  = m_renderer.GetPipelineCache();
 	const auto&        buffers    = m_renderer.GetBufferCache();
 	constexpr uint32_t MaxPackets = 1u << 20u;
@@ -458,7 +502,7 @@ void DrawSpeculator::Walk(CommandProcessor& shadow, std::vector<Cursor> stack, u
 					// The stream (or the constant engine) writes the table later. Once the GPU
 					// thread has run the next draw, it has read the table: read it then.
 					m_stats.deferred.fetch_add(1, std::memory_order_relaxed);
-					if (!WaitForGpu(seq, epoch)) {
+					if (!WaitForGpu(seq, epoch, worker)) {
 						return;
 					}
 					if (!read()) {
@@ -536,11 +580,13 @@ void DrawSpeculator::Walk(CommandProcessor& shadow, std::vector<Cursor> stack, u
 					// other window.
 					static const bool lead_ab = AbSelected("speclead");
 					const uint64_t    lead    = lead_ab && AbFeatureOff() ? 0u : SpeculationLead;
-					if (seq < m_gpu_next.load(std::memory_order_acquire) + lead) {
+					if (seq % m_workers != worker) {
+						// Another worker's draw.
+					} else if (seq < m_gpu_next.load(std::memory_order_acquire) + lead) {
 						// Behind the GPU thread, or too close to it: not worth speculating.
 						m_stats.behind.fetch_add(1, std::memory_order_relaxed);
 					} else if (opcode != Pm4::IT_DISPATCH_DRAW_PREAMBLE) {
-						auto* slot = AcquireSlot(seq, epoch);
+						auto* slot = AcquireSlot(seq, epoch, worker);
 						if (slot == nullptr) {
 							return;
 						}

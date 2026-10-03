@@ -31,6 +31,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <fmt/format.h>
 #include <immintrin.h>
@@ -915,8 +916,31 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 		if (m_speculator == nullptr) {
 			m_speculator = std::make_unique<DrawSpeculator>(m_renderer, m_interrupt_event_id);
 		}
-		RestartSpeculation(execution);
+		// An execution resuming where this processor last left it continues the stream the walk
+		// is already ahead in: restarting it would throw away the draws it has prepared (a
+		// submission resumes several times a frame; one draw in ten was prepared by the GPU
+		// thread itself because of it). KYTY_SPEC_KEEP_ON_RESUME=0 restarts as before.
+		static const bool keep_on_resume = [] {
+			const char* value = std::getenv("KYTY_SPEC_KEEP_ON_RESUME");
+			return value == nullptr || std::strcmp(value, "0") != 0;
+		}();
+		const auto& top = execution.m_buffer_stack.back();
+		if (!(keep_on_resume && m_spec_execution == &execution &&
+		      m_spec_packet == top.commands.data() + top.offset_dw && !m_speculator->RestartDue())) {
+			RestartSpeculation(execution);
+		}
 	}
+	struct SpeculationResumePoint {
+		CommandProcessor& processor;
+		Pm4Execution&     execution;
+		~SpeculationResumePoint() {
+			processor.m_spec_execution = &execution;
+			processor.m_spec_packet    = execution.m_buffer_stack.empty()
+			                                 ? nullptr
+			                                 : execution.m_buffer_stack.back().commands.data() +
+			                                       execution.m_buffer_stack.back().offset_dw;
+		}
+	} speculation_resume_point {*this, execution};
 
 	struct ExecutionScope {
 		ExecutionScope(CommandProcessor& processor, Pm4Execution& execution)
