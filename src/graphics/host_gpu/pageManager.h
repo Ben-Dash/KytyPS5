@@ -20,6 +20,13 @@ public:
 
 	[[nodiscard]] uint64_t GetPageSize() const;
 
+	// KYTY_DEBUG_BDA_STATS: this thread's protection changes since the last call.
+	struct ProtectStats {
+		uint64_t calls = 0;
+		uint64_t ns    = 0;
+	};
+	[[nodiscard]] static ProtectStats TakeProtectStats() noexcept;
+
 	template <bool track>
 	void UpdatePageWatchers(uint64_t vaddr, uint64_t size);
 	template <bool track, bool is_read = false>

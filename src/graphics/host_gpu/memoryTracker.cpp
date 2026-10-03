@@ -197,6 +197,21 @@ bool MemoryTracker::IsRegionOnlyCpuModified(uint64_t vaddr, uint64_t size) {
 	       manager->IsModified<DirtySource::Cpu>(offset, size);
 }
 
+void MemoryTracker::ExpandWriteFault(uint64_t vaddr, uint64_t window) {
+	CheckNotInUploadCallback();
+	const auto begin = vaddr & ~(window - 1);
+	if (!GuestRange {begin, window}.Valid() || begin / TRACKER_REGION_SIZE !=
+	                                               (begin + window - 1) / TRACKER_REGION_SIZE) {
+		return;
+	}
+	auto* manager = m_regions[begin / TRACKER_REGION_SIZE].load(std::memory_order_acquire);
+	if (manager == nullptr) {
+		return;
+	}
+	std::scoped_lock lock(manager->lock);
+	manager->MarkCpuDirtyUnlessGpuDirty(begin, window);
+}
+
 void MemoryTracker::MarkRegionAsCpuModified(uint64_t vaddr, uint64_t size) {
 	CheckNotInUploadCallback();
 	Iterate<true>(vaddr, size, [](RegionManager* manager, uint64_t offset, uint64_t bytes) {

@@ -59,6 +59,9 @@ public:
 	KYTY_CLASS_NO_COPY(BufferCache);
 
 	void                   InvalidateMemory(uint64_t vaddr, uint64_t size);
+	// After a guest write fault at vaddr (see MemoryTracker::ExpandWriteFault).
+	// KYTY_FAULT_AHEAD_PAGES=<pages> sets the window (a power of two, default 16; 1: off).
+	void                   ExpandWriteFault(uint64_t vaddr);
 	void                   ReadMemory(uint64_t vaddr, uint64_t size, bool is_write = false);
 	[[nodiscard]] Buffer&  GetBuffer(BufferId id) { return m_slot_buffers[id]; }
 	[[nodiscard]] BufferId FindBuffer(uint64_t vaddr, uint64_t size);

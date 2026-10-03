@@ -28,6 +28,10 @@ public:
 	// !IsRegionGpuModified && IsRegionCpuModified, taking each region's lock once.
 	[[nodiscard]] bool IsRegionOnlyCpuModified(uint64_t vaddr, uint64_t size);
 	void               MarkRegionAsCpuModified(uint64_t vaddr, uint64_t size);
+	// After a CPU write fault at vaddr: marks the other pages of its aligned window (a power of
+	// two within one region) CPU-dirty too, except GPU-dirty ones, and so lifts their write
+	// protection. Guest threads mostly write on, so this saves their next faults.
+	void               ExpandWriteFault(uint64_t vaddr, uint64_t window);
 	void               MarkRegionAsGpuModified(uint64_t vaddr, uint64_t size);
 	void               UnmarkRegionAsGpuModified(uint64_t vaddr, uint64_t size);
 	void               UntrackMemory(uint64_t vaddr, uint64_t size);
@@ -185,8 +189,9 @@ public:
 	}
 
 	template <typename RangeFunc, typename UploadFunc>
+	// keep_epoch: the BDA epoch of the upload (see RegionManager::ForEachModifiedRange), or 0.
 	void ForEachUploadRange(uint64_t vaddr, uint64_t size, bool is_written, RangeFunc&& range_func,
-	                        UploadFunc&& upload_func) {
+	                        UploadFunc&& upload_func, uint64_t keep_epoch = 0) {
 		static_assert(std::is_nothrow_invocable_v<RangeFunc&, uint64_t, uint64_t>);
 		static_assert(std::is_nothrow_invocable_v<UploadFunc&>);
 		CheckNotInUploadCallback();
@@ -194,8 +199,8 @@ public:
 		const auto* previous_upload_owner = std::exchange(s_upload_owner, this);
 		Iterate<false>(vaddr, size, [&](RegionManager* manager, uint64_t offset, uint64_t bytes) {
 			manager->lock.lock();
-			manager->ForEachModifiedRange<DirtySource::Cpu, true>(manager->GetCpuAddr() + offset,
-			                                                      bytes, range_func);
+			manager->ForEachModifiedRange<DirtySource::Cpu, true>(
+			    manager->GetCpuAddr() + offset, bytes, range_func, is_written ? 0 : keep_epoch);
 			if (!is_written) {
 				manager->lock.unlock();
 			}

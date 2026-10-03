@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <utility>
@@ -87,6 +88,9 @@ struct ReadbackState {
 	bool     unarmed   = false;
 	uint64_t tick      = 0; // Highest publication tick among armed pages.
 };
+
+// PrepareBda's synchronizing passes so far (see RegionManager::HotWrites).
+inline std::atomic<uint32_t> g_bda_pass_serial {0};
 
 class RegionManager final {
 public:
@@ -174,8 +178,27 @@ public:
 		}
 	}
 
+	// Caller holds lock: the range's pages that are not GPU-dirty become CPU-dirty.
+	void MarkCpuDirtyUnlessGpuDirty(uint64_t vaddr, uint64_t size) {
+		const auto [start, end] = GetPageRange(vaddr, size);
+		RegionBits add;
+		add.SetRange(start, end);
+		add &= ~m_gpu_dirty;
+		add &= ~m_cpu_dirty;
+		if (add.None()) {
+			return;
+		}
+		m_cpu_dirty |= add;
+		PublishCpuDirtySlices();
+		PublishBdaHint();
+		UpdateProtection<false, false>();
+	}
+
+	// keep_epoch (CPU, clear): the BDA epoch of a read-only upload, or 0. Then hot written pages
+	// (see HotWrites) stay CPU-dirty and writable instead of being protected again, and
+	// are reported once per epoch. With 0 the range's pages lose that status.
 	template <DirtySource source, bool clear, typename Func>
-	void ForEachModifiedRange(uint64_t vaddr, uint64_t size, Func&& func) {
+	void ForEachModifiedRange(uint64_t vaddr, uint64_t size, Func&& func, uint64_t keep_epoch = 0) {
 		const auto [start, end] = GetPageRange(vaddr, size);
 		auto&      bits         = GetBits<source>();
 		if constexpr (source == DirtySource::Cpu) {
@@ -192,8 +215,42 @@ public:
 				Disarm(start, end);
 				m_stale_readable.UnsetRange(start, end);
 			}
+			RegionBits kept;
+			if constexpr (source == DirtySource::Cpu) {
+				if (keep_epoch == 0) {
+					if (m_hot_writes != nullptr) {
+						m_hot_writes->unwatched.UnsetRange(start, end);
+					}
+				} else if (HotWritesEnabled()) {
+					if (m_hot_writes == nullptr) {
+						m_hot_writes = std::make_unique<HotWrites>();
+					}
+					auto& hot = *m_hot_writes;
+					if (hot.synced_epoch != keep_epoch) {
+						hot.synced.Clear();
+						hot.synced_epoch = keep_epoch;
+						if (++hot.epochs >= HotWrites::DemoteEpochs) {
+							// Try protecting them again: pages no longer written every pass
+							// return to normal tracking, the others qualify again.
+							hot.unwatched.Clear();
+							hot.streak.fill(0);
+							hot.epochs = 0;
+						}
+					}
+					kept = mask & hot.unwatched;
+					// Reported already this epoch: nothing a draw of it must see is new.
+					mask &= ~(kept & hot.synced);
+					hot.synced |= kept;
+					CountDirtyPasses(hot, mask & ~kept);
+				}
+			}
 			bits.UnsetRange(start, end);
 			if constexpr (source == DirtySource::Cpu) {
+				if (!kept.None()) {
+					bits |= kept;
+					// The next epoch's pass must visit them again.
+					PublishBdaHint();
+				}
 				PublishCpuDirtySlices();
 				UpdateProtection<true, false>();
 			} else {
@@ -339,6 +396,52 @@ private:
 		std::array<uint64_t, TRACKER_REGION_PAGES> tick {};
 	};
 
+	// Hot written pages. Guest threads rewrite some pages (per-frame constants, streaming data)
+	// right after each upload protected them again: ASTRO BOT's Sky Garden took ~350k write
+	// faults a second (about 8 us each on the guest threads) and the GPU thread ~9k protection
+	// changes (~80 ms a second). A page that an upload found dirty in StreakLimit consecutive BDA
+	// passes stays CPU-dirty and writable; uploads copy it once per BDA epoch (see
+	// ForEachModifiedRange), as they did anyway. KYTY_HOT_WRITES=0 protects every page as before.
+	struct HotWrites {
+		static constexpr uint8_t  StreakLimit  = 4;
+		static constexpr uint32_t DemoteEpochs = 1024; // A few seconds of epochs.
+		std::array<uint32_t, TRACKER_REGION_PAGES> last_pass {};
+		std::array<uint8_t, TRACKER_REGION_PAGES>  streak {};
+		RegionBits                                 unwatched;
+		RegionBits                                 synced; // Reported in synced_epoch.
+		uint64_t                                   synced_epoch = 0;
+		uint32_t                                   epochs       = 0;
+	};
+
+	static bool HotWritesEnabled() {
+		static const bool enabled = [] {
+			const char* text = std::getenv("KYTY_HOT_WRITES");
+			return text == nullptr || text[0] != '0';
+		}();
+		return enabled;
+	}
+
+	// Caller holds lock: an upload is about to clear these dirty pages.
+	static void CountDirtyPasses(HotWrites& hot, const RegionBits& cleared) {
+		const auto pass = g_bda_pass_serial.load(std::memory_order_relaxed);
+		for (const auto [first, last]: cleared) {
+			for (size_t page = first; page < last; page++) {
+				const auto previous = hot.last_pass[page];
+				if (previous == pass) {
+					continue;
+				}
+				auto& streak = hot.streak[page];
+				streak       = previous + 1 != pass                ? 1
+				               : streak < HotWrites::StreakLimit ? static_cast<uint8_t>(streak + 1)
+				                                                 : streak;
+				if (streak >= HotWrites::StreakLimit) {
+					hot.unwatched.Set(page);
+				}
+				hot.last_pass[page] = pass;
+			}
+		}
+	}
+
 	void Disarm(size_t start, size_t end) {
 		if (m_arms == nullptr) {
 			return;
@@ -416,6 +519,8 @@ private:
 	uint64_t               m_bda_summary_mask;
 	// Allocated when a page is first armed; most regions never hold a pending readback.
 	std::unique_ptr<Arms>  m_arms;
+	// Allocated at the first counted write fault.
+	std::unique_ptr<HotWrites> m_hot_writes;
 	std::atomic<int64_t>&  m_armed_pages;
 };
 

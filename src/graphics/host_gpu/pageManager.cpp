@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <utility>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
@@ -78,7 +80,18 @@ void ValidateRange(uint64_t vaddr, uint64_t size) {
 	}
 }
 
+bool ProtectStatsEnabled() {
+	static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
+	return enabled;
+}
+
+thread_local PageManager::ProtectStats t_protect_stats;
+
 } // namespace
+
+PageManager::ProtectStats PageManager::TakeProtectStats() noexcept {
+	return std::exchange(t_protect_stats, {});
+}
 
 struct PageManager::Impl {
 	struct PageState {
@@ -191,7 +204,16 @@ struct PageManager::Impl {
 	}
 
 	void Protect(uint64_t vaddr, uint64_t size, Common::VirtualMemory::Mode mode) noexcept {
-		if (!Libs::LibKernel::Memory::ProtectGuestHostMemory(vaddr, size, mode)) {
+		const bool stats = ProtectStatsEnabled();
+		const auto start = stats ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
+		const bool done  = Libs::LibKernel::Memory::ProtectGuestHostMemory(vaddr, size, mode);
+		if (stats) {
+			t_protect_stats.calls++;
+			t_protect_stats.ns += static_cast<uint64_t>(
+			    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+			        .count());
+		}
+		if (!done) {
 			Fatal("address-space protection failed at 0x%016" PRIx64 ", mode=0x%08" PRIx32, vaddr,
 			      static_cast<uint32_t>(mode));
 		}

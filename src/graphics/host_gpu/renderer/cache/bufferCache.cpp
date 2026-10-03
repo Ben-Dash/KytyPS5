@@ -47,6 +47,40 @@ constexpr uint64_t GdsBufferSize = 64 * 1024;
 
 } // namespace
 
+// KYTY_DEBUG_BDA_STATS=1: every 5 s, how the GPU thread's buffer synchronization spends its time,
+// for PrepareBda's dirty-page passes and for the other callers (mostly bound buffers): the tracker
+// walk, the copies into the staging buffer and the recording of the copy commands, and how many
+// uploads ended a render pass.
+namespace {
+struct SyncStats {
+	static bool Enabled() {
+		static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
+		return enabled;
+	}
+	static uint64_t Now() {
+		return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+		                                 std::chrono::steady_clock::now().time_since_epoch())
+		                                 .count());
+	}
+	uint64_t passes  = 0;
+	uint64_t pass_ns = 0;
+	// [0]: PrepareBda's passes, [1]: other callers.
+	std::array<uint64_t, 2> calls {};
+	std::array<uint64_t, 2> uploads {};
+	std::array<uint64_t, 2> copies {};
+	std::array<uint64_t, 2> bytes {};
+	std::array<uint64_t, 2> walk_ns {};
+	std::array<uint64_t, 2> copy_ns {};
+	std::array<uint64_t, 2> record_ns {};
+	std::array<uint64_t, 2> breaks {};
+	uint64_t                window_start = 0;
+};
+thread_local SyncStats t_sync_stats;
+// Guest-thread side: InvalidateMemory calls (write faults and kernel writes) and their time.
+std::atomic<uint64_t> g_invalidate_calls {0};
+std::atomic<uint64_t> g_invalidate_ns {0};
+} // namespace
+
 void BufferCache::WriteDataBuffer(Buffer& buffer, uint64_t address, const void* source,
                                   uint64_t size) {
 	auto* bytes = static_cast<const uint8_t*>(source);
@@ -325,6 +359,21 @@ void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 	if (!GuestRange {vaddr, size}.Valid()) {
 		EXIT("BufferCache: invalid memory-invalidation range\n");
 	}
+	struct Timer {
+		bool                                  on;
+		std::chrono::steady_clock::time_point start;
+		~Timer() {
+			if (on) {
+				g_invalidate_calls.fetch_add(1, std::memory_order_relaxed);
+				g_invalidate_ns.fetch_add(
+				    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+				                              std::chrono::steady_clock::now() - start)
+				                              .count()),
+				    std::memory_order_relaxed);
+			}
+		}
+	} timer {SyncStats::Enabled(), SyncStats::Enabled() ? std::chrono::steady_clock::now()
+	                                                     : std::chrono::steady_clock::time_point {}};
 	// A CPU write needs the whole range CPU-dirty. GPU-dirty pages are published first; a GPU
 	// write recorded while this thread waits can re-dirty a page, so repeat until all are marked.
 	for (;;) {
@@ -334,6 +383,18 @@ void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 			return;
 		}
 		ReadMemory(vaddr, size, true);
+	}
+}
+
+void BufferCache::ExpandWriteFault(uint64_t vaddr) {
+	static const uint64_t window = [] {
+		const char* text  = std::getenv("KYTY_FAULT_AHEAD_PAGES");
+		const auto  pages = text != nullptr ? std::strtoull(text, nullptr, 10) : 16ull;
+		return std::has_single_bit(pages) && pages <= TRACKER_REGION_PAGES ? pages * TRACKER_PAGE_SIZE
+		                                                                   : TRACKER_PAGE_SIZE;
+	}();
+	if (window > TRACKER_PAGE_SIZE) {
+		m_memory_tracker.ExpandWriteFault(vaddr, window);
 	}
 }
 
@@ -617,36 +678,6 @@ BufferId BufferCache::CreateBuffer(uint64_t vaddr, uint64_t size) {
 	return id;
 }
 
-// KYTY_DEBUG_BDA_STATS=1: every 5 s, how the GPU thread's buffer synchronization spends its time,
-// for PrepareBda's dirty-page passes and for the other callers (mostly bound buffers): the tracker
-// walk, the copies into the staging buffer and the recording of the copy commands, and how many
-// uploads ended a render pass.
-namespace {
-struct SyncStats {
-	static bool Enabled() {
-		static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
-		return enabled;
-	}
-	static uint64_t Now() {
-		return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
-		                                 std::chrono::steady_clock::now().time_since_epoch())
-		                                 .count());
-	}
-	uint64_t passes  = 0;
-	uint64_t pass_ns = 0;
-	// [0]: PrepareBda's passes, [1]: other callers.
-	std::array<uint64_t, 2> calls {};
-	std::array<uint64_t, 2> uploads {};
-	std::array<uint64_t, 2> copies {};
-	std::array<uint64_t, 2> bytes {};
-	std::array<uint64_t, 2> walk_ns {};
-	std::array<uint64_t, 2> copy_ns {};
-	std::array<uint64_t, 2> record_ns {};
-	std::array<uint64_t, 2> breaks {};
-	uint64_t                window_start = 0;
-};
-thread_local SyncStats t_sync_stats;
-} // namespace
 
 bool BufferCache::BdaStatsEnabled() {
 	return SyncStats::Enabled();
@@ -677,7 +708,12 @@ void BufferCache::NoteBdaPass(uint64_t elapsed_ns) {
 		            ms_s(stats.walk_ns[kind]), ms_s(stats.copy_ns[kind]),
 		            ms_s(stats.record_ns[kind]), per_s(stats.breaks[kind]));
 	}
-	std::printf("\n");
+	const auto protect     = PageManager::TakeProtectStats();
+	const auto invalidates = g_invalidate_calls.exchange(0, std::memory_order_relaxed);
+	const auto invalid_ns  = g_invalidate_ns.exchange(0, std::memory_order_relaxed);
+	std::printf(" | gpu-thread protects/s=%.0f protect-ms/s=%.1f | invalidates/s=%.0f "
+	            "invalidate-ms/s=%.1f\n",
+	            per_s(protect.calls), ms_s(protect.ns), per_s(invalidates), ms_s(invalid_ns));
 	std::fflush(stdout);
 	stats              = {};
 	stats.window_start = now;
@@ -704,7 +740,8 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 		    if (stats_on) {
 			    copy_ns = SyncStats::Now() - copy_start;
 		    }
-	    });
+	    },
+	    m_scheduler.Context().CurrentBdaEpoch());
 	const uint64_t walked = stats_on ? SyncStats::Now() : 0;
 	if (stats_on) {
 		auto& stats = t_sync_stats;

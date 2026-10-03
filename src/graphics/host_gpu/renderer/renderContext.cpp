@@ -96,6 +96,7 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		                                          : DrainStats::Reason::GuestWriteFault);
 		RecordUpload(UploadSource::Fault, fault_vaddr, 0x1000);
 		m_buffer_cache.InvalidateMemory(fault_vaddr, fault_size);
+		m_buffer_cache.ExpandWriteFault(fault_vaddr);
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
 		if (gpu_thread) {
 			// The command stream writes this (WRITE_DATA, fills): later draws must see it.
@@ -216,6 +217,7 @@ void RenderContext::PrepareBda() {
 	// An epoch started during the synchronization below leaves the next call synchronizing.
 	m_bda_synced_epoch = epoch;
 	RecordUpload(UploadSource::BdaSync, 0, 0);
+	g_bda_pass_serial.fetch_add(1, std::memory_order_relaxed);
 	const bool stats = BufferCache::BdaStatsEnabled();
 	const auto start = stats ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
 	std::shared_lock lock(m_mapped_ranges_mutex);
