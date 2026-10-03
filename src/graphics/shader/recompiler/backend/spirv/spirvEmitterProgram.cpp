@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <optional>
 #include <type_traits>
@@ -97,8 +98,25 @@ void EmitReturn(ValueEmitContext& ctx) {
 	ctx.state.builder.AddFunction(spv::OpReturn);
 }
 
-// KYTY_DEBUG_LOOP_GUARD: counts an iteration and returns whether the limit is passed.
+bool LoopsNeedExitTest(const EmitterState& state) {
+	return state.loop_guard_variable != 0 || state.bda_fault_seen_variable != 0;
+}
+
+// Whether this invocation has to leave its loops: it read a page missing from the BDA page
+// table, or (KYTY_DEBUG_LOOP_GUARD) it passed the iteration limit.
 uint32_t EmitLoopGuardExceeded(EmitterState& state) {
+	uint32_t faulted = 0;
+	if (state.bda_fault_seen_variable != 0) {
+		const auto seen = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, TypeU32(state), seen,
+		                          state.bda_fault_seen_variable);
+		faulted = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpINotEqual, TypeBool(state), faulted, seen,
+		                          ConstantU32(state, 0));
+		if (state.loop_guard_variable == 0) {
+			return faulted;
+		}
+	}
 	const auto count = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpLoad, TypeU32(state), count, state.loop_guard_variable);
 	const auto next = EmitBinaryU32(state, spv::OpIAdd, count, ConstantU32(state, 1));
@@ -106,15 +124,20 @@ uint32_t EmitLoopGuardExceeded(EmitterState& state) {
 	const auto exceeded = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpUGreaterThan, TypeBool(state), exceeded, next,
 	                          ConstantU32(state, state.loop_guard_limit));
-	return exceeded;
+	if (faulted == 0) {
+		return exceeded;
+	}
+	const auto either = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLogicalOr, TypeBool(state), either, exceeded, faulted);
+	return either;
 }
 
-// KYTY_DEBUG_LOOP_GUARD: a loop header returns from the shader past the limit. Returns whether
-// it emitted the header's OpLoopMerge (the block then continues under a new label).
+// A loop header returns from the shader when EmitLoopGuardExceeded says so. Returns whether it
+// emitted the header's OpLoopMerge (the block then continues under a new label).
 bool EmitStructuredLoopGuard(ValueEmitContext& ctx, const IR::BlockInfo& info) {
 	auto&       state = ctx.state;
 	const auto& term  = info.terminator;
-	if (state.loop_guard_variable == 0 || !term.loop_header) {
+	if (!LoopsNeedExitTest(state) || !term.loop_header) {
 		return false;
 	}
 	const auto* merge = TargetBlock(state.program, term.merge_block);
@@ -599,7 +622,7 @@ void EmitDispatcherFunction(ValueEmitContext& ctx, const DispatcherFunctionState
 	auto done = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpIEqual, TypeBool(state), done, pc,
 	                          ConstantU32(ctx.state, UINT32_MAX));
-	if (state.loop_guard_variable != 0) {
+	if (LoopsNeedExitTest(state)) {
 		const auto exceeded = EmitLoopGuardExceeded(state);
 		const auto either   = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpLogicalOr, TypeBool(state), either, done, exceeded);
@@ -876,11 +899,18 @@ void EmitProgram(EmitterState& state) {
 		state.pixel_valid_mask_variable = state.builder.AllocateId();
 		state.builder.AddName(state.pixel_valid_mask_variable, "pixel_valid_mask_active");
 	}
+	// KYTY_DEBUG_LOOP_GUARD=<n>[:<hash>]: every shader, or only the one with that hash.
+	static const uint64_t loop_guard_hash = [] {
+		const char* text  = std::getenv("KYTY_DEBUG_LOOP_GUARD");
+		const char* colon = text != nullptr ? std::strchr(text, ':') : nullptr;
+		return colon != nullptr ? std::strtoull(colon + 1, nullptr, 16) : 0ull;
+	}();
 	static const uint32_t loop_guard_limit = [] {
 		const char* text = std::getenv("KYTY_DEBUG_LOOP_GUARD");
 		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 0)) : 0u;
 	}();
-	if (loop_guard_limit != 0 && !program.blocks.empty()) {
+	if (loop_guard_limit != 0 && !program.blocks.empty() &&
+	    (loop_guard_hash == 0 || loop_guard_hash == program.shader_hash)) {
 		state.loop_guard_variable = state.builder.AllocateId();
 		state.loop_guard_limit    = loop_guard_limit;
 	}
@@ -1017,6 +1047,10 @@ void EmitProgram(EmitterState& state) {
 	}
 	if (state.loop_guard_variable != 0) {
 		state.builder.AddFunction(spv::OpStore, state.loop_guard_variable, ConstantU32(state, 0));
+	}
+	if (state.bda_fault_seen_variable != 0) {
+		state.builder.AddFunction(spv::OpStore, state.bda_fault_seen_variable,
+		                          ConstantU32(state, 0));
 	}
 	EmitMemoryOffsets(state);
 	if (program.blocks.empty()) {

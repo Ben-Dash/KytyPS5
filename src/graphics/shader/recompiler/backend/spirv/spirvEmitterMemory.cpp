@@ -1281,6 +1281,10 @@ void DefineGetBdaPointer(EmitterState& state) {
 
 	EmitLabel(state, fault_label);
 	RecordBdaFault(state, page);
+	if (state.bda_fault_seen_variable != 0) {
+		state.builder.AddFunction(spv::OpStore, state.bda_fault_seen_variable,
+		                          ConstantU32(state, 1));
+	}
 	state.builder.AddFunction(spv::OpBranch, merge_label);
 
 	EmitLabel(state, available_label);
@@ -1498,29 +1502,44 @@ uint32_t EmitReadConst(ValueEmitContext& ctx, const IR::Inst& inst) {
 }
 
 // A scalar buffer read through a GPU-selected descriptor reads guest memory by address: the
-// descriptor's base plus the dword-aligned offset, zero outside NUM_RECORDS bytes.
+// descriptor's base plus the dword-aligned offset, zero outside the buffer. As in the CPU walk
+// (SrtWalker), the buffer is NUM_RECORDS bytes, or NUM_RECORDS strides when it has a stride:
+// Astro Bot's BVH traversal reads its 8-byte leaf records this way, and a zero read past a too
+// short bound never ends its leaf loop.
 uint32_t ReadIndirectConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst,
                                  const IR::MemoryInfo& mem) {
 	auto&       state   = ctx.state;
 	const auto& handle  = *inst.Arg(0).ResolveInstruction();
+	const auto  wide    = TypeScalarU64(state);
+	const auto  word1   = ctx.Arg(handle, 1);
 	const auto  records = ctx.Arg(handle, 2);
-	const auto  base    = DeviceAddressFromWords(
-	       state, ctx.Arg(handle, 0),
-	       EmitBitFieldUExtract(state, ctx.Arg(handle, 1), ConstantU32(state, 0),
-	                            ConstantU32(state, 16)));
+	const auto  base    = Binary(
+	       state, spv::OpBitwiseAnd, wide,
+	       DeviceAddressFromWords(
+	           state, ctx.Arg(handle, 0),
+	           EmitBitFieldUExtract(state, word1, ConstantU32(state, 0), ConstantU32(state, 16))),
+	       ConstantDeviceAddress(state, ~uint64_t {3}));
+	const auto stride =
+	    EmitBitFieldUExtract(state, word1, ConstantU32(state, 16), ConstantU32(state, 14));
+	const auto unit = Select(
+	    state, TypeU32(state),
+	    Binary(state, spv::OpIEqual, TypeBool(state), stride, ConstantU32(state, 0)),
+	    ConstantU32(state, 1), stride);
+	const auto size = Binary(state, spv::OpIMul, wide, Unary(state, spv::OpUConvert, wide, records),
+	                         Unary(state, spv::OpUConvert, wide, unit));
 	auto offset = Binary(state, spv::OpBitwiseAnd, TypeU32(state), ctx.Arg(inst, 1),
 	                     ConstantU32(state, ~3u));
+	auto wide_offset = Unary(state, spv::OpUConvert, wide, offset);
 	if (mem.offset != 0u) {
-		offset = Binary(state, spv::OpIAdd, TypeU32(state), offset,
-		                ConstantU32(state, mem.offset & ~3u));
+		wide_offset = Binary(state, spv::OpIAdd, wide, wide_offset,
+		                     ConstantDeviceAddress(state, mem.offset & ~3u));
 	}
-	const auto in_bounds = AndCondition(
-	    state,
-	    Binary(state, spv::OpUGreaterThanEqual, TypeBool(state), records, ConstantU32(state, 4)),
-	    Binary(state, spv::OpULessThanEqual, TypeBool(state), offset,
-	           Binary(state, spv::OpISub, TypeU32(state), records, ConstantU32(state, 4))));
-	const auto guest = Binary(state, spv::OpIAdd, TypeScalarU64(state), base,
-	                          Unary(state, spv::OpUConvert, TypeScalarU64(state), offset));
+	const auto in_bounds =
+	    Binary(state, spv::OpULessThanEqual, TypeBool(state),
+	           Binary(state, spv::OpIAdd, wide, wide_offset,
+	                  ConstantDeviceAddress(state, sizeof(uint32_t))),
+	           size);
+	const auto guest = Binary(state, spv::OpIAdd, wide, base, wide_offset);
 	return LoadBda(ctx, guest, in_bounds, 32u);
 }
 

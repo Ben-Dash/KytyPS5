@@ -268,6 +268,12 @@ void DefineDescriptors(EmitterState& state) {
 				break;
 			case IR::DescriptorBindingKind::FaultBuffer:
 				state.fault_buffer_variable = Define(StorageBufferType(state), "fault_buffer");
+				if (state.program.stage == ShaderType::Compute) {
+					state.bda_fault_seen_variable = state.builder.DefineGlobalVariable(
+					    TypePointer(state, spv::StorageClassPrivate, TypeU32(state)),
+					    spv::StorageClassPrivate);
+					state.builder.AddName(state.bda_fault_seen_variable, "bda_fault_seen");
+				}
 				break;
 			case IR::DescriptorBindingKind::ShaderData:
 				state.shader_data_storage_variable =

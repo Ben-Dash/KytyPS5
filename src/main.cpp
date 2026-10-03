@@ -569,6 +569,11 @@ static int Main(int argc, char* argv[]) {
 #if defined(KYTY_PGO_GENERATE)
 	StartProfileWriter();
 #endif
+	// KYTY_DEBUG_UNBUFFERED=1: a redirected console log is complete even when the emulator is
+	// killed (stdout to a file is block-buffered otherwise).
+	if (std::getenv("KYTY_DEBUG_UNBUFFERED") != nullptr) {
+		std::setvbuf(stdout, nullptr, _IONBF, 0);
+	}
 	VirtualMemory::Init();
 	InitializeThreads();
 

@@ -138,6 +138,9 @@ struct EmitterState {
 	uint32_t                                         pixel_valid_mask_variable = 0;
 	// KYTY_DEBUG_LOOP_GUARD=<n>: a function-local count of loop iterations; past <n> the shader
 	// returns (a guest loop that never ends on the host would otherwise hang the GPU).
+	// Set once this invocation read a page that is not in the BDA page table yet (the read
+	// gave zero): its loops then end, since a loop can depend on that data to terminate.
+	uint32_t                                         bda_fault_seen_variable   = 0;
 	uint32_t                                         loop_guard_variable       = 0;
 	uint32_t                                         loop_guard_limit          = 0;
 	uint32_t                                         subgroup_local_invocation_id_variable = 0;
