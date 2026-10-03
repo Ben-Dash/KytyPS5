@@ -25,24 +25,25 @@ public:
 private:
 	static constexpr uint32_t DescriptorSetBatch = 32;
 
-	// A pool keeps every set it allocated, by layout: when the GPU has finished with the pool,
-	// its sets are handed out again as they are, instead of resetting the pool and allocating
-	// them from the driver once more (about 5% of the GPU thread in ASTRO BOT's Sky Garden).
-	struct Pool {
-		vk::DescriptorPool                                                      pool = nullptr;
-		std::unordered_map<vk::DescriptorSetLayout, std::vector<vk::DescriptorSet>> sets;
+	// Sets are never returned to the driver: a set is handed out again once the GPU has finished
+	// the tick it was last used in. In steady state no set is allocated at all (allocation was
+	// about 4% of the GPU thread in ASTRO BOT's Sky Garden).
+	struct Used {
+		vk::DescriptorSet set;
+		uint64_t          tick = 0;
+	};
+	struct Sets {
+		std::vector<vk::DescriptorSet> fresh;
+		std::deque<Used>               used; // In tick order.
 	};
 
-	[[nodiscard]] bool Allocate(vk::DescriptorSetLayout layout, std::vector<vk::DescriptorSet>& sets);
-	void               CreateDescriptorPool();
+	void Allocate(vk::DescriptorSetLayout layout, std::vector<vk::DescriptorSet>& sets);
+	void CreateDescriptorPool();
 
-	GraphicContext&                                       m_graphics;
-	MasterSemaphore&                                      m_master_semaphore;
-	Pool                                                  m_current;
-	std::deque<std::pair<Pool, uint64_t>>                 m_pending_pools;
-	// Sets of the current pool handed out since it became current, by layout and in total.
-	std::unordered_map<vk::DescriptorSetLayout, uint32_t> m_next;
-	uint32_t                                              m_handed = 0;
+	GraphicContext&                                   m_graphics;
+	MasterSemaphore&                                  m_master_semaphore;
+	std::vector<vk::DescriptorPool>                   m_pools;
+	std::unordered_map<vk::DescriptorSetLayout, Sets> m_sets;
 };
 
 } // namespace Libs::Graphics

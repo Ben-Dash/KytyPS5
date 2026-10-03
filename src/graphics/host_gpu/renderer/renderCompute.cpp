@@ -116,6 +116,12 @@ static void PrefetchBvhs(BufferCache& buffers,
 		}
 	}
 }
+// Asked per dispatch: reading the environment each time cost about 1% of the GPU thread.
+static bool BvhCheckEnabled() {
+	static const bool enabled = std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr;
+	return enabled;
+}
+
 // KYTY_DEBUG_BVH_CHECK=<hash>: walks, on the CPU, the BVH that compute shader traverses (its
 // header pointer is at SRT+40) and reports its shape: a cycle or garbage there makes the
 // shader's traversal loop endless.
@@ -609,7 +615,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 		m_context.PrepareBda();
 	}
-	if (std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr && program.shader_hash == 0x380bb9d636390baeull) {
+	if (program.shader_hash == 0x380bb9d636390baeull && BvhCheckEnabled()) [[unlikely]] {
 		static uint32_t described = 0;
 		const auto&     user      = resources.user_data;
 		std::array<uint32_t, 12> table {};
@@ -708,7 +714,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 		m_context.PrepareBda();
 	}
-	if (std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr && program.shader_hash == 0x380bb9d636390baeull) {
+	if (program.shader_hash == 0x380bb9d636390baeull && BvhCheckEnabled()) [[unlikely]] {
 		static uint32_t described = 0;
 		const auto&     user      = input_info.stage.resources->user_data;
 		std::array<uint32_t, 12> table {};

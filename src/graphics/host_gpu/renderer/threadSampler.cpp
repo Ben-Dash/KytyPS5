@@ -343,6 +343,57 @@ void DumpThreads(uint32_t index) {
 
 } // namespace
 
+// KYTY_GPU_CORE=<physical core>: the calling thread gets that core to itself. The process's other
+// threads are kept off both of its logical processors (CPU sets), so no busy sibling thread shares
+// the core's execution resources, and the thread runs at raised priority.
+void ReserveCoreForCurrentThread() {
+	const char* value = std::getenv("KYTY_GPU_CORE");
+	if (value == nullptr) {
+		return;
+	}
+	const auto core = static_cast<uint32_t>(std::strtoul(value, nullptr, 10));
+	ULONG      size = 0;
+	GetSystemCpuSetInformation(nullptr, 0, &size, GetCurrentProcess(), 0);
+	std::vector<uint8_t> buffer(size);
+	if (size == 0 ||
+	    !GetSystemCpuSetInformation(reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(buffer.data()),
+	                                size, &size, GetCurrentProcess(), 0)) {
+		return;
+	}
+	// Logical processors of one core share its CoreIndex.
+	std::vector<std::pair<uint32_t, ULONG>> sets; // CoreIndex, Id.
+	std::vector<uint32_t>                   cores;
+	for (ULONG offset = 0; offset < size;) {
+		const auto* info = reinterpret_cast<const SYSTEM_CPU_SET_INFORMATION*>(buffer.data() + offset);
+		if (info->Type == CpuSetInformation) {
+			sets.emplace_back(info->CpuSet.CoreIndex, info->CpuSet.Id);
+			if (std::ranges::find(cores, uint32_t {info->CpuSet.CoreIndex}) == cores.end()) {
+				cores.push_back(info->CpuSet.CoreIndex);
+			}
+		}
+		offset += info->Size;
+	}
+	std::ranges::sort(cores);
+	if (core >= cores.size()) {
+		return;
+	}
+	std::vector<ULONG> others;
+	std::vector<ULONG> own;
+	for (const auto& [core_index, id]: sets) {
+		(core_index == cores[core] ? own : others).push_back(id);
+	}
+	if (own.empty() || others.empty()) {
+		return;
+	}
+	const bool process_ok = SetProcessDefaultCpuSets(GetCurrentProcess(), others.data(),
+	                                                static_cast<ULONG>(others.size())) != 0;
+	const bool thread_ok  = SetThreadSelectedCpuSets(GetCurrentThread(), own.data(), 1) != 0;
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+	std::printf("gpu-core: core %u reserved (cpu set %lu of %zu, others %zu) process=%d thread=%d\n",
+	            core, own.front(), own.size(), others.size(), process_ok ? 1 : 0, thread_ok ? 1 : 0);
+	std::fflush(stdout);
+}
+
 void StartThreadSampler(const char* name) {
 	const char* value = std::getenv("KYTY_DEBUG_SAMPLE_GPU");
 	if (value == nullptr) {

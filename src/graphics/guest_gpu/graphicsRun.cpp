@@ -643,6 +643,7 @@ void GuestGpu::ThreadRun(void* data) {
 	g_gpu_thread = true;
 	g_gpu_state  = gpu;
 	StartThreadSampler("gpu");
+	ReserveCoreForCurrentThread();
 	StartThreadDumper();
 
 	// KYTY_DEBUG_QUEUES=1: every 5 s, for each queue with work, the submissions completed and the

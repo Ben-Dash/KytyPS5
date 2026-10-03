@@ -26,10 +26,8 @@ DescriptorHeap::DescriptorHeap(GraphicContext& graphics, MasterSemaphore& master
 }
 
 DescriptorHeap::~DescriptorHeap() {
-	m_graphics.device.destroyDescriptorPool(m_current.pool, nullptr);
-	for (const auto& [pool, tick]: m_pending_pools) {
-		m_master_semaphore.Wait(tick);
-		m_graphics.device.destroyDescriptorPool(pool.pool, nullptr);
+	for (const auto pool: m_pools) {
+		m_graphics.device.destroyDescriptorPool(pool, nullptr);
 	}
 }
 
@@ -37,56 +35,47 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout layout) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(layout == nullptr);
 
-	for (;;) {
-		auto& sets = m_current.sets[layout];
-		auto& next = m_next[layout];
-		if (next < sets.size() || Allocate(layout, sets)) {
-			m_handed++;
-			return sets[next++];
-		}
-		if (m_handed == 0) {
-			// A reused pool whose sets are of other layouts: none is in use, start it over.
-			EXIT_IF(std::ranges::none_of(m_current.sets,
-			                             [](const auto& entry) { return !entry.second.empty(); }));
-			EXIT_IF(m_graphics.device.resetDescriptorPool(m_current.pool, {}) !=
-			        vk::Result::eSuccess);
-			m_current.sets.clear();
-			m_next.clear();
-			continue;
-		}
-		m_pending_pools.emplace_back(std::move(m_current), m_master_semaphore.CurrentTick());
-		m_current = {};
-		if (m_master_semaphore.IsFree(m_pending_pools.front().second)) {
-			m_current = std::move(m_pending_pools.front().first);
-			m_pending_pools.pop_front();
-		} else {
-			CreateDescriptorPool();
-		}
-		m_next.clear();
-		m_handed = 0;
+	auto&             sets = m_sets[layout];
+	const auto        tick = m_master_semaphore.CurrentTick();
+	vk::DescriptorSet set;
+	if (!sets.fresh.empty()) {
+		set = sets.fresh.back();
+		sets.fresh.pop_back();
+	} else if (!sets.used.empty() && sets.used.front().tick < tick &&
+	           m_master_semaphore.IsFree(sets.used.front().tick)) {
+		set = sets.used.front().set;
+		sets.used.pop_front();
+	} else {
+		Allocate(layout, sets.fresh);
+		set = sets.fresh.back();
+		sets.fresh.pop_back();
 	}
+	sets.used.push_back({set, tick});
+	return set;
 }
 
-bool DescriptorHeap::Allocate(vk::DescriptorSetLayout layout, std::vector<vk::DescriptorSet>& sets) {
+void DescriptorHeap::Allocate(vk::DescriptorSetLayout layout, std::vector<vk::DescriptorSet>& sets) {
 	std::array<vk::DescriptorSetLayout, DescriptorSetBatch> layouts;
 	layouts.fill(layout);
 	std::array<vk::DescriptorSet, DescriptorSetBatch> batch {};
 
 	vk::DescriptorSetAllocateInfo allocate {};
-	allocate.descriptorPool = m_current.pool;
-	allocate.pSetLayouts    = layouts.data();
-
-	for (uint32_t count = DescriptorSetBatch; count != 0; count /= 2) {
-		allocate.descriptorSetCount = count;
-		const auto result = m_graphics.device.allocateDescriptorSets(&allocate, batch.data());
-		if (result == vk::Result::eSuccess) {
-			sets.insert(sets.end(), batch.begin(), batch.begin() + count);
-			return true;
+	allocate.pSetLayouts = layouts.data();
+	for (uint32_t attempt = 0; attempt < 2; attempt++) {
+		allocate.descriptorPool = m_pools.back();
+		for (uint32_t count = DescriptorSetBatch; count != 0; count /= 2) {
+			allocate.descriptorSetCount = count;
+			const auto result = m_graphics.device.allocateDescriptorSets(&allocate, batch.data());
+			if (result == vk::Result::eSuccess) {
+				sets.insert(sets.end(), batch.begin(), batch.begin() + count);
+				return;
+			}
+			EXIT_IF(result != vk::Result::eErrorOutOfPoolMemory &&
+			        result != vk::Result::eErrorFragmentedPool);
 		}
-		EXIT_IF(result != vk::Result::eErrorOutOfPoolMemory &&
-		        result != vk::Result::eErrorFragmentedPool);
+		CreateDescriptorPool();
 	}
-	return false;
+	EXIT("DescriptorHeap: a new descriptor pool cannot hold one set\n");
 }
 
 void DescriptorHeap::CreateDescriptorPool() {
@@ -94,8 +83,9 @@ void DescriptorHeap::CreateDescriptorPool() {
 	create.maxSets       = DescriptorHeapCount;
 	create.poolSizeCount = static_cast<uint32_t>(DescriptorPoolSizes.size());
 	create.pPoolSizes    = DescriptorPoolSizes.data();
-	EXIT_IF(m_graphics.device.createDescriptorPool(&create, nullptr, &m_current.pool) !=
-	        vk::Result::eSuccess);
+	vk::DescriptorPool pool;
+	EXIT_IF(m_graphics.device.createDescriptorPool(&create, nullptr, &pool) != vk::Result::eSuccess);
+	m_pools.push_back(pool);
 }
 
 } // namespace Libs::Graphics
