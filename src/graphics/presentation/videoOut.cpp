@@ -25,6 +25,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <fmt/format.h>
 #include <list>
 #include <thread>
@@ -213,7 +217,8 @@ public:
 	void Prepare(uint64_t request_id, Graphics::CommandBuffer& buffer);
 	void Complete(uint64_t request_id);
 	void WaitForSubmitSlot(VideoOutConfig& cfg);
-	bool Flip(uint32_t micros);
+	bool Flip(uint32_t micros, bool ignore_flip_rate = false);
+	bool IsFlipReady();
 	void GetFlipStatus(VideoOutConfig& cfg, VideoOutFlipStatus& out);
 	void Wait(VideoOutConfig& cfg, int index);
 
@@ -856,10 +861,55 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 	const auto frequency = Common::Timer::QueryPerformanceFrequency();
 	EXIT_IF(frequency == 0);
 
+	// KYTY_PRESENT_WHEN_READY=1 (for variable-refresh displays): a finished frame is shown as soon
+	// as it is ready instead of at the next emulated vblank, but no sooner than one flip interval
+	// after the previous one. Vblank events keep their fixed rate.
+	static const bool when_ready = std::getenv("KYTY_PRESENT_WHEN_READY") != nullptr;
+	uint64_t          last_flip  = 0;
+	auto flip_when_ready = [&](uint64_t now) {
+		if (m_presenter.IsGuestPaused() || !m_flip_queue.IsFlipReady()) {
+			return false;
+		}
+		int interval = 1;
+		{
+			Common::LockGuard lock(m_mutex);
+			for (int handle = 1; handle < VIDEO_OUT_NUM_MAX; handle++) {
+				auto& ctx = m_video_out_ctx[handle];
+				if (ctx.opened) {
+					interval = std::max(interval, ctx.flip_rate + 1);
+				}
+			}
+		}
+		const auto refresh = std::max(Config::GetVblankFrequency(), 1u);
+		const auto spacing = frequency * static_cast<uint64_t>(interval) / refresh;
+		// Half a millisecond of slack keeps a frame that is on time from slipping a poll.
+		if (now + frequency / 2000 < last_flip + spacing) {
+			return false;
+		}
+		if (!m_flip_queue.Flip(0, true)) {
+			return false;
+		}
+		last_flip = now;
+		return true;
+	};
+
 	int64_t total_wait = 0;
 	while (!token.stop_requested()) {
 		const auto sleep_begin = Common::Timer::QueryPerformanceCounter();
-		if (total_wait > 0) {
+		if (total_wait > 0 && when_ready) {
+			const auto deadline = sleep_begin + static_cast<uint64_t>(total_wait);
+			for (auto now = sleep_begin; now < deadline && !token.stop_requested();
+			     now      = Common::Timer::QueryPerformanceCounter()) {
+				(void)flip_when_ready(now);
+				now = Common::Timer::QueryPerformanceCounter();
+				if (now >= deadline) {
+					break;
+				}
+				const auto remaining_us = (deadline - now) * 1000000u / frequency;
+				Common::Thread::SleepMicro(
+				    static_cast<uint32_t>(std::clamp<uint64_t>(remaining_us, 1, 250)));
+			}
+		} else if (total_wait > 0) {
 			const auto remaining_us =
 			    (static_cast<uint64_t>(total_wait) * 1000000u + frequency - 1) / frequency;
 			Common::Thread::SleepMicro(static_cast<uint32_t>(
@@ -883,7 +933,7 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 		}
 
 		VblankBegin();
-		bool presented = m_flip_queue.Flip(0);
+		bool presented = when_ready ? flip_when_ready(frame_begin) : m_flip_queue.Flip(0);
 		if (!presented && m_presenter.NeedsSystemOverlayRefresh()) {
 			if (m_presenter.PresentLastFrame()) {
 				presented = true;
@@ -1198,7 +1248,54 @@ void FlipQueue::Wait(VideoOutConfig& cfg, int index) {
 	}
 }
 
-bool FlipQueue::Flip(uint32_t micros) {
+// KYTY_DEBUG_PACING=1 prints, every 120 presented flips, how evenly they were spaced.
+static void DebugPacing() {
+	static const bool enabled = std::getenv("KYTY_DEBUG_PACING") != nullptr;
+	if (!enabled) {
+		return;
+	}
+	static std::array<double, 120> intervals {};
+	static size_t                  count = 0;
+	static auto                    last  = std::chrono::steady_clock::now();
+	const auto                     now   = std::chrono::steady_clock::now();
+	intervals[count++] = std::chrono::duration<double, std::milli>(now - last).count();
+	last               = now;
+	if (count == intervals.size()) {
+		double sum = 0.0;
+		for (const auto v: intervals) {
+			sum += v;
+		}
+		const double mean = sum / static_cast<double>(count);
+		double       dev  = 0.0;
+		for (const auto v: intervals) {
+			dev += std::abs(v - mean);
+		}
+		std::sort(intervals.begin(), intervals.end());
+		std::printf("pacing: mean=%.2f ms, avg deviation=%.2f ms, min=%.2f, median=%.2f, max=%.2f\n",
+		            mean, dev / static_cast<double>(count), intervals.front(),
+		            intervals[count / 2], intervals.back());
+		std::fflush(stdout);
+		count = 0;
+	}
+}
+
+// True when the oldest flip group has every frame recorded and could be presented now.
+bool FlipQueue::IsFlipReady() {
+	Common::LockGuard lock(m_mutex);
+	const auto        owner = std::find_if(m_requests.begin(), m_requests.end(),
+	                                       [](const auto& r) { return r.group == r.id; });
+	if (owner == m_requests.end()) {
+		return false;
+	}
+	const uint64_t group = owner->id;
+	return !std::any_of(m_cpu_requests.begin(), m_cpu_requests.end(),
+	                    [group](const auto& r) { return r.group == group; }) &&
+	       !std::any_of(m_requests.begin(), m_requests.end(), [group](const auto& r) {
+		       return r.group == group && r.state != RequestState::Ready;
+	       });
+}
+
+bool FlipQueue::Flip(uint32_t micros, bool ignore_flip_rate) {
 	KYTY_PROFILER_BLOCK("FlipQueue::Flip");
 
 	m_mutex.Lock();
@@ -1242,13 +1339,14 @@ bool FlipQueue::Flip(uint32_t micros) {
 		auto& r = requests[i];
 		r.cfg->mutex.Lock();
 		due &= r.cfg->opened && !r.cfg->closing && r.cfg->generation == r.generation;
-		if (r.id == group) {
+		if (r.id == group && !ignore_flip_rate) {
 			due &= IsFlipDueLocked(*r.cfg, r.generation);
 		}
 		layers[i] = {r.frame, r.cfg->bus, r.premultiplied_alpha};
 	}
 	if (due) {
 		m_presenter.Present(std::span(layers.data(), count));
+		DebugPacing();
 	}
 
 	m_mutex.Lock();

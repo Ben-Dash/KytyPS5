@@ -33,6 +33,7 @@
 #include <cstdlib>
 #include <deque>
 #include <fmt/format.h>
+#include <immintrin.h>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -97,12 +98,20 @@ static void DebugFrameLimit() {
 		}
 	}
 	static auto last = std::chrono::steady_clock::now();
+	const auto  step = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+	    std::chrono::duration<double, std::milli>(limit_ms));
 	if (active) {
-		std::this_thread::sleep_until(
-		    last + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-		               std::chrono::duration<double, std::milli>(limit_ms)));
+		// Sleep up to the last millisecond and spin the rest: a late wake-up would otherwise cost
+		// a few percent of the frame rate.
+		const auto target = last + step;
+		std::this_thread::sleep_until(target - std::chrono::milliseconds(1));
+		while (std::chrono::steady_clock::now() < target) {
+			_mm_pause();
+		}
 	}
-	last = std::chrono::steady_clock::now();
+	// A flip that is at most one step late keeps the schedule, so wake-up errors do not add up.
+	const auto now = std::chrono::steady_clock::now();
+	last           = active && now < last + 2 * step ? last + step : now;
 }
 
 // With KYTY_DEBUG_MRT_SHADER set, the GPU thread keeps its last 96 PM4 packets (header and up to 8
