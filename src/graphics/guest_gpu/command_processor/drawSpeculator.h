@@ -64,7 +64,8 @@ private:
 	// Workers share the walk's draws by sequence number (draw seq belongs to worker seq % count):
 	// one worker prepares a draw about as fast as the GPU thread executes one, so alone it only
 	// slowly gets ahead after each restart and the GPU thread prepared one draw in twelve itself.
-	// KYTY_SPECULATE_THREADS=<1..3> sets the count (default 2).
+	// KYTY_SPECULATE_THREADS=<1..3> sets the count. Default 1: once the walk no longer waited for
+	// GPU readbacks, a second worker only cost time (4.6 -> 5.1-5.6 us per draw in Sky Garden).
 	static constexpr uint32_t MaxWorkers = 3;
 	static constexpr uint64_t NotStopped = UINT64_MAX;
 	// Draws within this many of the GPU thread's next draw are not speculated (see Walk).
@@ -106,7 +107,7 @@ private:
 	// m_restart_count, read without the lock: the workers spin on it before sleeping.
 	std::atomic<uint64_t>      m_restart_hint {0};
 	bool                       m_quit    = false;
-	uint32_t                   m_workers = 2;
+	uint32_t                   m_workers = 1;
 	std::array<std::atomic<bool>, MaxWorkers> m_waiting {};
 	// While a worker waits: the GPU thread's draw count that wakes it (a waking per draw would
 	// cost the GPU thread a kernel call each).
