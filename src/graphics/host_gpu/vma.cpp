@@ -292,9 +292,77 @@ uint64_t GraphicContext::GetTotalMemoryBudget() const {
 }
 
 
+// Images freed lately, kept to serve a creation with the same parameters: ASTRO BOT's Sky Garden
+// uses one 960x540 surface as depth target and as R32 texture in turn, which replaced its image
+// three times a frame (create, destroy and the driver's kernel calls: about 4% of the GPU
+// thread). A recycled image has undefined contents, as a new one. KYTY_IMAGE_RECYCLE=0 turns it
+// off.
+namespace {
+struct RecycledImage {
+	vk::Image     image;
+	VmaAllocation allocation = nullptr;
+	vk::Format    format     = vk::Format::eUndefined;
+	vk::ImageType image_type = vk::ImageType::e2D;
+	vk::Extent3D  extent {};
+	uint32_t      layers     = 0;
+	uint32_t      mip_levels = 0;
+	uint32_t      samples    = 0;
+	vk::ImageUsageFlags  usage {};
+	vk::ImageCreateFlags flags {};
+	uint64_t             serial = 0;
+};
+constexpr size_t           RecycledImagesMax = 24;
+std::mutex                 g_recycled_mutex;
+std::vector<RecycledImage> g_recycled;
+uint64_t                   g_recycled_serial = 0;
+
+bool ImageRecycleEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_IMAGE_RECYCLE");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+bool ImageRecyclable(const vk::ImageCreateInfo& info) {
+	return ImageRecycleEnabled() && info.pNext == nullptr &&
+	       info.tiling == vk::ImageTiling::eOptimal &&
+	       info.sharingMode == vk::SharingMode::eExclusive &&
+	       info.initialLayout == vk::ImageLayout::eUndefined;
+}
+} // namespace
+
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(allocator == nullptr || image.image != nullptr || image.allocation != nullptr);
+
+	image.recyclable = ImageRecyclable(image_info);
+	if (image.recyclable) {
+		std::scoped_lock lock {g_recycled_mutex};
+		const auto found = std::ranges::find_if(g_recycled, [&](const RecycledImage& r) {
+			return r.format == image_info.format && r.image_type == image_info.imageType &&
+			       r.extent == image_info.extent && r.layers == image_info.arrayLayers &&
+			       r.mip_levels == image_info.mipLevels &&
+			       r.samples == static_cast<uint32_t>(image_info.samples) &&
+			       r.usage == image_info.usage && r.flags == image_info.flags;
+		});
+		if (found != g_recycled.end()) {
+			image.image      = found->image;
+			image.allocation = found->allocation;
+			g_recycled.erase(found);
+			image.format     = image_info.format;
+			image.image_type = image_info.imageType;
+			image.extent     = image_info.extent;
+			image.layers     = image_info.arrayLayers;
+			image.mip_levels = image_info.mipLevels;
+			image.samples    = static_cast<uint32_t>(image_info.samples);
+			image.usage      = image_info.usage;
+			image.flags      = image_info.flags;
+			image.state      = {.layout = image_info.initialLayout};
+			image.subresource_states.clear();
+			return true;
+		}
+	}
 
 	VmaAllocationCreateInfo alloc_info {};
 	alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
@@ -345,7 +413,25 @@ void GraphicContext::DeleteImage(VulkanImage& image) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(allocator == nullptr || image.image == nullptr || image.allocation == nullptr);
 
-	vmaDestroyImage(allocator, image.image, image.allocation);
+	vk::Image     destroy_image      = image.image;
+	VmaAllocation destroy_allocation = image.allocation;
+	if (image.recyclable) {
+		std::scoped_lock lock {g_recycled_mutex};
+		g_recycled.push_back({image.image, image.allocation, image.format, image.image_type,
+		                      image.extent, image.layers, image.mip_levels, image.samples,
+		                      image.usage, image.flags, ++g_recycled_serial});
+		destroy_image      = nullptr;
+		destroy_allocation = nullptr;
+		if (g_recycled.size() > RecycledImagesMax) {
+			const auto oldest = std::ranges::min_element(g_recycled, {}, &RecycledImage::serial);
+			destroy_image      = oldest->image;
+			destroy_allocation = oldest->allocation;
+			g_recycled.erase(oldest);
+		}
+	}
+	if (destroy_image) {
+		vmaDestroyImage(allocator, destroy_image, destroy_allocation);
+	}
 	image.image      = nullptr;
 	image.allocation = nullptr;
 }

@@ -144,6 +144,8 @@ struct VulkanImage {
 	uint32_t                      layers      = 1;
 	uint32_t                      mip_levels  = 1;
 	uint32_t                      samples     = 1;
+	// Created with the plain parameters the image recycler keys on (see GraphicContext::DeleteImage).
+	bool                          recyclable  = false;
 	vk::ImageUsageFlags           usage       = {};
 	vk::ImageCreateFlags          flags       = {};
 	vk::Image                     image       = nullptr;
