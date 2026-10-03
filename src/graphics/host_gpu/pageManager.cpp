@@ -87,7 +87,78 @@ bool ProtectStatsEnabled() {
 
 thread_local PageManager::ProtectStats t_protect_stats;
 
+void ProtectNow(uint64_t vaddr, uint64_t size, Common::VirtualMemory::Mode mode) noexcept {
+	const bool stats = ProtectStatsEnabled();
+	const auto start = stats ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
+	const bool done  = Libs::LibKernel::Memory::ProtectGuestHostMemory(vaddr, size, mode);
+	if (stats) {
+		t_protect_stats.calls++;
+		t_protect_stats.ns += static_cast<uint64_t>(
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
+		        .count());
+	}
+	if (!done) {
+		Fatal("address-space protection failed at 0x%016" PRIx64 ", mode=0x%08" PRIx32, vaddr,
+		      static_cast<uint32_t>(mode));
+	}
+}
+
+// Deferred protection changes (see PageManager::DeferProtects), run in order. Every change of a
+// page's protection happens under its region's lock, and an immediate change first runs the
+// queued ones, so a page's changes take effect in the order they were made.
+struct DeferredProtect {
+	uint64_t                    vaddr;
+	uint64_t                    size;
+	Common::VirtualMemory::Mode mode;
+};
+std::mutex                   g_deferred_mutex;
+std::vector<DeferredProtect> g_deferred;
+std::atomic<uint64_t>        g_deferred_count {0};
+thread_local bool            t_defer_protects = false;
+thread_local uint64_t        t_deferred_pushes = 0;
+
+// Caller holds g_deferred_mutex.
+void RunDeferredLocked() noexcept {
+	for (const auto& item: g_deferred) {
+		ProtectNow(item.vaddr, item.size, item.mode);
+	}
+	g_deferred.clear();
+	g_deferred_count.store(0, std::memory_order_release);
+}
+
+// Caller holds g_deferred_mutex: runs, in order, the queued changes overlapping the range; the
+// others keep their place.
+void RunDeferredOverlappingLocked(uint64_t vaddr, uint64_t size) noexcept {
+	size_t kept = 0;
+	for (size_t i = 0; i < g_deferred.size(); i++) {
+		const auto& item = g_deferred[i];
+		if (item.vaddr < vaddr + size && vaddr < item.vaddr + item.size) {
+			ProtectNow(item.vaddr, item.size, item.mode);
+		} else {
+			g_deferred[kept++] = item;
+		}
+	}
+	g_deferred.resize(kept);
+	g_deferred_count.store(kept, std::memory_order_release);
+}
+
 } // namespace
+
+uint64_t PageManager::DeferredPushes() noexcept {
+	return t_deferred_pushes;
+}
+
+void PageManager::DeferProtects(bool defer) noexcept {
+	t_defer_protects = defer;
+}
+
+void PageManager::RunDeferredProtects() noexcept {
+	if (g_deferred_count.load(std::memory_order_acquire) == 0) {
+		return;
+	}
+	std::scoped_lock lock(g_deferred_mutex);
+	RunDeferredLocked();
+}
 
 PageManager::ProtectStats PageManager::TakeProtectStats() noexcept {
 	return std::exchange(t_protect_stats, {});
@@ -204,19 +275,18 @@ struct PageManager::Impl {
 	}
 
 	void Protect(uint64_t vaddr, uint64_t size, Common::VirtualMemory::Mode mode) noexcept {
-		const bool stats = ProtectStatsEnabled();
-		const auto start = stats ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {};
-		const bool done  = Libs::LibKernel::Memory::ProtectGuestHostMemory(vaddr, size, mode);
-		if (stats) {
-			t_protect_stats.calls++;
-			t_protect_stats.ns += static_cast<uint64_t>(
-			    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start)
-			        .count());
+		if (t_defer_protects) {
+			std::scoped_lock lock(g_deferred_mutex);
+			g_deferred.push_back({vaddr, size, mode});
+			g_deferred_count.fetch_add(1, std::memory_order_release);
+			t_deferred_pushes++;
+			return;
 		}
-		if (!done) {
-			Fatal("address-space protection failed at 0x%016" PRIx64 ", mode=0x%08" PRIx32, vaddr,
-			      static_cast<uint32_t>(mode));
+		if (g_deferred_count.load(std::memory_order_acquire) != 0) {
+			std::scoped_lock lock(g_deferred_mutex);
+			RunDeferredOverlappingLocked(vaddr, size);
 		}
+		ProtectNow(vaddr, size, mode);
 	}
 
 	template <bool track, bool is_read, bool masked>

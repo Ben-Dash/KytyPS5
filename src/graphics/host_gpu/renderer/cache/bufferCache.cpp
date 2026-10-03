@@ -719,6 +719,8 @@ void BufferCache::NoteBdaPass(uint64_t elapsed_ns) {
 	stats.window_start = now;
 }
 
+static bool DeferProtectsEnabled();
+
 bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size, bool is_written,
                                     bool is_texel_buffer) {
 	std::vector<vk::BufferCopy> copies;
@@ -728,6 +730,11 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 	const int      kind     = t_upload_source == UploadSource::Bda ? 0 : 1;
 	const uint64_t start    = stats_on ? SyncStats::Now() : 0;
 	uint64_t       copy_ns  = 0;
+	// A read-only upload leaves its write protections to the upload helper, which makes them
+	// before it copies the pages (see PageManager::DeferProtects).
+	const bool defer = !is_written && DeferProtectsEnabled() && m_staging_buffer.IsCoherent();
+	PageManager::DeferProtects(defer);
+	const auto pushes = defer ? PageManager::DeferredPushes() : 0;
 	m_memory_tracker.ForEachUploadRange(
 	    vaddr, size, is_written,
 	    [&](uint64_t address, uint64_t bytes) noexcept {
@@ -736,12 +743,14 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 	    },
 	    [&]() noexcept {
 		    const uint64_t copy_start = stats_on ? SyncStats::Now() : 0;
-		    source = UploadCopies(buffer, copies, total_size);
+		    source = UploadCopies(buffer, copies, total_size,
+		                          defer && PageManager::DeferredPushes() != pushes);
 		    if (stats_on) {
 			    copy_ns = SyncStats::Now() - copy_start;
 		    }
 	    },
 	    m_scheduler.Context().CurrentBdaEpoch());
+	PageManager::DeferProtects(false);
 	const uint64_t walked = stats_on ? SyncStats::Now() : 0;
 	if (stats_on) {
 		auto& stats = t_sync_stats;
@@ -847,6 +856,8 @@ struct AsyncUploads {
 				taken.swap(queue);
 				hint.store(false, std::memory_order_release);
 			}
+			// The protections of the pages first: a write landing before them is in the copy.
+			PageManager::RunDeferredProtects();
 			for (const auto& item: taken) {
 				if (!Libs::LibKernel::Memory::TryReadBacking(item.address, item.destination,
 				                                             item.size)) {
@@ -870,6 +881,15 @@ struct AsyncUploads {
 };
 AsyncUploads g_async_uploads;
 } // namespace
+
+// KYTY_DEFER_PROTECTS=0 protects pages on the GPU thread as before.
+static bool DeferProtectsEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_DEFER_PROTECTS");
+		return (text == nullptr || std::strcmp(text, "0") != 0) && AsyncUploads::Enabled();
+	}();
+	return enabled;
+}
 
 void JoinAsyncUploads() noexcept {
 	g_async_uploads.Join();
@@ -963,17 +983,21 @@ static void DebugHostImportTest(GraphicContext& graphics, uint64_t address) {
 }
 
 vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
-                                     uint64_t total_size) {
+                                     uint64_t total_size, bool deferred) {
 	DebugHostImportTest(m_graphics, buffer.CpuAddress());
 	if (copies.empty()) {
+		if (deferred) {
+			// No copy will run them: a queued protection must not wait for some later upload.
+			PageManager::RunDeferredProtects();
+		}
 		return nullptr;
 	}
 	RecordUpload(t_upload_source, buffer.CpuAddress() + copies.front().dstOffset, total_size);
 
 	auto [mapped, base_offset] = m_staging_buffer.Map(total_size, 4);
 	constexpr uint64_t AsyncUploadMinimum = 64 * 1024;
-	if (mapped != nullptr && total_size >= AsyncUploadMinimum && m_staging_buffer.IsCoherent() &&
-	    AsyncUploads::Enabled()) {
+	if (mapped != nullptr && (total_size >= AsyncUploadMinimum || deferred) &&
+	    m_staging_buffer.IsCoherent() && AsyncUploads::Enabled()) {
 		thread_local std::vector<AsyncUploads::Item> items;
 		items.clear();
 		for (auto& copy: copies) {
@@ -983,6 +1007,9 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 		g_async_uploads.Push(items);
 		m_staging_buffer.Commit();
 		return m_staging_buffer.Handle();
+	}
+	if (deferred) {
+		PageManager::RunDeferredProtects();
 	}
 	if (mapped != nullptr) {
 		// Copying on several threads measured no faster (A/B 2026-09-28): the staging memory's

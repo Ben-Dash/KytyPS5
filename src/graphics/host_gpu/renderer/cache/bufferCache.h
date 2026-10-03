@@ -159,8 +159,9 @@ private:
 	void DeleteBuffer(BufferId id);
 	[[nodiscard]] bool SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size,
 	                                     bool is_written, bool is_texel_buffer);
+	// deferred: the pages' protections are queued (PageManager::DeferProtects).
 	[[nodiscard]] vk::Buffer UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
-	                                      uint64_t total_size);
+	                                      uint64_t total_size, bool deferred = false);
 	[[nodiscard]] bool SynchronizeBufferFromImage(Buffer& buffer, uint64_t vaddr, uint64_t size);
 	// Records downloads of the range's unarmed GPU-dirty pages, arms them, and queues their
 	// publication, which finalizes them. Returns false when there was nothing to arm.
