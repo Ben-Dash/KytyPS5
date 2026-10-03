@@ -55,9 +55,12 @@ public:
 		return is_allocated(id) ? &*m_values[id.index].value : nullptr;
 	}
 
+	// Answered from a small array of its own: the generation used to sit behind the value, so each
+	// check of a large resource (an image) touched a cache line nothing else on the path reads
+	// (the hottest single line of the GPU thread in ASTRO BOT's Sky Garden, about 5%).
 	[[nodiscard]] bool is_allocated(SlotId id) const noexcept {
-		return id && id.index < m_values.size() &&
-		       m_values[id.index].generation == id.generation && m_values[id.index].value.has_value();
+		return id && id.index < m_states.size() &&
+		       m_states[id.index] == ((uint64_t {id.generation} << 1u) | 1u);
 	}
 
 	template <typename... Args>
@@ -67,23 +70,30 @@ public:
 			index = static_cast<uint32_t>(m_values.size());
 			m_values.emplace_back();
 			m_values.back().value.emplace(std::forward<Args>(args)...);
+			if (m_states.capacity() == 0) {
+				m_states.reserve(1u << 16u);
+			}
+			m_states.push_back(uint64_t {1} << 1u);
 		} else {
 			index = m_free_list.back();
 			m_free_list.pop_back();
 			EXIT_IF(m_values[index].value.has_value());
 			m_values[index].value.emplace(std::forward<Args>(args)...);
 		}
+		m_states[index] |= 1u;
 		++m_size;
-		return SlotId {index, m_values[index].generation};
+		return SlotId {index, static_cast<uint32_t>(m_states[index] >> 1u)};
 	}
 
 	void erase(SlotId id) noexcept {
 		EXIT_IF(!is_allocated(id));
 		auto& slot = m_values[id.index];
 		slot.value.reset();
-		if (++slot.generation == 0) {
-			slot.generation = 1;
+		uint32_t generation = id.generation + 1u;
+		if (generation == 0) {
+			generation = 1;
 		}
+		m_states[id.index] = uint64_t {generation} << 1u;
 		m_free_list.push_back(id.index);
 		--m_size;
 	}
@@ -95,7 +105,7 @@ public:
 	void ForEach(F&& fn) {
 		for (uint32_t index = 0; index < m_values.size(); ++index) {
 			if (m_values[index].value) {
-				fn(SlotId {index, m_values[index].generation}, *m_values[index].value);
+				fn(SlotId {index, static_cast<uint32_t>(m_states[index] >> 1u)}, *m_values[index].value);
 			}
 		}
 	}
@@ -104,7 +114,7 @@ public:
 	void ForEach(F&& fn) const {
 		for (uint32_t index = 0; index < m_values.size(); ++index) {
 			if (m_values[index].value) {
-				fn(SlotId {index, m_values[index].generation}, *m_values[index].value);
+				fn(SlotId {index, static_cast<uint32_t>(m_states[index] >> 1u)}, *m_values[index].value);
 			}
 		}
 	}
@@ -112,10 +122,11 @@ public:
 private:
 	struct Slot {
 		std::optional<T> value;
-		uint32_t         generation = 1;
 	};
 
 	std::deque<Slot>             m_values;
+	// Per slot: its generation << 1 | allocated.
+	std::vector<uint64_t>        m_states;
 	std::vector<uint32_t>        m_free_list;
 	size_t                       m_size = 0;
 };
