@@ -952,6 +952,93 @@ void PrintUploadStats(double seconds) {
 
 } // namespace
 
+namespace {
+struct StampTrace {
+	std::vector<uint64_t>                  surfaces;
+	std::vector<std::pair<char, uint32_t>> events; // Event and surface index.
+	std::string                            last_shape;
+	uint64_t                               frame = 0;
+};
+StampTrace& GetStampTrace() {
+	static StampTrace trace;
+	return trace;
+}
+int StampSurface(uint64_t address, bool add) {
+	auto& surfaces = GetStampTrace().surfaces;
+	for (size_t i = 0; i < surfaces.size(); i++) {
+		if (surfaces[i] == address) {
+			return static_cast<int>(i);
+		}
+	}
+	if (!add || address == 0 || surfaces.size() >= 9) {
+		return -1;
+	}
+	surfaces.push_back(address);
+	std::printf("stamp-trace: surface %zu = 0x%016" PRIx64 "\n", surfaces.size() - 1, address);
+	return static_cast<int>(surfaces.size() - 1);
+}
+} // namespace
+
+bool StampTraceEnabled() noexcept {
+	static const bool enabled = std::getenv("KYTY_DEBUG_STAMP_TRACE") != nullptr;
+	return enabled;
+}
+
+void StampTraceDraw(uint64_t pixel_hash, uint64_t target_address) noexcept {
+	const bool stamp = pixel_hash == 0x63722404bb8c7b26ull;
+	const int  index = StampSurface(target_address, stamp);
+	if (index >= 0) {
+		GetStampTrace().events.emplace_back(stamp ? 'D' : 'O', static_cast<uint32_t>(index));
+	}
+}
+
+void StampTraceEvent(char event, uint64_t address) noexcept {
+	if (const int index = StampSurface(address, false); index >= 0) {
+		GetStampTrace().events.emplace_back(event, static_cast<uint32_t>(index));
+	}
+}
+
+void StampTraceDispatch(uint64_t compute_hash) noexcept {
+	if (compute_hash == 0xfb948a435a4e295eull) {
+		GetStampTrace().events.emplace_back('S', 0u);
+	}
+}
+
+void StampTraceFrame() noexcept {
+	auto& trace = GetStampTrace();
+	trace.frame++;
+	std::string shape;
+	std::string text;
+	for (size_t i = 0; i < trace.events.size();) {
+		size_t run = 1;
+		while (i + run < trace.events.size() && trace.events[i + run] == trace.events[i]) {
+			run++;
+		}
+		const auto [event, surface] = trace.events[i];
+		shape += event;
+		text += event;
+		if (event != 'S') {
+			shape += static_cast<char>('0' + surface);
+			text += static_cast<char>('0' + surface);
+		}
+		if (run > 1) {
+			text += "x" + std::to_string(run);
+		}
+		text += ' ';
+		i += run;
+	}
+	trace.events.clear();
+	if (shape != trace.last_shape) {
+		std::printf("stamp-trace: frame=%" PRIu64 " t=%.2f : %s\n", trace.frame,
+		            std::chrono::duration<double>(
+		                std::chrono::steady_clock::now().time_since_epoch())
+		                .count(),
+		            text.empty() ? "-" : text.c_str());
+		std::fflush(stdout);
+		trace.last_shape = shape;
+	}
+}
+
 bool UploadStatsEnabled() noexcept {
 	static const bool enabled =
 	    DrawPhaseTimer::Hash() != 0 && std::getenv("KYTY_DEBUG_UPLOADS") != nullptr;

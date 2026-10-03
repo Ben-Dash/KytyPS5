@@ -216,6 +216,17 @@ struct Pm4OpTimer {
 };
 inline thread_local Pm4OpTimer g_pm4_ops;
 
+// KYTY_DEBUG_STAMP_TRACE=1: follows ASTRO BOT's interaction stamp surfaces (the targets of pixel
+// shader 63722404bb8c7b26) through each frame: C = fast clear written, G = the same on the GPU,
+// E = eliminate, D = stamp draw, O = another draw into the surface, S = the simulation's dispatch
+// (fb948a435a4e295e). A digit names the surface. A frame's sequence is printed when its shape
+// differs from the previous frame's. GPU thread only.
+[[nodiscard]] bool StampTraceEnabled() noexcept;
+void               StampTraceDraw(uint64_t pixel_hash, uint64_t target_address) noexcept;
+void               StampTraceEvent(char event, uint64_t address) noexcept;
+void               StampTraceDispatch(uint64_t compute_hash) noexcept;
+void               StampTraceFrame() noexcept;
+
 // KYTY_DEBUG_UPLOADS=1 (with KYTY_DEBUG_DRAW_PHASES): guest memory copied for the GPU, counted
 // per source and printed after each draw-phases line with the images and 4 MiB regions copied
 // most. A copy counts under its thread's innermost UploadSourceScope.

@@ -1476,6 +1476,9 @@ TextureCache::MaterializeColorClearNow(ImageId id, const ImageDesc& desc,
 		bool no_op = false;
 		if (MaterializeDccClearOnGpu(id, desc, range.address + slice_size * first, slice_size,
 		                             image_first, count, &no_op)) {
+			if (StampTraceEnabled()) [[unlikely]] {
+				StampTraceEvent(no_op ? 'g' : 'G', desc.info.data.address);
+			}
 			return no_op ? ColorClearOutcome::GpuChecked : ColorClearOutcome::Other;
 		}
 	}
@@ -1528,6 +1531,9 @@ TextureCache::MaterializeColorClearNow(ImageId id, const ImageDesc& desc,
 			ClearImage(m_scheduler.Current(), id, view.format,
 			           {vk::ImageAspectFlagBits::eColor, view.base_level, view.level_count,
 			            image_first + slice, 1}, clear);
+		}
+		if (StampTraceEnabled()) [[unlikely]] {
+			StampTraceEvent('C', desc.info.data.address);
 		}
 		cleared_slices++;
 		// Native expanded keys own consumption. Existing buffer tracking publishes this CPU

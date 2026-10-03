@@ -1064,6 +1064,9 @@ bool RenderExecutor::ConsumeMetadataColorOperation(CommandBuffer& buffer,
 		    rt.attrib.num_samples == 0 && rt.attrib.num_fragments == 0) {
 			RenderColorInfo target {};
 			ResolveRenderColorTarget(buffer, target, render_target_slice_offset, slot, true, false);
+			if (StampTraceEnabled() && target.image_id) [[unlikely]] {
+				StampTraceEvent('E', target.desc.info.data.address);
+			}
 		}
 	}
 	return true;
@@ -2401,6 +2404,12 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 			ResetBindings();
 			return;
 		}
+		if (StampTraceEnabled()) [[unlikely]] {
+			for (uint32_t i = 0; i < state.color_count; i++) {
+				StampTraceDraw(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0,
+				               state.color_info[i].desc.info.data.address);
+			}
+		}
 
 		LogDrawStateIfNeeded(buffer, draw, state, args.index_type_and_size,
 		                     args.index_addr);
@@ -2506,6 +2515,12 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 			g_pm4_ops.outcome = Pm4OpTimer::NotPrepared;
 			ResetBindings();
 			return;
+		}
+		if (StampTraceEnabled()) [[unlikely]] {
+			for (uint32_t i = 0; i < state.color_count; i++) {
+				StampTraceDraw(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0,
+				               state.color_info[i].desc.info.data.address);
+			}
 		}
 
 		const bool rect_list = Prospero::IsRectList(ucfg.GetPrimType());

@@ -499,6 +499,9 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	{
 		const std::array groups {thread_group_x, thread_group_y, thread_group_z};
 		DebugCheckBvh(program, resources, groups.data());
+		if (StampTraceEnabled()) [[unlikely]] {
+			StampTraceDispatch(program.shader_hash);
+		}
 	}
 	if (resources.specialization_reads.empty() &&
 	    (TryConsumeComputeMetaClear(input_info, buffer) ||
@@ -697,6 +700,9 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		std::array<uint32_t, 3> groups {};
 		LibKernel::Memory::TryReadBacking(args_addr, groups.data(), sizeof(groups));
 		DebugCheckBvh(program, *input_info.stage.resources, groups.data());
+		if (StampTraceEnabled()) [[unlikely]] {
+			StampTraceDispatch(program.shader_hash);
+		}
 	}
 	if (program.info.uses_dma) {
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
