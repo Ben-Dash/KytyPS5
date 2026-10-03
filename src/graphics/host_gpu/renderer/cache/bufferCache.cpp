@@ -18,6 +18,11 @@
 #include "kernel/memory.h"
 
 #include <algorithm>
+#include <condition_variable>
+#include <cstring>
+#include <immintrin.h>
+#include <mutex>
+#include <thread>
 #include <atomic>
 #include <bit>
 #include <cinttypes>
@@ -653,6 +658,90 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 	return false;
 }
 
+// Large uploads (the BDA synchronization copies about 600 MiB a second in ASTRO BOT's Sky Garden,
+// a few hundred KiB at a time) are copied into the staging buffer by a helper thread while the GPU
+// thread goes on recording; CommandScheduler::Submit waits for them (JoinAsyncUploads) before the
+// commands that read the staging memory reach the GPU. The helper reads the backing, which cannot
+// fault. KYTY_ASYNC_UPLOADS=0 copies on the GPU thread as before.
+namespace {
+struct AsyncUploads {
+	struct Item {
+		uint64_t address;
+		uint8_t* destination;
+		uint64_t size;
+	};
+	std::mutex              mutex;
+	std::condition_variable wake;
+	std::vector<Item>       queue;
+	std::atomic<uint64_t>   pending {0};
+	std::atomic<bool>       hint {false};
+	std::thread             thread;
+	bool                    started = false;
+
+	static bool Enabled() {
+		static const bool enabled = [] {
+			const char* text = std::getenv("KYTY_ASYNC_UPLOADS");
+			return text == nullptr || std::strcmp(text, "0") != 0;
+		}();
+		return enabled;
+	}
+
+	void Push(std::span<const Item> items) {
+		pending.fetch_add(items.size(), std::memory_order_acq_rel);
+		{
+			std::scoped_lock lock {mutex};
+			queue.insert(queue.end(), items.begin(), items.end());
+			if (!started) {
+				started = true;
+				thread  = std::thread([this] { Run(); });
+				thread.detach();
+			}
+		}
+		hint.store(true, std::memory_order_release);
+		wake.notify_one();
+	}
+
+	void Run() {
+		std::vector<Item> taken;
+		for (;;) {
+			// Spin briefly for the next upload: they come in bursts, a few per synchronization.
+			for (uint32_t i = 0; i < 20000 && !hint.load(std::memory_order_acquire); i++) {
+				_mm_pause();
+			}
+			{
+				std::unique_lock lock {mutex};
+				wake.wait(lock, [this] { return !queue.empty(); });
+				taken.swap(queue);
+				hint.store(false, std::memory_order_release);
+			}
+			for (const auto& item: taken) {
+				if (!Libs::LibKernel::Memory::TryReadBacking(item.address, item.destination,
+				                                             item.size)) {
+					std::memcpy(item.destination, reinterpret_cast<const void*>(item.address),
+					            item.size);
+				}
+				pending.fetch_sub(1, std::memory_order_acq_rel);
+			}
+			taken.clear();
+		}
+	}
+
+	void Join() noexcept {
+		for (uint32_t i = 1; pending.load(std::memory_order_acquire) != 0; i++) {
+			_mm_pause();
+			if (i % 4096 == 0) {
+				std::this_thread::yield();
+			}
+		}
+	}
+};
+AsyncUploads g_async_uploads;
+} // namespace
+
+void JoinAsyncUploads() noexcept {
+	g_async_uploads.Join();
+}
+
 vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
                                      uint64_t total_size) {
 	if (copies.empty()) {
@@ -661,6 +750,19 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 	RecordUpload(t_upload_source, buffer.CpuAddress() + copies.front().dstOffset, total_size);
 
 	auto [mapped, base_offset] = m_staging_buffer.Map(total_size, 4);
+	constexpr uint64_t AsyncUploadMinimum = 64 * 1024;
+	if (mapped != nullptr && total_size >= AsyncUploadMinimum && m_staging_buffer.IsCoherent() &&
+	    AsyncUploads::Enabled()) {
+		thread_local std::vector<AsyncUploads::Item> items;
+		items.clear();
+		for (auto& copy: copies) {
+			items.push_back({buffer.CpuAddress() + copy.dstOffset, mapped + copy.srcOffset, copy.size});
+			copy.srcOffset += base_offset;
+		}
+		g_async_uploads.Push(items);
+		m_staging_buffer.Commit();
+		return m_staging_buffer.Handle();
+	}
 	if (mapped != nullptr) {
 		// Copying on several threads measured no faster (A/B 2026-09-28): the staging memory's
 		// write bandwidth, not one thread's latency, bounds it.

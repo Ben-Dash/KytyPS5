@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 
+#include "graphics/host_gpu/renderer/cache/bufferCache.h"
 #include "graphics/host_gpu/renderer/threadSampler.h"
 
 #include "common/assert.h"
@@ -563,6 +564,7 @@ void CommandScheduler::ReadTimestamps(uint32_t slot) {
 }
 
 uint64_t CommandScheduler::Submit(SubmitInfo submit) {
+	JoinAsyncUploads();
 	EXIT_IF(m_command.IsInvalid());
 	EXIT_IF(submit.num_wait_semaphores > SubmitInfo::MaxSemaphores ||
 	        submit.num_signal_semaphores >= SubmitInfo::MaxSemaphores);

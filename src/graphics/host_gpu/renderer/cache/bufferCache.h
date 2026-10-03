@@ -22,6 +22,10 @@
 
 namespace Libs::Graphics {
 
+// Waits until the uploads handed to the helper thread are in the staging buffer (see
+// BufferCache::UploadCopies). Called before recorded commands are submitted to the GPU.
+void JoinAsyncUploads() noexcept;
+
 struct GraphicContext;
 class CommandScheduler;
 class TextureCache;
