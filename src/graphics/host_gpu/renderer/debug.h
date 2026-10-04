@@ -48,7 +48,7 @@ inline RenderDebugCounters g_render_debug_counters;
 // null texture binding keeping its image and view while its descriptor repeats), imagebuf (a
 // repeatedly re-uploaded CPU-written image range held in a buffer, copying only written pages),
 // suballoc (game buffers up to 64 MiB sharing VMA's memory blocks rather than taking dedicated
-// memory).
+// memory), bindplan (descriptor payloads filled from a per-program binding plan).
 [[nodiscard]] bool AbSelected(const char* feature) noexcept;
 // KYTY_DEBUG_FULL_BARRIERS=1: every draw and dispatch waits for all earlier GPU work and sees all
 // its memory writes (RecordFullBarrier). Slow; it tells synchronization bugs (a result that changes)
