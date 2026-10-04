@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -36,9 +37,16 @@ namespace Libs::Graphics {
 // ask the driver for the memory budget (a kernel call) every few uploads: on Astro Bot's Sky
 // Garden, whose render targets written through buffers are re-uploaded several times a frame,
 // that was about 1% of the render thread. Buffers the GPU is done with wait here for reuse.
+// At 4K (a 3840x2160 RGBA16F target is 64 MiB) 256 MiB of idle buffers no longer held a frame's
+// set, and freeing and recreating them cost about 3% of the render thread in Sky Garden.
+// KYTY_SCRATCH_IDLE_MB sets the limit (default 1024).
 struct TileManager::ScratchPool {
-	static constexpr uint64_t Granularity  = 64ull * 1024;
-	static constexpr uint64_t MaxIdleBytes = 256ull * 1024 * 1024;
+	static constexpr uint64_t Granularity = 64ull * 1024;
+	const uint64_t            MaxIdleBytes = [] {
+		const char* text = std::getenv("KYTY_SCRATCH_IDLE_MB");
+		const auto  mb   = text != nullptr ? std::strtoull(text, nullptr, 10) : 1024ull;
+		return mb * 1024 * 1024;
+	}();
 
 	explicit ScratchPool(VmaAllocator allocator): allocator(allocator) {}
 	~ScratchPool() {

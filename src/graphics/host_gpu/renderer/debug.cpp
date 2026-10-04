@@ -1148,6 +1148,84 @@ void RecordImageChunks(uint64_t address, uint64_t size) noexcept {
 	previous.hashes = std::move(hashes);
 }
 
+bool BindStatsEnabled() noexcept {
+	static const bool enabled =
+	    DrawPhaseTimer::Hash() != 0 && std::getenv("KYTY_DEBUG_BIND_STATS") != nullptr;
+	return enabled;
+}
+
+// The image-groups and depth-only lines (see BindStats), per second or as shares.
+static void PrintBindStats(double seconds, double to_us) {
+	auto&          stats = g_bind_stats;
+	const auto     share = [](uint64_t part, uint64_t whole) {
+		return whole != 0 ? 100.0 * static_cast<double>(part) / static_cast<double>(whole) : 0.0;
+	};
+	static constexpr std::array<const char*, BindStats::GroupOutcomeCount> GroupNames {
+	    "no-images", "kept",    "disabled", "not-recorded", "other-program", "other-images",
+	    "image-set", "tick",    "gc-tick",  "other-image",  "dirty",         "color-clear"};
+	static constexpr std::array<const char*, BindStats::RefusalCount> RefusalNames {
+	    "none", "type", "lookup", "view", "dynamic-mip"};
+	uint64_t stages = 0;
+	for (const auto count: stats.group) {
+		stages += count;
+	}
+	const auto with_images = stages - stats.group[BindStats::NoImages];
+	std::string line = fmt::format("image-groups: stages/s={:.0f} with-images/s={:.0f} |",
+	                               stages / seconds, with_images / seconds);
+	for (uint32_t i = 0; i < BindStats::GroupOutcomeCount; i++) {
+		line += fmt::format(" {}%={:.1f}", GroupNames[i],
+		                    share(stats.group[i], i == BindStats::NoImages ? stages : with_images));
+	}
+	line += fmt::format(" kept-lost%={:.1f} | refused%:", share(stats.kept_lost,
+	                                                            stats.group[BindStats::Kept]));
+	uint64_t refused = 0;
+	for (const auto count: stats.refused) {
+		refused += count;
+	}
+	for (uint32_t i = 1; i < BindStats::RefusalCount; i++) {
+		line += fmt::format(" {}={:.1f}", RefusalNames[i], share(stats.refused[i], refused));
+	}
+	const auto per = [&](uint64_t ticks, uint64_t count) {
+		return count != 0 ? static_cast<double>(ticks) * to_us / static_cast<double>(count) : 0.0;
+	};
+	line += fmt::format(" | us/stage prepare kept={:.3f} other={:.3f} rebind kept={:.3f} other={:.3f}",
+	                    per(stats.prepare_ticks[0], stats.prepare_count[0]),
+	                    per(stats.prepare_ticks[1], stats.prepare_count[1]),
+	                    per(stats.rebind_ticks[0], stats.rebind_count[0]),
+	                    per(stats.rebind_ticks[1], stats.rebind_count[1]));
+	std::printf("%s\n", line.c_str());
+	uint64_t breaks = 0;
+	for (const auto count: stats.run_breaks) {
+		breaks += count;
+	}
+	std::string depth = fmt::format(
+	    "depth-only: draws/s={:.0f} depth%={:.1f} | of depth: no-ps%={:.1f} ps-images%={:.1f} "
+	    "vs-images%={:.1f} | run draws% 1={:.1f} 2-3={:.1f} 4-7={:.1f} 8-15={:.1f} 16-63={:.1f} "
+	    "64+={:.1f} | breaks% pipeline={:.1f} vs={:.1f} target={:.1f} color-draw={:.1f}",
+	    stats.draws / seconds, share(stats.depth_draws, stats.draws),
+	    share(stats.depth_no_ps, stats.depth_draws), share(stats.depth_ps_images, stats.depth_draws),
+	    share(stats.depth_vs_images, stats.depth_draws), share(stats.run_draws[0], stats.depth_draws),
+	    share(stats.run_draws[1], stats.depth_draws), share(stats.run_draws[2], stats.depth_draws),
+	    share(stats.run_draws[3], stats.depth_draws), share(stats.run_draws[4], stats.depth_draws),
+	    share(stats.run_draws[5], stats.depth_draws), share(stats.run_breaks[0], breaks),
+	    share(stats.run_breaks[1], breaks), share(stats.run_breaks[2], breaks),
+	    share(stats.run_breaks[3], breaks));
+	std::printf("%s\n", depth.c_str());
+	std::printf("set-repeats: set0 payloads/s=%.0f repeat%%=%.1f set1 payloads/s=%.0f repeat%%=%.1f\n",
+	            stats.set_payloads[0] / seconds, share(stats.set_repeats[0], stats.set_payloads[0]),
+	            stats.set_payloads[1] / seconds, share(stats.set_repeats[1], stats.set_payloads[1]));
+	// Keep the open run.
+	const auto run_length   = stats.run_length;
+	const auto run_pipeline = stats.run_pipeline;
+	const auto run_program  = stats.run_program;
+	const auto run_target   = stats.run_target;
+	stats                   = {};
+	stats.run_length        = run_length;
+	stats.run_pipeline      = run_pipeline;
+	stats.run_program       = run_program;
+	stats.run_target        = run_target;
+}
+
 void DrawPhaseTimer::End(uint64_t pixel_hash) {
 	if (!active) {
 		return;
@@ -1161,7 +1239,8 @@ void DrawPhaseTimer::End(uint64_t pixel_hash) {
 	static constexpr std::array<const char*, ProbeCount> ProbeNames {
 	    "rt-image", "tex-image", "tex-describe", "buf-written", "buf-read", "buf-invalidate",
 	    "upload",   "find-finish", "stream-copy", "pending-ops", "bda",       "spec-reads",
-	    "refresh",  "prog-match",  "inputs-check", "upload-copy"};
+	    "refresh",  "prog-match",  "inputs-check", "upload-copy", "commit-scan", "commit-transit",
+	    "commit-writes", "commit-payload"};
 	static std::array<uint64_t, Count>      totals {};
 	static std::array<uint64_t, ProbeCount> probe_totals {};
 	static uint64_t draws        = 0;
@@ -1179,6 +1258,10 @@ void DrawPhaseTimer::End(uint64_t pixel_hash) {
 	// DRAW_INDEX_AUTO draws, also on their own (see Begin).
 	static std::array<uint64_t, Count> auto_totals {};
 	static uint64_t                    auto_draws = 0;
+	// Depth-only draws (see SetDepthOnly), also on their own.
+	static std::array<uint64_t, Count>      depth_totals {};
+	static std::array<uint64_t, ProbeCount> depth_probes {};
+	static uint64_t                         depth_draws = 0;
 	if (pixel_hash == Hash() || Hash() == AllDraws) {
 		for (uint32_t i = 0; i < Count; i++) {
 			totals[i] += current[i];
@@ -1192,6 +1275,15 @@ void DrawPhaseTimer::End(uint64_t pixel_hash) {
 				auto_totals[i] += current[i];
 			}
 			auto_draws++;
+		}
+		if (depth_kind) {
+			for (uint32_t i = 0; i < Count; i++) {
+				depth_totals[i] += current[i];
+			}
+			for (uint32_t i = 0; i < ProbeCount; i++) {
+				depth_probes[i] += probes[i];
+			}
+			depth_draws++;
 		}
 	} else {
 		other_draws++;
@@ -1268,6 +1360,29 @@ void DrawPhaseTimer::End(uint64_t pixel_hash) {
 		std::printf("%s\n", auto_line.c_str());
 		auto_totals.fill(0);
 		auto_draws = 0;
+	}
+	if (depth_draws != 0) {
+		uint64_t depth_all = 0;
+		for (const auto ticks: depth_totals) {
+			depth_all += ticks;
+		}
+		std::string depth_line = fmt::format("draw-phases depth: draws/s={:.0f} us/draw={:.2f} |",
+		                                     depth_draws / seconds, depth_all * to_us / depth_draws);
+		for (uint32_t i = 0; i < Count; i++) {
+			depth_line += fmt::format(" {}={:.2f}", Names[i], depth_totals[i] * to_us / depth_draws);
+		}
+		depth_line += " | probes:";
+		for (uint32_t i = 0; i < ProbeCount; i++) {
+			depth_line +=
+			    fmt::format(" {}={:.2f}", ProbeNames[i], depth_probes[i] * to_us / depth_draws);
+		}
+		std::printf("%s\n", depth_line.c_str());
+		depth_totals.fill(0);
+		depth_probes.fill(0);
+		depth_draws = 0;
+	}
+	if (BindStatsEnabled()) {
+		PrintBindStats(seconds, to_us);
 	}
 	if (UploadStatsEnabled()) {
 		PrintUploadStats(seconds);
