@@ -70,6 +70,7 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 	vk::BufferCreateInfo buffer_info {};
 	buffer_info.size        = size;
 	buffer_info.usage       = flags;
+	graphics.ShareBuffer(buffer_info);
 
 	// Game buffers (the ones with device addresses) took dedicated memory, a kernel allocation
 	// each: ~0.3 ms per buffer, and Sky Garden creates ~35 a second. Up to SharedMax they share

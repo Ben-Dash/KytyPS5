@@ -25,6 +25,7 @@
 #include "loader/systemContent.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -403,6 +404,45 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	queue_create_info.queueCount       = 1;
 	queue_create_info.pQueuePriorities = &queue_priority;
 
+	// KYTY_READBACK_QUEUE=1: a second queue for guest readbacks (ReadbackQueue), preferably of a
+	// transfer-only family (the copy engine).
+	std::array<vk::DeviceQueueCreateInfo, 2> queue_create_infos {queue_create_info, {}};
+	uint32_t                                 queue_create_count = 1;
+	if (const char* readback = std::getenv("KYTY_READBACK_QUEUE");
+	    readback != nullptr && readback[0] != '0') {
+		uint32_t family_count = 0;
+		physical_device.getQueueFamilyProperties(&family_count, nullptr);
+		std::vector<vk::QueueFamilyProperties> families(family_count);
+		physical_device.getQueueFamilyProperties(&family_count, families.data());
+		uint32_t best = static_cast<uint32_t>(-1);
+		for (uint32_t family = 0; family < family_count; family++) {
+			const auto flags = families[family].queueFlags;
+			if (family == queue_family || families[family].queueCount == 0 ||
+			    !(flags & vk::QueueFlagBits::eTransfer)) {
+				continue;
+			}
+			const bool transfer_only =
+			    !(flags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute));
+			if (best == static_cast<uint32_t>(-1) || transfer_only) {
+				best = family;
+			}
+			if (transfer_only) {
+				break;
+			}
+		}
+		if (best != static_cast<uint32_t>(-1)) {
+			graphics.readback_family                = best;
+			queue_create_infos[1].queueFamilyIndex  = best;
+			queue_create_infos[1].queueCount        = 1;
+			queue_create_infos[1].pQueuePriorities  = &queue_priority;
+			queue_create_count                      = 2;
+			std::printf("readback queue: family %u (%s)\n", best,
+			            vk::to_string(families[best].queueFlags).c_str());
+		} else {
+			std::printf("readback queue: no second family with transfer support\n");
+		}
+	}
+
 	vk::PhysicalDeviceColorWriteEnableFeaturesEXT color_write_ext {};
 	color_write_ext.colorWriteEnable = VK_TRUE;
 
@@ -706,8 +746,8 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		executable_properties.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext           = &executable_properties;
 	}
-	create_info.pQueueCreateInfos       = &queue_create_info;
-	create_info.queueCreateInfoCount    = 1;
+	create_info.pQueueCreateInfos       = queue_create_infos.data();
+	create_info.queueCreateInfoCount    = queue_create_count;
 	create_info.enabledExtensionCount   = static_cast<uint32_t>(device_extensions.size());
 	create_info.ppEnabledExtensionNames = device_extensions.data();
 	create_info.pEnabledFeatures        = &device_features;
@@ -1122,6 +1162,11 @@ void WindowContext::CreateVulkan() {
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.device);
 	graphic_ctx.device.getQueue(graphic_ctx.queue_family, 0, &graphic_ctx.queue);
 	EXIT_IF(graphic_ctx.queue == nullptr);
+	if (graphic_ctx.readback_family != static_cast<uint32_t>(-1)) {
+		graphic_ctx.device.getQueue(graphic_ctx.readback_family, 0, &graphic_ctx.readback_queue);
+		EXIT_IF(graphic_ctx.readback_queue == nullptr);
+		graphic_ctx.shared_queue_families = {graphic_ctx.queue_family, graphic_ctx.readback_family};
+	}
 
 	if (!graphic_ctx.CreateAllocator()) {
 		EXIT("Could not create Vulkan memory allocator");

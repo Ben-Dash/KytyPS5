@@ -6,6 +6,7 @@
 #include "common/threads.h"
 #include "graphics/host_gpu/vulkanCommon.h" // IWYU pragma: export
 
+#include <array>
 #include <map>
 #include <mutex>
 #include <tuple>
@@ -58,6 +59,19 @@ struct GraphicContext {
 	Common::Mutex                      queue_mutex;
 	uint32_t                           queue_family = static_cast<uint32_t>(-1);
 	vk::Queue                          queue        = nullptr;
+	// KYTY_READBACK_QUEUE=1: a transfer queue of another family for guest readbacks (see
+	// ReadbackQueue). Buffers are then shared by both families (shared_queue_families).
+	uint32_t                           readback_family = static_cast<uint32_t>(-1);
+	vk::Queue                          readback_queue  = nullptr;
+	std::array<uint32_t, 2>            shared_queue_families {};
+	// Makes a buffer usable on both queues when the readback queue exists.
+	void ShareBuffer(vk::BufferCreateInfo& info) const noexcept {
+		if (readback_queue != nullptr) {
+			info.sharingMode           = vk::SharingMode::eConcurrent;
+			info.queueFamilyIndexCount = 2;
+			info.pQueueFamilyIndices   = shared_queue_families.data();
+		}
+	}
 
 	[[nodiscard]] const vk::PhysicalDeviceProperties& GetPhysicalDeviceProperties() const {
 		return physical_device_properties;

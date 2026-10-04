@@ -22,6 +22,8 @@
 
 namespace Libs::Graphics {
 
+class ReadbackQueue;
+
 // Waits until the uploads handed to the helper thread are in the staging buffer (see
 // BufferCache::UploadCopies). Called before recorded commands are submitted to the GPU.
 void JoinAsyncUploads() noexcept;
@@ -171,6 +173,24 @@ private:
 	// Other threads: publish GPU-dirty pages without draining Thread_Gpu.
 	void ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write);
 	void MarkReadbackHot(uint64_t vaddr);
+	// GPU writes that may still be in flight (KYTY_DEBUG_READBACK_AGE): NoteGpuWrite logs a
+	// written range; Thread_Gpu, between commands, InflightWriteTick returns the latest tick of a
+	// possibly unfinished write overlapping [begin, end) (0: none). Writes get their tick at the
+	// next point between commands, so one is never dated earlier than its command buffer.
+	// KYTY_READBACK_QUEUE=1 (ReadbackQueue). Thread_Gpu, for a guest thread's readback: when every
+	// GPU write of the readback window has finished, arms its GPU-dirty pages for a download on
+	// the readback queue and returns it; null otherwise. The guest thread then submits and
+	// publishes it (PublishQueuedReadback); a priority operation at the arming tick does so too,
+	// for waiters that only know that tick.
+	struct QueuedReadback;
+	[[nodiscard]] std::shared_ptr<QueuedReadback> QueueReadback(uint64_t vaddr, uint64_t size,
+	                                                            bool is_write);
+	void PublishQueuedReadback(QueuedReadback& request);
+	void                   NoteGpuWrite(uint64_t vaddr, uint64_t size);
+	[[nodiscard]] uint64_t InflightWriteTick(uint64_t begin, uint64_t end, uint64_t completed);
+	[[nodiscard]] bool     GpuWriteLogComplete(uint64_t completed) const noexcept {
+		return m_gpu_writes_on && completed >= m_gpu_writes_from;
+	}
 	void QueueEagerReadback(uint64_t vaddr, uint64_t size);
 	// Whether a recorded download of these bytes has not finished publishing.
 	[[nodiscard]] bool InFlightIntersects(uint64_t vaddr, uint64_t size);
@@ -216,6 +236,18 @@ private:
 		std::vector<std::pair<uint64_t, uint64_t>> ranges;
 	};
 	std::deque<InFlightDownload> m_inflight_downloads;
+	struct GpuWrite {
+		uint64_t begin = 0;
+		uint64_t end   = 0;
+		uint64_t tick  = 0;
+	};
+	std::unique_ptr<ReadbackQueue> m_readback_queue;
+	std::vector<GpuWrite> m_gpu_writes;
+	size_t                m_gpu_writes_head    = 0;
+	size_t                m_gpu_writes_stamped = 0;
+	bool                  m_gpu_writes_on      = false;
+	// Writes before this tick were not logged (the log started or overflowed).
+	uint64_t              m_gpu_writes_from    = UINT64_MAX;
 	// HasGpuDirtyBytes: tracker pages found clean, valid while m_gpu_dirty_generation is
 	// unchanged. It is bumped when bytes become GPU-dirty or a download starts; nothing else can
 	// dirty a page. GPU thread only, like HasGpuDirtyBytes.

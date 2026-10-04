@@ -57,6 +57,9 @@ inline RenderDebugCounters g_render_debug_counters;
 // KYTY_COMPUTE_CHAIN=1: consecutive dispatches without a guest synchronization point between them
 // run without host barriers between them (CommandBuffer::ChainHandle). Off with full barriers.
 [[nodiscard]] bool ComputeChainEnabled() noexcept;
+// KYTY_DEBUG_READBACK_AGE=1: classifies guest waits for GPU-written bytes by whether their last
+// GPU write had finished (see BufferCache::InflightWriteTick).
+[[nodiscard]] bool ReadbackAgeEnabled() noexcept;
 // Counts dispatches and how many continued a chain; KYTY_COMPUTE_CHAIN=1 prints the share
 // every 50000 dispatches.
 void NoteComputeChain(bool continued) noexcept;

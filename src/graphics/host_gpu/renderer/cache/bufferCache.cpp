@@ -7,6 +7,7 @@
 #include "common/profiler.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/cache/readbackQueue.h"
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/debug.h"
@@ -22,6 +23,8 @@
 #include <windows.h>
 #endif
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <immintrin.h>
@@ -319,6 +322,9 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	    m_slot_buffers.insert(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0, AllFlags, 16);
 	EXIT_IF(null_id != NULL_BUFFER_ID);
 	SetVulkanObjectNameF(m_graphics.device, GetBuffer(null_id).Handle(), "Kyty.NullBuffer");
+	if (m_graphics.readback_queue != nullptr) {
+		m_readback_queue = std::make_unique<ReadbackQueue>(m_graphics);
+	}
 	if (AbSelected("streamhost")) {
 		m_stream_device = std::make_unique<StreamBuffer>(graphics, scheduler, MemoryUsage::Stream,
 		                                                 64 * MiB, vk::BufferUsageFlags {}, false);
@@ -342,6 +348,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 }
 
 BufferCache::~BufferCache() {
+	m_readback_queue.reset();
 	if (!m_gpu_modified_ranges.Empty()) {
 		EXIT("BufferCache: destroyed with pending GPU-modified ranges\n");
 	}
@@ -447,6 +454,205 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	}
 }
 
+void BufferCache::NoteGpuWrite(uint64_t vaddr, uint64_t size) {
+	// Starting, or no point between commands for very long: forget what is not stamped and
+	// refuse to answer until everything recorded so far has completed.
+	constexpr size_t Limit = size_t {1} << 20u;
+	if (!m_gpu_writes_on || m_gpu_writes.size() - m_gpu_writes_head >= Limit) {
+		m_gpu_writes_on = true;
+		m_gpu_writes.clear();
+		m_gpu_writes_head = m_gpu_writes_stamped = 0;
+		m_gpu_writes_from = UINT64_MAX;
+	}
+	m_gpu_writes.push_back({vaddr, vaddr + size, 0});
+}
+
+uint64_t BufferCache::InflightWriteTick(uint64_t begin, uint64_t end, uint64_t completed) {
+	const uint64_t current = m_scheduler.CurrentTick();
+	for (; m_gpu_writes_stamped < m_gpu_writes.size(); ++m_gpu_writes_stamped) {
+		m_gpu_writes[m_gpu_writes_stamped].tick = current;
+	}
+	if (m_gpu_writes_from == UINT64_MAX) {
+		m_gpu_writes_from = current;
+	}
+	// Stamps never decrease: the completed writes are a prefix.
+	while (m_gpu_writes_head < m_gpu_writes.size() &&
+	       m_gpu_writes[m_gpu_writes_head].tick <= completed) {
+		++m_gpu_writes_head;
+	}
+	if (m_gpu_writes_head >= 4096 && m_gpu_writes_head * 2 >= m_gpu_writes.size()) {
+		m_gpu_writes.erase(m_gpu_writes.begin(),
+		                   m_gpu_writes.begin() + static_cast<std::ptrdiff_t>(m_gpu_writes_head));
+		m_gpu_writes_stamped -= m_gpu_writes_head;
+		m_gpu_writes_head = 0;
+	}
+	uint64_t tick = 0;
+	for (size_t i = m_gpu_writes_head; i < m_gpu_writes.size(); ++i) {
+		const auto& write = m_gpu_writes[i];
+		if (write.begin < end && begin < write.end) {
+			tick = std::max(tick, write.tick);
+		}
+	}
+	return tick;
+}
+
+namespace {
+// KYTY_DEBUG_READBACK_AGE=1: guest threads' waits for GPU-written bytes, by the state of the
+// bytes' last GPU write when the download was recorded: finished, submitted, still recording,
+// or unknown (the write log is incomplete), plus waits for an already recorded download.
+struct ReadbackAgeStats {
+	enum Class : uint32_t { Done, Submitted, Open, Unknown, Armed, Queued, Count };
+	std::mutex                  mutex;
+	std::array<uint64_t, Count> n {};
+	std::array<double, Count>   ms {};
+	uint64_t                    total = 0;
+	void Add(uint32_t c, double wait_ms) {
+		std::scoped_lock lock(mutex);
+		n[c]++;
+		ms[c] += wait_ms;
+		if (++total % 500u == 0u) {
+			std::printf("readback-age: %" PRIu64 " waits | done n=%" PRIu64 " %.0fms | submitted n=%" PRIu64
+			            " %.0fms | open n=%" PRIu64 " %.0fms | unknown n=%" PRIu64
+			            " %.0fms | armed n=%" PRIu64 " %.0fms | readback queue n=%" PRIu64
+			            " %.0fms\n",
+			            total, n[Done], ms[Done], n[Submitted], ms[Submitted], n[Open], ms[Open],
+			            n[Unknown], ms[Unknown], n[Armed], ms[Armed], n[Queued], ms[Queued]);
+			std::fflush(stdout);
+		}
+	}
+};
+ReadbackAgeStats g_readback_age;
+} // namespace
+
+struct BufferCache::QueuedReadback {
+	vk::Buffer                                 source;
+	std::unique_ptr<Buffer>                    download;
+	std::vector<vk::BufferCopy>                copies;
+	std::vector<std::pair<uint64_t, uint64_t>> pages;
+	uint64_t                                   buffer_address = 0;
+	uint64_t                                   token          = 0;
+	uint64_t                                   total_size     = 0;
+	uint64_t                                   wait_tick      = 0;
+	uint64_t                                   queue_value    = 0;
+	bool                                       published      = false;
+	std::mutex                                 mutex;
+};
+
+std::shared_ptr<BufferCache::QueuedReadback> BufferCache::QueueReadback(uint64_t vaddr,
+                                                                        uint64_t size,
+                                                                        bool     is_write) {
+	if (is_write && !IsRegionRegistered(vaddr, size)) {
+		return nullptr;
+	}
+	auto& buffer = m_slot_buffers[FindBuffer(vaddr, size)];
+	// The window RecordReadback would download.
+	constexpr uint64_t WindowSize   = 512 * 1024;
+	const auto         buffer_begin = buffer.CpuAddress();
+	const auto         buffer_end   = buffer_begin + buffer.Size();
+	auto window_begin = std::max(Common::AlignDown(vaddr, WindowSize), buffer_begin);
+	auto window_end   = std::min(std::max(window_begin + WindowSize, vaddr + size), buffer_end);
+	auto& master      = m_scheduler.GetMasterSemaphore();
+	master.Refresh();
+	const uint64_t completed = master.KnownGpuTick();
+	// KYTY_DEBUG_READBACK_AGE: outcomes (queued window, queued pages, writes in flight, log
+	// incomplete, nothing unarmed).
+	static std::array<uint64_t, 5> outcomes {};
+	const auto                     note = [](size_t outcome) {
+        if (ReadbackAgeEnabled() && ++outcomes[outcome] % 1000u == 0u) {
+            std::printf("readback queue: window=%" PRIu64 " pages=%" PRIu64 " in-flight=%" PRIu64
+			                                " log=%" PRIu64 " clean=%" PRIu64 "\n",
+			                                outcomes[0], outcomes[1], outcomes[2], outcomes[3], outcomes[4]);
+            std::fflush(stdout);
+        }
+	};
+	if (!GpuWriteLogComplete(completed)) {
+		note(3);
+		return nullptr;
+	}
+	size_t   outcome  = 0;
+	uint64_t producer = InflightWriteTick(window_begin, window_end, completed);
+	if (producer != 0) {
+		// The window is still being written elsewhere: download only the requested pages, after
+		// their last writer, when that one is submitted (the open command buffer's would need a
+		// flush, which the graphics queue path does anyway).
+		window_begin = std::max(Common::AlignDown(vaddr, TRACKER_PAGE_SIZE), buffer_begin);
+		window_end   = std::min(Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE), buffer_end);
+		producer     = InflightWriteTick(window_begin, window_end, completed);
+		if (producer >= m_scheduler.CurrentTick()) {
+			note(2);
+			return nullptr;
+		}
+		outcome = 1;
+	}
+	auto request            = std::make_shared<QueuedReadback>();
+	request->buffer_address = buffer_begin;
+	m_memory_tracker.ForEachUnarmedDownloadRange(
+	    window_begin, window_end - window_begin, [&](uint64_t address, uint64_t bytes) noexcept {
+		    m_memory_tracker.ValidateGpuDirtyPages(m_gpu_modified_ranges, address, bytes,
+		                                           "queued buffer download");
+		    request->pages.emplace_back(address, bytes);
+		    m_gpu_modified_ranges.ForEachInRange(address, bytes, [&](uint64_t start, uint64_t end) {
+			    request->copies.emplace_back(start - buffer_begin, request->total_size, end - start);
+			    request->total_size += Common::AlignUp(end - start, 64);
+		    });
+		    m_gpu_modified_ranges.Subtract(address, bytes);
+	    });
+	if (request->pages.empty()) {
+		note(4);
+		return nullptr;
+	}
+	note(outcome);
+	if (!request->copies.empty()) {
+		DrainStats::Record(DrainStats::Kind::Readback, request->total_size);
+		request->download =
+		    std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Download, 0,
+		                             vk::BufferUsageFlagBits::eTransferDst, request->total_size);
+		EXIT_IF(request->download->Mapped().empty());
+		request->source = buffer.Handle();
+	}
+	request->wait_tick = std::max(completed, producer);
+	request->token     = ++m_readback_token;
+	for (const auto& [address, bytes]: request->pages) {
+		m_memory_tracker.ArmReadback(address, bytes, request->token, m_scheduler.CurrentTick());
+	}
+	PruneInFlight();
+	m_gpu_dirty_generation++;
+	auto& inflight = m_inflight_downloads.emplace_back();
+	inflight.tick  = m_scheduler.CurrentTick();
+	inflight.ranges.reserve(request->copies.size());
+	for (const auto& copy: request->copies) {
+		inflight.ranges.emplace_back(buffer_begin + copy.srcOffset, copy.size);
+	}
+	m_scheduler.DeferPriorityOperation([this, request] { PublishQueuedReadback(*request); });
+	return request;
+}
+
+void BufferCache::PublishQueuedReadback(QueuedReadback& request) {
+	std::scoped_lock lock(request.mutex);
+	if (request.published) {
+		return;
+	}
+	if (!request.copies.empty()) {
+		if (request.queue_value == 0) {
+			request.queue_value = m_readback_queue->Copy(
+			    request.source, request.download->Handle(), request.copies,
+			    m_scheduler.GetMasterSemaphore().Handle(), request.wait_tick);
+		}
+		m_readback_queue->Wait(request.queue_value);
+		request.download->Invalidate(0, request.total_size);
+		const auto* mapped = request.download->Mapped().data();
+		for (const auto& copy: request.copies) {
+			Libs::LibKernel::Memory::WriteBacking(request.buffer_address + copy.srcOffset,
+			                                      mapped + copy.dstOffset, copy.size);
+		}
+	}
+	for (const auto& [address, bytes]: request.pages) {
+		m_memory_tracker.FinalizeReadback(address, bytes, request.token);
+	}
+	request.published = true;
+	request.download.reset();
+}
+
 void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) {
 	// Thread_Gpu only records and submits the download; this thread waits for its own
 	// publication while Thread_Gpu keeps working. The caller retries the access afterwards:
@@ -463,10 +669,33 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) 
 		DrainStats::Record(DrainStats::Kind::StaleRead, 1);
 		return;
 	}
+	uint32_t                        age = ReadbackAgeStats::Armed;
+	std::shared_ptr<QueuedReadback> queued;
 	if (state.unarmed || tick >= m_scheduler.CurrentTick()) {
 		const auto reason = DrainStats::CurrentReason();
-		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, reason, &tick] {
+		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, reason, &tick,
+		                                                &age, &queued] {
 			DrainStats::ReasonScope reason_scope(reason);
+			if (ReadbackAgeEnabled()) [[unlikely]] {
+				auto& master = m_scheduler.GetMasterSemaphore();
+				master.Refresh();
+				const uint64_t completed = master.KnownGpuTick();
+				const uint64_t producer  = InflightWriteTick(vaddr, vaddr + size, completed);
+				age = !GpuWriteLogComplete(completed)        ? ReadbackAgeStats::Unknown
+				      : producer == 0                         ? ReadbackAgeStats::Done
+				      : producer < m_scheduler.CurrentTick() ? ReadbackAgeStats::Submitted
+				                                              : ReadbackAgeStats::Open;
+			}
+			if (m_readback_queue != nullptr) {
+				queued = QueueReadback(vaddr, size, is_write);
+				if (queued != nullptr) {
+					if (!is_write) {
+						MarkReadbackHot(vaddr);
+					}
+					tick = 0;
+					return;
+				}
+			}
 			if (!is_write) {
 				MarkReadbackHot(vaddr);
 			}
@@ -485,12 +714,32 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) 
 			}
 		});
 	}
+	if (queued != nullptr) {
+		DrainStats::WaitTimer wait(DrainStats::Kind::TickWait);
+		const auto            start = ReadbackAgeEnabled() ? std::chrono::steady_clock::now()
+		                                                   : std::chrono::steady_clock::time_point {};
+		PublishQueuedReadback(*queued);
+		if (ReadbackAgeEnabled()) [[unlikely]] {
+			g_readback_age.Add(ReadbackAgeStats::Queued,
+			                   std::chrono::duration<double, std::milli>(
+			                       std::chrono::steady_clock::now() - start)
+			                       .count());
+		}
+		return;
+	}
 	if (tick == 0) {
 		return;
 	}
 	{
 		DrainStats::WaitTimer wait(DrainStats::Kind::TickWait);
+		const auto            start = ReadbackAgeEnabled() ? std::chrono::steady_clock::now()
+		                                                   : std::chrono::steady_clock::time_point {};
 		m_scheduler.GetMasterSemaphore().Wait(tick);
+		if (ReadbackAgeEnabled()) [[unlikely]] {
+			g_readback_age.Add(age, std::chrono::duration<double, std::milli>(
+			                            std::chrono::steady_clock::now() - start)
+			                            .count());
+		}
 	}
 	m_scheduler.WaitPriorityOperations(tick);
 }
@@ -938,6 +1187,7 @@ static void DebugHostImportTest(GraphicContext& graphics, uint64_t address) {
 		if (device_address) {
 			create.usage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 		}
+		graphics.ShareBuffer(create);
 		vk::Buffer buffer;
 		const auto created = graphics.device.createBuffer(&create, nullptr, &buffer);
 		vk::Result allocated = vk::Result::eErrorUnknown;
@@ -1157,6 +1407,9 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 			m_gpu_dirty_generation++;
 		}
 		m_texture_cache.OnBufferGpuWrite(vaddr, size);
+		if (m_readback_queue != nullptr || ReadbackAgeEnabled()) [[unlikely]] {
+			NoteGpuWrite(vaddr, size);
+		}
 		if (!m_hot_pages.empty()) {
 			QueueEagerReadback(vaddr, size);
 		}

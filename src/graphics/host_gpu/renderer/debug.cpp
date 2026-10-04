@@ -668,6 +668,11 @@ bool ComputeChainEnabled() noexcept {
 	return enabled;
 }
 
+bool ReadbackAgeEnabled() noexcept {
+	static const bool enabled = std::getenv("KYTY_DEBUG_READBACK_AGE") != nullptr;
+	return enabled;
+}
+
 void NoteComputeChain(bool continued) noexcept {
 	// Dispatches are recorded on the render thread only.
 	static uint64_t total     = 0;
