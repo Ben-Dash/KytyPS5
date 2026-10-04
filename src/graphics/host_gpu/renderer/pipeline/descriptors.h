@@ -88,6 +88,8 @@ struct PreparedBindings {
 		std::vector<ShaderRecompiler::IR::DescriptorValue> images;
 		std::vector<uint32_t>                              mip_counters;
 		TextureCache::TargetState                          state {};
+		// KYTY_DEBUG_BIND_STATS: why the last draw recorded no group (BindStats::Refusal).
+		uint8_t                                            refused = 0;
 	} image_group;
 	// This draw kept the group so far: PrepareBindings resolved nothing, and RebindImages keeps
 	// the views if the group still stands then.

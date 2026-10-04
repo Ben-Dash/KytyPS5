@@ -1887,6 +1887,55 @@ void RenderExecutor::RecordPendingWrites(std::span<PreparedBindings* const> stag
 	}
 }
 
+// KYTY_DEBUG_BIND_STATS: counts draws that write depth and no color, and their runs with the same
+// pipeline, vertex program and depth target (see BindStats). Dispatches between draws do not end
+// a run.
+static void NoteDepthOnly(DrawRenderState& state, const void* pipeline) {
+	auto&      stats = g_bind_stats;
+	const auto end_run = [&] {
+		const auto length = stats.run_length;
+		const auto bucket = length < 2 ? 0 : length < 4 ? 1 : length < 8 ? 2 : length < 16 ? 3
+		                                  : length < 64 ? 4 : 5;
+		stats.run_draws[bucket] += length;
+		stats.run_length = 0;
+	};
+	stats.draws++;
+	if (state.color_count != 0 || !state.depth_info.image_id) {
+		if (stats.run_length != 0) {
+			stats.run_breaks[3]++;
+			end_run();
+		}
+		return;
+	}
+	g_draw_phases.SetDepthOnly();
+	stats.depth_draws++;
+	stats.depth_no_ps += state.ps_active ? 0 : 1;
+	stats.depth_ps_images +=
+	    state.ps_active && !state.ps_input_info.stage.program->info.images.empty() ? 1 : 0;
+	bool vs_images = false;
+	for (uint32_t i = 0; i < state.programs.VertexStageCount(); i++) {
+		vs_images = vs_images || !state.vertex_info[i].stage.program->info.images.empty();
+	}
+	stats.depth_vs_images += vs_images ? 1 : 0;
+	const void*    program = state.vertex_info[0].stage.program;
+	const uint64_t target  = state.depth_info.desc.info.data.address;
+	if (stats.run_length != 0 && stats.run_pipeline == pipeline && stats.run_program == program &&
+	    stats.run_target == target) {
+		stats.run_length++;
+		return;
+	}
+	if (stats.run_length != 0) {
+		stats.run_breaks[stats.run_pipeline != pipeline  ? 0
+		                 : stats.run_program != program ? 1
+		                                                : 2]++;
+		end_run();
+	}
+	stats.run_length   = 1;
+	stats.run_pipeline = pipeline;
+	stats.run_program  = program;
+	stats.run_target   = target;
+}
+
 void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buffer,
                                          const DrawCallInfo& draw, DrawRenderState& state,
                                          vk::PrimitiveTopology topology, const DrawEmitInfo& emit,
@@ -2016,6 +2065,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	auto& pipeline = *found_pipeline;
 	g_draw_phases.Mark(DrawPhaseTimer::Pipeline);
+	if (g_draw_phases.Active() && BindStatsEnabled()) [[unlikely]] {
+		NoteDepthOnly(state, &pipeline);
+	}
 
 	// Mesh shaders load their draw parameters from a record by address (see
 	// EmitMeshDrawParameter). Write each slice's record now: the ring can wait and restart the

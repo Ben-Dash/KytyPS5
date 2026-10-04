@@ -1118,6 +1118,13 @@ static void RecordImageGroup(RenderContext& context, PreparedBindings& prepared,
 		    source.view_generation == 0 || source.view_image != binding.image_id ||
 		    source.view != binding.image_view ||
 		    program.info.images[i].mip_mode == ShaderRecompiler::IR::ImageMipMode::DynamicStorage) {
+			group.refused =
+			    binding.desc.type != TextureCache::BindingType::Texture ? BindStats::RefusedType
+			    : program.info.images[i].mip_mode == ShaderRecompiler::IR::ImageMipMode::DynamicStorage
+			        ? BindStats::RefusedDynamicMip
+			    : source.generation == 0 && !(source.null_image && NullReuseEnabled())
+			        ? BindStats::RefusedLookup
+			        : BindStats::RefusedView;
 			return;
 		}
 		if (values[i].dword_count >= 8) {
@@ -1130,6 +1137,46 @@ static void RecordImageGroup(RenderContext& context, PreparedBindings& prepared,
 	group.images.assign(values.begin(), values.end());
 	group.state   = cache.CurrentTargetState();
 	group.program = &program;
+	group.refused = BindStats::RefusedNone;
+}
+
+// KYTY_DEBUG_BIND_STATS: counts whether PrepareBindings kept the stage's image group, and if not,
+// the first reason ImageGroupStands or the comparisons before it found.
+static void NoteImageGroup(TextureCache& cache, const PreparedBindings& prepared,
+                           const void*                                               program,
+                           const std::vector<ShaderRecompiler::IR::DescriptorValue>& images,
+                           bool                                                      kept) {
+	auto&       stats   = g_bind_stats;
+	const auto& group   = prepared.image_group;
+	const auto  outcome = [&] {
+		if (images.empty()) return BindStats::NoImages;
+		if (kept) return BindStats::Kept;
+		if (!ImageGroupsEnabled()) return BindStats::Disabled;
+		if (group.program == nullptr) {
+			stats.refused[group.refused]++;
+			return BindStats::NotRecorded;
+		}
+		if (group.program != program) return BindStats::OtherProgram;
+		if (!std::ranges::equal(images, group.images)) return BindStats::OtherImages;
+		const auto state = cache.CurrentTargetState();
+		if (state.image_set != group.state.image_set) return BindStats::ImageSet;
+		if (state.tick != group.state.tick) return BindStats::Tick;
+		if (state.gc_tick != group.state.gc_tick) return BindStats::GcTick;
+		for (size_t i = 0; i < prepared.images.size(); i++) {
+			const auto& source = prepared.image_sources[i];
+			const auto  bound  = prepared.images[i].image_id;
+			if (source.null_image) continue;
+			const auto depth = cache.GetImage(source.found).depth_id;
+			if ((depth ? depth : source.found) != bound) return BindStats::OtherImage;
+			if (!cache.IsTextureClean(bound)) return BindStats::Dirty;
+			if (!cache.IsColorClearCurrent(source.found, prepared.images[i].desc,
+			                               source.metadata_base_layer)) {
+				return BindStats::ColorClear;
+			}
+		}
+		return BindStats::Kept; // Not reached: ImageGroupStands would have kept it.
+	}();
+	stats.group[outcome]++;
 }
 
 struct FrameRepeat {
@@ -1231,12 +1278,20 @@ void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
 	prepared.samplers.clear();
 	prepared.shader_data.clear();
 	auto& texture_cache = m_context.GetTextureCache();
+	const bool bind_stats = g_draw_phases.Active() && BindStatsEnabled();
+	uint64_t   stats_start = bind_stats ? DrawPhaseTimer::Now() : 0;
 	// A draw repeating the stage's program and image descriptors binds its last images while they
 	// stand (see ImageGroupStands); RebindImages checks them again.
 	const auto& group = prepared.image_group;
 	prepared.image_group_kept =
 	    ImageGroupsEnabled() && group.program == &program &&
 	    std::ranges::equal(snapshot.images, group.images) && ImageGroupStands(texture_cache, prepared);
+	if (bind_stats) [[unlikely]] {
+		const auto now = DrawPhaseTimer::Now();
+		NoteImageGroup(texture_cache, prepared, &program, snapshot.images,
+		               prepared.image_group_kept);
+		stats_start += DrawPhaseTimer::Now() - now; // Leave out the reason search.
+	}
 	if (prepared.image_group_kept) {
 		for (const auto counter: group.mip_counters) {
 			m_context.MarkMipStatsCounter(counter);
@@ -1273,6 +1328,11 @@ void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
 		ResolveTextureInto(program.info.images[i], snapshot.images[i], &prepared.image_sources[i],
 		                   previous);
 		BindImage(previous.image_id, previous.desc.type == TextureCache::BindingType::Storage);
+	}
+	if (bind_stats && !program.info.images.empty()) [[unlikely]] {
+		const size_t kind = prepared.image_group_kept ? 0 : 1;
+		g_bind_stats.prepare_ticks[kind] += DrawPhaseTimer::Now() - stats_start;
+		g_bind_stats.prepare_count[kind]++;
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::StageTextures);
 	prepared.samplers.reserve(program.info.samplers.size());
@@ -1423,7 +1483,27 @@ void RenderExecutor::RebindImages(PreparedBindings& prepared) {
 	// PrepareBindings kept the group; BDA synchronization since may have dirtied an image.
 	const bool group_kept     = prepared.image_group_kept;
 	prepared.image_group_kept = false;
-	if (group_kept && ImageGroupStands(texture_cache, prepared)) {
+	// KYTY_DEBUG_BIND_STATS: this call's time, for kept groups and the rest.
+	struct StatsScope {
+		bool     on;
+		size_t   kind;
+		uint64_t start;
+		~StatsScope() {
+			if (on) [[unlikely]] {
+				g_bind_stats.rebind_ticks[kind] += DrawPhaseTimer::Now() - start;
+				g_bind_stats.rebind_count[kind]++;
+			}
+		}
+	};
+	const bool bind_stats =
+	    g_draw_phases.Active() && BindStatsEnabled() && !program.info.images.empty();
+	StatsScope stats_scope {bind_stats, group_kept ? 0u : 1u,
+	                        bind_stats ? DrawPhaseTimer::Now() : 0};
+	const bool stands = group_kept && ImageGroupStands(texture_cache, prepared);
+	if (bind_stats && group_kept && !stands) [[unlikely]] {
+		g_bind_stats.kept_lost++;
+	}
+	if (stands) {
 		if (VerifyImageGroups()) [[unlikely]] {
 			for (const auto& binding: images) {
 				CheckViewReuse(texture_cache, binding);
@@ -1695,7 +1775,8 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     const PipelineCache::Pipeline&     pipeline,
                                     std::span<PreparedBindings* const> prepared_bindings) {
 	KYTY_PROFILER_FUNCTION();
-	auto   vk_buffer        = buffer.Handle();
+	uint64_t lap              = g_draw_phases.Lap();
+	auto     vk_buffer        = buffer.Handle();
 	size_t descriptor_count = 0;
 	size_t write_count      = 0;
 	ShaderRecompiler::IR::PushData push_data;
@@ -1763,6 +1844,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 	m_descriptor_images.reserve(descriptor_count);
 	m_descriptor_writes.reserve(write_count);
 	size_t pixel_write_start = write_count;
+	g_draw_phases.Lap(DrawPhaseTimer::CommitScan, lap);
 
 	for (auto* prepared: prepared_bindings) {
 		const auto& program       = *prepared->runtime->program;
@@ -1831,6 +1913,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 			}
 			binding.layout = image.backing.state.layout;
 		}
+		g_draw_phases.Lap(DrawPhaseTimer::CommitTransit, lap);
 
 		m_image_occurrences.assign(descriptors.images.size(), 0);
 		for (const auto& binding: program.bindings.descriptors) {
@@ -1915,7 +1998,13 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 			                  push_data.dwords.begin() + program.bindings.push_data_start_dword);
 			has_push_data = true;
 		}
+		g_draw_phases.Lap(DrawPhaseTimer::CommitWrites, lap);
 	}
+	// Charges the rest (the payload or the calls) when CommitBindings returns.
+	struct PayloadLap {
+		uint64_t& lap;
+		~PayloadLap() { g_draw_phases.Lap(DrawPhaseTimer::CommitPayload, lap); }
+	} payload_lap {lap};
 
 	if (has_push_data && pipeline.push_constant_stages) {
 		// The stages must match the layout's push constant range exactly.

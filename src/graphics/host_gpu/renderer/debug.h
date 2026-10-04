@@ -90,6 +90,62 @@ struct BindingRepeats {
 };
 inline BindingRepeats g_binding_repeats;
 
+// KYTY_DEBUG_BIND_STATS=1 (with KYTY_DEBUG_DRAW_PHASES): why a stage's image group was not kept,
+// and which draws only write depth, printed as "image-groups" and "depth-only" lines after each
+// draw-phases line. Render thread only.
+struct BindStats {
+	enum ImageGroupOutcome : uint32_t {
+		NoImages,      // The program binds no images.
+		Kept,          // PrepareBindings kept the group.
+		Disabled,      // Image groups are off.
+		NotRecorded,   // The stage's last draw recorded no group (see refused).
+		OtherProgram,  // The last group is of another program.
+		OtherImages,   // The image descriptors changed.
+		ImageSet,      // An image was registered or unregistered.
+		Tick,          // The scheduler's tick moved (a submission).
+		GcTick,        // Garbage collection ran.
+		OtherImage,    // A lookup would find another image (depth association).
+		Dirty,         // An image is not clean.
+		ColorClear,    // A color clear check is not current.
+		GroupOutcomeCount
+	};
+	// Why RecordImageGroup recorded none.
+	enum Refusal : uint32_t {
+		RefusedNone,
+		RefusedType,       // Not a sampled texture (storage).
+		RefusedLookup,     // The lookup cannot be repeated (generation 0).
+		RefusedView,       // The view is not kept.
+		RefusedDynamicMip, // Dynamic storage mips.
+		RefusalCount
+	};
+	std::array<uint64_t, GroupOutcomeCount> group {};
+	std::array<uint64_t, RefusalCount>      refused {};
+	uint64_t                                kept_lost = 0; // Kept, then failed in RebindImages.
+	// Time in PrepareBindings' image part and in RebindImages, for kept and other stages.
+	std::array<uint64_t, 2> prepare_ticks {}; // [0] kept, [1] other.
+	std::array<uint64_t, 2> prepare_count {};
+	std::array<uint64_t, 2> rebind_ticks {};
+	std::array<uint64_t, 2> rebind_count {};
+	// Depth-only draws: no color target, a depth target.
+	uint64_t draws           = 0;
+	uint64_t depth_draws     = 0; // Of draws.
+	uint64_t depth_no_ps     = 0; // Of depth_draws: without a pixel shader.
+	uint64_t depth_ps_images = 0; // Of depth_draws: a pixel shader binding images.
+	uint64_t depth_vs_images = 0; // Of depth_draws: a vertex stage binding images.
+	// Runs of consecutive depth-only draws with the same pipeline, vertex program and target,
+	// counted by the run's length (1, 2-3, 4-7, 8-15, 16-63, 64+) in draws.
+	std::array<uint64_t, 6> run_draws {};
+	// What ended a run: [0] another pipeline, [1] another vertex program, [2] another target,
+	// [3] a draw that is not depth-only.
+	std::array<uint64_t, 4> run_breaks {};
+	uint32_t                run_length   = 0;
+	const void*             run_pipeline = nullptr;
+	const void*             run_program  = nullptr;
+	uint64_t                run_target   = 0;
+};
+inline BindStats g_bind_stats;
+[[nodiscard]] bool BindStatsEnabled() noexcept;
+
 // KYTY_DEBUG_DRAW_PHASES=<pixel shader hash> times the render thread's CPU phases of that pixel
 // shader's draws and prints their average every 5 s; =all times every draw. Each Mark charges the
 // time since the previous mark to its phase; marks outside a Begin/End pair (other threads, other
@@ -136,6 +192,10 @@ struct DrawPhaseTimer {
 		ProgramMatch,     // Finding the refreshed stage's permutation.
 		InputsCheck,      // Comparing the registers of speculation-prepared stage inputs.
 		UploadCopy,       // Copying guest bytes into the staging buffer (UploadCopies).
+		CommitScan,       // CommitBindings: counting descriptors, specialization read checks.
+		CommitTransit,    // CommitBindings: image layout transitions.
+		CommitWrites,     // CommitBindings: descriptor writes and push data.
+		CommitPayload,    // CommitBindings: the payload for the recording thread (or the calls).
 		ProbeCount
 	};
 	class ProbeScope {
@@ -164,6 +224,7 @@ struct DrawPhaseTimer {
 		if (Hash() != 0) [[unlikely]] {
 			active    = true;
 			auto_kind = auto_draw;
+			depth_kind = false;
 			current.fill(0);
 			probes.fill(0);
 			last = Now();
@@ -180,10 +241,22 @@ struct DrawPhaseTimer {
 	void End(uint64_t pixel_hash);
 	// Whether a draw is being timed (between Begin and End).
 	[[nodiscard]] bool Active() const noexcept { return active; }
+	// Consecutive probes without scopes: Lap() starts, Lap(probe, since) charges the time since.
+	[[nodiscard]] uint64_t Lap() const { return active ? Now() : 0; }
+	void                   Lap(Probe probe, uint64_t& since) {
+		if (active) [[unlikely]] {
+			const auto now = Now();
+			probes[probe] += now - since;
+			since = now;
+		}
+	}
+	// The draw only writes depth (see BindStats), also accounted on its own line.
+	void SetDepthOnly() { depth_kind = active; }
 
 private:
 	bool                             active    = false;
 	bool                             auto_kind = false;
+	bool                             depth_kind = false;
 	uint64_t                         last      = 0;
 	std::array<uint64_t, Count>      current {};
 	std::array<uint64_t, ProbeCount> probes {};
