@@ -1037,7 +1037,7 @@ struct SystemOverlay::Impl {
 		ImGui::TextUnformatted("Dynamic resolution headroom");
 		int percent = static_cast<int>(Config::GetGpuTimestampScalePercent());
 		ImGui::SetNextItemWidth(-1.0f);
-		bool changed = ImGui::SliderInt("##headroom", &percent, 100, 150,
+		bool changed = ImGui::SliderInt("##headroom", &percent, 25, 150,
 		                                percent == 100 ? "Off" : "%d%%",
 		                                ImGuiSliderFlags_AlwaysClamp);
 		if (changed) {
@@ -1047,7 +1047,7 @@ struct SystemOverlay::Impl {
 		if (ImGui::IsItemFocused() && !ImGui::IsItemActive()) {
 			if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) ||
 			    ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)) {
-				percent = std::max(percent - 5, 100);
+				percent = std::max(percent - 5, 25);
 				changed = true;
 			} else if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) ||
 			           ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight)) {
@@ -1072,7 +1072,8 @@ struct SystemOverlay::Impl {
 		ImGui::TextDisabled(
 		    "For games that adjust their render resolution to how busy the GPU is, such as Astro "
 		    "Bot. Higher values keep GPU time in reserve: a steadier frame rate at a lower "
-		    "resolution. Astro Bot holds a steady 60 from 115%%.");
+		    "resolution. Astro Bot holds a steady 60 from 115%%. Below 100%% the game sees less GPU "
+		    "time and picks a higher resolution.");
 		ImGui::PopTextWrapPos();
 		ImGui::Separator();
 

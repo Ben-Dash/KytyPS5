@@ -190,7 +190,7 @@ uint32_t GetGpuTimestampScalePercent() {
 }
 
 void SetGpuTimestampScalePercent(uint32_t percent) {
-	g_gpu_timestamp_scale_override.store(std::clamp(percent, 100u, 200u),
+	g_gpu_timestamp_scale_override.store(std::clamp(percent, 25u, 200u),
 	                                     std::memory_order_relaxed);
 }
 

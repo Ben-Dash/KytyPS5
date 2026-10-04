@@ -151,7 +151,8 @@ uint32_t GetGpuFramesAhead();
 // Minimum time between submits made at plain RELEASE_MEM labels; 0 submits at every idle label.
 uint32_t GetLabelFlushIntervalUs();
 // Stretch time measured between guest GPU timestamps within a frame, in percent (100 = off).
-// Games that size their dynamic resolution from GPU timestamps then leave more GPU headroom.
+// Games that size their dynamic resolution from GPU timestamps then leave more GPU headroom;
+// below 100 they see less GPU time and pick a higher resolution.
 uint32_t GetGpuTimestampScalePercent();
 // Changes it while running (the settings panel); takes effect at the next timestamp.
 void     SetGpuTimestampScalePercent(uint32_t percent);
