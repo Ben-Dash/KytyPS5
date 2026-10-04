@@ -1974,6 +1974,37 @@ bool RecordPlannedBindings(vk::CommandBuffer buffer, vk::Device device,
 			infos += RecordedInfoBytes;
 		}
 	}
+	if (g_draw_phases.Active() && BindStatsEnabled()) [[unlikely]] {
+		// Each set's writes and infos, compared with the previous payload's for the set.
+		thread_local std::array<std::vector<uint8_t>, 2> last_bytes;
+		thread_local std::array<VkPipelineLayout, 2>      last_layout {};
+		const auto* set_writes_start = reinterpret_cast<const RecordedWrite*>(
+		    payload + sizeof(RecordedBindings));
+		const auto* set_infos_start =
+		    payload + sizeof(RecordedBindings) + write_count * sizeof(RecordedWrite);
+		for (uint32_t set_index = 0; set_index < 2; set_index++) {
+			const auto count     = header.set_writes[set_index];
+			uint32_t   set_infos = 0;
+			for (uint32_t i = 0; i < count; i++) {
+				set_infos += set_writes_start[i].count;
+			}
+			if (count != 0) {
+				std::vector<uint8_t> bytes(count * sizeof(RecordedWrite) +
+				                           set_infos * RecordedInfoBytes);
+				std::memcpy(bytes.data(), set_writes_start, count * sizeof(RecordedWrite));
+				std::memcpy(bytes.data() + count * sizeof(RecordedWrite), set_infos_start,
+				            set_infos * RecordedInfoBytes);
+				g_bind_stats.set_payloads[set_index]++;
+				g_bind_stats.set_repeats[set_index] +=
+				    last_layout[set_index] == header.layout && last_bytes[set_index] == bytes ? 1
+				                                                                                : 0;
+				last_bytes[set_index]  = std::move(bytes);
+				last_layout[set_index] = header.layout;
+			}
+			set_writes_start += count;
+			set_infos_start += set_infos * RecordedInfoBytes;
+		}
+	}
 	CommitRecordedCall(RunRecordedBindings);
 	return true;
 }

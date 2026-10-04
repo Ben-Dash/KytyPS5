@@ -1181,6 +1181,9 @@ static void PrintBindStats(double seconds, double to_us) {
 	    share(stats.run_breaks[1], breaks), share(stats.run_breaks[2], breaks),
 	    share(stats.run_breaks[3], breaks));
 	std::printf("%s\n", depth.c_str());
+	std::printf("set-repeats: set0 payloads/s=%.0f repeat%%=%.1f set1 payloads/s=%.0f repeat%%=%.1f\n",
+	            stats.set_payloads[0] / seconds, share(stats.set_repeats[0], stats.set_payloads[0]),
+	            stats.set_payloads[1] / seconds, share(stats.set_repeats[1], stats.set_payloads[1]));
 	// Keep the open run.
 	const auto run_length   = stats.run_length;
 	const auto run_pipeline = stats.run_pipeline;

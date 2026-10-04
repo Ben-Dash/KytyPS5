@@ -138,6 +138,10 @@ struct BindStats {
 	// What ended a run: [0] another pipeline, [1] another vertex program, [2] another target,
 	// [3] a draw that is not depth-only.
 	std::array<uint64_t, 4> run_breaks {};
+	// Planned payloads by descriptor set: sets with writes, and those whose writes and infos
+	// repeat the previous payload's for the same set under the same pipeline layout.
+	std::array<uint64_t, 2> set_payloads {};
+	std::array<uint64_t, 2> set_repeats {};
 	uint32_t                run_length   = 0;
 	const void*             run_pipeline = nullptr;
 	const void*             run_program  = nullptr;
