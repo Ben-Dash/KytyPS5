@@ -496,6 +496,39 @@ static void LogDrawInputState(const CommandBuffer& buffer, const RenderColorInfo
 	}
 }
 
+// KYTY_DEBUG_RESOLUTION=1 prints, every 3 s, the viewport sizes drawn most often (with the size of
+// their render target) and the GPU timestamp scale, to see the render resolution a game with dynamic
+// resolution picks.
+static void DebugResolution(float width, float height, uint32_t target_width,
+                            uint32_t target_height) {
+	static const bool enabled = std::getenv("KYTY_DEBUG_RESOLUTION") != nullptr;
+	if (!enabled) [[likely]] {
+		return;
+	}
+	static std::map<std::array<uint32_t, 4>, uint64_t> counts;
+	static auto window_start = std::chrono::steady_clock::now();
+	const auto  w            = static_cast<uint32_t>(std::lround(std::fabs(width)));
+	const auto  h            = static_cast<uint32_t>(std::lround(std::fabs(height)));
+	if (w >= 640 && h >= 360) {
+		counts[{w, h, target_width, target_height}]++;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (now - window_start < std::chrono::seconds(3)) {
+		return;
+	}
+	std::vector<std::pair<std::array<uint32_t, 4>, uint64_t>> rows(counts.begin(), counts.end());
+	std::ranges::sort(rows, [](const auto& a, const auto& b) { return a.second > b.second; });
+	std::printf("resolution: scale=%u%%", Config::GetGpuTimestampScalePercent());
+	for (size_t i = 0; i < std::min<size_t>(rows.size(), 5); i++) {
+		const auto& [key, count] = rows[i];
+		std::printf("  %ux%u in %ux%u: %" PRIu64, key[0], key[1], key[2], key[3], count);
+	}
+	std::printf("\n");
+	std::fflush(stdout);
+	counts.clear();
+	window_start = now;
+}
+
 // KYTY_DEBUG_STATE_FILTER=0 records every draw's full graphics state, for A/B runs.
 static bool GraphicsStateFilterEnabled() {
 	static const bool enabled = [] {
@@ -551,6 +584,7 @@ static void SetGraphicsDynamicParams(const CommandBuffer& buffer, vk::CommandBuf
 			scissor.extent = {0, 0};
 		}
 	}
+	DebugResolution(viewports[0].width, viewports[0].height, rendering.width, rendering.height);
 	// Consecutive draws mostly repeat their state: only changed values are recorded (see
 	// CommandBuffer::GraphicsState).
 	auto& known = buffer.GetGraphicsState();
