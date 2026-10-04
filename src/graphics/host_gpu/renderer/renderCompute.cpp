@@ -634,10 +634,16 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	RebindBuffers(bindings);
 
-	auto              vk_buffer        = buffer.Handle();
+	const bool        chain            = ComputeChainEnabled();
+	auto              vk_buffer        = chain ? buffer.ChainHandle() : buffer.Handle();
 	PreparedBindings* descriptor_stage = &bindings;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
-	               std::span {&descriptor_stage, 1u});
+	               std::span {&descriptor_stage, 1u}, chain);
+	// Still pending: nothing but dispatches since the previous one, and no guest synchronization.
+	const bool continues_chain = chain && buffer.ComputeChainPending();
+	if (chain) {
+		NoteComputeChain(continues_chain);
+	}
 	bool has_storage_writes = HasShaderBufferWrites(input_info.stage);
 	has_storage_writes =
 	    std::any_of(program.info.images.begin(), program.info.images.end(),
@@ -647,7 +653,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		                           ShaderRecompiler::IR::ImageResourceClass::Storage;
 	                }) ||
 	    has_storage_writes;
-	if (has_storage_writes) {
+	if (has_storage_writes && !continues_chain) {
 		// A host fence used to serialize every dispatch. Preserve its read-before-write ordering
 		// while allowing the queue to execute asynchronously.
 		ShaderWriteHazardBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
@@ -661,7 +667,11 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
 
 	// The removed host fence also ordered read-only dispatches before later writers.
-	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	if (chain) {
+		buffer.ContinueComputeChain();
+	} else {
+		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
 }
@@ -737,15 +747,20 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
 	PreparedBindings* descriptor_stage = &bindings;
+	const bool chain = ComputeChainEnabled();
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
-	               std::span {&descriptor_stage, 1u});
-	const auto vk_buffer = buffer.Handle();
+	               std::span {&descriptor_stage, 1u}, chain);
+	const bool continues_chain = chain && buffer.ComputeChainPending();
+	if (chain) {
+		NoteComputeChain(continues_chain);
+	}
+	const auto vk_buffer = chain ? buffer.ChainHandle() : buffer.Handle();
 	const bool has_storage_writes = HasShaderBufferWrites(input_info.stage) ||
 	    std::any_of(program.info.images.begin(), program.info.images.end(), [](const auto& image) {
 		    return image.written && image.resource_class ==
 		                                ShaderRecompiler::IR::ImageResourceClass::Storage;
 	    });
-	if (has_storage_writes) {
+	if (has_storage_writes && !continues_chain) {
 		ShaderWriteHazardBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
 	vk::MemoryBarrier barrier {};
@@ -763,7 +778,11 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	GpuZones::Mark(vk_buffer, DrainStats::Zone::GameDispatch, input_info.stage.program->shader_hash);
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
 	vk_buffer.dispatchIndirect(args_buffer->Handle(), args_offset);
-	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	if (chain) {
+		buffer.ContinueComputeChain();
+	} else {
+		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
 }

@@ -173,6 +173,15 @@ public:
 	void InvalidateGraphicsState() const noexcept { m_graphics_state = {}; }
 
 	[[nodiscard]] vk::CommandBuffer Handle() const;
+	// KYTY_COMPUTE_CHAIN=1: a dispatch leaves the barrier that orders it before later work pending
+	// instead of recording it, so consecutive dispatches the guest did not separate by a cache
+	// flush, partial flush, wait or end-of-pipe write run without host barriers between them, as
+	// on the PS5. Every other command (Handle) records the pending barrier first.
+	[[nodiscard]] vk::CommandBuffer ChainHandle() const;
+	[[nodiscard]] bool ComputeChainPending() const noexcept { return m_compute_access_pending; }
+	void ContinueComputeChain() const noexcept { m_compute_access_pending = true; }
+	// For a caller that records a full memory dependency at once, which covers the pending one.
+	[[nodiscard]] vk::CommandBuffer HandleForFullBarrier() const;
 	[[nodiscard]] GraphicContext&   GetGraphics() const noexcept { return m_graphics; }
 	[[nodiscard]] RenderContext&    GetContext() const noexcept { return m_context; }
 	[[nodiscard]] HW::Context&      GetRegisters() const noexcept { return *m_registers; }
@@ -202,6 +211,7 @@ private:
 	uint64_t            m_debug_arg4      = 0;
 	mutable RenderState m_render_state;
 	mutable bool        m_rendering   = false;
+	mutable bool        m_compute_access_pending = false;
 	mutable vk::PipelineStageFlags m_pending_shader_writes;
 	mutable GraphicsState          m_graphics_state;
 	HW::Context*        m_registers   = nullptr;
@@ -228,7 +238,7 @@ public:
 	void                           RebindImages(PreparedBindings& bindings);
 	void CommitBindings(CommandBuffer& buffer, vk::PipelineBindPoint pipeline_bind_point,
 	                    const PipelineCache::Pipeline&     pipeline,
-	                    std::span<PreparedBindings* const> bindings);
+	                    std::span<PreparedBindings* const> bindings, bool compute_chain = false);
 
 private:
 	void DrawIndex(uint64_t submit_id, CommandBuffer& buffer, const DrawIndexArgs& args);

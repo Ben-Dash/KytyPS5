@@ -13,7 +13,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cinttypes>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -655,6 +657,29 @@ bool DebugFullBarriers() noexcept {
 		present.store(std::filesystem::exists(file, error), std::memory_order_relaxed);
 	}
 	return present.load(std::memory_order_relaxed);
+}
+
+bool ComputeChainEnabled() noexcept {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_COMPUTE_CHAIN");
+		return value != nullptr && value[0] != '0' && std::getenv("KYTY_DEBUG_FULL_BARRIERS") == nullptr &&
+		       std::getenv("KYTY_DEBUG_FULL_BARRIERS_FILE") == nullptr;
+	}();
+	return enabled;
+}
+
+void NoteComputeChain(bool continued) noexcept {
+	// Dispatches are recorded on the render thread only.
+	static uint64_t total     = 0;
+	static uint64_t chained   = 0;
+	total++;
+	chained += continued ? 1u : 0u;
+	if (total % 50000u == 0u) {
+		std::printf("compute chain: %" PRIu64 " of %" PRIu64
+		            " dispatches without barriers before them (%.1f%%)\n",
+		            chained, total, 100.0 * static_cast<double>(chained) / static_cast<double>(total));
+		std::fflush(stdout);
+	}
 }
 
 // KYTY_DEBUG_SKIP_SHADERS_LIVE=<path>: the file holds pixel or vertex shader hashes (hex,

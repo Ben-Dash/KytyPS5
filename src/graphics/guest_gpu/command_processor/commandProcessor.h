@@ -132,6 +132,9 @@ public:
 	void PrepareCpuFlip(uint64_t request_id);
 	void SynchronizeGpu();
 	void EmitGlobalBarrier();
+	// Records a pending compute chain barrier (KYTY_COMPUTE_CHAIN) at a guest synchronization point
+	// that records no host barrier of its own.
+	void BreakComputeChain();
 	void TriggerEopEventAtEndOfPipe(uint32_t interrupt_context_id);
 	void DispatchDirect(uint32_t thread_group_x, uint32_t thread_group_y, uint32_t thread_group_z,
 	                    uint32_t mode);

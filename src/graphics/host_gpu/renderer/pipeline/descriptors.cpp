@@ -1693,9 +1693,11 @@ bool RecordPushedBindings(vk::CommandBuffer buffer, vk::Device device,
 void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     vk::PipelineBindPoint              pipeline_bind_point,
                                     const PipelineCache::Pipeline&     pipeline,
-                                    std::span<PreparedBindings* const> prepared_bindings) {
+                                    std::span<PreparedBindings* const> prepared_bindings,
+                                    bool                               compute_chain) {
 	KYTY_PROFILER_FUNCTION();
-	auto   vk_buffer        = buffer.Handle();
+	// Binding commands do not touch memory, so they leave a pending compute chain barrier pending.
+	auto   vk_buffer        = compute_chain ? buffer.ChainHandle() : buffer.Handle();
 	size_t descriptor_count = 0;
 	size_t write_count      = 0;
 	ShaderRecompiler::IR::PushData push_data;

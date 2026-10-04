@@ -498,6 +498,7 @@ void CommandProcessor::WaitRegMem(uint32_t func, const T* addr, T ref, T mask, u
 	}
 
 	(void)poll;
+	BreakComputeChain();
 	// The CPU may have written the data this wait guards just before its flag.
 	AdvanceBdaEpoch();
 	if (!TestWaitRegMemValue(*addr, ref, mask, func)) {
@@ -1747,6 +1748,7 @@ void CommandProcessor::WriteAtEndOfPipe(uint32_t cache_policy, uint32_t event_wr
                                         uint32_t interrupt_context_id) {
 	static_assert(sizeof(T) == sizeof(uint32_t) || sizeof(T) == sizeof(uint64_t));
 
+	BreakComputeChain();
 	auto& command = CurrentBuffer();
 
 	if (GraphicsRunDebugDumpEnabled()) {
@@ -1975,10 +1977,22 @@ void CommandProcessor::EmitGlobalBarrier() {
 	dependency.memoryBarrierCount = 1;
 	dependency.pMemoryBarriers    = &barrier;
 	GetScheduler().EndRendering();
-	CurrentBuffer().Handle().pipelineBarrier2(dependency);
+	CurrentBuffer().HandleForFullBarrier().pipelineBarrier2(dependency);
+}
+
+void CommandProcessor::BreakComputeChain() {
+	if (!GetScheduler().Active()) {
+		return;
+	}
+	Common::LockGuard lock(m_renderer.GetMutex());
+	auto& buffer = CurrentBuffer();
+	if (!buffer.IsInvalid() && buffer.ComputeChainPending()) {
+		(void)buffer.Handle();
+	}
 }
 
 void CommandProcessor::TriggerEopEventAtEndOfPipe(uint32_t interrupt_context_id) {
+	BreakComputeChain();
 	Sync::TriggerEopEventAtEndOfPipe(CurrentBuffer(), m_interrupt_event_id, interrupt_context_id);
 }
 
@@ -2030,6 +2044,7 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 			LOGF("\t temporary: ignoring unsupported event_write type 0x%08" PRIx32
 			     ", index 0x%08" PRIx32 "\n",
 			     event_type, event_index);
+			BreakComputeChain();
 			break;
 		case 0x00000039: {
 			if (event_index != 0x00000001 || event_address == 0 || (event_address & 0x7u) != 0) {

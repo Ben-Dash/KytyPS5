@@ -54,6 +54,12 @@ inline RenderDebugCounters g_render_debug_counters;
 // its memory writes (RecordFullBarrier). Slow; it tells synchronization bugs (a result that changes)
 // from bugs that do not depend on timing.
 [[nodiscard]] bool DebugFullBarriers() noexcept;
+// KYTY_COMPUTE_CHAIN=1: consecutive dispatches without a guest synchronization point between them
+// run without host barriers between them (CommandBuffer::ChainHandle). Off with full barriers.
+[[nodiscard]] bool ComputeChainEnabled() noexcept;
+// Counts dispatches and how many continued a chain; KYTY_COMPUTE_CHAIN=1 prints the share
+// every 50000 dispatches.
+void NoteComputeChain(bool continued) noexcept;
 // KYTY_DEBUG_SKIP_SHADERS=<shader hashes, hex, comma-separated>: draws with a listed pixel or
 // vertex shader and dispatches of a listed compute shader are left out, to find the draws behind a
 // visual defect. An entry <value>/<mask> skips every pixel and compute shader whose hash matches
