@@ -1573,13 +1573,35 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 	// attachment, as a render target the game fast-clears and then samples without drawing to it
 	// first: on the CPU path each such lookup drained the GPU (once a frame near Astro Bot's
 	// crashed ship, waiting about 25 ms behind the frame's heaviest draw).
+	// Storage images consume the keys on the CPU path too: ASTRO's PLAYROOM's hub binds a
+	// fast-cleared target as a storage image of an indirect dispatch about four times a frame,
+	// and each drained the GPU (11 % of Thread_Gpu). KYTY_DCC_GPU_STORAGE=0 keeps them on the CPU
+	// path. KYTY_DEBUG_DCC_FALLBACK=1 prints why a check still takes the CPU path.
+	static const bool storage = [] {
+		const char* text = std::getenv("KYTY_DCC_GPU_STORAGE");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	const auto fallback = [&](const char* why) {
+		static const bool          enabled = std::getenv("KYTY_DEBUG_DCC_FALLBACK") != nullptr;
+		static std::atomic<uint32_t> printed {0};
+		if (enabled && printed.fetch_add(1, std::memory_order_relaxed) < 64) {
+			std::printf("dcc-fallback: %s image=0x%016" PRIx64 " type=%u fmt=%u %ux%u layers=%u\n",
+			            why, desc.info.data.address, static_cast<uint32_t>(desc.type),
+			            static_cast<uint32_t>(desc.view_info.format), desc.info.extent.width,
+			            desc.info.extent.height, count);
+			std::fflush(stdout);
+		}
+		return false;
+	};
 	const auto& view = desc.view_info;
-	if ((desc.type != BindingType::RenderTarget && desc.type != BindingType::Texture) ||
-	    desc.info.IsVolume() ||
-	    count > DccClearResolver::MaxSlices || view.base_level != 0 ||
+	if (desc.type != BindingType::RenderTarget && desc.type != BindingType::Texture &&
+	    !(storage && desc.type == BindingType::Storage)) {
+		return fallback("binding type");
+	}
+	if (desc.info.IsVolume() || count > DccClearResolver::MaxSlices || view.base_level != 0 ||
 	    !(m_graphics.GetFormatProperties(view.format).optimalTilingFeatures &
 	      vk::FormatFeatureFlagBits::eColorAttachment)) {
-		return false;
+		return fallback("view or format");
 	}
 	{
 		std::scoped_lock lock {m_lock};
@@ -1587,7 +1609,7 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 		if (image.depth_id || image.backing.image == nullptr ||
 		    !(image.backing.usage & vk::ImageUsageFlagBits::eColorAttachment) ||
 		    image_first >= image.backing.layers || count > image.backing.layers - image_first) {
-			return false;
+			return fallback("image usage");
 		}
 	}
 	m_dcc_gpu_checks++;
