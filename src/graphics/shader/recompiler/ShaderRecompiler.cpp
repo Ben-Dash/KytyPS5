@@ -646,6 +646,7 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 			     MakeIrDump(cfg_dump, ir).c_str());
 		}
 	}
+	ir.bindless_images = options.bindless_images;
 	try {
 		IR::TrackResources(ir, decoded, native_cfg);
 	} catch (const IR::ResourceTrackingError& error) {

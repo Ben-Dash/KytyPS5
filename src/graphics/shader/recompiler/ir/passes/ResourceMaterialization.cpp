@@ -480,6 +480,33 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 	return true;
 }
 
+// The shader looks the key up in the bindless translation table: nothing to enumerate. Record
+// the heap for the host and reserve the two words it patches (region base, entry count); zeros
+// resolve every key to the placeholder in slot 0.
+template <typename Specialization>
+bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indirect,
+                              const DescriptorValue& table_value, uint32_t image_index,
+                              ResourceSnapshot& snapshot, std::vector<Specialization>& specializations) {
+	ShaderBufferResource heap;
+	if (table_value.dword_count != 4u || !DecodeBufferDescriptor(table_value, heap)) {
+		return false;
+	}
+	const auto mapping_offset = static_cast<uint32_t>(snapshot.flattened_srt.size());
+	snapshot.flattened_srt.resize(mapping_offset + 2u, 0u);
+	snapshot.images[image_index] = {.dword_count = 8u};
+	snapshot.bindless_heaps.push_back({.base           = heap.Base48(),
+	                                   .size           = heap.GetSize(),
+	                                   .table_offset   = indirect.table_offset,
+	                                   .record_stride  = indirect.table_stride,
+	                                   .image          = image_index,
+	                                   .mapping_offset = mapping_offset});
+	auto& root                      = specializations[image_index];
+	root.indirect_root              = image_index;
+	root.indirect_mapping_offset    = mapping_offset;
+	root.indirect_search_iterations = 0;
+	root.bindless                   = true;
+	return true;
+}
 
 } // namespace
 
@@ -590,6 +617,14 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 			                                  : Prospero::TextureNumericClass::Float;
 			image.dimension     = Decoder::ImageDimension::Dim2D;
 			image.cube          = false;
+			if (image.bindless) {
+				// No one descriptor describes a bindless image: keep the dimension the
+				// instruction samples, which picks the bindless array.
+				image.dimension = base.dimension == Decoder::ImageDimension::Unknown
+				                      ? Decoder::ImageDimension::Dim2D
+				                      : base.dimension;
+				image.cube      = base.cube;
+			}
 			continue;
 		}
 		const auto descriptor_dimension = DescriptorDimension(descriptor, base.dimension);
@@ -650,7 +685,7 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 	}
 	for (uint32_t root_index = 0; root_index < specialization.images.size(); root_index++) {
 		auto& root = specialization.images[root_index];
-		if (root.indirect_root != root_index) {
+		if (root.indirect_root != root_index || root.bindless) {
 			continue;
 		}
 		const auto key_count = root.indirect_mapping_offset < snapshot.flattened_srt.size()
@@ -1371,6 +1406,8 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			memo->valid = false;
 		}
 	}
+	snapshot.bindless_heaps.clear();
+	snapshot.bindless_sampler_heaps.clear();
 	const auto evaluate = [&](uint32_t source, DescriptorValue& value) {
 		if (source >= program.descriptor_sources.size()) {
 			return false;
@@ -1456,6 +1493,13 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			const auto&     indirect = *source->indirect_descriptor;
 			DescriptorValue material;
 			DescriptorValue table;
+			if (indirect.bindless) {
+				if (!clean.EvaluateDescriptor(indirect.table_source, table) ||
+				    !MaterializeBindlessImage(indirect, table, i, snapshot, specialization.images)) {
+					return ReportMaterializeFailure(program, "bindless image", i);
+				}
+				continue;
+			}
 			const auto      normalize = [&](DescriptorValue& value) {
 				if (NullImageDescriptor(value) || !ValidImageDescriptor(value, image.r128)) {
 					value.dwords.fill(0u);
@@ -1770,6 +1814,7 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 		image.indirect_mapping_offset    = source.indirect_mapping_offset;
 		image.indirect_search_iterations = source.indirect_search_iterations;
 		image.cube                       = source.cube;
+		image.bindless                   = source.bindless;
 		image.indirect_resources.clear();
 	}
 	for (uint32_t index = 0; index < images.size(); index++) {
@@ -1881,7 +1926,9 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 				memory.sampler = sampler_plan.mapping[memory.sampler][type];
 				EXIT_IF(memory.sampler == UINT32_MAX);
 			}
-			EXIT_IF(image.indirect_root == memory.resource &&
+			// Enumerated candidates only sample; a bindless image is loaded per instruction and
+			// serves every image operation.
+			EXIT_IF(image.indirect_root == memory.resource && !image.bindless &&
 			        inst.GetOpcode() != ValueOpcode::ImageSampleRaw);
 		}
 	}

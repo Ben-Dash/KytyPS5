@@ -57,6 +57,10 @@ namespace Libs::Graphics {
 
 namespace {
 
+// Set once by the PipelineCache constructor, before any shader is translated: the device has
+// descriptor indexing and --bindless asked for it.
+bool g_bindless_images = false;
+
 // The library cache key a prefetched compute pipeline compiles under.
 std::string ComputePrefetchKey(uint64_t program_id) {
 	std::string key(1, 'C');
@@ -521,6 +525,7 @@ struct PipelineCache::ProgramCache {
 		options.dump_ir     = Config::GetShaderLogDirection() != Config::LogDirection::Silent;
 		options.early_dump  = options.dump_ir;
 		options.dump_label  = label;
+		options.bindless_images = g_bindless_images;
 		options.input_info  = stage_input;
 
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
@@ -1230,6 +1235,7 @@ struct PipelineCache::ProgramCache {
 PipelineCache::PipelineCache(GraphicContext& graphics)
     : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
+	g_bindless_images = graphics.bindless_enabled && Config::BindlessImagesEnabled();
 	InitializeDriverCache();
 	InitializeShaderPrecompile();
 	// Linking libraries without fast linking costs about as much as a full compile.
@@ -1400,6 +1406,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		options.dump_ir        = false;
 		options.early_dump     = false;
 		options.dump_label     = "ShaderPrecompile";
+		options.bindless_images = g_bindless_images;
 		std::visit(
 		    [&](auto& info) {
 			    using Info = std::decay_t<decltype(info)>;

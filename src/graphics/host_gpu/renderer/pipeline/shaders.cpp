@@ -198,6 +198,12 @@ static void AddLayoutBindings(std::vector<vk::DescriptorSetLayoutBinding>& descr
 	}
 }
 
+static bool UsesBindless(const ShaderRecompiler::IR::CompiledShaderInfo& program) {
+	return std::ranges::any_of(program.info.images, &ShaderRecompiler::IR::ImageResource::bindless) ||
+	       std::ranges::any_of(program.info.samplers,
+	                           &ShaderRecompiler::IR::SamplerResource::bindless);
+}
+
 [[nodiscard]] static bool FitsPushDescriptors(
     const GraphicContext& graphics, std::span<const vk::DescriptorSetLayoutBinding> bindings) {
 	uint32_t descriptor_count = 0;
@@ -250,6 +256,8 @@ struct GraphicsPipelineState {
 	bool                            mesh       = false;
 	bool                            rect_list  = false;
 	bool                            with_depth = false;
+	// A stage samples bindless images: the layout gets the bindless table as set 2.
+	bool                            uses_bindless = false;
 
 	std::array<vk::PipelineShaderStageCreateInfo, 4> stages {};
 	uint32_t                                         stage_count = 0;
@@ -538,11 +546,13 @@ void BuildGraphicsPipelineState(GraphicsPipelineState& state, GraphicContext& gr
 		const auto native_stage = NativeShaderStage(stage.logical_stage);
 		AddLayoutBindings(state.vertex_bindings, *stage.stage.program, native_stage);
 		graphics_stages |= native_stage;
+		state.uses_bindless |= UsesBindless(*stage.stage.program);
 	}
 	if (ps_active) {
 		EXIT_IF(!ps_input_info->stage);
 		AddLayoutBindings(state.pixel_bindings, *ps_input_info->stage.program,
 		                  vk::ShaderStageFlagBits::eFragment);
+		state.uses_bindless |= UsesBindless(*ps_input_info->stage.program);
 	}
 	state.graphics_stages = graphics_stages;
 	state.pixel_uses_push =
@@ -625,7 +635,14 @@ void CreateGraphicsLayouts(GraphicContext& graphics, PipelineCache::Pipeline& pi
 	pipeline.descriptor_set_layout =
 	    CreateSetLayout(graphics, state.vertex_bindings, state.vertex_uses_push);
 	pipeline.pixel_set_layout = CreateSetLayout(graphics, state.pixel_bindings, state.pixel_uses_push);
-	const std::array set_layouts {pipeline.descriptor_set_layout, pipeline.pixel_set_layout};
+	pipeline.uses_bindless    = state.uses_bindless;
+	// Set 2, when a stage samples bindless images, is the shared bindless table.
+	std::vector<vk::DescriptorSetLayout> set_layouts {pipeline.descriptor_set_layout,
+	                                                  pipeline.pixel_set_layout};
+	if (state.uses_bindless) {
+		EXIT_IF(graphics.bindless_layout == nullptr);
+		set_layouts.push_back(graphics.bindless_layout);
+	}
 	EXIT_IF(pipeline.pipeline_layout != nullptr);
 	pipeline.pipeline_layout = CreatePipelineLayout(graphics, set_layouts, push_stages);
 }
@@ -730,6 +747,7 @@ LibraryPartKeys BuildLibraryPartKeys(const GraphicsPipelineState&           stat
 	AppendBindingsKey(layout_key, state.vertex_bindings, state.vertex_uses_push);
 	AppendBindingsKey(layout_key, state.pixel_bindings, state.pixel_uses_push);
 	AppendKey(layout_key, static_cast<uint32_t>(LibraryPushStages(state)));
+	AppendKey(layout_key, state.uses_bindless);
 
 	auto& vertex_input_key = keys.vertex_input;
 	vertex_input_key       = "V";
@@ -1184,13 +1202,23 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 	std::vector<vk::DescriptorSetLayoutBinding> descriptor_bindings;
 	AddLayoutBindings(descriptor_bindings, *input_info.stage.program,
 	                  vk::ShaderStageFlagBits::eCompute);
+	pipeline.uses_bindless = UsesBindless(*input_info.stage.program);
 	CreateDescriptorLayout(graphics, pipeline, descriptor_bindings);
 	const vk::PushConstantRange push_constants {vk::ShaderStageFlagBits::eCompute, 0,
 	                                            ShaderRecompiler::IR::NativePushConstantSize};
 
+	// Set 0 is the shader's own descriptors. A bindless shader also gets the shared bindless table
+	// at set 2 (as in graphics pipelines) behind an empty set 1.
+	std::vector<vk::DescriptorSetLayout> set_layouts {pipeline.descriptor_set_layout};
+	if (pipeline.uses_bindless) {
+		EXIT_IF(graphics.bindless_layout == nullptr);
+		pipeline.pixel_set_layout = CreateSetLayout(graphics, {}, false);
+		set_layouts.push_back(pipeline.pixel_set_layout);
+		set_layouts.push_back(graphics.bindless_layout);
+	}
 	vk::PipelineLayoutCreateInfo pipeline_layout_info {};
-	pipeline_layout_info.setLayoutCount         = 1;
-	pipeline_layout_info.pSetLayouts            = &pipeline.descriptor_set_layout;
+	pipeline_layout_info.setLayoutCount         = static_cast<uint32_t>(set_layouts.size());
+	pipeline_layout_info.pSetLayouts            = set_layouts.data();
 	pipeline_layout_info.pushConstantRangeCount = 1;
 	pipeline_layout_info.pPushConstantRanges    = &push_constants;
 

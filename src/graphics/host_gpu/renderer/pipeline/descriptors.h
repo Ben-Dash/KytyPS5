@@ -78,6 +78,10 @@ struct PreparedBindings {
 	vk::DescriptorBufferInfo              shader_data_buffer;
 	vk::DescriptorBufferInfo              shared_memory;
 	std::vector<uint32_t>                 shader_data;
+	// Bindless: flattened-SRT words to patch (offset, region, entries) and resolved images to
+	// keep readable for this draw.
+	std::vector<std::array<uint32_t, 3>>  bindless_patches;
+	std::vector<ImageId>                  bindless_images;
 	// KYTY_DEBUG_DRAW_PHASES: the previous draw's program and descriptor hashes (see
 	// NoteBindingRepeat).
 	// The stage's images as its last draw left them, for a draw with the same program and image

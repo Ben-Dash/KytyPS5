@@ -157,6 +157,9 @@ struct ImageResource {
 	uint32_t                      indirect_root     = NoIndirectImage;
 	uint32_t                      indirect_mapping_offset   = 0;
 	uint32_t                      indirect_search_iterations = 0;
+	// Sampled through the bindless image arrays (descriptor set 1) at the slot the translation
+	// table gives for the handle's key; the mapping offset locates the heap's region and size.
+	bool                          bindless          = false;
 	std::vector<uint32_t>         indirect_resources;
 
 	bool operator==(const ImageResource& other) const = default;
@@ -171,6 +174,10 @@ struct SamplerResource {
 	bool     depth_compare         = false;
 	bool     integer_border        = false;
 	bool     gather_lod            = false;
+	// Selected per draw by a GPU-computed key from a guest sampler heap: the shader indexes the
+	// bindless sampler array with the region base and entry count at bindless_mapping_offset.
+	bool     bindless                = false;
+	uint32_t bindless_mapping_offset = 0;
 
 	bool operator==(const SamplerResource& other) const = default;
 };
@@ -510,6 +517,8 @@ struct DescriptorSource {
 		uint32_t workgroup_axis  = UINT32_MAX;
 		uint32_t selector_shift  = 0;
 		uint32_t selector_bits   = UINT32_MAX;
+		// No enumeration: the shader looks the key up in the bindless translation table.
+		bool     bindless        = false;
 		Value    key_count;
 		Value                 selector_first;
 		Value    selector_mask;
@@ -710,6 +719,9 @@ struct ResourcePlan {
 	std::vector<uint8_t>                clean_flat_slots;
 	bool                                requires_specialization_memory = false;
 	bool                                capture_specialization_reads = false;
+	// The device supports bindless images: an indirect image the enumeration cannot cover
+	// becomes a bindless one instead of failing tracking.
+	bool                                bindless_images = false;
 	bool                                srt_plan_complete          = false;
 	bool                                resource_tracking_complete = false;
 	ShaderInfo                          info;

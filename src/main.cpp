@@ -88,6 +88,7 @@ static void PrintUsage() {
 	::printf("  --shader-precompile <true|false>     Replay recorded shaders before drawing. "
 	         "Default: true.\n");
 	::printf("  --tessellation                      Draw tessellation patches; skipped by default.\n");
+	::printf("  --bindless                          Sample heap-indexed images through bindless arrays.\n");
 	::printf("  --shader-optimization-type <value>   None, Size, or Performance.\n");
 	::printf("  --shader-log-direction <value>       Silent, Console, or File.\n");
 	::printf("  --shader-log-folder <path>           Shader log output folder.\n");
@@ -287,6 +288,15 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		                     "gpu-timestamp-scale %u\n",
 		                     title_id.c_str(), options.config.gpu_timestamp_scale_percent);
 	}
+	if (title_id == "PPSA26344") {
+		// Ghost of Yotei: heap-indexed textures need the bindless arrays. Shaders that hang the host
+		// GPU are skipped: the RENDERWORLD clear pair (wave64 min loop) and two that lose the device
+		// once they run.
+		options.config.bindless_images_enabled = true;
+		KYTY_SET_DEFAULT_SWITCH("KYTY_DEBUG_SKIP_SHADERS",
+		                        "964747887d898821,f0a524a3bcc360f1,e374a8dfad01be72,f08cf07763b51d49");
+		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, GPU-hang shaders skipped\n", title_id.c_str());
+	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger
 	// resistance, and controller speaker sounds play on the PC output.
 	if (g_dualsense_fix) {
@@ -349,6 +359,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 
 		if (arg == "--tessellation") {
 			options.config.tessellation_enabled = true;
+			continue;
+		}
+
+		if (arg == "--bindless") {
+			options.config.bindless_images_enabled = true;
 			continue;
 		}
 

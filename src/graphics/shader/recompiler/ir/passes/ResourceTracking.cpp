@@ -1,12 +1,15 @@
 #include "graphics/shader/recompiler/ir/passes/ResourceTracking.h"
 
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/switches.h"
+#include "graphics/shader/recompiler/ir/BindlessBindings.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdlib>
 #include <fmt/format.h>
 #include <map>
@@ -1747,7 +1750,14 @@ private:
 		indirect.table_offset = table_offset;
 		indirect.table_stride = table_stride;
 		indirect.workgroup_axis = WorkgroupAxis(key);
-		if (indirect.workgroup_axis != UINT32_MAX) {
+		if (indirect.workgroup_axis == UINT32_MAX && m_program.bindless_images &&
+		    table_source.dword_count == 4u && table_stride >= 32u) {
+			// Bindless (--bindless): the shader looks the key up in the host's translation table
+			// at run time. An enumeration that passes here can still fail per draw (a material
+			// table of more records than the probe cap, more textures than a shader binds), and a
+			// compiled shader cannot switch plans, so a V# heap always takes this path.
+			indirect.bindless = true;
+		} else if (indirect.workgroup_axis != UINT32_MAX) {
 			// The descriptor also supplies dimensions to shader arithmetic. Keep its reads;
 			// only the image handle is projected onto the bounded workgroup key.
 			plan.reads.fill(nullptr);
@@ -1796,8 +1806,9 @@ private:
 		// This plan combines shader byte-offset additions with the scalar immediate.
 		// A nonzero combined offset is exact only when neither can cross U32 wrap.
 		const auto maximum_key = (UINT32_MAX >> indirect.selector_shift) & indirect.selector_bits;
-		if (indirect.workgroup_axis == UINT32_MAX && table_source.dword_count == 4u &&
-		    table_offset != 0u && uint64_t {maximum_key} * table_stride + table_offset + 28u > UINT32_MAX)
+		if (!indirect.bindless && indirect.workgroup_axis == UINT32_MAX &&
+		    table_source.dword_count == 4u && table_offset != 0u &&
+		    uint64_t {maximum_key} * table_stride + table_offset + 28u > UINT32_MAX)
 			return false;
 		indirect.table_source = InternSource(table_source);
 		DescriptorSource image_source;
@@ -2127,6 +2138,26 @@ private:
 			    std::all_of(descriptor.dwords.begin(), descriptor.dwords.begin() + width,
 			                [](Value word) { return word.Resolve().GetType() == Type::U32; })) {
 				return false;
+			}
+			// With --bindless: a sampler selected per material from a sampler heap (like the bindless
+			// image beside it) has no plan yet. Sample with one fixed sampler (trilinear, wrap, full
+			// LOD range) rather than giving up the whole shader; only the filtering and the edge
+			// addressing can differ from the material's own sampler.
+			if (expected == ValueOpcode::GetSamplerResource && width == 4u &&
+			    m_program.bindless_images) {
+				for (uint32_t dword = 0; dword < 4u; dword++) {
+					handle->SetArg(dword, Value(BindlessDefaultSampler[dword]));
+					descriptor.dwords[dword] = Value(BindlessDefaultSampler[dword]);
+				}
+				static std::atomic<uint32_t> reported {0};
+				if (reported.fetch_add(1, std::memory_order_relaxed) < 32u) {
+					Log::WriteToConsoleAndLog(fmt::format(
+					    "shader resource tracking: hash=0x{:016x} pc=0x{:08x} heap-selected sampler: "
+					    "using a default sampler\n",
+					    m_program.shader_hash, pc));
+				}
+				source = InternSource(descriptor);
+				return true;
 			}
 			Fail(pc, fmt::format("{} dword {} is not a valid runtime value",
 			                     ValueOpcodeName(expected), bad_dword));

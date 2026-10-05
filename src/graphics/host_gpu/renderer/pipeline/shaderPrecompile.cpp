@@ -12,7 +12,7 @@ namespace Libs::Graphics::ShaderPrecompile {
 namespace {
 
 constexpr std::array<uint8_t, 8> Magic {'K', 'Y', 'T', 'Y', 'S', 'H', 'D', 'R'};
-constexpr uint32_t               FormatVersion  = 5; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source.
+constexpr uint32_t               FormatVersion  = 6; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images.
 constexpr uint32_t               MaxCodeWords   = 256u * 1024u;
 constexpr uint32_t               MaxRecordBytes = 4u * 1024u * 1024u;
 constexpr uint64_t               MaxFileBytes   = 256u * 1024u * 1024u;
@@ -204,7 +204,7 @@ void Specialization(Archive& a, ShaderRecompiler::IR::ResourceSpecialization& s)
 	for (auto& i: s.images) {
 		a(i.numeric_class, i.dimension, i.mip_count, i.conversion_format, i.shader_swizzle,
 		  i.indirect_root, i.indirect_mapping_offset, i.indirect_search_iterations, i.cube,
-		  i.fmask);
+		  i.fmask, i.bindless);
 	}
 }
 

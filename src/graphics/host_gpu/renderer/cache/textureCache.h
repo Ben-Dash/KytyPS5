@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <span>
@@ -37,6 +38,8 @@ struct TextureCacheTestAccess;
 
 class TextureCache {
 public:
+	// Called before a bindless-pinned image is unregistered.
+	std::function<void(ImageId)> on_bindless_unregister;
 	enum class BindingType : uint8_t { Texture, Storage, RenderTarget, DepthTarget, VideoOut };
 
 	struct ImageDesc {

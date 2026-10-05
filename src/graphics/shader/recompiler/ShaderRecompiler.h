@@ -12,6 +12,7 @@
 namespace Libs::Graphics::ShaderRecompiler {
 
 struct CompileOptions {
+	bool                        bindless_images = false;
 	ShaderType                  stage           = ShaderType::Compute;
 	uint32_t                    wave_size       = 64;
 	uint32_t                    user_data_base  = 0;

@@ -78,6 +78,7 @@ struct ConfigOptions {
 	bool                   renderdoc_enabled           = false;
 	bool                   readback_linear_images      = false;
 	bool                   tessellation_enabled        = false;
+	bool                   bindless_images_enabled     = false;
 	bool                   trophy_enabled              = true;
 	bool                   playgo_hack_enabled         = false;
 	uint32_t               drain_stats_interval        = 0;
@@ -144,6 +145,7 @@ bool GpuAssistedValidationEnabled();
 bool RenderDocEnabled();
 bool ReadbackLinearImagesEnabled();
 bool TessellationEnabled();
+bool BindlessImagesEnabled();
 bool TrophyEnabled();
 bool PlayGoHackEnabled();
 // Seconds between GPU wait reports; 0 disables the accounting.
