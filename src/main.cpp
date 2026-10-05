@@ -10,7 +10,9 @@
 #include "emulator.h"
 #include "kytyGitVersion.h"
 
+#include <algorithm>
 #include <charconv>
+#include <cstdlib>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -69,6 +71,8 @@ static void PrintUsage() {
 	::printf("  --fullscreen                         Run in borderless desktop fullscreen.\n");
 	::printf("  --vr                                 Enable the virtual VR headset.\n");
 	::printf("  --amd-cpu                            Apply AMD CPU instruction patches.\n");
+	::printf("  --dualsense-fix                      No DualSense vibration; controller speaker sounds\n"
+	         "                                       play on the PC output.\n");
 	::printf("  --vblank-frequency <num>             Virtual vblank frequency. Default: 60.\n");
 	::printf("  --console-language <0-29>            Console language. Default: 1 (English US).\n");
 	::printf("  --vulkan-validation <true|false>     Enable Vulkan validation.\n");
@@ -218,6 +222,81 @@ static bool ParseUserId(const std::string& value, int32_t& out) {
 	return true;
 }
 
+static bool g_dualsense_fix         = false;
+static bool g_timestamp_scale_given = false;
+
+// Sets an environment switch unless the environment already has it (a launcher script wins).
+static void SetDefaultSwitch(const char* name, const char* value) {
+	if (std::getenv(name) == nullptr) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		_putenv_s(name, value);
+#else
+		setenv(name, value, 0);
+#endif
+	}
+}
+
+// The game's title ID: from sce_sys/param.json of a game folder, else the first PPSA/CUSA ID in
+// the game path.
+static std::string DetectTitleId(const RunOptions& options, const std::string& game_arg) {
+	if (!options.app0_dir.empty()) {
+		const auto json = options.app0_dir / "sce_sys" / "param.json";
+		if (std::FILE* file = Common::File::IsFileExisting(json) ? std::fopen(Common::PathToString(json).c_str(), "rb")
+		                                                         : nullptr;
+		    file != nullptr) {
+			std::string text(65536, '\0');
+			text.resize(std::fread(text.data(), 1, text.size(), file));
+			std::fclose(file);
+			if (const auto key = text.find("\"titleId\""); key != std::string::npos) {
+				const auto open  = text.find('"', text.find(':', key) + 1);
+				const auto close = open != std::string::npos ? text.find('"', open + 1) : open;
+				if (close != std::string::npos) {
+					return text.substr(open + 1, close - open - 1);
+				}
+			}
+		}
+	}
+	for (const char* prefix: {"PPSA", "CUSA"}) {
+		for (auto at = game_arg.find(prefix); at != std::string::npos; at = game_arg.find(prefix, at + 1)) {
+			if (at + 9 <= game_arg.size() &&
+			    std::all_of(game_arg.begin() + static_cast<std::ptrdiff_t>(at + 4),
+			                game_arg.begin() + static_cast<std::ptrdiff_t>(at + 9),
+			                [](char c) { return c >= '0' && c <= '9'; })) {
+				return game_arg.substr(at, 9);
+			}
+		}
+	}
+	return {};
+}
+
+// Per-title defaults, so a game starts the same way from the launcher, a script or a double click:
+// what the tested launch scripts set. Switches already in the environment, and a timestamp scale on
+// the command line, are kept.
+static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) {
+	if (title_id == "PPSA21564" || title_id == "PPSA01325") {
+		// ASTRO BOT, ASTRO's PLAYROOM.
+		SetDefaultSwitch("KYTY_COMPUTE_CHAIN", "1");
+		// The game advances 1/60 s per frame: cap at 60 fps so light scenes do not run fast.
+		SetDefaultSwitch("KYTY_DEBUG_FRAME_LIMIT_MS", "16.667");
+		SetDefaultSwitch("KYTY_PRESENT_WHEN_READY", "1");
+		if (!g_timestamp_scale_given) {
+			// The game's dynamic resolution follows the window: the scale stretches the GPU time it
+			// measures, so 50 lets it aim for 4K, 200 holds it near 1080p (the fastest: at 4K the GPU
+			// limits the frame rate in Sky Garden, at 1080p the CPU).
+			const auto height = options.config.screen_height;
+			options.config.gpu_timestamp_scale_percent = height <= 1080 ? 200 : height <= 1440 ? 100 : 50;
+		}
+		::printf("Title profile %s: compute chain, 60 fps limit, present when ready, "
+		         "gpu-timestamp-scale %u\n",
+		         title_id.c_str(), options.config.gpu_timestamp_scale_percent);
+	}
+	if (g_dualsense_fix) {
+		SetDefaultSwitch("KYTY_PAD_VIBRATION", "0");
+		SetDefaultSwitch("KYTY_PAD_SPEAKER", "0");
+		::printf("DualSense fix: no vibration, controller speaker sounds on the PC output\n");
+	}
+}
+
 static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_help) {
 	show_help = false;
 
@@ -247,6 +326,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 
 		if (arg == "--amd-cpu") {
 			options.config.amd_cpu_enabled = true;
+			continue;
+		}
+
+		if (arg == "--dualsense-fix") {
+			g_dualsense_fix = true;
 			continue;
 		}
 
@@ -485,6 +569,7 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 				return false;
 			}
 			options.config.gpu_timestamp_scale_percent = percent;
+			g_timestamp_scale_given = true;
 		} else if (arg == "--pipeline-libraries") {
 			if (!ParseBool(value, options.config.pipeline_libraries_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
@@ -593,6 +678,13 @@ static int Main(int argc, char* argv[]) {
 		return 0;
 	}
 
+	// Only a timestamp scale on the command line overrides a title profile's (kyty_settings.ini keeps
+	// one for builds without profiles).
+	bool command_line_scale = false;
+	for (int i = 1; i < argc; i++) {
+		command_line_scale = command_line_scale || std::string_view(argv[i]) == "--gpu-timestamp-scale";
+	}
+
 	// The settings file's options go first, so the same option on the command line overrides it.
 	std::vector<char*> arguments {argv[0]};
 	for (auto& setting: settings) {
@@ -606,11 +698,21 @@ static int Main(int argc, char* argv[]) {
 		PrintUsage();
 		return 1;
 	}
+	g_timestamp_scale_given = command_line_scale;
 
 	if (show_help) {
 		PrintUsage();
 		return 0;
 	}
+
+	std::string game_arg;
+	for (int i = 1; i + 1 < argc; i++) {
+		if (std::string_view(argv[i]) == "--game") {
+			game_arg = argv[i + 1];
+		}
+	}
+	ApplyTitleProfile(options, DetectTitleId(options, game_arg));
+	std::fflush(stdout);
 
 	Run(options);
 

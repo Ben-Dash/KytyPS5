@@ -306,6 +306,12 @@
          </widget>
         </item>
         <item>
+         <widget class="QCheckBox" name="checkBox_dualsense_fix">
+          <property name="toolTip"><string>No controller vibration; sounds the game sends to the controller speaker play on the PC instead.</string></property>
+          <property name="text"><string>DualSense fix (no vibration, no controller speaker)</string></property>
+         </widget>
+        </item>
+        <item>
          <widget class="QCheckBox" name="checkBox_red_zone_protection">
           <property name="toolTip"><string>Helps prevent crashes in some games on Windows</string></property>
           <property name="text"><string>Windows SysV red zone crash protection (experimental)</string></property>

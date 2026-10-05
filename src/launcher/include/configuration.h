@@ -1,4 +1,4 @@
-#ifndef LAUNCHER_INCLUDE_CONFIGURATION_H_
+﻿#ifndef LAUNCHER_INCLUDE_CONFIGURATION_H_
 #define LAUNCHER_INCLUDE_CONFIGURATION_H_
 
 #include "common/emulatorConfig.h"
@@ -85,7 +85,7 @@ public:
 	GameStatus game_status     = GameStatus::Unknown;
 	QString    game_comment;
 
-	Resolution             screen_resolution           = Resolution::R1280X720;
+	Resolution             screen_resolution           = Resolution::R1920X1080;
 	QString                user_name                   = "Kyty";
 	int                    user_id                     = Config::DEFAULT_USER_ID;
 	QString                audio_input_device;
@@ -109,6 +109,7 @@ public:
 	bool                   profiler_enabled            = false;
 	bool                   renderdoc_enabled           = false;
 	bool                   amd_cpu_enabled             = false;
+	bool                   dualsense_fix_enabled       = false;
 #if defined(_WIN32)
 	bool red_zone_protection_enabled = false;
 #endif
@@ -141,6 +142,7 @@ public:
 		profiler_enabled            = other.profiler_enabled;
 		renderdoc_enabled           = other.renderdoc_enabled;
 		amd_cpu_enabled             = other.amd_cpu_enabled;
+		dualsense_fix_enabled       = other.dualsense_fix_enabled;
 #if defined(_WIN32)
 		red_zone_protection_enabled = other.red_zone_protection_enabled;
 #endif
@@ -188,6 +190,7 @@ public:
 		KYTY_CFG_SET(profiler_enabled);
 		KYTY_CFG_SET(renderdoc_enabled);
 		KYTY_CFG_SET(amd_cpu_enabled);
+		KYTY_CFG_SET(dualsense_fix_enabled);
 #if defined(_WIN32)
 		KYTY_CFG_SET(red_zone_protection_enabled);
 #endif
@@ -235,6 +238,7 @@ public:
 		KYTY_CFG_GET(profiler_enabled);
 		KYTY_CFG_GET(renderdoc_enabled);
 		amd_cpu_enabled = s->value("amd_cpu_enabled", false).toBool();
+		dualsense_fix_enabled = s->value("dualsense_fix_enabled", false).toBool();
 #if defined(_WIN32)
 		red_zone_protection_enabled =
 		    s->value("red_zone_protection_enabled", red_zone_protection_enabled).toBool();

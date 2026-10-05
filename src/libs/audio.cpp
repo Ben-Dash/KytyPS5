@@ -14,6 +14,7 @@
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <magic_enum.hpp>
@@ -466,7 +467,18 @@ Audio::Id Audio::AudioOutOpen(int type, uint32_t samples_num, uint32_t freq, For
 			if (type != AUDIO_OUT_PORT_TYPE_VIBRATION) {
 				OpenSdlDevice(&port);
 			}
-			if (type == AUDIO_OUT_PORT_TYPE_VIBRATION || type == AUDIO_OUT_PORT_TYPE_PADSPK) {
+			// KYTY_PAD_SPEAKER=0: pad speaker sounds play on the main output, as on a PS5 with the
+			// controller speaker off; KYTY_PAD_VIBRATION=0: no haptic vibration.
+			static const bool pad_speaker = [] {
+				const char* text = std::getenv("KYTY_PAD_SPEAKER");
+				return text == nullptr || std::strcmp(text, "0") != 0;
+			}();
+			static const bool pad_vibration = [] {
+				const char* text = std::getenv("KYTY_PAD_VIBRATION");
+				return text == nullptr || std::strcmp(text, "0") != 0;
+			}();
+			if ((type == AUDIO_OUT_PORT_TYPE_VIBRATION && pad_vibration) ||
+			    (type == AUDIO_OUT_PORT_TYPE_PADSPK && pad_speaker)) {
 				port.haptics =
 				    Controller::DualSenseHaptics::Open(freq, type == AUDIO_OUT_PORT_TYPE_PADSPK);
 			}

@@ -168,6 +168,18 @@ void MainDialogPrivate::FindInterpreter() {
 		search_dir.cdUp();
 		m_interpreter = search_dir.absoluteFilePath(EMULATOR_EXE);
 	}
+	// launcher_emulator.txt beside the launcher names another emulator executable there (first
+	// line), so several builds can share one install folder.
+	{
+		const QDir launcher_dir(QApplication::applicationDirPath());
+		QFile      choice(launcher_dir.absoluteFilePath(QStringLiteral("launcher_emulator.txt")));
+		if (choice.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			const auto name = QString::fromUtf8(choice.readLine()).trimmed();
+			if (!name.isEmpty() && QFile::exists(launcher_dir.absoluteFilePath(name))) {
+				m_interpreter = launcher_dir.absoluteFilePath(name);
+			}
+		}
+	}
 
 	bool found = QFile::exists(m_interpreter);
 
@@ -259,6 +271,9 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	args << "--spirv-debug-printf" << "false";
 	if (info.amd_cpu_enabled) {
 		args << "--amd-cpu";
+	}
+	if (info.dualsense_fix_enabled) {
+		args << "--dualsense-fix";
 	}
 #if defined(_WIN32)
 	if (info.red_zone_protection_enabled) {

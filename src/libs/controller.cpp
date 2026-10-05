@@ -817,7 +817,13 @@ void GameController::ApplyVibration() {
 	const auto now = SDL_GetTicks();
 	const auto duration =
 	    m_vibration_until > now ? static_cast<uint32_t>(m_vibration_until - now) : 0;
-	const auto scale       = duration != 0 ? GetSettingScale(Setting::VibrationIntensity) : 0.0f;
+	// KYTY_PAD_VIBRATION=0: no rumble either (see AudioOutOpen for the haptic ports).
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_PAD_VIBRATION");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	const auto scale =
+	    duration != 0 && enabled ? GetSettingScale(Setting::VibrationIntensity) : 0.0f;
 	const auto large_motor = Scale(m_vibration[0], scale);
 	const auto small_motor = Scale(m_vibration[1], scale);
 	if (DualSenseHaptics::SetVibration(m_active_id, large_motor, small_motor, duration)) {
