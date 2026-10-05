@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <map>
 #include <mutex>
+#include <span>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -70,6 +71,10 @@ public:
 	// changed since.
 	[[nodiscard]] bool          RefindImage(ImageId id, uint64_t generation, const ImageDesc& desc,
 	                                        uint32_t metadata_base_layer);
+	// RefindImage's bookkeeping for images whose lookups are known to repeat (the image set and GC
+	// tick they were found under are current): each is accessed in this tick, all under one lock.
+	// The caller has checked what FinishFind would apply (IsColorClearCurrent). Thread_Gpu only.
+	void                        MarkImagesAccessed(std::span<const ImageId> ids);
 	// The newest registration or unregistration of an image over `range`, as a stamp of the whole
 	// image set's generation (never 0): unchanged while no image over the range came or went.
 	// Registering an image stamps its range with a newer value, so a range that gained an image

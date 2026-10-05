@@ -1137,9 +1137,68 @@ static bool ImageGroupRevalidates(TextureCache& cache, PreparedBindings& prepare
 	return true;
 }
 
+// KYTY_IMAGE_RETICK=0 revalidates image by image after every submission tick; KYTY_DEBUG_AB=retick
+// alternates.
+static bool ImageRetickEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_IMAGE_RETICK");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("retick");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// A group checked under the current image set and GC tick, only an earlier submission tick: no
+// image came or went, so each image's range generation, lookup and view stay what they were when
+// the group was last checked, and the LRU already holds each image for this GC tick. What
+// ImageGroupRevalidates would still do is stamp each found image with this tick (RefindImage) and
+// ask what ImageGroupStands asks; FinishFind's color clear check is IsColorClearCurrent.
+// KYTY_VERIFY_IMAGE_RETICK=1 revalidates image by image as well and reports a disagreement.
+static bool ImageGroupRetick(TextureCache& cache, PreparedBindings& prepared) {
+	const auto current = cache.CurrentTargetState();
+	auto&      state   = prepared.image_group.state;
+	if (current.image_set != state.image_set || current.gc_tick != state.gc_tick ||
+	    !ImageRetickEnabled()) {
+		return false;
+	}
+	thread_local std::vector<ImageId> found;
+	found.clear();
+	for (size_t i = 0; i < prepared.images.size(); i++) {
+		const auto& source  = prepared.image_sources[i];
+		const auto& binding = prepared.images[i];
+		if (source.null_image) {
+			continue;
+		}
+		const auto depth = cache.GetImage(source.found).depth_id;
+		if ((depth ? depth : source.found) != binding.image_id || source.view_image != binding.image_id ||
+		    source.view != binding.image_view || !cache.IsTextureClean(binding.image_id) ||
+		    !cache.IsColorClearCurrent(source.found, binding.desc, source.metadata_base_layer)) {
+			return false;
+		}
+		found.push_back(source.found);
+	}
+	cache.MarkImagesAccessed(found);
+	state = current;
+	static const bool verify = std::getenv("KYTY_VERIFY_IMAGE_RETICK") != nullptr;
+	if (verify) [[unlikely]] {
+		static uint64_t checked = 0;
+		static uint64_t differ  = 0;
+		checked++;
+		if (!ImageGroupRevalidates(cache, prepared) && differ++ < 16) {
+			std::printf("image-retick verify: a reticked group does not revalidate\n");
+		}
+		if (checked % 100000 == 0) {
+			std::printf("image-retick verify: checked=%" PRIu64 " differ=%" PRIu64 "\n", checked, differ);
+			std::fflush(stdout);
+		}
+	}
+	return true;
+}
+
 static bool ImageGroupStandsOrRevalidates(TextureCache& cache, PreparedBindings& prepared) {
 	return ImageGroupStands(cache, prepared) ||
-	       (StageRecordsEnabled() && ImageGroupRevalidates(cache, prepared));
+	       (StageRecordsEnabled() &&
+	        (ImageGroupRetick(cache, prepared) || ImageGroupRevalidates(cache, prepared)));
 }
 
 // Records the stage's images as RebindImages left them, for the next draw of the same program and

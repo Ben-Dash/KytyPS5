@@ -2046,6 +2046,21 @@ void TextureCache::VerifyOverlapRefind(ImageId id, const ImageDesc& desc, bool e
 	}
 }
 
+void TextureCache::MarkImagesAccessed(std::span<const ImageId> ids) {
+	const auto                       tick = m_scheduler.CurrentTick();
+	std::unique_lock<TrackingSpinLock> lock {m_lock, std::defer_lock};
+	for (const auto id: ids) {
+		auto& image = m_slot_images[id];
+		if (image.tick_accessed_last != tick || (image.registered && image.lru_tick != m_gc_tick)) {
+			if (!lock.owns_lock()) {
+				lock.lock();
+			}
+			image.tick_accessed_last = tick;
+			TouchImage(image);
+		}
+	}
+}
+
 bool TextureCache::RefindImage(ImageId id, uint64_t generation, const ImageDesc& desc,
                                uint32_t metadata_base_layer) {
 	// Only Thread_Gpu (the caller) registers, frees and touches images, so when this tick and GC
