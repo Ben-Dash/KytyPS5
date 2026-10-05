@@ -1979,6 +1979,10 @@ KYTY_CP_OP_PARSER(CpOpIndirectCxRegs) {
 		auto cmd_offset     = NormalizeRegisterOffset(raw_cmd_offset);
 		auto value          = indirect_buffer[1];
 
+		if (HW::g_context_write_log.enabled) [[unlikely]] {
+			HW::g_context_write_log.Note(cmd_offset, value);
+		}
+
 		if (HwCtxTrySetFakeRegister(cmd_offset, value)) {
 			continue;
 		}
@@ -2416,6 +2420,12 @@ KYTY_CP_OP_PARSER(CpOpSetContextReg) {
 	HW::g_context_register_writes++;
 
 	auto cmd_offset = NormalizeRegisterOffset(buffer[0]);
+
+	if (HW::g_context_write_log.enabled) [[unlikely]] {
+		for (uint32_t i = 0; i + 2u < KYTY_PM4_LEN(cmd_id); i++) {
+			HW::g_context_write_log.Note(cmd_offset + i, buffer[1 + i]);
+		}
+	}
 
 	if (HwCtxTrySetFakeRegister(cmd_offset, buffer[1])) {
 		return 2;

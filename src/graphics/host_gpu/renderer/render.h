@@ -320,6 +320,7 @@ private:
 		bool             ignore_target_mask  = false;
 		bool             exact_format        = false;
 		uint64_t         generation          = 0; // 0: not reusable.
+		bool             overlap             = false; // See TextureCache::LastFindOverlap.
 		uint32_t         metadata_base_layer = 0;
 		RenderColorInfo  target;
 		// The view FindRenderTarget last returned for this slot (see
@@ -334,6 +335,7 @@ private:
 	struct DepthTargetSource {
 		HW::DepthRenderTarget   registers;
 		uint64_t                generation          = 0; // 0: not reusable.
+		bool                    overlap             = false; // See TextureCache::LastFindOverlap.
 		uint32_t                metadata_base_layer = 0;
 		TextureCache::ImageDesc desc;
 		ImageId                 image_id;

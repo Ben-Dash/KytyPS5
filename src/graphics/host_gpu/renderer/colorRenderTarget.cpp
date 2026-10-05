@@ -69,13 +69,17 @@ void RenderExecutor::ResolveRenderColorTarget(CommandBuffer& buffer, RenderColor
 	// Consecutive draws mostly keep their targets: the same registers resolve to the same image
 	// while the image set is unchanged.
 	auto& source = m_color_target_sources.at(rt_slot);
-	if (TargetReuseEnabled() && source.generation != 0 && source.mask == mask &&
+	if (TargetReuseEnabled() && source.generation != 0 &&
+	    (!source.overlap || TextureCache::OverlapTargetsEnabled()) && source.mask == mask &&
 	    source.slice_offset == render_target_slice_offset &&
 	    source.ignore_target_mask == ignore_target_mask && source.exact_format == exact_format &&
 	    source.registers == rt &&
 	    m_context.GetTextureCache().RefindImage(source.target.image_id, source.generation,
 	                                            source.target.desc, source.metadata_base_layer)) {
 		r = source.target;
+		if (source.overlap) [[unlikely]] {
+			m_context.GetTextureCache().VerifyOverlapRefind(r.image_id, r.desc, exact_format);
+		}
 		BindRenderTarget(r.image_id);
 		return;
 	}
@@ -378,6 +382,7 @@ void RenderExecutor::ResolveRenderColorTarget(CommandBuffer& buffer, RenderColor
 		source.ignore_target_mask  = ignore_target_mask;
 		source.exact_format        = exact_format;
 		source.generation          = generation;
+		source.overlap             = texture_cache.LastFindOverlap();
 		source.metadata_base_layer = metadata_base_layer;
 		source.target              = r;
 	}

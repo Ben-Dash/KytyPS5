@@ -5,6 +5,10 @@
 #include "common/common.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 
+#include <array>
+#include <cstdlib>
+#include <vector>
+
 namespace Libs::Graphics::HW {
 
 struct ColorBase {
@@ -666,6 +670,27 @@ struct GeUserVgprEn {
 // SET_CONTEXT_REG packets and indirect context register pairs handled so far (the command
 // processor thread only): draws between which it did not change kept every context register.
 inline uint64_t g_context_register_writes = 0;
+
+// KYTY_DEBUG_CX_WRITES=1: the context registers written since the last indexed draw, each with
+// whether the write changed the register's value (the command processor thread only), for the
+// "cx-writes" lines of renderDraw.cpp.
+struct ContextWriteLog {
+	static constexpr uint32_t   ChangedBit = 1u << 31u;
+	bool                        enabled    = std::getenv("KYTY_DEBUG_CX_WRITES") != nullptr;
+	std::vector<uint32_t>       since_draw;
+	std::array<uint32_t, 0x400> values {};
+	std::array<bool, 0x400>     known {};
+	void                        Note(uint32_t offset, uint32_t value) {
+		if (offset >= values.size()) {
+			return;
+		}
+		const bool changed = !known[offset] || values[offset] != value;
+		known[offset]      = true;
+		values[offset]     = value;
+		since_draw.push_back(offset | (changed ? ChangedBit : 0u));
+	}
+};
+inline ContextWriteLog g_context_write_log;
 
 class Context {
 public:

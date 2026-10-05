@@ -320,11 +320,16 @@ void RenderExecutor::ResolveRenderDepthTarget(CommandBuffer& buffer, RenderDepth
 	// image while the image set is unchanged (see ResolveRenderColorTarget).
 	auto&      cache  = m_context.GetTextureCache();
 	auto&      source = m_depth_target_source;
-	const bool reused = TargetReuseEnabled() && source.generation != 0 && source.registers == z &&
+	const bool reused = TargetReuseEnabled() && source.generation != 0 &&
+	                    (!source.overlap || TextureCache::OverlapTargetsEnabled()) &&
+	                    source.registers == z &&
 	                    cache.RefindImage(source.image_id, source.generation, source.desc,
 	                                      source.metadata_base_layer);
 	if (reused) {
 		r.desc = source.desc;
+		if (source.overlap) [[unlikely]] {
+			cache.VerifyOverlapRefind(source.image_id, source.desc, false);
+		}
 	} else {
 		source.generation = 0;
 		r.desc            = MakeDepthTargetDesc(buffer, z);
@@ -380,6 +385,7 @@ void RenderExecutor::ResolveRenderDepthTarget(CommandBuffer& buffer, RenderDepth
 		if (generation != 0) {
 			source.registers           = z;
 			source.generation          = generation;
+			source.overlap             = cache.LastFindOverlap();
 			source.metadata_base_layer = metadata_base_layer;
 			source.desc                = r.desc;
 			source.image_id            = r.image_id;

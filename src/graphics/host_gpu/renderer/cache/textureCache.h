@@ -52,9 +52,19 @@ public:
 	// When the lookup finds exactly one image with the same backing, *unique_generation receives
 	// the generation of the images over the request's range (RangeGeneration), else 0: until an
 	// image over the range is registered or unregistered, the same request finds the same image,
-	// and RefindImage does the rest of FindImage for it.
+	// and RefindImage does the rest of FindImage for it. With KYTY_OVERLAP_TARGETS, so does a
+	// render or depth target request resolved through an overlap (see LastFindOverlap).
 	[[nodiscard]] ImageId       FindImage(ImageDesc& desc, bool exact_format = false,
 	                                      uint64_t* unique_generation = nullptr);
+	// Whether the last FindImage resolved its request through an overlap with an image of another
+	// backing and still gave a generation: a depth target over the image a texture registered, a
+	// layer or level of a larger image. Thread_Gpu only.
+	[[nodiscard]] bool          LastFindOverlap() const noexcept { return m_last_find_overlap; }
+	// KYTY_OVERLAP_TARGETS=0 gives overlap lookups no generation (every draw looks its targets up
+	// again, as before); KYTY_DEBUG_AB=overlap alternates.
+	[[nodiscard]] static bool   OverlapTargetsEnabled() noexcept;
+	// KYTY_VERIFY_OVERLAP_TARGETS=1: checks a target kept from an overlap lookup against a full one.
+	void                        VerifyOverlapRefind(ImageId id, const ImageDesc& desc, bool exact_format);
 	// FindImage's bookkeeping for a request FindImage resolved to id under generation (see
 	// unique_generation). Returns false, doing nothing, when the images over the request's range
 	// changed since.
@@ -369,6 +379,7 @@ private:
 	std::vector<ImageLookup> m_image_lookups =
 	    std::vector<ImageLookup>(ImageLookupSets * ImageLookupWays);
 	uint64_t m_image_lookup_clock = 0;
+	bool     m_last_find_overlap  = false;
 	// Each cache counts from its own base, so a generation remembered from one cache (a test's
 	// earlier context, say) never matches another's.
 	[[nodiscard]] static uint64_t        NextGenerationBase() noexcept {

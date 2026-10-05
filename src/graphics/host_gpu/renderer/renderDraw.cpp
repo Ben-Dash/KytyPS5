@@ -1477,7 +1477,8 @@ void RenderExecutor::RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
 	for (uint32_t i = 0; i < state.color_count; i++) {
 		const auto& target = state.color_info[i];
 		const auto& source = m_color_target_sources.at(target.target_slot);
-		if (source.generation == 0 || source.target.image_id != target.image_id) {
+		if (source.generation == 0 || source.target.image_id != target.image_id ||
+		    (source.overlap && !TextureCache::OverlapTargetsEnabled())) {
 			return;
 		}
 		chain.colors[i]            = target;
@@ -1485,7 +1486,8 @@ void RenderExecutor::RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
 	}
 	if (state.depth_info.image_id) {
 		const auto& source = m_depth_target_source;
-		if (source.generation == 0 || source.image_id != state.depth_info.image_id) {
+		if (source.generation == 0 || source.image_id != state.depth_info.image_id ||
+		    (source.overlap && !TextureCache::OverlapTargetsEnabled())) {
 			return;
 		}
 		chain.depth_base_layer = source.metadata_base_layer;
@@ -1504,26 +1506,73 @@ void RenderExecutor::RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
 // would resolve again, and with the same target state (no image registered or unregistered, the
 // same tick and GC tick) every lookup would find the same image and touch nothing; only a color
 // clear could still have to be applied (IsColorClearCurrent).
+static bool ChainStatsEnabled();
+
+// KYTY_DEBUG_CHAIN_STATS=1: why TakeDrawChain refused, every 5 s ("chain-refused").
+static void NoteChainOutcome(uint32_t reason) {
+	static constexpr std::array<const char*, 9> Names {"taken",   "invalid", "cx-write", "slots",
+	                                                   "image-set", "tick",  "gc-tick",  "clear",
+	                                                   "disabled"};
+	static std::array<uint64_t, Names.size()> counts {};
+	static auto                               start = std::chrono::steady_clock::now();
+	counts[reason]++;
+	if (std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
+		return;
+	}
+	start = std::chrono::steady_clock::now();
+	uint64_t total = 0;
+	for (const auto n: counts) {
+		total += n;
+	}
+	std::string line = fmt::format("chain-refused: draws={}", total);
+	for (size_t i = 0; i < Names.size(); i++) {
+		line += fmt::format(" {}%={:.1f}", Names[i], 100.0 * static_cast<double>(counts[i]) / static_cast<double>(total));
+	}
+	std::printf("%s\n", line.c_str());
+	std::fflush(stdout);
+	counts.fill(0);
+}
+
 bool RenderExecutor::TakeDrawChain(uint32_t slice_offset, uint32_t mrt_mask, DrawRenderState& state) {
-	auto& chain = m_draw_chain;
-	if (!chain.valid || !DrawChainEnabled() || chain.cx_writes != HW::g_context_register_writes ||
-	    chain.slice_offset != slice_offset || chain.color_filter != m_color_slot_filter ||
-	    chain.mrt_mask != mrt_mask) {
+	auto&      chain = m_draw_chain;
+	const bool stats = g_draw_phases.Active() && ChainStatsEnabled();
+	const auto refuse = [&](uint32_t reason) {
+		if (stats) [[unlikely]] {
+			NoteChainOutcome(reason);
+		}
 		return false;
+	};
+	if (!DrawChainEnabled()) {
+		return refuse(8);
+	}
+	if (!chain.valid) {
+		return refuse(1);
+	}
+	if (chain.cx_writes != HW::g_context_register_writes) {
+		return refuse(2);
+	}
+	if (chain.slice_offset != slice_offset || chain.color_filter != m_color_slot_filter ||
+	    chain.mrt_mask != mrt_mask) {
+		return refuse(3);
 	}
 	auto& cache = m_context.GetTextureCache();
-	if (!(cache.CurrentTargetState() == chain.targets)) {
-		return false;
+	if (const auto current = cache.CurrentTargetState(); !(current == chain.targets)) {
+		return refuse(current.image_set != chain.targets.image_set ? 4
+		              : current.tick != chain.targets.tick         ? 5
+		                                                           : 6);
 	}
 	for (uint32_t i = 0; i < chain.color_count; i++) {
 		const auto& target = chain.colors[i];
 		if (!cache.IsColorClearCurrent(target.image_id, target.desc, chain.color_base_layers[i])) {
-			return false;
+			return refuse(7);
 		}
 	}
 	if (chain.depth.image_id &&
 	    !cache.IsColorClearCurrent(chain.depth.image_id, chain.depth.desc, chain.depth_base_layer)) {
-		return false;
+		return refuse(7);
+	}
+	if (stats) [[unlikely]] {
+		NoteChainOutcome(0);
 	}
 	for (uint32_t i = 0; i < chain.color_count; i++) {
 		if (i == state.color_constructed) {
@@ -2121,6 +2170,78 @@ static bool ChainStatsEnabled() {
 	return enabled;
 }
 
+// KYTY_DEBUG_CX_WRITES=1: the context registers written before indexed draws (see
+// HW::ContextWriteLog), every 5 s for all draws and for depth-only ones: how many draws had a write
+// since the previous draw, how many a write that changed a value, and the registers written most.
+static std::vector<uint32_t> g_cx_writes_pending;
+
+// A draw that ends early (not drawn) leaves its writes to the next one.
+static void TakeContextWrites() {
+	auto& log = HW::g_context_write_log;
+	g_cx_writes_pending.insert(g_cx_writes_pending.end(), log.since_draw.begin(), log.since_draw.end());
+	log.since_draw.clear();
+}
+
+static void NoteContextWrites(const DrawRenderState& state) {
+	struct Totals {
+		uint64_t                    draws = 0, written = 0, changed = 0;
+		std::array<uint64_t, 0x400> writes {}, changes {};
+	};
+	static std::array<Totals, 2> totals;
+	static auto                  start = std::chrono::steady_clock::now();
+	const bool depth = state.color_count == 0 && static_cast<bool>(state.depth_info.image_id);
+	for (auto* t: {&totals[0], depth ? &totals[1] : nullptr}) {
+		if (t == nullptr) {
+			continue;
+		}
+		t->draws++;
+		bool                         any_changed = false;
+		std::array<uint8_t, 0x400>   seen {};
+		for (const auto entry: g_cx_writes_pending) {
+			const auto offset  = entry & ~HW::ContextWriteLog::ChangedBit;
+			const bool changed = (entry & HW::ContextWriteLog::ChangedBit) != 0;
+			any_changed        = any_changed || changed;
+			if ((seen[offset] & 1u) == 0) {
+				t->writes[offset]++;
+			}
+			if (changed && (seen[offset] & 2u) == 0) {
+				t->changes[offset]++;
+			}
+			seen[offset] |= static_cast<uint8_t>(1u | (changed ? 2u : 0u));
+		}
+		t->written += g_cx_writes_pending.empty() ? 0 : 1;
+		t->changed += any_changed ? 1 : 0;
+	}
+	g_cx_writes_pending.clear();
+	if (std::chrono::steady_clock::now() - start < std::chrono::seconds(5)) {
+		return;
+	}
+	start = std::chrono::steady_clock::now();
+	for (uint32_t kind = 0; kind < 2; kind++) {
+		auto& t = totals[kind];
+		if (t.draws == 0) {
+			continue;
+		}
+		const auto share = [&](uint64_t n) {
+			return 100.0 * static_cast<double>(n) / static_cast<double>(t.draws);
+		};
+		std::vector<uint32_t> order(0x400);
+		for (uint32_t i = 0; i < 0x400; i++) {
+			order[i] = i;
+		}
+		std::ranges::sort(order, [&](uint32_t a, uint32_t b) { return t.writes[a] > t.writes[b]; });
+		std::string line = fmt::format("cx-writes {}: draws={} written%={:.1f} changed%={:.1f} | reg:written%/changed%",
+		                               kind == 0 ? "all" : "depth", t.draws, share(t.written), share(t.changed));
+		for (uint32_t i = 0; i < 14 && t.writes[order[i]] != 0; i++) {
+			line += fmt::format(" {:03x}:{:.1f}/{:.1f}", order[i], share(t.writes[order[i]]),
+			                    share(t.changes[order[i]]));
+		}
+		std::printf("%s\n", line.c_str());
+		t = {};
+	}
+	std::fflush(stdout);
+}
+
 static void NoteChain(const DrawRenderState& state) {
 	struct Chain {
 		uint64_t writes = UINT64_MAX;
@@ -2604,6 +2725,9 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
                                const DrawIndexArgs& args) {
 	KYTY_PROFILER_FUNCTION();
 	g_draw_phases.Begin();
+	if (HW::g_context_write_log.enabled) [[unlikely]] {
+		TakeContextWrites();
+	}
 
 	EXIT_IF(buffer.IsInvalid());
 	EXIT_IF(args.offset_source == DrawOffsetSource::DrawState && args.first_instance != 0);
@@ -2736,6 +2860,9 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 		if (g_draw_phases.Active() && ChainStatsEnabled()) [[unlikely]] {
 			NoteChain(state);
+		}
+		if (HW::g_context_write_log.enabled) [[unlikely]] {
+			NoteContextWrites(state);
 		}
 		LogDrawStateIfNeeded(buffer, draw, state, args.index_type_and_size,
 		                     args.index_addr);

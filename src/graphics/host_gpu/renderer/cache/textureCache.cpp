@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -1800,6 +1801,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 	if (unique_generation != nullptr) {
 		*unique_generation = 0;
 	}
+	m_last_find_overlap = false;
 	ValidateImageDesc(desc);
 	if (desc.info.data.Empty()) {
 		std::scoped_lock lock {m_lock};
@@ -1813,6 +1815,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 		int32_t view_mip        = -1;
 		int32_t view_layer      = -1;
 		int32_t backing_matches = 0;
+		ImageId only_candidate {};
 		const auto       lookup     = [&] {
 			result          = {};
 			view_mip        = -1;
@@ -1820,6 +1823,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 			backing_matches = 0;
 			const auto candidates =
 			    FindImagesInRegion(desc.info.data.address, desc.info.data.size, false);
+			only_candidate = candidates.size() == 1 ? candidates[0] : ImageId {};
 			for (const auto id: candidates) {
 				const auto& image = m_slot_images[id];
 				if (SameBacking(image.info, desc.info, exact_format)) {
@@ -1893,7 +1897,35 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 				result = {};
 			}
 		}
+		// KYTY_DEBUG_FIND_STATS=1: how lookups that ask for a generation (targets) end, every 5 s.
+		static const bool find_stats = std::getenv("KYTY_DEBUG_FIND_STATS") != nullptr;
+		const auto        note_find  = [&](uint32_t outcome) {
+			if (!find_stats || unique_generation == nullptr) [[likely]] {
+				return;
+			}
+			static constexpr std::array<const char*, 6> Names {"memo", "unique", "multi", "view",
+			                                                   "overlap", "inserted"};
+			static std::array<uint64_t, Names.size()> counts {};
+			static auto start = std::chrono::steady_clock::now();
+			counts[outcome]++;
+			if (std::chrono::steady_clock::now() - start >= std::chrono::seconds(5)) {
+				start          = std::chrono::steady_clock::now();
+				uint64_t total = 0;
+				for (const auto n: counts) {
+					total += n;
+				}
+				std::string line = fmt::format("find-stats: lookups={}", total);
+				for (size_t i = 0; i < Names.size(); i++) {
+					line += fmt::format(" {}%={:.1f}", Names[i],
+					                    100.0 * static_cast<double>(counts[i]) / static_cast<double>(total));
+				}
+				std::printf("%s\n", line.c_str());
+				std::fflush(stdout);
+				counts.fill(0);
+			}
+		};
 		if (remembered != nullptr) {
+			note_find(0);
 			remembered->last_use = ++m_image_lookup_clock;
 			result               = remembered->id;
 			if (unique_generation != nullptr) {
@@ -1901,6 +1933,10 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 			}
 		} else {
 			lookup();
+			note_find(!result               ? 5
+			          : backing_matches > 1 ? 2
+			          : backing_matches == 1 ? (view_mip < 0 && view_layer < 0 ? 1 : 3)
+			                                 : 4);
 			if (!result && m_last_pressure_gc_tick != m_gc_tick &&
 			    m_graphics.CanReportMemoryUsage() &&
 			    m_graphics.GetDeviceMemoryUsage() >= m_pressure_gc_memory) {
@@ -1949,6 +1985,16 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 				if (unique_generation != nullptr) {
 					*unique_generation = found_generation;
 				}
+			} else if (backing_matches == 0 && unique_generation != nullptr && result == only_candidate &&
+			           (desc.type == BindingType::RenderTarget || desc.type == BindingType::DepthTarget) &&
+			           OverlapTargetsEnabled() && RangeGeneration(desc.info.data) == range_generation) {
+				// The request overlapped the one image over its range, which ResolveOverlap kept (a
+				// depth target over a texture's image, a layer or level of it, a compatible view)
+				// without registering or freeing an image: those outcomes depend only on the two
+				// images, so the same request resolves the same way, to the view now in desc, until
+				// an image over the range comes or goes.
+				*unique_generation  = range_generation;
+				m_last_find_overlap = true;
 			}
 		}
 		auto& image = m_slot_images[result];
@@ -1963,6 +2009,41 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 	}
 	FinishFind(result, desc, metadata_base_layer);
 	return result;
+}
+
+bool TextureCache::OverlapTargetsEnabled() noexcept {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_OVERLAP_TARGETS");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("overlap");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// KYTY_VERIFY_OVERLAP_TARGETS=1: a target taken again from an overlap lookup (see LastFindOverlap)
+// is looked up in full as well, which must find the same image and view.
+void TextureCache::VerifyOverlapRefind(ImageId id, const ImageDesc& desc, bool exact_format) {
+	static const bool verify = std::getenv("KYTY_VERIFY_OVERLAP_TARGETS") != nullptr;
+	if (!verify) [[likely]] {
+		return;
+	}
+	auto       check = desc;
+	const auto found = FindImage(check, exact_format);
+	static uint64_t checked = 0;
+	static uint64_t differ  = 0;
+	checked++;
+	if (found != id || !(check.view_info == desc.view_info)) {
+		if (differ++ < 16) {
+			std::printf("overlap-targets verify: 0x%016" PRIx64 " %ux%u kept image %u, lookup finds %u%s\n",
+			            desc.info.data.address, desc.info.extent.width, desc.info.extent.height,
+			            static_cast<uint32_t>(id.index), static_cast<uint32_t>(found.index),
+			            found == id ? " with another view" : "");
+		}
+	}
+	if (checked % 200000 == 0) {
+		std::printf("overlap-targets verify: checked=%" PRIu64 " differ=%" PRIu64 "\n", checked, differ);
+		std::fflush(stdout);
+	}
 }
 
 bool TextureCache::RefindImage(ImageId id, uint64_t generation, const ImageDesc& desc,
