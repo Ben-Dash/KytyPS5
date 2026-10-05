@@ -372,6 +372,17 @@ void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
 		source = ir.ConstructU64(ReadU32(inst.src0), IR::U32(IR::Value(0u)));
 	}
 	const auto result = IR::U64(ir.Emit(IR::ValueOpcode::WqmU64, {source}));
+	// The scalar mask follows the ballots, which leave helper invocations out: a waterfall loop
+	// over the EXEC copy (s_ff1, v_readlane, v_cmp, s_andn2) must find only lanes its compare can
+	// clear, or it never ends. Helpers still run as live lanes (the per-lane `live` below).
+	auto scalar_result = result;
+	if (program.stage == ShaderType::Pixel) {
+		const auto live_ballot = ir.Emit(IR::ValueOpcode::Ballot, {IR::Value(true)});
+		const auto live_mask   = ir.ConstructU64(
+            ir.CompositeExtract(live_ballot, 0),
+            program.wave_size == 64u ? ir.CompositeExtract(live_ballot, 1) : IR::U32(IR::Value(0u)));
+		scalar_result = IR::U64(ir.Emit(IR::ValueOpcode::BitwiseAnd64, {result, live_mask}));
+	}
 	if (!wide) {
 		const auto low = ir.CompositeExtract(result, 0);
 		const bool destination_is_mask = IsExecOrVcc(inst.dst);
@@ -429,7 +440,7 @@ void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
 	// from the scalar mask: reconstructing an entry-true predicate from a ballot
 	// otherwise introduces a spurious dependency into every vector write.
 	const auto live = ir.LogicalOr(retained_live, ThreadBit(ExtractU64(result)));
-	WriteOperand(DestinationOperand(inst), result);
+	WriteOperand(DestinationOperand(inst), scalar_result);
 	if (inst.dst.kind == Decoder::OperandKind::ExecLo) {
 		ir.SetExec(live);
 	} else if (inst.dst.kind == Decoder::OperandKind::VccLo) {
