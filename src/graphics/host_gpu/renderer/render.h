@@ -13,6 +13,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <array>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -369,8 +370,34 @@ private:
 	void               RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
 	                                   const DrawRenderState& state);
 
+	// KYTY_PIPELINE_CHAIN: the pipeline the last draw looked up, with the inputs of the lookup that
+	// do not come from context registers (programs, targets' formats, topology, vertex input; see
+	// MakePipelineChainKey in renderDraw.cpp). A draw with no context register written since and
+	// the same inputs takes it without building the pipeline key.
+	struct PipelineChainKey {
+		uint32_t                 size = 0;
+		bool                     usable = true;
+		std::array<uint64_t, 64> words; // The first `size` are set.
+		void                     Push(uint64_t word) {
+			if (size == words.size()) {
+				usable = false;
+				return;
+			}
+			words[size++] = word;
+		}
+		[[nodiscard]] bool operator==(const PipelineChainKey& other) const {
+			return size == other.size && std::memcmp(words.data(), other.words.data(), size * sizeof(uint64_t)) == 0;
+		}
+	};
+	struct PipelineChain {
+		PipelineCache::Pipeline* pipeline  = nullptr;
+		uint64_t                 cx_writes = 0;
+		PipelineChainKey         key;
+	};
+
 	RenderContext&                        m_context;
 	DrawChain                             m_draw_chain;
+	PipelineChain                         m_pipeline_chain;
 	std::array<ColorTargetSource, RENDER_COLOR_ATTACHMENTS_MAX> m_color_target_sources;
 	// Colour slots PrepareDrawRenderState may bind: all but one pass of a draw that binds one
 	// surface to several slots (see AliasedColorSlots in renderDraw.cpp).

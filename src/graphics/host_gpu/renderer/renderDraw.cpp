@@ -2286,6 +2286,23 @@ static void NoteChain(const DrawRenderState& state) {
 	}
 }
 
+// KYTY_PIPELINE_CHAIN=0 looks every draw's pipeline up; KYTY_DEBUG_AB=pipechain alternates.
+static bool PipelineChainEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_PIPELINE_CHAIN");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("pipechain");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// KYTY_VERIFY_PIPELINE_CHAIN=1: a draw that takes the chain's pipeline looks it up as well, which
+// must find the same one.
+static bool VerifyPipelineChain() {
+	static const bool enabled = std::getenv("KYTY_VERIFY_PIPELINE_CHAIN") != nullptr;
+	return enabled;
+}
+
 void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buffer,
                                          const DrawCallInfo& draw, DrawRenderState& state,
                                          vk::PrimitiveTopology topology, const DrawEmitInfo& emit,
@@ -2407,13 +2424,95 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	may_defer = may_defer && !(state.ps_active && StoresData(state.ps_input_info.stage));
 	// Target acquisition resolves the actual overlapping read/write aspects for this draw.
-	auto* const found_pipeline = [&]() -> PipelineCache::Pipeline* {
+	const auto lookup_pipeline = [&]() -> PipelineCache::Pipeline* {
 		DrainStats::SlowLookupTimer create_timer(DrainStats::Kind::PipelineCreate);
 		return m_context.GetPipelineCache().GetGraphicsPipeline(
 		    std::span {state.color_info, state.color_count}, state.depth_info, vertex_stages, buffer,
 		    state.ps_active ? &state.ps_input_info : nullptr, topology, primitive_restart_enable,
 		    state.programs, feedback_aspects, may_defer);
-	}();
+	};
+	// GetGraphicsPipeline's inputs besides context registers (see PipelineChain): with no context
+	// register written since the chain's lookup, equal inputs build an equal key.
+	const bool       chain_on = PipelineChainEnabled();
+	PipelineChainKey chain_key;
+	if (chain_on) {
+		const auto& programs = state.programs;
+		for (const auto& program: programs.vertex) {
+			chain_key.Push(program.id);
+		}
+		chain_key.Push(state.ps_active ? programs.pixel.id : 0);
+		chain_key.Push(static_cast<uint64_t>(topology) | (uint64_t {primitive_restart_enable} << 8u) |
+		               (uint64_t {static_cast<uint32_t>(feedback_aspects)} << 16u) |
+		               (uint64_t {static_cast<uint32_t>(ucfg.GetPrimType())} << 32u));
+		if (state.ps_active) {
+			const auto& ps = state.ps_input_info;
+			chain_key.Push(uint64_t {ps.alpha_blend_source_remap} | (uint64_t {ps.ps_sample_shading} << 1u) |
+			               (uint64_t {ps.ps_execute_on_noop} << 2u) | 8u);
+		}
+		chain_key.Push(state.color_count);
+		for (uint32_t i = 0; i < state.color_count; i++) {
+			const auto& color = state.color_info[i];
+			chain_key.Push(uint64_t {color.target_slot} |
+			               (uint64_t {static_cast<uint32_t>(color.desc.view_info.format)} << 8u) |
+			               (uint64_t {color.export_mapping.packed} << 40u) |
+			               (uint64_t {static_cast<bool>(color.image_id)} << 48u));
+			chain_key.Push(color.desc.info.samples);
+		}
+		const auto& depth = state.depth_info;
+		chain_key.Push(uint64_t {static_cast<bool>(depth.image_id)} |
+		               (uint64_t {static_cast<uint32_t>(depth.desc.view_info.format)} << 8u) |
+		               (uint64_t {depth.desc.info.samples} << 40u) |
+		               (uint64_t {depth.depth_bounds_test_enable} << 48u));
+		chain_key.Push(uint64_t {std::bit_cast<uint32_t>(depth.depth_min_bounds)} |
+		               (uint64_t {std::bit_cast<uint32_t>(depth.depth_max_bounds)} << 32u));
+		const auto& vertex = state.vertex_info[0];
+		chain_key.Push(uint64_t {mesh_active} |
+		               (uint64_t {static_cast<uint32_t>(vertex.buffers_num)} << 8u) |
+		               (uint64_t {static_cast<uint32_t>(vertex.resources_num)} << 32u));
+		if (!mesh_active) {
+			for (int b = 0; b < vertex.buffers_num; b++) {
+				chain_key.Push(uint64_t {vertex.buffers[b].stride} |
+				               (uint64_t {vertex.buffers[b].fetch_index != 0} << 32u));
+			}
+			for (int a = 0; a < vertex.resources_num && chain_key.usable; a++) {
+				const auto binding = vertex.resources_dst[a].buffer_index;
+				if (binding < 0 || binding >= vertex.buffers_num) {
+					chain_key.usable = false;
+					break;
+				}
+				const auto offset = static_cast<uint32_t>(vertex.resources[a].Base48() -
+				                                          vertex.buffers[binding].addr);
+				chain_key.Push(uint64_t {offset} | (uint64_t {static_cast<uint32_t>(binding)} << 32u));
+			}
+		}
+	}
+	auto&                    chain          = m_pipeline_chain;
+	PipelineCache::Pipeline* found_pipeline = nullptr;
+	if (chain_on && chain_key.usable && chain.pipeline != nullptr &&
+	    chain.cx_writes == HW::g_context_register_writes && !chain.pipeline->optimize_pending &&
+	    chain.key == chain_key) {
+		found_pipeline = chain.pipeline;
+		if (VerifyPipelineChain()) [[unlikely]] {
+			static uint64_t checked = 0;
+			static uint64_t differ  = 0;
+			checked++;
+			if (lookup_pipeline() != found_pipeline && differ++ < 16) {
+				std::printf("pipeline-chain verify: the chain's pipeline differs from the lookup's\n");
+			}
+			if (checked % 500000 == 0) {
+				std::printf("pipeline-chain verify: checked=%" PRIu64 " differ=%" PRIu64 "\n", checked, differ);
+				std::fflush(stdout);
+			}
+		}
+	} else {
+		found_pipeline  = lookup_pipeline();
+		chain.pipeline  = chain_on && chain_key.usable ? found_pipeline : nullptr;
+		chain.cx_writes = HW::g_context_register_writes;
+		if (chain.pipeline != nullptr) {
+			chain.key.size = chain_key.size;
+			std::copy_n(chain_key.words.begin(), chain_key.size, chain.key.words.begin());
+		}
+	}
 	if (found_pipeline == nullptr) {
 		return;
 	}
