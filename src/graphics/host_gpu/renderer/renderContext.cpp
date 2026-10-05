@@ -143,6 +143,16 @@ void RenderContext::MapMemory(uint64_t vaddr, uint64_t size) {
 	AdvanceBdaEpoch();
 }
 
+// KYTY_UNMAP_SKIP_DRAIN=1: an unmap of memory no buffer or image owns skips the GPU drain
+// (upstream e6fce45d). Off by default until a measurement backs it.
+static bool UnmapSkipDrainEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_UNMAP_SKIP_DRAIN");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+
 void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size) {
 	if (!GuestRange {vaddr, size}.Valid()) {
 		return;
@@ -162,7 +172,12 @@ void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size) {
 	}
 	const auto unmap = [this, vaddr, size] {
 		DrainStats::ReasonScope reason(DrainStats::Reason::Unmap);
-		if (m_command_scheduler.Active()) {
+		// Check cache ownership on the GPU thread. Guest-memory callbacks can still
+		// access a range with no cached data, so they must finish before it is unmapped.
+		if (m_command_scheduler.Active() &&
+		    (!UnmapSkipDrainEnabled() || m_buffer_cache.IsRegionRegistered(vaddr, size) ||
+		     m_texture_cache.IsRegionRegistered(vaddr, size) ||
+		     m_command_scheduler.HasPendingPriorityOperations())) {
 			const auto tick = m_command_scheduler.CurrentTick();
 			m_command_scheduler.Finish();
 			m_command_scheduler.WaitPriorityOperations(tick);
