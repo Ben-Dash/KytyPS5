@@ -274,21 +274,17 @@ bool Apply(const std::filesystem::path& plan_path, Program* main_program,
 
 // ASTRO BOT 01.007.000 picks its render size from five modes (0: 1920x1080, 1 and 2: 2432x1368,
 // 3: 3328x1872, 4: 3840x2160) by GPU time; two functions take the mode, one for levels and one
-// for the galaxy map. The window size chosen for the game fixes the mode instead: up to 1080 lines
-// 1080p, up to 1440 lines 2432x1368, above 3840x2160. KYTY_ASTRO_FIXED_RESOLUTION=0 keeps the
-// game's dynamic resolution.
+// for the galaxy map. With KYTY_ASTRO_FIXED_RESOLUTION=1 the window size chosen for the game fixes
+// the mode instead: up to 1080 lines 1080p, up to 1440 lines 2432x1368, above 3840x2160. Off by
+// default: the same patch is a cheat file (_Patches/PPSA21564.json, chosen in the launcher).
 void ApplyBuiltIn(Program* main_program) {
 	std::string title_id;
 	std::string version;
-	if (main_program == nullptr || main_program->base_vaddr == 0 ||
-	    !SystemContentParamSfoGetString("TITLE_ID", &title_id) ||
+	const char* enabled = std::getenv("KYTY_ASTRO_FIXED_RESOLUTION");
+	if (enabled == nullptr || std::strcmp(enabled, "1") != 0 || main_program == nullptr ||
+	    main_program->base_vaddr == 0 || !SystemContentParamSfoGetString("TITLE_ID", &title_id) ||
 	    !SystemContentParamSfoGetString("APP_VER", &version) || title_id != "PPSA21564" ||
 	    version != "01.007.000") {
-		return;
-	}
-	if (const char* text = std::getenv("KYTY_ASTRO_FIXED_RESOLUTION");
-	    text != nullptr && std::strcmp(text, "0") == 0) {
-		::printf("Built-in patch: ASTRO BOT dynamic resolution kept (KYTY_ASTRO_FIXED_RESOLUTION=0)\n");
 		return;
 	}
 	const auto    height = Config::GetScreenHeight();
@@ -322,8 +318,8 @@ void ApplyBuiltIn(Program* main_program) {
 		std::memcpy(reinterpret_cast<void*>(address), site.on.data(), site.on.size());
 		(void)Common::VirtualMemory::FlushInstructionCache(address, site.on.size());
 	}
-	::printf("Built-in patch applied: ASTRO BOT fixed render resolution %s (window height %u; "
-	         "KYTY_ASTRO_FIXED_RESOLUTION=0 keeps the dynamic resolution)\n",
+	::printf("Built-in patch applied: ASTRO BOT fixed render resolution %s (window height %u, "
+	         "KYTY_ASTRO_FIXED_RESOLUTION=1)\n",
 	         Sizes[mode], height);
 	std::fflush(stdout);
 }
