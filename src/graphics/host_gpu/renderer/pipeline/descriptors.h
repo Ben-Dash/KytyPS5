@@ -88,6 +88,11 @@ struct PreparedBindings {
 		std::vector<ShaderRecompiler::IR::DescriptorValue> images;
 		std::vector<uint32_t>                              mip_counters;
 		TextureCache::TargetState                          state {};
+		// g_image_clean_epoch when ImageGroupStands last found every image clean (0: not since
+		// the group was recorded), and whether no image's request has color metadata, so that
+		// IsColorClearCurrent holds without looking (KYTY_CLEAN_EPOCH).
+		uint64_t                                           clean_epoch = 0;
+		bool                                               clear_free  = false;
 		// KYTY_DEBUG_BIND_STATS: why the last draw recorded no group (BindStats::Refusal).
 		uint8_t                                            refused = 0;
 	} image_group;

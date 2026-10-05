@@ -8,6 +8,7 @@
 #include "graphics/host_gpu/renderer/image/imageInfo.h"
 
 #include <array>
+#include <atomic>
 #include <compare>
 #include <limits>
 #include <optional>
@@ -22,6 +23,14 @@ class CommandScheduler;
 struct ImageTestAccess;
 
 using ImageId = Common::SlotId;
+
+// Bumped whenever an image may stop being clean for a sampled binding (TextureCache::IsTextureClean):
+// CPU or buffer writes, a rebind, tracking, depth or stencil association and registration changes.
+// While it is unchanged, an image group that was clean is still clean (see ImageGroupStands).
+inline std::atomic<uint64_t> g_image_clean_epoch {1};
+inline void                  BumpImageCleanEpoch() noexcept {
+    g_image_clean_epoch.fetch_add(1, std::memory_order_acq_rel);
+}
 
 struct CachedImageView {
 	ImageViewInfo info;
@@ -75,8 +84,10 @@ public:
 			m_cpu_dirty        = true;
 			m_maybe_cpu_dirty  = false;
 			m_maybe_hash_valid = false;
+			BumpImageCleanEpoch();
 		} else if (ImagePageRangesOverlap(info.data.address, info.data.size, vaddr, size)) {
 			m_maybe_cpu_dirty = true;
+			BumpImageCleanEpoch();
 		}
 	}
 
@@ -87,6 +98,7 @@ public:
 		if (!m_cpu_dirty) {
 			m_maybe_cpu_dirty = true;
 		}
+		BumpImageCleanEpoch();
 	}
 	[[nodiscard]] bool NeedsMaybeCpuHash() const {
 		return m_maybe_cpu_dirty && !m_maybe_hash_valid;
@@ -122,7 +134,10 @@ public:
 	void               ClearGpuModified() noexcept { m_gpu_modified = false; }
 
 	[[nodiscard]] bool IsBufferModified() const noexcept { return m_buffer_modified; }
-	void               MarkBufferModified() noexcept { m_buffer_modified = true; }
+	void               MarkBufferModified() noexcept {
+		m_buffer_modified = true;
+		BumpImageCleanEpoch();
+	}
 	void               ClearBufferModified() noexcept { m_buffer_modified = false; }
 
 	[[nodiscard]] bool Overlaps(uint64_t address, uint64_t size,

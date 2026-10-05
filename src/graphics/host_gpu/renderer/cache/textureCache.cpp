@@ -431,6 +431,7 @@ void TextureCache::UnregisterImage(ImageId id) {
 	}
 	m_total_used_memory -= accounted;
 	image.registered = false;
+	BumpImageCleanEpoch();
 }
 
 void TextureCache::DeleteImage(ImageId id, std::vector<ImageId>* retired) {
@@ -537,6 +538,7 @@ void TextureCache::TrackImage(ImageId id) {
 	if (!image.IsTracked()) {
 		image.track_addr     = image_begin;
 		image.track_addr_end = image_end;
+		BumpImageCleanEpoch();
 		m_page_manager.UpdatePageWatchers<true>(image_begin, image.info.data.size);
 		return;
 	}
@@ -562,6 +564,7 @@ void TextureCache::TrackImageHead(ImageId id) {
 	}
 	const auto size  = image.track_addr - image_begin;
 	image.track_addr = image_begin;
+	BumpImageCleanEpoch();
 	m_page_manager.UpdatePageWatchers<true>(image_begin, size);
 }
 
@@ -580,6 +583,7 @@ void TextureCache::TrackImageTail(ImageId id) {
 	const auto address   = image.track_addr_end;
 	const auto size      = image_end - address;
 	image.track_addr_end = image_end;
+	BumpImageCleanEpoch();
 	m_page_manager.UpdatePageWatchers<true>(address, size);
 }
 
@@ -592,6 +596,7 @@ void TextureCache::UntrackImage(ImageId id) {
 	const auto size      = image.track_addr_end - image.track_addr;
 	image.track_addr     = 0;
 	image.track_addr_end = 0;
+	BumpImageCleanEpoch();
 	if (size != 0) {
 		m_page_manager.UpdatePageWatchers<false>(address, size);
 	}
@@ -606,6 +611,7 @@ void TextureCache::UntrackImageHead(ImageId id) {
 	const auto address = Common::AlignDown(begin + TRACKER_PAGE_SIZE, TRACKER_PAGE_SIZE);
 	const auto size    = address - begin;
 	image.track_addr   = address;
+	BumpImageCleanEpoch();
 	if (image.track_addr == image.track_addr_end) {
 		MarkAsMaybeDirty(id, image);
 	}
@@ -623,6 +629,7 @@ void TextureCache::UntrackImageTail(ImageId id) {
 	const auto address   = Common::AlignDown(end, TRACKER_PAGE_SIZE);
 	const auto size      = end - address;
 	image.track_addr_end = address;
+	BumpImageCleanEpoch();
 	if (image.track_addr == image.track_addr_end) {
 		MarkAsMaybeDirty(id, image);
 	}
@@ -938,6 +945,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 	replacement.usage         = cached.usage;
 	if (cached.binding.is_bound || cached.binding.is_target) {
 		cached.binding.needs_rebind = true;
+		BumpImageCleanEpoch();
 	}
 	if (cached.backing.samples == replacement.backing.samples) {
 		const bool copy_supported =
@@ -1081,6 +1089,7 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId source_id) {
 	auto&      source      = m_slot_images[source_id];
 	if (source.binding.is_bound || source.binding.is_target) {
 		source.binding.needs_rebind = true;
+		BumpImageCleanEpoch();
 	}
 	InitializeImage(expanded_id);
 	const int32_t mip = source.info.MipOf(info);
@@ -1790,6 +1799,7 @@ ImageId TextureCache::AssociateStencil(ImageId depth_id, GuestRange stencil) {
 	auto& record = m_slot_images[association];
 	TouchImage(record);
 	record.depth_id = depth_id;
+	BumpImageCleanEpoch();
 	return association;
 }
 
@@ -2277,6 +2287,7 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 	MarkGpuModified(image);
 	image.usage.depth_target = true;
 	image.info.stencil = desc.info.stencil;
+	BumpImageCleanEpoch();
 	image.info.metadata = desc.info.metadata;
 	if (desc.info.HasMetadata()) {
 		if (m_surface_metas

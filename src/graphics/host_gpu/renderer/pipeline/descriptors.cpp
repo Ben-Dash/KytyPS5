@@ -1076,10 +1076,18 @@ static void ReportImageGroupCheck(bool same, uint64_t address) {
 // the tick and GC tick are the ones they were checked under, so every lookup and view acquisition
 // would repeat itself (RefindImage, IsTextureCurrent), and each image is still clean, bound for
 // the image its lookup finds, and has no color clear to apply for its request.
-static bool ImageGroupStands(TextureCache& cache, const PreparedBindings& prepared) {
-	if (!(prepared.image_group.state == cache.CurrentTargetState())) {
-		return false;
-	}
+// KYTY_CLEAN_EPOCH=0 checks a standing group's images every draw; KYTY_DEBUG_AB=cleanepoch
+// alternates.
+static bool CleanEpochEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_CLEAN_EPOCH");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("cleanepoch");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+static bool ImageGroupImagesClean(TextureCache& cache, const PreparedBindings& prepared) {
 	for (size_t i = 0; i < prepared.images.size(); i++) {
 		const auto& source = prepared.image_sources[i];
 		const auto  bound  = prepared.images[i].image_id;
@@ -1093,6 +1101,41 @@ static bool ImageGroupStands(TextureCache& cache, const PreparedBindings& prepar
 			return false;
 		}
 	}
+	return true;
+}
+
+// With the target state of the last check, each image of a group whose requests carry no color
+// metadata is as clean as it was then while g_image_clean_epoch is unchanged: every change that
+// IsTextureClean or the bound image depends on bumps it. KYTY_VERIFY_CLEAN_EPOCH=1 checks the
+// images anyway and reports a group the epoch kept that is not clean.
+static bool ImageGroupStands(TextureCache& cache, PreparedBindings& prepared) {
+	auto& group = prepared.image_group;
+	if (!(group.state == cache.CurrentTargetState())) {
+		return false;
+	}
+	const bool epoch_on = group.clear_free && CleanEpochEnabled();
+	const auto epoch    = g_image_clean_epoch.load(std::memory_order_acquire);
+	if (epoch_on && group.clean_epoch == epoch) {
+		static const bool verify = std::getenv("KYTY_VERIFY_CLEAN_EPOCH") != nullptr;
+		if (verify) [[unlikely]] {
+			static uint64_t checked = 0;
+			static uint64_t differ  = 0;
+			checked++;
+			if (!ImageGroupImagesClean(cache, prepared) && differ++ < 16) {
+				std::printf("clean-epoch verify: a group kept by the epoch is not clean\n");
+			}
+			if (checked % 500000 == 0) {
+				std::printf("clean-epoch verify: checked=%" PRIu64 " differ=%" PRIu64 "\n", checked,
+				            differ);
+				std::fflush(stdout);
+			}
+		}
+		return true;
+	}
+	if (!ImageGroupImagesClean(cache, prepared)) {
+		return false;
+	}
+	group.clean_epoch = epoch_on ? epoch : 0;
 	return true;
 }
 
@@ -1240,9 +1283,14 @@ static void RecordImageGroup(RenderContext& context, PreparedBindings& prepared,
 		}
 	}
 	group.images.assign(values.begin(), values.end());
-	group.state   = cache.CurrentTargetState();
-	group.program = &program;
-	group.refused = BindStats::RefusedNone;
+	group.state       = cache.CurrentTargetState();
+	group.program     = &program;
+	group.refused     = BindStats::RefusedNone;
+	group.clean_epoch = 0;
+	group.clear_free  = std::ranges::none_of(prepared.images, [](const TextureBinding& binding) {
+		const auto kind = binding.desc.info.metadata.kind;
+		return kind == ImageMetadataKind::Dcc || kind == ImageMetadataKind::Cmask;
+	});
 }
 
 // KYTY_DEBUG_BIND_STATS: counts whether PrepareBindings kept the stage's image group, and if not,
