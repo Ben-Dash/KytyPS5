@@ -47,11 +47,9 @@ bool PatchesDialog::IsSupportedTitleId(const QString& title_id) {
 	return title_id.trimmed().toUpper().startsWith(QStringLiteral("PPSA"));
 }
 
-// The launcher's own patch plans: launch scripts pass their files from _Patches themselves, so a
-// game starts from the launcher without a patch until one is put here.
 QString PatchesDialog::PatchPlanPath(const QString& title_id) {
 	return QDir(QCoreApplication::applicationDirPath())
-	    .filePath(QStringLiteral("_Patches/Launcher/%1.json").arg(title_id.trimmed().toUpper()));
+	    .filePath(QStringLiteral("_Patches/%1.json").arg(title_id.trimmed().toUpper()));
 }
 
 void PatchesDialog::Load() {
