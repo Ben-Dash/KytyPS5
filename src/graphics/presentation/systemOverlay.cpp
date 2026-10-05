@@ -495,12 +495,13 @@ SystemOverlayVisualState GetSystemOverlayVisualState() noexcept {
 	const auto core   = CoreIme::GetVisualState();
 	const auto dialog = DialogIme::GetVisualState();
 	const auto error  = ErrorDialog::GetVisualState();
-	return {core.active || dialog.active || error.active ||
-	            g_settings_open.load(std::memory_order_acquire) ||
-	            g_hud.active.load(std::memory_order_relaxed),
+	const bool interactive = core.active || dialog.active || error.active ||
+	                         g_settings_open.load(std::memory_order_acquire);
+	return {interactive || g_hud.active.load(std::memory_order_relaxed),
 	        core.revision + dialog.revision + error.revision +
 	            g_settings_generation.load(std::memory_order_acquire) +
-	            g_hud_generation.load(std::memory_order_acquire)};
+	            g_hud_generation.load(std::memory_order_acquire),
+	        interactive};
 }
 
 bool ProcessSystemOverlayInput(const SDL_Event& event) {

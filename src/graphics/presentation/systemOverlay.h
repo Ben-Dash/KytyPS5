@@ -16,6 +16,9 @@ struct GraphicContext;
 struct SystemOverlayVisualState {
 	bool     active;
 	uint64_t revision;
+	// A dialog or menu is open: the presenter keeps redrawing it between game frames. The info
+	// display (F3) alone is drawn with the game's own frames.
+	bool     interactive = false;
 };
 
 void                     InitializeSystemOverlayInput(SDL_Window* window);

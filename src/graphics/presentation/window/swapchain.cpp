@@ -1166,7 +1166,7 @@ bool Presenter::IsGuestPaused() const noexcept {
 
 bool Presenter::NeedsSystemOverlayRefresh() const noexcept {
 	const auto visual = GetSystemOverlayVisualState();
-	return visual.active ||
+	return visual.interactive ||
 	       visual.revision != m_impl->presented_overlay_revision.load(std::memory_order_acquire);
 }
 

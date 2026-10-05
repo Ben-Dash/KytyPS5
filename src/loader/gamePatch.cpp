@@ -1,6 +1,7 @@
 #include "loader/gamePatch.h"
 
 #include "common/assert.h"
+#include "common/emulatorConfig.h"
 #include "common/stringUtils.h"
 #include "common/virtualMemory.h"
 #include "kernel/memory.h"
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -268,6 +270,62 @@ bool Apply(const std::filesystem::path& plan_path, Program* main_program,
 	}
 	::printf("Game cheat: waiting for the matching module\n");
 	return true;
+}
+
+// ASTRO BOT 01.007.000 picks its render size from five modes (0: 1920x1080, 1 and 2: 2432x1368,
+// 3: 3328x1872, 4: 3840x2160) by GPU time; two functions take the mode, one for levels and one
+// for the galaxy map. The window size chosen for the game fixes the mode instead: up to 1080 lines
+// 1080p, up to 1440 lines 2432x1368, above 3840x2160. KYTY_ASTRO_FIXED_RESOLUTION=0 keeps the
+// game's dynamic resolution.
+void ApplyBuiltIn(Program* main_program) {
+	std::string title_id;
+	std::string version;
+	if (main_program == nullptr || main_program->base_vaddr == 0 ||
+	    !SystemContentParamSfoGetString("TITLE_ID", &title_id) ||
+	    !SystemContentParamSfoGetString("APP_VER", &version) || title_id != "PPSA21564" ||
+	    version != "01.007.000") {
+		return;
+	}
+	if (const char* text = std::getenv("KYTY_ASTRO_FIXED_RESOLUTION");
+	    text != nullptr && std::strcmp(text, "0") == 0) {
+		::printf("Built-in patch: ASTRO BOT dynamic resolution kept (KYTY_ASTRO_FIXED_RESOLUTION=0)\n");
+		return;
+	}
+	const auto    height = Config::GetScreenHeight();
+	const uint8_t mode   = height <= 1080 ? 0 : height <= 1440 ? 1 : 4;
+	static constexpr const char* Sizes[5] = {"1920x1080", "2432x1368", "2432x1368", "3328x1872",
+	                                         "3840x2160"};
+	struct Site {
+		uint64_t             offset;
+		std::vector<uint8_t> off;
+		std::vector<uint8_t> on;
+	};
+	const Site sites[] = {
+	    // Levels: mov eax, [rbp - 0x220] -> mov eax, mode; nop.
+	    {0x70cfeda, {0x8b, 0x85, 0xe0, 0xfd, 0xff, 0xff}, {0xb8, mode, 0x00, 0x00, 0x00, 0x90}},
+	    // Galaxy map: cmp r12d, 4; ja (the mode check) -> mov r12d, mode.
+	    {0x73be6dd, {0x41, 0x83, 0xfc, 0x04, 0x77, 0x31}, {0x41, 0xbc, mode, 0x00, 0x00, 0x00}},
+	};
+	for (const auto& site: sites) {
+		const auto address = main_program->base_vaddr + site.offset;
+		if (!IsInsideProgram(*main_program, address, site.off.size()) ||
+		    std::memcmp(reinterpret_cast<const void*>(address), site.off.data(), site.off.size()) !=
+		        0) {
+			::printf("Built-in patch: ASTRO BOT fixed render resolution skipped (code at 0x%llx "
+			         "differs, e.g. changed by a cheat file)\n",
+			         static_cast<unsigned long long>(site.offset));
+			return;
+		}
+	}
+	for (const auto& site: sites) {
+		const auto address = main_program->base_vaddr + site.offset;
+		std::memcpy(reinterpret_cast<void*>(address), site.on.data(), site.on.size());
+		(void)Common::VirtualMemory::FlushInstructionCache(address, site.on.size());
+	}
+	::printf("Built-in patch applied: ASTRO BOT fixed render resolution %s (window height %u; "
+	         "KYTY_ASTRO_FIXED_RESOLUTION=0 keeps the dynamic resolution)\n",
+	         Sizes[mode], height);
+	std::fflush(stdout);
 }
 
 bool ApplyPending(Program* program) {
