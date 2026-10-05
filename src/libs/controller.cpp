@@ -915,6 +915,16 @@ bool GameController::SendTriggerEffect(const PadTriggerEffectParam& param) {
 	if (effect.enable_bits == 0) {
 		return true;
 	}
+	// KYTY_PAD_TRIGGERS=0 (DualSense Fix off): the triggers get the "off" effect (mode 0) instead,
+	// so they never resist; the game still sees the effect state it set.
+	static const bool triggers = [] {
+		const char* text = std::getenv("KYTY_PAD_TRIGGERS");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	if (!triggers) {
+		std::memset(&effect.left_trigger, 0, sizeof(effect.left_trigger));
+		std::memset(&effect.right_trigger, 0, sizeof(effect.right_trigger));
+	}
 
 	auto* pad = SDL_GetGamepadFromID(static_cast<SDL_JoystickID>(m_active_id));
 	if (pad != nullptr && SDL_GetGamepadType(pad) == SDL_GAMEPAD_TYPE_PS5) {
