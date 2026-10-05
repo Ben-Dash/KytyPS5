@@ -499,8 +499,39 @@ static void LogDrawInputState(const CommandBuffer& buffer, const RenderColorInfo
 // KYTY_DEBUG_RESOLUTION=1 prints, every 3 s, the viewport sizes drawn most often (with the size of
 // their render target) and the GPU timestamp scale, to see the render resolution a game with dynamic
 // resolution picks.
+// The info display's counts (see HudStats): draws, and the viewport size drawn most often in the
+// last second that is not square (shadow maps are).
+static void HudCountDraw(float width, float height) {
+	static std::map<uint64_t, uint64_t> counts;
+	static uint64_t                     draws        = 0;
+	static auto                         window_start = std::chrono::steady_clock::now();
+	const auto w = static_cast<uint32_t>(std::lround(std::fabs(width)));
+	const auto h = static_cast<uint32_t>(std::lround(std::fabs(height)));
+	draws++;
+	if (w >= 640 && h >= 360 && w != h) {
+		counts[uint64_t {w} << 32u | h]++;
+	}
+	const auto now = std::chrono::steady_clock::now();
+	if (now - window_start < std::chrono::seconds(1)) {
+		return;
+	}
+	const auto top = std::ranges::max_element(
+	    counts, [](const auto& a, const auto& b) { return a.second < b.second; });
+	g_hud.render_size.store(top != counts.end() ? top->first : 0, std::memory_order_relaxed);
+	g_hud.draws_per_second.store(static_cast<uint64_t>(
+	                                 static_cast<double>(draws) /
+	                                 std::chrono::duration<double>(now - window_start).count()),
+	                             std::memory_order_relaxed);
+	counts.clear();
+	draws        = 0;
+	window_start = now;
+}
+
 static void DebugResolution(float width, float height, uint32_t target_width,
                             uint32_t target_height) {
+	if (g_hud.active.load(std::memory_order_relaxed)) [[unlikely]] {
+		HudCountDraw(width, height);
+	}
 	static const bool enabled = std::getenv("KYTY_DEBUG_RESOLUTION") != nullptr;
 	if (!enabled) [[likely]] {
 		return;

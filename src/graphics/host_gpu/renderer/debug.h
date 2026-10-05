@@ -99,6 +99,16 @@ struct BindingRepeats {
 };
 inline BindingRepeats g_binding_repeats;
 
+// The info display (F3, see SystemOverlay): while it is on, draws count themselves and their
+// viewport sizes (see DebugResolution in renderDraw.cpp), and the display reads the results.
+struct HudStats {
+	std::atomic<bool>     active {false};
+	// The most drawn viewport of the last second that is no square (shadow maps), as w << 32 | h.
+	std::atomic<uint64_t> render_size {0};
+	std::atomic<uint64_t> draws_per_second {0};
+};
+inline HudStats g_hud;
+
 // KYTY_DEBUG_BIND_STATS=1 (with KYTY_DEBUG_DRAW_PHASES): why a stage's image group was not kept,
 // and which draws only write depth, printed as "image-groups" and "depth-only" lines after each
 // draw-phases line. Render thread only.
@@ -309,6 +319,8 @@ inline thread_local Pm4OpTimer g_pm4_ops;
 // differs from the previous frame's. GPU thread only.
 // KYTY_DEBUG_FRAME_REPEAT=1: see NoteBindingRepeat (descriptors.cpp). Called once per flip.
 void DebugFrameRepeatFlip();
+// KYTY_DEBUG_WATCH (see debugWatch.cpp). Called once per flip.
+void DebugWatchTick();
 
 [[nodiscard]] bool StampTraceEnabled() noexcept;
 void               StampTraceDraw(uint64_t pixel_hash, uint64_t target_address) noexcept;

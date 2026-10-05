@@ -281,11 +281,11 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		SetDefaultSwitch("KYTY_DEBUG_FRAME_LIMIT_MS", "16.667");
 		SetDefaultSwitch("KYTY_PRESENT_WHEN_READY", "1");
 		if (!g_timestamp_scale_given) {
-			// The game's dynamic resolution follows the window: the scale stretches the GPU time it
-			// measures, so 50 lets it aim for 4K, 200 holds it near 1080p (the fastest: at 4K the GPU
-			// limits the frame rate in Sky Garden, at 1080p the CPU).
+			// The game's dynamic resolution only rests at its ends below 60 fps: 75-200 keep its floor,
+			// 1080p (the fastest: the CPU limits the frame rate in Sky Garden), 50 lets it render 4K
+			// (then the GPU limits it); 60 flips between steps. A 4K window takes 4K.
 			const auto height = options.config.screen_height;
-			options.config.gpu_timestamp_scale_percent = height <= 1080 ? 200 : height <= 1440 ? 100 : 50;
+			options.config.gpu_timestamp_scale_percent = height <= 1440 ? 200 : 50;
 		}
 		::printf("Title profile %s: compute chain, 60 fps limit, present when ready, "
 		         "gpu-timestamp-scale %u\n",

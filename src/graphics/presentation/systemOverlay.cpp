@@ -7,6 +7,7 @@
 #include "common/settingsFile.h"
 #include "common/stringUtils.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/debug.h"
 #include "imgui.h"
 #include "imgui_impl_vulkan.h"
 #include "libs/controller.h"
@@ -530,6 +531,11 @@ bool ProcessSystemOverlayInput(const SDL_Event& event) {
 			QueueInput({InputKind::ResetController, g_input_session, 0, 0.0f, 0.0f});
 		}
 		return false;
+	}
+	// F3 shows and hides the info display (render resolution, frame rate, draws).
+	if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F3) {
+		g_hud.active.store(!g_hud.active.load(std::memory_order_relaxed), std::memory_order_relaxed);
+		return true;
 	}
 	// F2 opens and closes the emulator settings panel, unless a game dialog owns the overlay.
 	if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F2 &&
@@ -1197,9 +1203,44 @@ struct SystemOverlay::Impl {
 		}
 	}
 
+	// The info display (F3): a small box in the top left corner over the game.
+	void DrawHud(vk::Extent2D extent) {
+		const auto now = std::chrono::steady_clock::now();
+		hud_frames++;
+		if (now - hud_window_start >= std::chrono::seconds(1)) {
+			hud_fps = static_cast<float>(hud_frames) /
+			          std::chrono::duration<float>(now - hud_window_start).count();
+			hud_frames       = 0;
+			hud_window_start = now;
+			hud_memory_mb    = graphics.CanReportMemoryUsage()
+			                       ? static_cast<uint32_t>(graphics.GetDeviceMemoryUsage() >> 20u)
+			                       : 0;
+		}
+		const auto size  = g_hud.render_size.load(std::memory_order_relaxed);
+		const auto draws = g_hud.draws_per_second.load(std::memory_order_relaxed);
+		ImGui::SetNextWindowPos({8.0f, 8.0f});
+		ImGui::SetNextWindowBgAlpha(0.6f);
+		ImGui::Begin("##KytyHud", nullptr,
+		             ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+		                 ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
+		                 ImGuiWindowFlags_NoNav);
+		ImGui::Text("Render: %ux%u", static_cast<uint32_t>(size >> 32u), static_cast<uint32_t>(size));
+		ImGui::Text("Window: %ux%u", extent.width, extent.height);
+		ImGui::Text("FPS: %.1f (%.1f ms)", hud_fps, hud_fps > 0.0f ? 1000.0f / hud_fps : 0.0f);
+		ImGui::Text("Draws: %.0f/frame",
+		            hud_fps > 0.0f ? static_cast<double>(draws) / static_cast<double>(hud_fps) : 0.0);
+		ImGui::Text("Timestamp scale: %u%%", Config::GetGpuTimestampScalePercent());
+		if (hud_memory_mb != 0) {
+			ImGui::Text("VRAM: %u MB", hud_memory_mb);
+		}
+		ImGui::End();
+	}
+
 	bool PrepareFrame(vk::Extent2D frame_extent, vk::Format format, uint32_t image_count) {
 		OverlaySnapshot snapshot;
-		if (!GetOverlaySnapshot(&snapshot)) {
+		const bool      visible = GetOverlaySnapshot(&snapshot);
+		const bool      hud     = g_hud.active.load(std::memory_order_relaxed);
+		if (!visible && !hud) {
 			return false;
 		}
 		const auto prepared_session = snapshot.session;
@@ -1229,16 +1270,21 @@ struct SystemOverlay::Impl {
 		last_frame     = now;
 		ImGui_ImplVulkan_NewFrame();
 		ImGui::NewFrame();
-		if (!GetOverlaySnapshot(&snapshot) || snapshot.session != prepared_session) {
+		if (GetOverlaySnapshot(&snapshot) != visible || snapshot.session != prepared_session) {
 			ImGui::EndFrame();
 			return false;
 		}
-		if (snapshot.session.kind == OverlayKind::Error) {
+		if (!visible) {
+			// Only the info display.
+		} else if (snapshot.session.kind == OverlayKind::Error) {
 			DrawError(snapshot.error, frame_extent);
 		} else if (snapshot.session.kind == OverlayKind::Settings) {
 			DrawSettings(frame_extent);
 		} else {
 			DrawIme(snapshot.ime, frame_extent);
+		}
+		if (hud) {
+			DrawHud(frame_extent);
 		}
 		ImGui::Render();
 		extent = frame_extent;
@@ -1293,6 +1339,11 @@ struct SystemOverlay::Impl {
 	OverlaySession                        session;
 	vk::Extent2D                          extent {};
 	std::chrono::steady_clock::time_point last_frame;
+	// The info display's frame rate and video memory, updated once a second.
+	std::chrono::steady_clock::time_point hud_window_start = std::chrono::steady_clock::now();
+	uint32_t                              hud_frames       = 0;
+	float                                 hud_fps          = 0.0f;
+	uint32_t                              hud_memory_mb    = 0;
 };
 
 SystemOverlay::SystemOverlay(GraphicContext& graphics): m_impl(std::make_unique<Impl>(graphics)) {}
