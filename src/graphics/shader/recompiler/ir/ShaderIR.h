@@ -92,6 +92,28 @@ struct MemoryInfo {
 		         opcode == ValueOpcode::StoreBufferU32x3 || opcode == ValueOpcode::StoreBufferU32x4));
 	}
 
+	// 32-bit buffer atomics through a GPU-selected descriptor operate on guest memory by address
+	// (see EmitAtomic32); the read-modify-write forms that need a compare loop are not handled.
+	[[nodiscard]] bool SupportsIndirectBufferAtomic(ValueOpcode opcode) const {
+		if (typed || formatted || data_bits != 32u) {
+			return false;
+		}
+		switch (opcode) {
+			case ValueOpcode::BufferAtomicIAdd32:
+			case ValueOpcode::BufferAtomicISub32:
+			case ValueOpcode::BufferAtomicSMin32:
+			case ValueOpcode::BufferAtomicUMin32:
+			case ValueOpcode::BufferAtomicSMax32:
+			case ValueOpcode::BufferAtomicUMax32:
+			case ValueOpcode::BufferAtomicAnd32:
+			case ValueOpcode::BufferAtomicOr32:
+			case ValueOpcode::BufferAtomicXor32:
+			case ValueOpcode::BufferAtomicSwap32:
+			case ValueOpcode::BufferAtomicCmpSwap32: return true;
+			default: return false;
+		}
+	}
+
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
 		// Raw byte and short loads read their bytes by address too (see LoadIndirectSubword).
 		if (!typed && !formatted &&
@@ -99,8 +121,13 @@ struct MemoryInfo {
 		     (data_bits == 16u && opcode == ValueOpcode::LoadBufferU16))) {
 			return true;
 		}
+		// Formatted XY/XYZ/XYZW loads (D16 too) decode the format from a table
+		// (LoadIndirectFormatted).
 		return !typed && data_bits == 32u &&
-		       (formatted ? opcode == ValueOpcode::LoadBufferU32
+		       (formatted ? opcode == ValueOpcode::LoadBufferU32 ||
+		                        opcode == ValueOpcode::LoadBufferU32x2 ||
+		                        opcode == ValueOpcode::LoadBufferU32x3 ||
+		                        opcode == ValueOpcode::LoadBufferU32x4
 		                  : opcode == ValueOpcode::ReadConstBuffer ||
 		                        opcode == ValueOpcode::LoadBufferU32 ||
 		                        opcode == ValueOpcode::LoadBufferU32x2 ||

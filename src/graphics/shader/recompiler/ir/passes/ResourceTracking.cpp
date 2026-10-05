@@ -1647,12 +1647,39 @@ private:
 		return false;
 	}
 
+	// Whether every image access through `handle` takes a 128-bit T#.
+	bool UsedAsR128(const Inst& handle) const {
+		bool any = false;
+		for (const auto& use: handle.Uses()) {
+			if (use.user->GetOpcode() == ValueOpcode::Phi) {
+				continue;
+			}
+			if (ImageOpcodeInfoOf(use.user->GetOpcode()).access == ImageAccess::None) {
+				return false;
+			}
+			const auto index = use.user->Flags<MemoryFlags>().index;
+			if (index >= m_program.memory_info.size() || !m_program.memory_info[index].image_r128) {
+				return false;
+			}
+			any = true;
+		}
+		return any;
+	}
+
 	bool MatchDescriptorTable(Inst& handle, const DescriptorSource& descriptor,
 	                          IndirectDescriptorPlan& plan,
 	                          DescriptorSource& table_source, Value& key, uint32_t& table_offset,
 	                          uint32_t& table_stride) {
 		Inst* table_handle = nullptr;
+		m_table_cross_block = false;
 		for (uint32_t dword = 0; dword < handle.NumArgs(); ++dword) {
+			// A 128-bit T# (r128): the decoder made its upper half zero; only the lower half is
+			// read from the table (the bindless lookup zeroes the rest of the record too).
+			if (dword >= 4u && handle.Arg(dword).Resolve().IsImmediate() && UsedAsR128(handle)) {
+				plan.memory[dword] = plan.memory[0];
+				plan.reads[dword]  = plan.reads[0];
+				continue;
+			}
 			auto* read = descriptor.dwords[dword].Resolve().TryInstruction();
 			if (read == nullptr) {
 				return false;
@@ -1671,13 +1698,18 @@ private:
 			    current_handle->GetOpcode() != (memory->kind == ResourceKind::ScalarAddress
 			                                      ? ValueOpcode::GetAddressResource
 			                                      : ValueOpcode::GetBufferResource) ||
-			    (memory->kind == ResourceKind::ScalarAddress && read->Parent() != handle.Parent()) ||
+			    (memory->kind == ResourceKind::ScalarAddress && read->Parent() != handle.Parent() &&
+			     !m_program.bindless_images) ||
 			    (table_handle != nullptr &&
 			     !EquivalentValue(m_program, Value(table_handle), Value(current_handle))) ||
 			    !MatchTableOffset(read->Arg(1), current_key, offset, stride) ||
 			    memory->offset > UINT32_MAX - offset) {
 				return false;
 			}
+			// A bare-address table read in another block: the host cannot rely on the address,
+			// so only the bindless lookup (lazy, checked reads) may take it.
+			m_table_cross_block |= memory->kind == ResourceKind::ScalarAddress &&
+			                       read->Parent() != handle.Parent();
 			offset += memory->offset;
 			if (dword == 0u) {
 				key = current_key;
@@ -1750,19 +1782,34 @@ private:
 		indirect.table_offset = table_offset;
 		indirect.table_stride = table_stride;
 		indirect.workgroup_axis = WorkgroupAxis(key);
-		if (indirect.workgroup_axis == UINT32_MAX && m_program.bindless_images &&
-		    table_source.dword_count == 4u && table_stride >= 32u) {
+		// A heap behind a V# or behind a bare 64-bit address (its size is then a host cap).
+		const bool bindless_heap =
+		    indirect.workgroup_axis == UINT32_MAX && m_program.bindless_images && table_stride >= 32u &&
+		    (table_source.dword_count == 4u || table_source.dword_count == 2u);
+		const auto take_bindless = [&]() {
+			indirect                = {};
+			indirect.table_offset   = table_offset;
+			indirect.table_stride   = table_stride;
+			indirect.bindless       = true;
+			material_source         = {};
+		};
+		if (bindless_heap && (table_source.dword_count == 4u || m_table_cross_block)) {
 			// Bindless (--bindless): the shader looks the key up in the host's translation table
 			// at run time. An enumeration that passes here can still fail per draw (a material
 			// table of more records than the probe cap, more textures than a shader binds), and a
 			// compiled shader cannot switch plans, so a V# heap always takes this path.
-			indirect.bindless = true;
+			take_bindless();
+		} else if (m_table_cross_block) {
+			return false;
 		} else if (indirect.workgroup_axis != UINT32_MAX) {
 			// The descriptor also supplies dimensions to shader arithmetic. Keep its reads;
 			// only the image handle is projected onto the bounded workgroup key.
 			plan.reads.fill(nullptr);
+		} else if (table_source.dword_count == 2u && table_stride != 32u) {
+			// A bare-address table of records larger than one descriptor: bindless only.
+			if (!bindless_heap) return false;
+			take_bindless();
 		} else if (table_source.dword_count == 2u) {
-			if (table_stride != 32u) return false;
 			const auto* selector = key.Resolve().TryInstruction();
 			const bool bitscan = selector != nullptr && selector->GetOpcode() == ValueOpcode::FindILsb32 &&
 			    selector->NumArgs() == 1u && !m_shader_writes &&
@@ -1775,10 +1822,12 @@ private:
 			}
 			if (indirect.key_count.IsEmpty() &&
 			    !MatchUniformizedMaterialKey(key, handle, indirect, material_source)) {
+				if (!bindless_heap) return false;
+				take_bindless();
+			} else if ((table_offset & 3u) != 0u ||
+			           (bitscan && table_offset > UINT32_MAX - (32u * 32u - 1u))) {
 				return false;
 			}
-			if ((table_offset & 3u) != 0u ||
-			    (bitscan && table_offset > UINT32_MAX - (32u * 32u - 1u))) return false;
 		} else if (!MatchUniformizedBufferKey(key, handle, indirect, material_source)) {
 			auto* material_read = MaterialKey(key, indirect).TryInstruction();
 			uint32_t material_memory_index = 0;
@@ -2352,17 +2401,18 @@ private:
 				source = indirect->source;
 			} else if (!GetHandle(inst.Arg(0), ValueOpcode::GetBufferResource, 4, flags.pc,
 			               memory.resource * 4u, handle, source)) {
-				const bool indirect_store = memory.SupportsIndirectBufferStore(op);
+				const bool indirect_store = memory.SupportsIndirectBufferStore(op) ||
+				                            memory.SupportsIndirectBufferAtomic(op);
 				if (memory.kind != (op == ValueOpcode::ReadConstBuffer ? ResourceKind::ScalarBuffer
 				                                                        : ResourceKind::Buffer) ||
 				    !(memory.SupportsIndirectBufferLoad(op) || indirect_store)) {
 					Fail(flags.pc,
 					     fmt::format("buffer descriptor is not a valid runtime value; GPU-selected "
 					                 "access requires a raw DWORD x2/x3/x4 load (op={} kind={} bits={} "
-					                 "dwords={} formatted={} typed={})",
+					                 "dwords={} formatted={} typed={} d16={})",
 					                 ValueOpcodeName(op), static_cast<uint32_t>(memory.kind),
 					                 memory.data_bits, memory.data_dwords, memory.formatted,
-					                 memory.typed));
+					                 memory.typed, memory.d16));
 				}
 				m_program.memory_info[flags.index].kind = ResourceKind::IndirectBuffer;
 				m_info.uses_dma                         = true;
@@ -2497,6 +2547,8 @@ private:
 	std::vector<IndirectDescriptorPlan>             m_indirect_descriptors;
 	std::vector<std::pair<const Inst*, Value>> m_descriptor_selections;
 	bool                                       m_shader_writes = false;
+	// Set by MatchDescriptorTable: a bare-address table read in another block than the handle.
+	bool                                       m_table_cross_block = false;
 };
 
 } // namespace

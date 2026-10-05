@@ -180,6 +180,9 @@ struct EmitterState {
 	std::vector<InputBinding>                        inputs;
 	std::vector<OutputBinding>                       outputs;
 	std::vector<uint32_t>                            interface_variables;
+	// Private tables of the per-format layout words, indexed by the V# format
+	// (LookupDynamicBufferFormat).
+	std::array<uint32_t, 4>                          format_tables {};
 	std::unordered_map<const IR::Block*, uint32_t>   labels;
 	// Long select(index == constant, ...) chains (V_MOVRELS reads) become one OpSwitch at their
 	// outermost select; their inner selects emit nothing (see EmitIndexedSelect).

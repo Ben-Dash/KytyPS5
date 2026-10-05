@@ -315,7 +315,8 @@ static bool IsSupportedStorageTextureDescriptor(const ShaderRecompiler::IR::Imag
 static bool IsSupportedStorageTextureEncoding(const ShaderRecompiler::IR::ImageResource& resource,
                                               const ShaderTextureResource& descriptor) {
 	constexpr uint32_t field1_reserved_mask = 0x200fff00u;
-	constexpr uint32_t field2_reserved_mask = 0xf0003000u;
+	// Bit 31 (resource level) is set by some storage T#s, e.g. Yotei's terrain tiles.
+	constexpr uint32_t field2_reserved_mask = 0x70003000u;
 	constexpr uint32_t field5_expected      = 0x00700000u;
 	constexpr uint32_t field5_max_mip_mask  = 0x000000f0u;
 	const uint32_t     expected_field3 = descriptor.DstSelXYZW() |
@@ -332,8 +333,13 @@ static bool IsSupportedStorageTextureEncoding(const ShaderRecompiler::IR::ImageR
 		return common && descriptor.fields[4] == 0 && descriptor.fields[5] == 0 &&
 		       descriptor.fields[6] == 0 && descriptor.fields[7] == 0;
 	}
-	return common && descriptor.fields[4] == expected_field4 &&
-	       (descriptor.fields[5] & ~field5_max_mip_mask) == field5_expected;
+	// An upper half that is all zero (a 128-bit T# in a 256-bit slot, e.g. Yotei's 132x132
+	// terrain tiles) means one level, no array, defaults.
+	const bool zero_upper = descriptor.fields[4] == 0 && descriptor.fields[5] == 0 &&
+	                        descriptor.fields[6] == 0 && descriptor.fields[7] == 0 &&
+	                        descriptor.BaseLevel() == 0 && descriptor.LastLevel() == 0;
+	return common && (zero_upper || (descriptor.fields[4] == expected_field4 &&
+	                                 (descriptor.fields[5] & ~field5_max_mip_mask) == field5_expected));
 }
 
 void ValidateStorageTexture(const ShaderRecompiler::IR::ImageResource& resource,
@@ -1559,6 +1565,10 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (!Libs::LibKernel::Memory::TryReadBacking(address, value.dwords.data(), 32u)) {
 		table.SetTranslation(heap, key, 0u);
 		return false;
+	}
+	// A 128-bit T#: the record's next 16 bytes are other data, not the descriptor's upper half.
+	if (heap.resource.r128) {
+		std::fill(value.dwords.begin() + 4, value.dwords.begin() + 8, 0u);
 	}
 	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
 	if (!BindlessCompatible(descriptor, heap.binding)) {

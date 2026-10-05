@@ -487,15 +487,31 @@ template <typename Specialization>
 bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indirect,
                               const DescriptorValue& table_value, uint32_t image_index,
                               ResourceSnapshot& snapshot, std::vector<Specialization>& specializations) {
-	ShaderBufferResource heap;
-	if (table_value.dword_count != 4u || !DecodeBufferDescriptor(table_value, heap)) {
-		return false;
+	uint64_t heap_base = 0;
+	uint64_t heap_size = 0;
+	if (table_value.dword_count == 2u) {
+		// A bare address has no bounds: the heap covers a fixed number of records. Keys are
+		// resolved when the shader names them, so only those records are read.
+		constexpr uint64_t AddressHeapKeys = 8192;
+		heap_base = ((static_cast<uint64_t>(table_value.dwords[1]) << 32u) | table_value.dwords[0]) &
+		            AddressMask;
+		heap_size = indirect.table_offset + AddressHeapKeys * std::max(indirect.table_stride, 32u);
+		if (heap_base == 0u) {
+			return false;
+		}
+	} else {
+		ShaderBufferResource heap;
+		if (table_value.dword_count != 4u || !DecodeBufferDescriptor(table_value, heap)) {
+			return false;
+		}
+		heap_base = heap.Base48();
+		heap_size = heap.GetSize();
 	}
 	const auto mapping_offset = static_cast<uint32_t>(snapshot.flattened_srt.size());
 	snapshot.flattened_srt.resize(mapping_offset + 2u, 0u);
 	snapshot.images[image_index] = {.dword_count = 8u};
-	snapshot.bindless_heaps.push_back({.base           = heap.Base48(),
-	                                   .size           = heap.GetSize(),
+	snapshot.bindless_heaps.push_back({.base           = heap_base,
+	                                   .size           = heap_size,
 	                                   .table_offset   = indirect.table_offset,
 	                                   .record_stride  = indirect.table_stride,
 	                                   .image          = image_index,

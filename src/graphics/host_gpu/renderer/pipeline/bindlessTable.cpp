@@ -425,7 +425,8 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	}
 	for (auto& heap: m_heaps) {
 		if (heap.base == base && heap.table_offset == table_offset &&
-		    heap.record_stride == record_stride && heap.binding == binding) {
+		    heap.record_stride == record_stride && heap.binding == binding &&
+		    heap.resource.r128 == resource.r128) {
 			if (entries > heap.entries && !AllocateRegion(heap, entries)) {
 				return nullptr;
 			}
