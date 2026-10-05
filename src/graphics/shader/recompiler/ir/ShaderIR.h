@@ -610,6 +610,7 @@ struct ResourceNode {
 		IEqual32,
 		INotEqual32,
 		ULessThan32,
+		ULessThanEqual32,
 		UGreaterThan32,
 		SGreaterThanEqual32,
 		LogicalAnd,

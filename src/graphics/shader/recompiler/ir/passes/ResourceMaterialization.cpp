@@ -1703,7 +1703,12 @@ bool MaterializeResourcesReference(const ResourcePlan& program, const SrtRuntime
 bool MaterializeResources(const ResourcePlan& program, const SrtRuntime& runtime,
                           ResourceSnapshot& snapshot, ResourceSpecialization& specialization,
                           MaterializationMemo* memo) {
-	const bool result = MaterializeCompiled(program, runtime, snapshot, specialization, memo);
+	bool result = MaterializeCompiled(program, runtime, snapshot, specialization, memo);
+	if (!result && !g_verify_materialization) {
+		// The compiled evaluator lacks some IR operations the walker knows (new resource tracking
+		// may bring more); the walker gives the draw its resources instead of skipping it.
+		result = MaterializeResourcesReference(program, runtime, snapshot, specialization);
+	}
 	if (g_verify_materialization) {
 		VerifyMaterialization(program, runtime, snapshot, specialization, result,
 		                      memo != nullptr && memo->reused);

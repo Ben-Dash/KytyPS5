@@ -1,6 +1,25 @@
 #include "graphics/shader/recompiler/frontend/translate/Translator.h"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace Libs::Graphics::ShaderRecompiler::Frontend {
+
+namespace {
+
+// KYTY_LEGACY_MAD=1 translates V_MAD/V_MAC_F32 with their legacy rounding: multiply and add
+// rounded separately (upstream d8be245c). By default they are fused like V_FMA_F32, which costs a
+// last-bit difference but runs much faster on the host GPU (ASTRO BOT at 4K: about 30 % more
+// frames).
+IR::ValueOpcode MadOpcode() {
+	static const bool legacy = [] {
+		const char* text = std::getenv("KYTY_LEGACY_MAD");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return legacy ? IR::ValueOpcode::FPMad32 : IR::ValueOpcode::FPFma32;
+}
+
+} // namespace
 
 void Translator::EmitVector(const Decoder::Instruction& inst) {
 	using O = Decoder::Opcode;
@@ -498,10 +517,10 @@ void Translator::EmitVector(const Decoder::Instruction& inst) {
 		case O::V_MIN_F32: return FloatBinary(inst, IR::ValueOpcode::FPMin32, false);
 		case O::V_MAX_F32: return FloatBinary(inst, IR::ValueOpcode::FPMax32, false);
 		case O::V_LDEXP_F32: return FloatBinary(inst, IR::ValueOpcode::FPLdexp, false);
-		case O::V_MAC_F32: return FloatTernary(inst, IR::ValueOpcode::FPMad32, true, true);
+		case O::V_MAC_F32: return FloatTernary(inst, MadOpcode(), true, true);
 		case O::V_MADMK_F32:
 		case O::V_MADAK_F32:
-		case O::V_MAD_F32: return FloatTernary(inst, IR::ValueOpcode::FPMad32, false, true);
+		case O::V_MAD_F32: return FloatTernary(inst, MadOpcode(), false, true);
 		case O::V_FMAC_F32: return FloatTernary(inst, IR::ValueOpcode::FPFma32, true, true);
 		case O::V_FMAMK_F32:
 		case O::V_FMAAK_F32:

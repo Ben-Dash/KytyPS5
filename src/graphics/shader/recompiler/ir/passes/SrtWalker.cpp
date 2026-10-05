@@ -537,10 +537,10 @@ bool SrtWalker::EvaluateRawRead(const Inst& inst, uint64_t& result) {
 		}
 	}
 	uint32_t word = 0;
-	const auto  reader          = vector ? m_runtime.read_specialization_memory : m_runtime.read_memory;
-	void* const reader_userdata = vector && m_runtime.specialization_userdata != nullptr
-	                                  ? m_runtime.specialization_userdata
-	                                  : m_runtime.userdata;
+	// Vector loads read like scalar ones (upstream sends them to the specialization reader, which
+	// reads GPU-written bytes back; ours fails on them instead).
+	const auto  reader          = m_runtime.read_memory;
+	void* const reader_userdata = m_runtime.userdata;
 	if (reader != nullptr) {
 		if (!reader(reader_userdata, address, {&word, 1})) {
 			// A load through a null base sits on a path the shader guards with a null-pointer
@@ -1063,6 +1063,7 @@ NodeOp ArithmeticOp(ValueOpcode op, size_t& args) {
 		case ValueOpcode::IEqual32: return NodeOp::IEqual32;
 		case ValueOpcode::INotEqual32: return NodeOp::INotEqual32;
 		case ValueOpcode::ULessThan32: return NodeOp::ULessThan32;
+		case ValueOpcode::ULessThanEqual32: return NodeOp::ULessThanEqual32;
 		case ValueOpcode::UGreaterThan32: return NodeOp::UGreaterThan32;
 		case ValueOpcode::SGreaterThanEqual32: return NodeOp::SGreaterThanEqual32;
 		case ValueOpcode::LogicalAnd: return NodeOp::LogicalAnd;
@@ -1980,6 +1981,10 @@ bool SrtEvaluator::EvaluateInst(const ResourceNode& node, uint64_t& result) {
 		case NodeOp::ULessThan32:
 			if (!binary()) return false;
 			result = static_cast<uint32_t>(a) < static_cast<uint32_t>(b);
+			return true;
+		case NodeOp::ULessThanEqual32:
+			if (!binary()) return false;
+			result = static_cast<uint32_t>(a) <= static_cast<uint32_t>(b);
 			return true;
 		case NodeOp::UGreaterThan32:
 			if (!binary()) return false;
