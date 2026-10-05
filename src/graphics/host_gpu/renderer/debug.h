@@ -321,6 +321,13 @@ inline thread_local Pm4OpTimer g_pm4_ops;
 // differs from the previous frame's. GPU thread only.
 // KYTY_DEBUG_FRAME_REPEAT=1: see NoteBindingRepeat (descriptors.cpp). Called once per flip.
 void DebugFrameRepeatFlip();
+// KYTY_DEBUG_FRAME_PASSES=<trigger file>: when that file exists at a flip (checked every 15
+// flips), the next frames' draws and dispatches are printed in order as "frame-pass" lines (see
+// NoteImageUsers in renderDraw.cpp) and the file is removed: each pass's shaders, samplers and
+// every image it reads and writes, to follow a post-processing chain such as temporal
+// anti-aliasing. KYTY_DEBUG_FRAME_PASSES_COUNT=<n> frames (default 2). GPU thread only.
+[[nodiscard]] bool FramePassesRecording() noexcept;
+void               FramePassesFlip() noexcept;
 // KYTY_DEBUG_WATCH (see debugWatch.cpp). Called once per flip.
 void DebugWatchTick();
 

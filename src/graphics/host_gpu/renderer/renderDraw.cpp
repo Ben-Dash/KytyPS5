@@ -46,6 +46,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1872,12 +1873,139 @@ static const std::vector<uint64_t>& ImageUsersShaders() {
 }
 
 bool ImageUsersEnabled() {
-	return ImageUsersAddress() != 0 || !ImageUsersShaders().empty();
+	return ImageUsersAddress() != 0 || !ImageUsersShaders().empty() || FramePassesRecording();
+}
+
+// KYTY_DEBUG_FRAME_PASSES (see debug.h): frames still to record, 0 while idle.
+static uint32_t g_frame_passes_left = 0;
+static uint64_t g_frame_pass_index  = 0;
+static uint64_t g_frame_pass_repeats = 0;
+static std::string g_frame_pass_previous;
+
+bool FramePassesRecording() noexcept {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES") != nullptr;
+	return enabled && g_frame_passes_left != 0;
+}
+
+static void FlushFramePassRepeats() {
+	if (g_frame_pass_repeats != 0) {
+		std::printf("frame-pass   x%" PRIu64 " more\n", g_frame_pass_repeats);
+		g_frame_pass_repeats = 0;
+	}
+	g_frame_pass_previous.clear();
+}
+
+void FramePassesFlip() noexcept {
+	static const char* trigger = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES");
+	if (trigger == nullptr) {
+		return;
+	}
+	static const uint32_t count = [] {
+		const char* text = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES_COUNT");
+		return text != nullptr ? std::max(1u, static_cast<uint32_t>(std::strtoul(text, nullptr, 10))) : 2u;
+	}();
+	static uint64_t flips = 0;
+	flips++;
+	if (g_frame_passes_left != 0) {
+		FlushFramePassRepeats();
+		g_frame_passes_left--;
+		std::printf("frame-pass flip %" PRIu64 "%s\n", flips, g_frame_passes_left == 0 ? " end" : "");
+		std::fflush(stdout);
+		return;
+	}
+	std::error_code error;
+	if (flips % 15 != 0 || !std::filesystem::exists(trigger, error)) {
+		return;
+	}
+	std::filesystem::remove(trigger, error);
+	g_frame_passes_left = count;
+	g_frame_pass_index  = 0;
+	std::printf("frame-pass flip %" PRIu64 " begin\n", flips);
+	std::fflush(stdout);
+}
+
+// One line per draw or dispatch while KYTY_DEBUG_FRAME_PASSES records: t = sampled texture,
+// s = storage image (<stage>.<slot>), c = color target, d = depth target, smp = the guest sampler
+// descriptor's four dwords, wb = a storage buffer the shader writes. An image is its guest request
+// (address, host format, size, mips and layers of the view) and, if the cache image holding it
+// differs, "in" that image; g1 = the cache image holds GPU-written contents.
+static void NoteFramePass(TextureCache& cache, std::span<PreparedBindings* const> stages,
+                          std::span<const RenderColorInfo> colors, const RenderDepthInfo* depth,
+                          uint64_t pixel_hash, uint64_t vertex_hash) {
+	std::string line = depth == nullptr ? fmt::format("cs={:016x}", vertex_hash)
+	                                    : fmt::format("ps={:016x} vs={:016x}", pixel_hash, vertex_hash);
+	const auto image_text = [&](ImageId id, const TextureCache::ImageDesc& desc) {
+		const auto& request = desc.info;
+		const auto& view    = desc.view_info;
+		std::string text = fmt::format("0x{:x} {} {}x{} m{}+{} l{}+{}", request.data.address,
+		                               vk::to_string(request.pixel_format), request.extent.width,
+		                               request.extent.height, view.base_level, view.level_count,
+		                               view.base_layer, view.layer_count);
+		if (!id) {
+			return text + " none";
+		}
+		const auto& image = cache.GetImage(id);
+		if (image.info.data.address != request.data.address ||
+		    image.info.extent.width != request.extent.width ||
+		    image.info.extent.height != request.extent.height ||
+		    image.info.pixel_format != request.pixel_format) {
+			text += fmt::format(" in 0x{:x} {} {}x{}", image.info.data.address,
+			                    vk::to_string(image.info.pixel_format), image.info.extent.width,
+			                    image.info.extent.height);
+		}
+		return text + fmt::format(" g{}", image.IsGpuModified() ? 1 : 0);
+	};
+	for (const auto* stage: stages) {
+		const auto& program    = *stage->runtime->program;
+		const auto  stage_type = static_cast<uint32_t>(program.stage);
+		for (uint32_t i = 0; i < stage->images.size(); i++) {
+			const auto& binding = stage->images[i];
+			line += fmt::format(" | {}{}.{} {}",
+			                    binding.desc.type == TextureCache::BindingType::Storage ? "s" : "t",
+			                    stage_type, i, image_text(binding.image_id, binding.desc));
+		}
+		const auto& samplers = stage->runtime->resources->samplers;
+		for (uint32_t i = 0; i < samplers.size(); i++) {
+			const auto sampler = DecodeNativeDescriptor<ShaderSamplerResource>(samplers[i]);
+			line += fmt::format(" | smp{}.{} {:08x} {:08x} {:08x} {:08x}", stage_type, i,
+			                    sampler.fields[0], sampler.fields[1], sampler.fields[2],
+			                    sampler.fields[3]);
+		}
+		const auto buffer_count = std::min(program.info.buffers.size(), stage->buffer_sources.size());
+		for (uint32_t i = 0; i < buffer_count; i++) {
+			const auto& source = stage->buffer_sources[i];
+			if (program.info.buffers[i].written && source.size != 0) {
+				line += fmt::format(" | wb{}.{} 0x{:x}+0x{:x}", stage_type, i, source.address,
+				                    source.size);
+			}
+		}
+	}
+	for (const auto& color: colors) {
+		line += fmt::format(" | c{} {}", color.target_slot, image_text(color.image_id, color.desc));
+	}
+	if (depth != nullptr && depth->image_id) {
+		line += fmt::format(" | d test={} write={} {}", depth->depth_test_enable ? 1 : 0,
+		                    depth->depth_write_enable ? 1 : 0, image_text(depth->image_id, depth->desc));
+	}
+	g_frame_pass_index++;
+	if (line == g_frame_pass_previous) {
+		g_frame_pass_repeats++;
+		return;
+	}
+	FlushFramePassRepeats();
+	std::printf("frame-pass %" PRIu64 " %s\n", g_frame_pass_index, line.c_str());
+	g_frame_pass_previous = std::move(line);
 }
 
 void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stages,
                     std::span<const RenderColorInfo> colors, const RenderDepthInfo* depth,
                     uint64_t pixel_hash, uint64_t vertex_hash) {
+	if (FramePassesRecording()) {
+		NoteFramePass(cache, stages, colors, depth, pixel_hash, vertex_hash);
+		if (ImageUsersAddress() == 0 && ImageUsersShaders().empty()) {
+			return;
+		}
+	}
 	static std::map<std::string, uint64_t> counts;
 	static auto window_start = std::chrono::steady_clock::now();
 	const auto  address      = ImageUsersAddress();
