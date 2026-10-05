@@ -1,6 +1,7 @@
 #include "graphics/host_gpu/renderer/threadSampler.h"
 
 #include "common/common.h"
+#include "common/switches.h"
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 
@@ -347,7 +348,7 @@ void DumpThreads(uint32_t index) {
 // threads are kept off both of its logical processors (CPU sets), so no busy sibling thread shares
 // the core's execution resources, and the thread runs at raised priority.
 void ReserveCoreForCurrentThread() {
-	const char* value = std::getenv("KYTY_GPU_CORE");
+	const char* value = KYTY_GETENV("KYTY_GPU_CORE");
 	if (value == nullptr) {
 		return;
 	}
@@ -395,13 +396,13 @@ void ReserveCoreForCurrentThread() {
 }
 
 void StartThreadSampler(const char* name) {
-	const char* value = std::getenv("KYTY_DEBUG_SAMPLE_GPU");
+	const char* value = KYTY_GETENV("KYTY_DEBUG_SAMPLE_GPU");
 	if (value == nullptr) {
 		return;
 	}
 	// KYTY_DEBUG_SAMPLE_ONLY=<name>: only that thread (gpu, submit, spec). Sampling several
 	// threads at once crashed the emulator within seconds.
-	if (const char* only = std::getenv("KYTY_DEBUG_SAMPLE_ONLY");
+	if (const char* only = KYTY_GETENV("KYTY_DEBUG_SAMPLE_ONLY");
 	    only != nullptr && std::strcmp(only, name) != 0) {
 		return;
 	}
@@ -426,7 +427,7 @@ void StartThreadSampler(const char* name) {
 }
 
 void StartThreadDumper() {
-	const char* value = std::getenv("KYTY_DEBUG_DUMP_THREADS");
+	const char* value = KYTY_GETENV("KYTY_DEBUG_DUMP_THREADS");
 	if (value == nullptr) {
 		return;
 	}

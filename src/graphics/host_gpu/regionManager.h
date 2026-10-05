@@ -2,6 +2,7 @@
 #define EMULATOR_SRC_GRAPHICS_HOST_GPU_REGIONMANAGER_H_
 
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/pageManager.h"
 #include "graphics/host_gpu/regionDefinitions.h"
 
@@ -415,7 +416,7 @@ private:
 
 	static bool HotWritesEnabled() {
 		static const bool enabled = [] {
-			const char* text = std::getenv("KYTY_HOT_WRITES");
+			const char* text = KYTY_GETENV("KYTY_HOT_WRITES");
 			return text == nullptr || text[0] != '0';
 		}();
 		return enabled;

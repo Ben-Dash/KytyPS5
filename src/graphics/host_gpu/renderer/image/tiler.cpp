@@ -2,6 +2,7 @@
 
 #include "common/alignment.h"
 #include "common/assert.h"
+#include "common/switches.h"
 #include "gpu_tiler_shaders/gpu_tiler_demote_d16_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_depth_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_promote_d16_spv.h"
@@ -43,7 +44,7 @@ namespace Libs::Graphics {
 struct TileManager::ScratchPool {
 	static constexpr uint64_t Granularity = 64ull * 1024;
 	const uint64_t            MaxIdleBytes = [] {
-		const char* text = std::getenv("KYTY_SCRATCH_IDLE_MB");
+		const char* text = KYTY_GETENV("KYTY_SCRATCH_IDLE_MB");
 		const auto  mb   = text != nullptr ? std::strtoull(text, nullptr, 10) : 1024ull;
 		return mb * 1024 * 1024;
 	}();

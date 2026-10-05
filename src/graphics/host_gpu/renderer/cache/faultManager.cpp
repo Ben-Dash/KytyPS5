@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "gpu_tiler_shaders/fault_buffer_process_spv.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
@@ -144,7 +145,7 @@ void FaultManager::ProcessFaultBuffer() {
 			fault_ranges.Add(address, BufferCache::CACHING_PAGESIZE);
 			LOGF("Accessed non-GPU cached memory at 0x%016" PRIx64 "\n", address);
 			// KYTY_DEBUG_BDA_FAULTS=1 prints the pages shaders found missing in the BDA page table.
-			static const bool print   = std::getenv("KYTY_DEBUG_BDA_FAULTS") != nullptr;
+			static const bool print   = KYTY_GETENV("KYTY_DEBUG_BDA_FAULTS") != nullptr;
 			static uint32_t   printed = 0;
 			if (print && (printed < 200u || printed % 500u == 0u)) {
 				std::printf("bda-fault: #%u 0x%016" PRIx64 " (%u this pass)\n", printed, address, count);

@@ -6,6 +6,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/commandHooks.h"
 #include "graphics/host_gpu/renderer/debug.h"
@@ -689,7 +690,7 @@ void CommandScheduler::EnableAsyncSubmit() {
 		m_stream = std::make_unique<CommandStream>();
 	}
 	// Only the render scheduler submits asynchronously, so it alone owns the zone marker.
-	if (const char* zones = std::getenv("KYTY_GPU_ZONES");
+	if (const char* zones = KYTY_GETENV("KYTY_GPU_ZONES");
 	    zones != nullptr && zones[0] == '1' && GpuZones::g_marker == nullptr) {
 		m_zones             = true;
 		GpuZones::g_context = this;

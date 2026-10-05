@@ -11,6 +11,7 @@
 #include "common/subsystems.h"
 #include "common/systemInfo.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/presentation/window.h"
 #include "kernel/fileSystem.h"
 #include "kernel/memory.h"
@@ -217,7 +218,7 @@ void Run(const RunOptions& options) {
 
 	// KYTY_DEBUG_SAVE_ELF=<host path> also writes the executable as a plain ELF, to disassemble the
 	// guest code that KYTY_DEBUG_CALL_COUNTS traces point at.
-	const char* save_elf = std::getenv("KYTY_DEBUG_SAVE_ELF");
+	const char* save_elf = KYTY_GETENV("KYTY_DEBUG_SAVE_ELF");
 	LoadElf(options.elf, false,
 	        save_elf != nullptr ? std::filesystem::path(save_elf) : std::filesystem::path());
 

@@ -2,6 +2,7 @@
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "common/switches.h"
 #include "libs/errno.h"
 #include "loader/runtimeLinker.h"
 #include "loader/symbolDatabase.h"
@@ -51,7 +52,7 @@ std::array<CallCounter, CallCounterCount> g_call_counters;
 int64_t TraceBudget(const char* function) {
 	static const std::vector<std::string> names = [] {
 		std::vector<std::string> list;
-		if (const char* value = std::getenv("KYTY_DEBUG_TRACE_FUNCTIONS"); value != nullptr) {
+		if (const char* value = KYTY_GETENV("KYTY_DEBUG_TRACE_FUNCTIONS"); value != nullptr) {
 			std::string text = value;
 			for (size_t begin = 0; begin <= text.size();) {
 				const auto end = std::min(text.find(',', begin), text.size());
@@ -64,7 +65,7 @@ int64_t TraceBudget(const char* function) {
 		return list;
 	}();
 	static const int64_t limit = [] {
-		const char* value = std::getenv("KYTY_DEBUG_TRACE_LIMIT");
+		const char* value = KYTY_GETENV("KYTY_DEBUG_TRACE_LIMIT");
 		return value != nullptr ? std::max<int64_t>(std::atoll(value), 0) : int64_t {100};
 	}();
 	return std::find(names.begin(), names.end(), function) != names.end() ? limit : 0;
@@ -187,7 +188,7 @@ static void CountCall(const char* library, const char* function, void* return_sl
 }
 
 [[maybe_unused]] static const bool g_count_call_installed = [] {
-	if (std::getenv("KYTY_DEBUG_CALL_COUNTS") != nullptr) {
+	if (KYTY_GETENV("KYTY_DEBUG_CALL_COUNTS") != nullptr) {
 		g_count_call = CountCall;
 	}
 	return true;

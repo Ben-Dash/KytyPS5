@@ -9,6 +9,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "common/timer.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/tile.h"
@@ -869,7 +870,7 @@ void VideoOutDriver::Impl::PresentThread(std::stop_token token) {
 	// KYTY_PRESENT_WHEN_READY=1 (for variable-refresh displays): a finished frame is shown as soon
 	// as it is ready instead of at the next emulated vblank, but no sooner than one flip interval
 	// after the previous one. Vblank events keep their fixed rate.
-	static const bool when_ready = std::getenv("KYTY_PRESENT_WHEN_READY") != nullptr;
+	static const bool when_ready = KYTY_GETENV("KYTY_PRESENT_WHEN_READY") != nullptr;
 	uint64_t          last_flip  = 0;
 	auto flip_when_ready = [&](uint64_t now) {
 		if (m_presenter.IsGuestPaused() || !m_flip_queue.IsFlipReady()) {
@@ -1256,7 +1257,7 @@ void FlipQueue::Wait(VideoOutConfig& cfg, int index) {
 
 // KYTY_DEBUG_PACING=1 prints, every 120 presented flips, how evenly they were spaced.
 static void DebugPacing() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_PACING") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_PACING") != nullptr;
 	if (!enabled) {
 		return;
 	}
@@ -1609,7 +1610,7 @@ KYTY_SYSV_ABI int VideoOutRegisterBuffers2(int handle, int set_index, int buffer
 		const auto& buffer                   = registrations[static_cast<size_t>(i)];
 		// KYTY_DEBUG_DUMP_VIDEO_OUT=1: the display buffers join the images that
 		// KYTY_DEBUG_DUMP_IMAGES_FILE dumps, to look at the picture without a screen.
-		if (std::getenv("KYTY_DEBUG_DUMP_VIDEO_OUT") != nullptr) {
+		if (KYTY_GETENV("KYTY_DEBUG_DUMP_VIDEO_OUT") != nullptr) {
 			Libs::Graphics::DebugRegisterDumpAddress(buffer.data_address);
 		}
 		LOGF("\tbuffers[%d] = %016" PRIx64 " metadata = %016" PRIx64 " dcc = %08" PRIx32 "\n",

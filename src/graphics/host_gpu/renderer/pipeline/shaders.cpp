@@ -3,6 +3,7 @@
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
@@ -1017,7 +1018,7 @@ uint32_t PrefetchLibraryParts(GraphicContext& graphics, const PipelineRenderingS
 static const std::vector<uint64_t>& PipelineStatsHashes() {
 	static const std::vector<uint64_t> hashes = [] {
 		std::vector<uint64_t> result;
-		for (const char* text = std::getenv("KYTY_DEBUG_PIPELINE_STATS"); text != nullptr;) {
+		for (const char* text = KYTY_GETENV("KYTY_DEBUG_PIPELINE_STATS"); text != nullptr;) {
 			char* end = nullptr;
 			result.push_back(std::strtoull(text, &end, 16));
 			text = end != nullptr && *end == ',' ? end + 1 : nullptr;

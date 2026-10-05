@@ -195,6 +195,12 @@ option(KYTY_BUILD_LAUNCHER "Build Qt launcher" ON)
 config_compiler_and_linker()
 
 add_subdirectory("${KYTY_THIRD_PARTY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/3rdparty")
+# A build given to other people: no switch names, no fatal error texts, no class names.
+option(KYTY_SHARE_BUILD "Hide switch names, error texts and class names (build for sharing)" OFF)
+if(KYTY_SHARE_BUILD)
+	add_compile_definitions(KYTY_SHARE_BUILD=1)
+endif()
+
 add_subdirectory("${KYTY_SOURCE_DIR}/common" "${CMAKE_CURRENT_BINARY_DIR}/common")
 
 file(GLOB kyty_emulator_src CONFIGURE_DEPENDS
@@ -805,6 +811,11 @@ if(APPLE AND (CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" OR
 endif()
 
 add_executable(kyty_emulator "${KYTY_SOURCE_DIR}/main.cpp" ${kyty_emulator_src})
+if(KYTY_SHARE_BUILD AND KYTY_CLANG_CL)
+	# No RTTI data, and no typeid in the standard library (std::function would name each lambda).
+	target_compile_options(kyty_emulator PRIVATE /GR- /D_HAS_STATIC_RTTI=0)
+	target_compile_options(common PRIVATE /GR- /D_HAS_STATIC_RTTI=0)
+endif()
 configure_macos_guest_address_space(kyty_emulator)
 
 set(KYTY_TROPHY_UNLOCK_SOUND "${CMAKE_CURRENT_SOURCE_DIR}/assets/sounds/trophy-unlock.wav")

@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/guest_gpu/hardwareContext.h"
@@ -45,7 +46,7 @@ static bool DccAlphaOnMsb(const HW::ColorInfo& info) {
 // (see also AbFeatureOff).
 bool RenderExecutor::TargetReuseEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_TARGET_REUSE");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_TARGET_REUSE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("reuse");

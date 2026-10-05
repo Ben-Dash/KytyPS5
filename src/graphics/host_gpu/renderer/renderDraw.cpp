@@ -8,6 +8,7 @@
 #include "common/profiler.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/hardwareContext.h"
@@ -110,7 +111,7 @@ struct Pending {
 
 static uint64_t Hash() {
 	static const uint64_t hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DRAW_LOG");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DRAW_LOG");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
 	}();
 	return hash;
@@ -180,7 +181,7 @@ static void PrintStageKeys(const char* tag, const ShaderStageRuntime& stage) {
 // barriers they caused, overall and for the pixel shaders causing the most, to find draw patterns
 // that stall the GPU (like the sand trail's).
 static bool StatsEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_DRAW_STATS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_DRAW_STATS") != nullptr;
 	return enabled;
 }
 
@@ -241,7 +242,7 @@ enum : uint32_t { DepthOverrideDepth = 1, DepthOverrideStencil = 2, DepthOverrid
 static uint32_t DebugDepthOverride(uint64_t pixel_hash) {
 	static const std::vector<std::pair<uint64_t, uint32_t>> entries = [] {
 		std::vector<std::pair<uint64_t, uint32_t>> list;
-		for (const char* text = std::getenv("KYTY_DEBUG_DEPTH_OVERRIDE"); text != nullptr;) {
+		for (const char* text = KYTY_GETENV("KYTY_DEBUG_DEPTH_OVERRIDE"); text != nullptr;) {
 			char*      end  = nullptr;
 			const auto hash = std::strtoull(text, &end, 16);
 			if (end == text || *end != ':') {
@@ -533,7 +534,7 @@ static void DebugResolution(float width, float height, uint32_t target_width,
 	if (g_hud.active.load(std::memory_order_relaxed)) [[unlikely]] {
 		HudCountDraw(width, height);
 	}
-	static const bool enabled = std::getenv("KYTY_DEBUG_RESOLUTION") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_RESOLUTION") != nullptr;
 	if (!enabled) [[likely]] {
 		return;
 	}
@@ -564,7 +565,7 @@ static void DebugResolution(float width, float height, uint32_t target_width,
 // KYTY_DEBUG_STATE_FILTER=0 records every draw's full graphics state, for A/B runs.
 static bool GraphicsStateFilterEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_STATE_FILTER");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_STATE_FILTER");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
@@ -801,7 +802,7 @@ struct DrawCallInfo {
 // KYTY_VERIFY_DEPTH_REUSE=1: a draw that keeps its depth target's view acquires it anyway and
 // reports what the full acquisition changed or returned differently (see IsDepthTargetCurrent).
 static bool VerifyDepthReuse() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_DEPTH_REUSE") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_DEPTH_REUSE") != nullptr;
 	return enabled;
 }
 
@@ -1051,7 +1052,7 @@ static uint32_t DrawColorOutputMask(const HW::Context& ctx) {
 // KYTY_DEBUG_MRT_SPLIT=0 binds them together as before.
 static uint32_t AliasedColorSlots(const HW::Context& ctx) {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_MRT_SPLIT");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_MRT_SPLIT");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	if (!enabled) {
@@ -1089,7 +1090,7 @@ enum class CbColorMode : uint8_t {
 // KYTY_CB_METADATA_MATERIALIZE=0 drops fast-clear-eliminate and DCC-decompress operations as before.
 static bool MetadataColorMaterializeEnabled() {
 	static const bool enabled = [] {
-		const char* value = std::getenv("KYTY_CB_METADATA_MATERIALIZE");
+		const char* value = KYTY_GETENV("KYTY_CB_METADATA_MATERIALIZE");
 		return value == nullptr || std::strcmp(value, "0") != 0;
 	}();
 	return enabled;
@@ -1413,7 +1414,7 @@ static void RefreshShaders(CommandBuffer& buffer, const DrawCallInfo& draw,
 // KYTY_DRAW_CHAIN=0 resolves every indexed draw's targets; KYTY_DEBUG_AB=chain alternates.
 static bool DrawChainEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DRAW_CHAIN");
+		const char* text = KYTY_GETENV("KYTY_DRAW_CHAIN");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("chain");
@@ -1423,7 +1424,7 @@ static bool DrawChainEnabled() {
 // KYTY_VERIFY_DRAW_CHAIN=1: a draw taking the chain's targets also resolves them and reports
 // what came out differently.
 static bool VerifyDrawChain() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_DRAW_CHAIN") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_DRAW_CHAIN") != nullptr;
 	return enabled;
 }
 
@@ -1636,7 +1637,7 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	// target and shader write masks, export format, blend) for its first 16 draws, to see how a draw
 	// that binds one surface to several slots splits the channels.
 	static const uint64_t mrt_shader = [] {
-		const char* text = std::getenv("KYTY_DEBUG_MRT_SHADER");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_MRT_SHADER");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
 	}();
 	if (mrt_shader != 0 && state.ps_active &&
@@ -1851,7 +1852,7 @@ static void EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_
 // finds the shaders reading a given surface and whether a draw also renders to it.
 static uint64_t ImageUsersAddress() {
 	static const uint64_t address = [] {
-		const char* text = std::getenv("KYTY_DEBUG_IMAGE_USERS");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_IMAGE_USERS");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
 	}();
 	return address;
@@ -1863,7 +1864,7 @@ static uint64_t ImageUsersAddress() {
 static const std::vector<uint64_t>& ImageUsersShaders() {
 	static const std::vector<uint64_t> shaders = [] {
 		std::vector<uint64_t> list;
-		const char*           text = std::getenv("KYTY_DEBUG_IMAGE_USERS_SHADER");
+		const char*           text = KYTY_GETENV("KYTY_DEBUG_IMAGE_USERS_SHADER");
 		while (text != nullptr && *text != '\0') {
 			char* end = nullptr;
 			list.push_back(std::strtoull(text, &end, 16));
@@ -1885,7 +1886,7 @@ static uint64_t g_frame_pass_repeats = 0;
 static std::string g_frame_pass_previous;
 
 bool FramePassesRecording() noexcept {
-	static const bool enabled = std::getenv("KYTY_DEBUG_FRAME_PASSES") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES") != nullptr;
 	return enabled && g_frame_passes_left != 0;
 }
 
@@ -1898,12 +1899,12 @@ static void FlushFramePassRepeats() {
 }
 
 void FramePassesFlip() noexcept {
-	static const char* trigger = std::getenv("KYTY_DEBUG_FRAME_PASSES");
+	static const char* trigger = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES");
 	if (trigger == nullptr) {
 		return;
 	}
 	static const uint32_t count = [] {
-		const char* text = std::getenv("KYTY_DEBUG_FRAME_PASSES_COUNT");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES_COUNT");
 		return text != nullptr ? std::max(1u, static_cast<uint32_t>(std::strtoul(text, nullptr, 10))) : 2u;
 	}();
 	static uint64_t flips = 0;
@@ -2014,7 +2015,7 @@ void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stag
 	const auto& shaders      = ImageUsersShaders();
 	// KYTY_DEBUG_IMAGE_USERS_VERTEX=1 lists every draw whose vertex-side stages sample images too:
 	// rare, and how foliage and water read interaction or displacement maps.
-	static const bool vertex_images = std::getenv("KYTY_DEBUG_IMAGE_USERS_VERTEX") != nullptr;
+	static const bool vertex_images = KYTY_GETENV("KYTY_DEBUG_IMAGE_USERS_VERTEX") != nullptr;
 	const bool        reads_in_vertex =
 	    vertex_images && pixel_hash != 0 && std::ranges::any_of(stages, [](const PreparedBindings* stage) {
 		    return stage->runtime->program->stage != ShaderType::Pixel && !stage->images.empty();
@@ -2024,7 +2025,7 @@ void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stag
 	// KYTY_DEBUG_IMAGE_USERS_TRACE=1 also prints each draw's or dispatch's uses in order, one line
 	// per call, with a run of identical calls collapsed into a count: the order of the passes
 	// sharing the surface (image-churn lines from the texture cache interleave).
-	static const bool trace = std::getenv("KYTY_DEBUG_IMAGE_USERS_TRACE") != nullptr;
+	static const bool trace = KYTY_GETENV("KYTY_DEBUG_IMAGE_USERS_TRACE") != nullptr;
 	static std::string previous_call;
 	static uint64_t    repeats = 0;
 	std::string        call;
@@ -2067,7 +2068,7 @@ void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stag
 		// contents of every image there (InvalidateMemoryFromGPU). The chosen shaders' other
 		// buffers (mostly constant ranges, one line each) only with KYTY_DEBUG_IMAGE_USERS_BUFFERS=1.
 		static const bool every_buffer = [] {
-			const char* text = std::getenv("KYTY_DEBUG_IMAGE_USERS_BUFFERS");
+			const char* text = KYTY_GETENV("KYTY_DEBUG_IMAGE_USERS_BUFFERS");
 			return text != nullptr && std::strcmp(text, "0") != 0;
 		}();
 		const auto buffer_count = std::min(program.info.buffers.size(), stage->buffer_sources.size());
@@ -2140,7 +2141,7 @@ void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stag
 // draw, reading its restart markers as vertices, as before restart was handled there.
 static bool MeshRestartSplitEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_MESH_RESTART");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_MESH_RESTART");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
@@ -2296,7 +2297,7 @@ static void NoteDepthOnly(DrawRenderState& state, const void* pipeline) {
 // previous one without a context register write between them, and how many of those also keep
 // its target images and programs: what a draw-state chain could reuse.
 static bool ChainStatsEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_CHAIN_STATS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_CHAIN_STATS") != nullptr;
 	return enabled;
 }
 
@@ -2419,7 +2420,7 @@ static void NoteChain(const DrawRenderState& state) {
 // KYTY_PIPELINE_CHAIN=0 looks every draw's pipeline up; KYTY_DEBUG_AB=pipechain alternates.
 static bool PipelineChainEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_PIPELINE_CHAIN");
+		const char* text = KYTY_GETENV("KYTY_PIPELINE_CHAIN");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("pipechain");
@@ -2429,7 +2430,7 @@ static bool PipelineChainEnabled() {
 // KYTY_VERIFY_PIPELINE_CHAIN=1: a draw that takes the chain's pipeline looks it up as well, which
 // must find the same one.
 static bool VerifyPipelineChain() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_PIPELINE_CHAIN") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_PIPELINE_CHAIN") != nullptr;
 	return enabled;
 }
 

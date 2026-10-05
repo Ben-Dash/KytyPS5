@@ -4,6 +4,7 @@
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "kernel/pthread.h"
 #include "libs/audio_internal.h"
 #include "libs/controller.h"
@@ -470,11 +471,11 @@ Audio::Id Audio::AudioOutOpen(int type, uint32_t samples_num, uint32_t freq, For
 			// KYTY_PAD_SPEAKER=0: pad speaker sounds play on the main output, as on a PS5 with the
 			// controller speaker off; KYTY_PAD_VIBRATION=0: no haptic vibration.
 			static const bool pad_speaker = [] {
-				const char* text = std::getenv("KYTY_PAD_SPEAKER");
+				const char* text = KYTY_GETENV("KYTY_PAD_SPEAKER");
 				return text == nullptr || std::strcmp(text, "0") != 0;
 			}();
 			static const bool pad_vibration = [] {
-				const char* text = std::getenv("KYTY_PAD_VIBRATION");
+				const char* text = KYTY_GETENV("KYTY_PAD_VIBRATION");
 				return text == nullptr || std::strcmp(text, "0") != 0;
 			}();
 			if ((type == AUDIO_OUT_PORT_TYPE_VIBRATION && pad_vibration) ||

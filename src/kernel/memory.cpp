@@ -5,6 +5,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "common/virtualMemory.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -981,7 +982,7 @@ void ReadGuestOnGpuThread(uint64_t vaddr, void* data, uint64_t size) {
 	// KYTY_SPEC_BACKING_READS=0 reads the guest address as before.
 	if (size != 0 && g_gpu_resources != nullptr && !Graphics::GuestGpu::IsGpuThread()) {
 		static const bool enabled = [] {
-			const char* value = std::getenv("KYTY_SPEC_BACKING_READS");
+			const char* value = KYTY_GETENV("KYTY_SPEC_BACKING_READS");
 			return value == nullptr || std::strcmp(value, "0") != 0;
 		}();
 		const auto& buffers = GetGpuResources().GetBufferCache();

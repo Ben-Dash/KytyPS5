@@ -69,6 +69,14 @@ int DbgExitHandler(const char* file, int line, fmt::text_style style, std::strin
 	return 1;
 }
 
+#if defined(KYTY_SHARE_BUILD) && KYTY_SHARE_BUILD
+int DbgExitSiteHandler(uint32_t code) {
+	Log::WriteFatal(fmt::format("--- Build ---\n{}\n--- Fatal Error ---\nError {:08x}\n{}",
+	                            KYTY_BUILD_LABEL, code, CaptureStack()));
+	return 1;
+}
+#endif
+
 void DbgExit(int status) {
 	Subsystems::EmergencyShutdownActive();
 	std::fflush(nullptr);

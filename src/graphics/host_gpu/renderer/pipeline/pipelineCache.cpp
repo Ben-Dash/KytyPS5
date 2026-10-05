@@ -7,6 +7,7 @@
 #include "common/profiler.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/guest_gpu/pm4.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
@@ -268,7 +269,7 @@ bool ValidateShaderSpirv(const char* label, uint64_t shader_hash,
 // KYTY_PERMUTATION_LOG=1 (diagnostic): describe why each runtime-compiled permutation is new.
 [[nodiscard]] static bool PermutationLogEnabled() {
 	static const bool enabled = [] {
-		const char* value = std::getenv("KYTY_PERMUTATION_LOG");
+		const char* value = KYTY_GETENV("KYTY_PERMUTATION_LOG");
 		return value != nullptr && std::strcmp(value, "1") == 0;
 	}();
 	return enabled;
@@ -1131,18 +1132,17 @@ struct PipelineCache::ProgramCache {
 		// Debugging aids: KYTY_VERIFY_SRT=1 checks every cached resource refresh against the
 		// reference SRT walker and aborts on a difference; KYTY_SRT_STATS=1 logs how often
 		// refreshes reuse descriptors; KYTY_DEBUG_SRT_RUNS=0 reads flat SRT slots one by one (A/B).
-		const auto enabled = [](const char* name) {
-			const char* value = std::getenv(name);
+		const auto enabled = [](const char* value) {
 			return value != nullptr && std::strcmp(value, "1") == 0;
 		};
-		if (enabled("KYTY_VERIFY_SRT")) {
+		if (enabled(KYTY_GETENV("KYTY_VERIFY_SRT"))) {
 			ShaderRecompiler::IR::SetResourceMaterializationVerification(true);
 		}
-		stats_enabled      = enabled("KYTY_SRT_STATS");
-		speculation_stats  = enabled("KYTY_DEBUG_SPEC_STATS");
-		verify_speculation       = enabled("KYTY_VERIFY_SPEC");
-		verify_speculation_reads = enabled("KYTY_VERIFY_SPEC_READS");
-		if (const char* runs = std::getenv("KYTY_DEBUG_SRT_RUNS");
+		stats_enabled      = enabled(KYTY_GETENV("KYTY_SRT_STATS"));
+		speculation_stats  = enabled(KYTY_GETENV("KYTY_DEBUG_SPEC_STATS"));
+		verify_speculation       = enabled(KYTY_GETENV("KYTY_VERIFY_SPEC"));
+		verify_speculation_reads = enabled(KYTY_GETENV("KYTY_VERIFY_SPEC_READS"));
+		if (const char* runs = KYTY_GETENV("KYTY_DEBUG_SRT_RUNS");
 		    runs != nullptr && std::strcmp(runs, "0") == 0) {
 			ShaderRecompiler::IR::SetFlatRunReads(false);
 		}

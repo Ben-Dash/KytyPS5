@@ -7,6 +7,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "common/virtualMemory.h"
+#include "common/switches.h"
 #include "emulator.h"
 #include "kytyGitVersion.h"
 
@@ -232,17 +233,6 @@ static bool ParseUserId(const std::string& value, int32_t& out) {
 static bool g_dualsense_fix         = false;
 static bool g_timestamp_scale_given = false;
 
-// Sets an environment switch unless the environment already has it (a launcher script wins).
-static void SetDefaultSwitch(const char* name, const char* value) {
-	if (std::getenv(name) == nullptr) {
-#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
-		_putenv_s(name, value);
-#else
-		setenv(name, value, 0);
-#endif
-	}
-}
-
 // The game's title ID: from sce_sys/param.json of a game folder, else the first PPSA/CUSA ID in
 // the game path.
 static std::string DetectTitleId(const RunOptions& options, const std::string& game_arg) {
@@ -282,10 +272,10 @@ static std::string DetectTitleId(const RunOptions& options, const std::string& g
 static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) {
 	if (title_id == "PPSA21564" || title_id == "PPSA01325") {
 		// ASTRO BOT, ASTRO's PLAYROOM.
-		SetDefaultSwitch("KYTY_COMPUTE_CHAIN", "1");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
 		// The game advances 1/60 s per frame: cap at 60 fps so light scenes do not run fast.
-		SetDefaultSwitch("KYTY_DEBUG_FRAME_LIMIT_MS", "16.667");
-		SetDefaultSwitch("KYTY_PRESENT_WHEN_READY", "1");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_DEBUG_FRAME_LIMIT_MS", "16.667");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_PRESENT_WHEN_READY", "1");
 		if (!g_timestamp_scale_given) {
 			// The game's dynamic resolution only rests at its ends below 60 fps: 75-200 keep its floor,
 			// 1080p (the fastest: the CPU limits the frame rate in Sky Garden), 50 lets it render 4K
@@ -293,18 +283,18 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 			const auto height = options.config.screen_height;
 			options.config.gpu_timestamp_scale_percent = height <= 1440 ? 200 : 50;
 		}
-		::printf("Title profile %s: compute chain, 60 fps limit, present when ready, "
-		         "gpu-timestamp-scale %u\n",
-		         title_id.c_str(), options.config.gpu_timestamp_scale_percent);
+		KYTY_INTERNAL_PRINTF("Title profile %s: compute chain, 60 fps limit, present when ready, "
+		                     "gpu-timestamp-scale %u\n",
+		                     title_id.c_str(), options.config.gpu_timestamp_scale_percent);
 	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger
 	// resistance, and controller speaker sounds play on the PC output.
 	if (g_dualsense_fix) {
 		::printf("DualSense fix: vibration, adaptive triggers and controller speaker on the DualSense\n");
 	} else {
-		SetDefaultSwitch("KYTY_PAD_VIBRATION", "0");
-		SetDefaultSwitch("KYTY_PAD_TRIGGERS", "0");
-		SetDefaultSwitch("KYTY_PAD_SPEAKER", "0");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_PAD_VIBRATION", "0");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_PAD_TRIGGERS", "0");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_PAD_SPEAKER", "0");
 		::printf("DualSense fix off: no vibration or trigger effects, controller speaker sounds on "
 		         "the PC output\n");
 	}
@@ -691,7 +681,7 @@ static int Main(int argc, char* argv[]) {
 #endif
 	// KYTY_DEBUG_UNBUFFERED=1: a redirected console log is complete even when the emulator is
 	// killed (stdout to a file is block-buffered otherwise).
-	if (std::getenv("KYTY_DEBUG_UNBUFFERED") != nullptr) {
+	if (KYTY_GETENV("KYTY_DEBUG_UNBUFFERED") != nullptr) {
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
 	}
 	VirtualMemory::Init();

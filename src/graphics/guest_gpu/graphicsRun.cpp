@@ -6,6 +6,7 @@
 #include "common/profiler.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
 #include "graphics/guest_gpu/command_processor/drawSpeculator.h"
 #include "graphics/guest_gpu/command_processor/pm4Dispatch.h"
@@ -55,7 +56,7 @@ static thread_local GuestGpu*         g_gpu_state         = nullptr;
 static void LogTimestampWrite(const char* kind, uint32_t event, uint64_t dst, uint64_t value,
                               bool counted = true) {
 	static const int64_t skip = [] {
-		const char* text = std::getenv("KYTY_TS_LOG");
+		const char* text = KYTY_GETENV("KYTY_TS_LOG");
 		return text != nullptr ? std::strtoll(text, nullptr, 10) : int64_t {-1};
 	}();
 	if (skip < 0) {
@@ -87,13 +88,13 @@ static void DebugFrameLimit() {
 		StampTraceFrame();
 	}
 	static const double limit_ms = [] {
-		const char* value = std::getenv("KYTY_DEBUG_FRAME_LIMIT_MS");
+		const char* value = KYTY_GETENV("KYTY_DEBUG_FRAME_LIMIT_MS");
 		return value != nullptr ? std::atof(value) : 0.0;
 	}();
 	if (limit_ms <= 0.0) {
 		return;
 	}
-	static const char* file   = std::getenv("KYTY_DEBUG_FRAME_LIMIT_FILE");
+	static const char* file   = KYTY_GETENV("KYTY_DEBUG_FRAME_LIMIT_FILE");
 	static uint32_t    flips  = 0;
 	static bool        active = false;
 	if (flips++ % 15 == 0) {
@@ -131,7 +132,7 @@ static thread_local std::array<RecentPm4, 96> t_recent_pm4 {};
 static thread_local uint32_t                  t_recent_pm4_next = 0;
 
 static void RecordRecentPm4(const uint32_t* packet, uint32_t remaining_dw) {
-	static const bool enabled = std::getenv("KYTY_DEBUG_MRT_SHADER") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_MRT_SHADER") != nullptr;
 	if (!enabled) {
 		return;
 	}
@@ -653,7 +654,7 @@ void GuestGpu::ThreadRun(void* data) {
 	// KYTY_DEBUG_QUEUES=1: every 5 s, for each queue with work, the submissions completed and the
 	// blocked passes in the window, the submissions pending, and the packet the last blocked pass
 	// stopped at (for WAIT_REG_MEM, its address, reference and the memory's current value).
-	static const bool debug_queues = std::getenv("KYTY_DEBUG_QUEUES") != nullptr;
+	static const bool debug_queues = KYTY_GETENV("KYTY_DEBUG_QUEUES") != nullptr;
 	struct QueueStats {
 		uint64_t                completed = 0;
 		uint64_t                blocked   = 0;
@@ -923,7 +924,7 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 		// submission resumes several times a frame; one draw in ten was prepared by the GPU
 		// thread itself because of it). KYTY_SPEC_KEEP_ON_RESUME=0 restarts as before.
 		static const bool keep_on_resume = [] {
-			const char* value = std::getenv("KYTY_SPEC_KEEP_ON_RESUME");
+			const char* value = KYTY_GETENV("KYTY_SPEC_KEEP_ON_RESUME");
 			return value == nullptr || std::strcmp(value, "0") != 0;
 		}();
 		const auto& top = execution.m_buffer_stack.back();
@@ -1054,7 +1055,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 
 		// KYTY_DEBUG_PREDICATION_STATS=1 prints, every 5 s, how many predicated packets ran and how
 		// many were skipped, per opcode, to see whether predication drops whole passes.
-		static const bool predication_stats = std::getenv("KYTY_DEBUG_PREDICATION_STATS") != nullptr;
+		static const bool predication_stats = KYTY_GETENV("KYTY_DEBUG_PREDICATION_STATS") != nullptr;
 		if (predication_stats && (packet_header & 1u) != 0) [[unlikely]] {
 			static std::array<std::array<uint64_t, 2>, 256> counts {};
 			static auto window = std::chrono::steady_clock::now();
@@ -2073,7 +2074,7 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 			// KYTY_DEBUG_OCCLUSION_HIDDEN_FILE=<path>: while that file exists, the counter stands
 			// still, so every query reports no samples and the game drops what it tests: an upper
 			// bound for what real occlusion queries could save, and which objects they cover.
-			static const char* hidden_file = std::getenv("KYTY_DEBUG_OCCLUSION_HIDDEN_FILE");
+			static const char* hidden_file = KYTY_GETENV("KYTY_DEBUG_OCCLUSION_HIDDEN_FILE");
 			static bool        hidden      = false;
 			static uint32_t    checks      = 0;
 			if (hidden_file != nullptr && checks++ % 256 == 0) {

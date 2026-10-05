@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/debug.h"
+#include "common/switches.h"
 
 #include <algorithm>
 #include <array>
@@ -105,7 +106,7 @@ LONG CALLBACK WatchHandler(PEXCEPTION_POINTERS info) {
 			if (g_arm_register[i] >= 0 && i + 1 < g_watch_count) {
 				// KYTY_DEBUG_WATCH_ARM_PREVIOUS=1: arm the address the previous hit computed, for
 				// objects used in turn (the next frame writes the one this frame does not use).
-				static const bool previous = std::getenv("KYTY_DEBUG_WATCH_ARM_PREVIOUS") != nullptr;
+				static const bool previous = KYTY_GETENV("KYTY_DEBUG_WATCH_ARM_PREVIOUS") != nullptr;
 				static std::array<uint64_t, 4> last {};
 				const auto computed =
 				    (ContextRegister(*ctx, g_arm_register[i]) + g_arm_offset[i]) & ~uint64_t {7};
@@ -131,7 +132,7 @@ LONG CALLBACK WatchHandler(PEXCEPTION_POINTERS info) {
 	if (rip >= g_module_begin && rip < g_module_end) {
 		// The emulator's own access (the timestamp write, or a libc copy the game called):
 		// with KYTY_DEBUG_WATCH_HOST=1, the first game code address on the stack stands for it.
-		static const bool host = std::getenv("KYTY_DEBUG_WATCH_HOST") != nullptr;
+		static const bool host = KYTY_GETENV("KYTY_DEBUG_WATCH_HOST") != nullptr;
 		if (!host) {
 			return EXCEPTION_CONTINUE_EXECUTION;
 		}
@@ -273,7 +274,7 @@ void PrintHits(uint32_t& printed) {
 static void DebugDumpGuestTick() {
 	static const std::vector<std::pair<uint64_t, uint64_t>> ranges = [] {
 		std::vector<std::pair<uint64_t, uint64_t>> list;
-		const char* text = std::getenv("KYTY_DEBUG_DUMP_GUEST");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_GUEST");
 		for (const char* p = text; p != nullptr && *p != '\0';) {
 			char*      end     = nullptr;
 			const auto address = std::strtoull(p, &end, 16);
@@ -317,7 +318,7 @@ static void DebugDumpGuestTick() {
 static void DebugFindGuestTick() {
 	static const std::vector<std::vector<uint8_t>> patterns = [] {
 		std::vector<std::vector<uint8_t>> list;
-		const char*                       text = std::getenv("KYTY_DEBUG_FIND_GUEST");
+		const char*                       text = KYTY_GETENV("KYTY_DEBUG_FIND_GUEST");
 		for (const char* p = text; p != nullptr && *p != '\0';) {
 			std::vector<uint8_t> bytes;
 			while (std::isxdigit(static_cast<unsigned char>(p[0])) != 0 &&
@@ -342,7 +343,7 @@ static void DebugFindGuestTick() {
 	static std::once_flag started;
 	std::call_once(started, [] {
 		std::vector<uint32_t> times;
-		const char*           text = std::getenv("KYTY_DEBUG_FIND_GUEST_AT");
+		const char*           text = KYTY_GETENV("KYTY_DEBUG_FIND_GUEST_AT");
 		for (const char* p = text; p != nullptr && *p != '\0';) {
 			char* end = nullptr;
 			times.push_back(static_cast<uint32_t>(std::strtoul(p, &end, 10)));
@@ -404,7 +405,7 @@ void DebugWatchTick() {
 	DebugDumpGuestTick();
 	DebugFindGuestTick();
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_WATCH");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_WATCH");
 		if (text == nullptr) {
 			return false;
 		}
@@ -434,7 +435,7 @@ void DebugWatchTick() {
 			}
 			p = *end == ',' ? end + 1 : end;
 		}
-		if (const char* repeat = std::getenv("KYTY_DEBUG_WATCH_REPEAT"); repeat != nullptr) {
+		if (const char* repeat = KYTY_GETENV("KYTY_DEBUG_WATCH_REPEAT"); repeat != nullptr) {
 			g_repeat_ms = std::strtoull(repeat, nullptr, 10);
 		}
 		return g_watch_count != 0;

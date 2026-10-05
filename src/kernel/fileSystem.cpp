@@ -10,6 +10,7 @@
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/hostMemory.h"
 #include "kernel/memory.h"
 #include "libs/errno.h"
@@ -142,7 +143,7 @@ static void NoteRepeatedFileRead(const std::filesystem::path& path, int64_t offs
 	constexpr uint32_t Repeats = 12;
 	constexpr auto     Window  = std::chrono::seconds(10);
 	static const bool  enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_FILE_THRASH");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_FILE_THRASH");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	if (!enabled || size < MinSize) {
@@ -188,7 +189,7 @@ static void TraceTextureRead(const std::filesystem::path& path, const void* buf,
                              int64_t offset) {
 	static const std::vector<std::string> filters = [] {
 		std::vector<std::string> list;
-		if (const char* value = std::getenv("KYTY_TRACE_TEXTURE"); value != nullptr) {
+		if (const char* value = KYTY_GETENV("KYTY_TRACE_TEXTURE"); value != nullptr) {
 			std::string all(value);
 			for (size_t start = 0; start < all.size();) {
 				const auto end = std::min(all.find(',', start), all.size());
@@ -389,7 +390,7 @@ static void TraceStreamerRequests(uint64_t manager, const char* name) {
 }
 
 static void TraceStreamerLists(const char* path, uint64_t rbp) {
-	static const char* name = std::getenv("KYTY_TRACE_LISTS");
+	static const char* name = KYTY_GETENV("KYTY_TRACE_LISTS");
 	if (name == nullptr || name[0] == '\0') {
 		return;
 	}
@@ -446,7 +447,7 @@ static void TraceStreamerLists(const char* path, uint64_t rbp) {
 // return addresses found by walking the frame-pointer chain, and dump the code around each new
 // one to _TraceCode/<address>.bin, to find the guest code that keeps reopening a file.
 static void TraceOpenCaller(const char* path, uint64_t return_address, const void* frame) {
-	static const char* filter = std::getenv("KYTY_TRACE_OPEN");
+	static const char* filter = KYTY_GETENV("KYTY_TRACE_OPEN");
 	if (filter == nullptr || filter[0] == '\0' || std::strstr(path, filter) == nullptr) {
 		return;
 	}
@@ -498,7 +499,7 @@ static void TraceOpenCaller(const char* path, uint64_t return_address, const voi
 	// callee saved the caller's rbp right below it; log the caller's locals [rbp-0xb0, rbp-0x28).
 	static const std::vector<uint64_t> frame_returns = [] {
 		std::vector<uint64_t> list;
-		if (const char* value = std::getenv("KYTY_TRACE_FRAME"); value != nullptr) {
+		if (const char* value = KYTY_GETENV("KYTY_TRACE_FRAME"); value != nullptr) {
 			for (const char* p = value; *p != '\0';) {
 				char*      end    = nullptr;
 				const auto parsed = std::strtoull(p, &end, 16);

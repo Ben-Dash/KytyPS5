@@ -1,4 +1,5 @@
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
 
 #include <algorithm>
@@ -164,7 +165,7 @@ bool EmitStructuredLoopGuard(ValueEmitContext& ctx, const IR::BlockInfo& info) {
 	// addresses, to find the loop that does not end; the BDA fault exit stays on every loop.
 	static const std::vector<uint32_t> guarded_pcs = [] {
 		std::vector<uint32_t> list;
-		for (const char* p = std::getenv("KYTY_DEBUG_LOOP_GUARD_PCS"); p != nullptr && *p != '\0';) {
+		for (const char* p = KYTY_GETENV("KYTY_DEBUG_LOOP_GUARD_PCS"); p != nullptr && *p != '\0';) {
 			char*      end   = nullptr;
 			const auto value = std::strtoul(p, &end, 16);
 			if (end == p) {
@@ -408,7 +409,7 @@ constexpr size_t MinIndexedSelects = 16;
 // KYTY_DEBUG_INDEXED_SWITCH=0 keeps every chain as selects (A/B runs).
 bool IndexedSwitchEnabled() {
 	static const bool enabled = [] {
-		const char* value = std::getenv("KYTY_DEBUG_INDEXED_SWITCH");
+		const char* value = KYTY_GETENV("KYTY_DEBUG_INDEXED_SWITCH");
 		return value == nullptr || std::strcmp(value, "0") != 0;
 	}();
 	return enabled;
@@ -954,12 +955,12 @@ void EmitProgram(EmitterState& state) {
 	}
 	// KYTY_DEBUG_LOOP_GUARD=<n>[:<hash>]: every shader, or only the one with that hash.
 	static const uint64_t loop_guard_hash = [] {
-		const char* text  = std::getenv("KYTY_DEBUG_LOOP_GUARD");
+		const char* text  = KYTY_GETENV("KYTY_DEBUG_LOOP_GUARD");
 		const char* colon = text != nullptr ? std::strchr(text, ':') : nullptr;
 		return colon != nullptr ? std::strtoull(colon + 1, nullptr, 16) : 0ull;
 	}();
 	static const uint32_t loop_guard_limit = [] {
-		const char* text = std::getenv("KYTY_DEBUG_LOOP_GUARD");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_LOOP_GUARD");
 		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 0)) : 0u;
 	}();
 	if (loop_guard_limit != 0 && !program.blocks.empty() &&

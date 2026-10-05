@@ -3,6 +3,7 @@
 
 #include "common/abi.h"
 #include "common/common.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 
 #include <array>
@@ -676,7 +677,7 @@ inline uint64_t g_context_register_writes = 0;
 // "cx-writes" lines of renderDraw.cpp.
 struct ContextWriteLog {
 	static constexpr uint32_t   ChangedBit = 1u << 31u;
-	bool                        enabled    = std::getenv("KYTY_DEBUG_CX_WRITES") != nullptr;
+	bool                        enabled    = KYTY_GETENV("KYTY_DEBUG_CX_WRITES") != nullptr;
 	std::vector<uint32_t>       since_draw;
 	std::array<uint32_t, 0x400> values {};
 	std::array<bool, 0x400>     known {};

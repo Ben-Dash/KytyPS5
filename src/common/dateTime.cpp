@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/platform/sysTimer.h"
 #include "common/stringUtils.h"
+#include "common/switches.h"
 
 #include <cstdlib>
 #include <fmt/format.h>
@@ -627,7 +628,7 @@ Time Time::operator-=(int secs) {
 
 int64_t DebugTimeOffsetSeconds() {
 	static const int64_t offset = [] {
-		const char* text = std::getenv("KYTY_DEBUG_TIME_OFFSET");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_TIME_OFFSET");
 		return text != nullptr ? static_cast<int64_t>(std::strtoll(text, nullptr, 10)) : int64_t {0};
 	}();
 	return offset;

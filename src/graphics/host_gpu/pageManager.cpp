@@ -2,6 +2,7 @@
 
 #include "common/alignment.h"
 #include "common/virtualMemory.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/regionDefinitions.h"
 #include "kernel/memory.h"
 
@@ -81,7 +82,7 @@ void ValidateRange(uint64_t vaddr, uint64_t size) {
 }
 
 bool ProtectStatsEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_BDA_STATS") != nullptr;
 	return enabled;
 }
 

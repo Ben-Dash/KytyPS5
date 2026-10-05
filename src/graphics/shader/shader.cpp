@@ -6,6 +6,7 @@
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/stringUtils.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/hardwareContext.h"
@@ -99,7 +100,7 @@ void ShaderMapUserData(uint64_t addr, const ShaderMappedData& data) {
 	// KYTY_PERMUTATION_LOG=1 (diagnostic): when each shader is registered, to compare with the
 	// time of its first permutation.
 	static const bool log_enabled = [] {
-		const char* value = std::getenv("KYTY_PERMUTATION_LOG");
+		const char* value = KYTY_GETENV("KYTY_PERMUTATION_LOG");
 		return value != nullptr && std::strcmp(value, "1") == 0;
 	}();
 	if (log_enabled && data.code_size_bytes != 0 && data.code_size_bytes % 4u == 0) [[unlikely]] {

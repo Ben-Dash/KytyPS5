@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
@@ -180,7 +181,7 @@ void RenderContext::UnmapMemory(uint64_t vaddr, uint64_t size) {
 // KYTY_DEBUG_AB=bdaepoch alternates.
 static bool BdaEpochEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_BDA_EPOCH");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_BDA_EPOCH");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("bdaepoch");
@@ -239,7 +240,7 @@ void RenderContext::PrepareBda() {
 // KYTY_DEBUG_MIP_STATS=1 prints, every 300 reports (every 30 during a relief), whether draws
 // marked a counter since the last report and how many counters report no samples.
 static bool MipStatsDebugEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_MIP_STATS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_MIP_STATS") != nullptr;
 	return enabled;
 }
 

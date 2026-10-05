@@ -5,6 +5,7 @@
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/tile.h"
@@ -313,7 +314,7 @@ struct ChurnReason {
 	const char*  previous;
 };
 void LogImageChurn(const char* what, const Image& image) {
-	static const bool enabled = std::getenv("KYTY_DEBUG_IMAGE_CHURN") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_IMAGE_CHURN") != nullptr;
 	if (!enabled) {
 		return;
 	}
@@ -1403,7 +1404,7 @@ void TextureCache::MaterializeColorClear(ImageId id, const ImageDesc& desc,
 	    desc.info.metadata.kind != ImageMetadataKind::Cmask) {
 		return;
 	}
-	static const bool verify = std::getenv("KYTY_VERIFY_COLOR_CLEAR") != nullptr;
+	static const bool verify = KYTY_GETENV("KYTY_VERIFY_COLOR_CLEAR") != nullptr;
 	static const bool ab     = AbSelected("colorclear");
 	const bool        skip   = !(ab && AbFeatureOff()) &&
 	                  ColorClearUnchanged(m_slot_images[id], desc, metadata_base_layer);
@@ -1611,11 +1612,11 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 	// and each drained the GPU (11 % of Thread_Gpu). KYTY_DCC_GPU_STORAGE=0 keeps them on the CPU
 	// path. KYTY_DEBUG_DCC_FALLBACK=1 prints why a check still takes the CPU path.
 	static const bool storage = [] {
-		const char* text = std::getenv("KYTY_DCC_GPU_STORAGE");
+		const char* text = KYTY_GETENV("KYTY_DCC_GPU_STORAGE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	const auto fallback = [&](const char* why) {
-		static const bool          enabled = std::getenv("KYTY_DEBUG_DCC_FALLBACK") != nullptr;
+		static const bool          enabled = KYTY_GETENV("KYTY_DEBUG_DCC_FALLBACK") != nullptr;
 		static std::atomic<uint32_t> printed {0};
 		if (enabled && printed.fetch_add(1, std::memory_order_relaxed) < 64) {
 			std::printf("dcc-fallback: %s image=0x%016" PRIx64 " type=%u fmt=%u %ux%u layers=%u\n",
@@ -1891,7 +1892,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 		};
 		// Draws look up the same textures again and again; see ImageLookup.
 		static const bool memo_enabled = [] {
-			const char* text = std::getenv("KYTY_DEBUG_IMAGE_MEMO");
+			const char* text = KYTY_GETENV("KYTY_DEBUG_IMAGE_MEMO");
 			return text == nullptr || std::strcmp(text, "0") != 0;
 		}();
 		auto* const  lookups          = ImageLookupSet(desc.info, exact_format);
@@ -1905,7 +1906,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 			}
 		}
 		// KYTY_VERIFY_IMAGE_MEMO=1: a remembered lookup is looked up again and must agree.
-		static const bool verify_memo = std::getenv("KYTY_VERIFY_IMAGE_MEMO") != nullptr;
+		static const bool verify_memo = KYTY_GETENV("KYTY_VERIFY_IMAGE_MEMO") != nullptr;
 		if (remembered != nullptr && verify_memo) [[unlikely]] {
 			const auto remembered_id = remembered->id;
 			lookup();
@@ -1932,7 +1933,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 			}
 		}
 		// KYTY_DEBUG_FIND_STATS=1: how lookups that ask for a generation (targets) end, every 5 s.
-		static const bool find_stats = std::getenv("KYTY_DEBUG_FIND_STATS") != nullptr;
+		static const bool find_stats = KYTY_GETENV("KYTY_DEBUG_FIND_STATS") != nullptr;
 		const auto        note_find  = [&](uint32_t outcome) {
 			if (!find_stats || unique_generation == nullptr) [[likely]] {
 				return;
@@ -2047,7 +2048,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 
 bool TextureCache::OverlapTargetsEnabled() noexcept {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_OVERLAP_TARGETS");
+		const char* text = KYTY_GETENV("KYTY_OVERLAP_TARGETS");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("overlap");
@@ -2057,7 +2058,7 @@ bool TextureCache::OverlapTargetsEnabled() noexcept {
 // KYTY_VERIFY_OVERLAP_TARGETS=1: a target taken again from an overlap lookup (see LastFindOverlap)
 // is looked up in full as well, which must find the same image and view.
 void TextureCache::VerifyOverlapRefind(ImageId id, const ImageDesc& desc, bool exact_format) {
-	static const bool verify = std::getenv("KYTY_VERIFY_OVERLAP_TARGETS") != nullptr;
+	static const bool verify = KYTY_GETENV("KYTY_VERIFY_OVERLAP_TARGETS") != nullptr;
 	if (!verify) [[likely]] {
 		return;
 	}
@@ -3019,7 +3020,7 @@ void DebugRegisterDumpAddress(uint64_t address) {
 void TextureCache::DebugDumpImages() {
 	static const std::vector<uint64_t> listed = [] {
 		std::vector<uint64_t> list;
-		for (const char* text = std::getenv("KYTY_DEBUG_DUMP_IMAGES"); text != nullptr && *text != '\0';) {
+		for (const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_IMAGES"); text != nullptr && *text != '\0';) {
 			char*      end   = nullptr;
 			const auto value = std::strtoull(text, &end, 16);
 			if (end == text) {
@@ -3032,13 +3033,13 @@ void TextureCache::DebugDumpImages() {
 	}();
 	auto addresses = listed;
 	addresses.insert(addresses.end(), g_debug_dump_extra.begin(), g_debug_dump_extra.end());
-	static const char* trigger = std::getenv("KYTY_DEBUG_DUMP_IMAGES_FILE");
+	static const char* trigger = KYTY_GETENV("KYTY_DEBUG_DUMP_IMAGES_FILE");
 	static uint64_t    frame   = 0;
 	frame++;
 	// KYTY_DEBUG_DUMP_VIDEO_OUT=<n> with n > 1: while the trigger file exists, every n-th frame
 	// dumps the display buffer being flipped and the listed images (a film of the picture).
 	static const uint64_t film = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DUMP_VIDEO_OUT");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_VIDEO_OUT");
 		return text != nullptr ? std::strtoull(text, nullptr, 10) : 0ull;
 	}();
 	const bool filming = film > 1;

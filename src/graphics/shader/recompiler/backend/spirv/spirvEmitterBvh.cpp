@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
+#include "common/switches.h"
 
 #include <cstdlib>
 #include <vector>
@@ -326,7 +327,7 @@ void DefineBvhIntersect(EmitterState& s) {
 	// KYTY_DEBUG_BVH_REASON=1: the first result word is a bit per validity check (in order), bit
 	// 17 the node's page being present and bits 18-21 the four result words differing from -1.
 	static const int reason_mode = [] {
-		const char* text = std::getenv("KYTY_DEBUG_BVH_REASON");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_BVH_REASON");
 		return text != nullptr ? std::atoi(text) : 0;
 	}();
 	const bool reason = reason_mode == 1;

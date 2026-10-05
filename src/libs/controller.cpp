@@ -7,6 +7,7 @@
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "kernel/pthread.h"
 #include "libs/dualSenseHaptics.h"
 #include "libs/errno.h"
@@ -165,7 +166,7 @@ static GameController* g_controller = nullptr;
 
 // KYTY_DEBUG_PAD_TRIGGERS=1 prints the trigger effects the game sets and the trigger values.
 static bool PadTriggerDebug() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_PAD_TRIGGERS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_PAD_TRIGGERS") != nullptr;
 	return enabled;
 }
 
@@ -179,7 +180,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 	// KYTY_DEBUG_PAD_AUTOPRESS=<seconds>: holds Cross for 150 ms every <seconds> (from 15 s on),
 	// so an unattended test run gets past the title screen.
 	static const double auto_period = [] {
-		const char* text = std::getenv("KYTY_DEBUG_PAD_AUTOPRESS");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_PAD_AUTOPRESS");
 		return text != nullptr ? std::atof(text) : 0.0;
 	}();
 	if (auto_period > 0.0) {
@@ -212,7 +213,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 		const std::lock_guard pad_lock(pad_mutex);
 		static const std::vector<PadEvent> replay = [] {
 			std::vector<PadEvent> list;
-			const char*           path = std::getenv("KYTY_DEBUG_PAD_REPLAY");
+			const char*           path = KYTY_GETENV("KYTY_DEBUG_PAD_REPLAY");
 			if (auto* file = path != nullptr ? std::fopen(path, "r") : nullptr; file != nullptr) {
 				PadEvent event {};
 				while (std::fscanf(file, "%lf %x %d %d %d %d %d %d", &event.time, &event.buttons,
@@ -226,7 +227,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 		}();
 		// KYTY_DEBUG_PAD_REPLAY_START_FILE=<path>: the replay clock starts only once that file exists
 		// (checked twice a second), so a benchmark script can start the route when a scene has loaded.
-		static const char* replay_start_file = std::getenv("KYTY_DEBUG_PAD_REPLAY_START_FILE");
+		static const char* replay_start_file = KYTY_GETENV("KYTY_DEBUG_PAD_REPLAY_START_FILE");
 		static double      replay_origin     = replay_start_file == nullptr ? 0.0 : -1.0;
 		if (replay_origin < 0.0 && !replay.empty()) {
 			static double next_check = 0.0;
@@ -260,7 +261,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 		// KYTY_DEBUG_PAD_LIVE=<file>: while the file holds "<buttons hex> <lx> <ly> <rx> <ry> <l2>
 		// <r2>", it replaces the controller (read every 50 ms), so a test can be steered from
 		// outside by rewriting the file.
-		static const char* live_path = std::getenv("KYTY_DEBUG_PAD_LIVE");
+		static const char* live_path = KYTY_GETENV("KYTY_DEBUG_PAD_LIVE");
 		if (live_path != nullptr) {
 			static PadEvent live {};
 			static bool     live_valid = false;
@@ -286,7 +287,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 			}
 		}
 		static std::FILE* record = [] {
-			const char* path = std::getenv("KYTY_DEBUG_PAD_RECORD");
+			const char* path = KYTY_GETENV("KYTY_DEBUG_PAD_RECORD");
 			return path != nullptr ? std::fopen(path, "w") : nullptr;
 		}();
 		if (record != nullptr) {
@@ -827,7 +828,7 @@ void GameController::ApplyVibration() {
 	    m_vibration_until > now ? static_cast<uint32_t>(m_vibration_until - now) : 0;
 	// KYTY_PAD_VIBRATION=0: no rumble either (see AudioOutOpen for the haptic ports).
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_PAD_VIBRATION");
+		const char* text = KYTY_GETENV("KYTY_PAD_VIBRATION");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	const auto scale =
@@ -926,7 +927,7 @@ bool GameController::SendTriggerEffect(const PadTriggerEffectParam& param) {
 	// KYTY_PAD_TRIGGERS=0 (DualSense Fix off): the triggers get the "off" effect (mode 0) instead,
 	// so they never resist; the game still sees the effect state it set.
 	static const bool triggers = [] {
-		const char* text = std::getenv("KYTY_PAD_TRIGGERS");
+		const char* text = KYTY_GETENV("KYTY_PAD_TRIGGERS");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	if (!triggers) {

@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 
 #include <array>
 #include <atomic>
@@ -1448,8 +1449,7 @@ struct FallbackHook<Tag, R(VKAPI_PTR*)(VkCommandBuffer, A...)> {
 #define KYTY_HOOK_FUNCTION_vkCmdSetAttachmentFeedbackLoopEnableEXT                              \
 	HookCmdSetAttachmentFeedbackLoopEnableEXT
 
-[[nodiscard]] bool Enabled(const char* name) {
-	const char* value = std::getenv(name);
+[[nodiscard]] bool Enabled(const char* value) {
 	return value != nullptr && std::strcmp(value, "1") == 0;
 }
 
@@ -1462,7 +1462,7 @@ void InstallCommandHooks() {
 	}
 	installed        = true;
 	auto&       dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
-	const char* forced     = std::getenv("KYTY_RECORD_THREAD");
+	const char* forced     = KYTY_GETENV("KYTY_RECORD_THREAD");
 	if (forced != nullptr ? std::strcmp(forced, "0") != 0 : Config::RecordThreadEnabled()) {
 		g_deferred = true;
 #define KYTY_INSTALL_RECORDING_HOOK(name)                                                         \
@@ -1493,7 +1493,7 @@ void InstallCommandHooks() {
 #undef KYTY_INSTALL_FALLBACK_HOOK
 		return;
 	}
-	if (Enabled("KYTY_DEBUG_VK_TIME")) {
+	if (Enabled(KYTY_GETENV("KYTY_DEBUG_VK_TIME"))) {
 #define KYTY_INSTALL_TIMED_HOOK(name)                                                             \
 	if (dispatcher.name != nullptr) {                                                             \
 		struct Tag_##name {};                                                                     \
@@ -1585,7 +1585,7 @@ void CommandStream::Push(Common::UniqueFunction<void>&& call) {
 void CommandStream::Wake() {
 	auto& impl = *m_impl;
 	impl.WakeIfSleeping();
-	static const bool stats = Enabled("KYTY_DEBUG_STREAM_STATS");
+	static const bool stats = Enabled(KYTY_GETENV("KYTY_DEBUG_STREAM_STATS"));
 	if (stats) {
 		using Clock = std::chrono::steady_clock;
 		static auto window_start = Clock::now();

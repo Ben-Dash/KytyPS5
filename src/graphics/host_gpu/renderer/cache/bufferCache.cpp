@@ -5,6 +5,7 @@
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/cache/readbackQueue.h"
@@ -57,7 +58,7 @@ constexpr uint64_t GdsBufferSize = 64 * 1024;
 namespace {
 struct SyncStats {
 	static bool Enabled() {
-		static const bool enabled = std::getenv("KYTY_DEBUG_BDA_STATS") != nullptr;
+		static const bool enabled = KYTY_GETENV("KYTY_DEBUG_BDA_STATS") != nullptr;
 		return enabled;
 	}
 	static uint64_t Now() {
@@ -296,7 +297,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 // more GPU time in the overworld, none measurable in Sky Garden). KYTY_DEBUG_STREAM_DEVICE=1
 // keeps the ring in device memory.
 static bool StreamRingInHostMemory() {
-	return std::getenv("KYTY_DEBUG_STREAM_DEVICE") == nullptr;
+	return KYTY_GETENV("KYTY_DEBUG_STREAM_DEVICE") == nullptr;
 }
 
 BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
@@ -395,7 +396,7 @@ void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 
 void BufferCache::ExpandWriteFault(uint64_t vaddr) {
 	static const uint64_t window = [] {
-		const char* text  = std::getenv("KYTY_FAULT_AHEAD_PAGES");
+		const char* text  = KYTY_GETENV("KYTY_FAULT_AHEAD_PAGES");
 		const auto  pages = text != nullptr ? std::strtoull(text, nullptr, 10) : 16ull;
 		return std::has_single_bit(pages) && pages <= TRACKER_REGION_PAGES ? pages * TRACKER_PAGE_SIZE
 		                                                                   : TRACKER_PAGE_SIZE;
@@ -1071,7 +1072,7 @@ struct AsyncUploads {
 
 	static bool Enabled() {
 		static const bool enabled = [] {
-			const char* text = std::getenv("KYTY_ASYNC_UPLOADS");
+			const char* text = KYTY_GETENV("KYTY_ASYNC_UPLOADS");
 			return text == nullptr || std::strcmp(text, "0") != 0;
 		}();
 		return enabled;
@@ -1134,7 +1135,7 @@ AsyncUploads g_async_uploads;
 // KYTY_DEFER_PROTECTS=0 protects pages on the GPU thread as before.
 static bool DeferProtectsEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEFER_PROTECTS");
+		const char* text = KYTY_GETENV("KYTY_DEFER_PROTECTS");
 		return (text == nullptr || std::strcmp(text, "0") != 0) && AsyncUploads::Enabled();
 	}();
 	return enabled;
@@ -1149,7 +1150,7 @@ void JoinAsyncUploads() noexcept {
 // mapped foreign memory, and prints what the driver answers: whether guest memory could back
 // buffers directly instead of being copied.
 static void DebugHostImportTest(GraphicContext& graphics, uint64_t address) {
-	static bool done = std::getenv("KYTY_DEBUG_HOST_IMPORT_TEST") == nullptr;
+	static bool done = KYTY_GETENV("KYTY_DEBUG_HOST_IMPORT_TEST") == nullptr;
 	if (done) {
 		return;
 	}
@@ -1297,7 +1298,7 @@ StreamBuffer& BufferCache::ActiveStream() noexcept {
 // alternates.
 static bool StreamReuseEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_STREAM_REUSE");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_STREAM_REUSE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("streamreuse");
@@ -1308,7 +1309,7 @@ static bool StreamReuseEnabled() {
 // memory it came from, and the range is copied again as without reuse. It reports how often the
 // bytes changed within the epoch: the draws that reuse would have shown older CPU writes.
 bool BufferCache::VerifyStreamReuse(const StreamCopy& copy) {
-	static const bool verify = std::getenv("KYTY_VERIFY_STREAM_REUSE") != nullptr;
+	static const bool verify = KYTY_GETENV("KYTY_VERIFY_STREAM_REUSE") != nullptr;
 	if (!verify) {
 		return false;
 	}
@@ -1799,7 +1800,7 @@ bool BufferCache::SynchronizeBdaRegion(uint64_t region, const RangeSet& mapped) 
 
 static bool BdaRunSyncEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_BDA_RUN_SYNC");
+		const char* text = KYTY_GETENV("KYTY_BDA_RUN_SYNC");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;

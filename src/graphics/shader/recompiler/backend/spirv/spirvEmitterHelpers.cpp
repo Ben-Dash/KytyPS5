@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
+#include "common/switches.h"
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 
@@ -127,7 +128,7 @@ DppTargetLane EmitDppTargetLane(EmitterState& state, const IR::DppMoveFlags& fla
 bool WaveHalvesInHostSubgroup(const EmitterState& state) {
 	// KYTY_DEBUG_WAVE_HALVES=0 emits as if the host subgroup matched the guest wave (A/B).
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_WAVE_HALVES");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_WAVE_HALVES");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	const auto stage = state.program.stage;

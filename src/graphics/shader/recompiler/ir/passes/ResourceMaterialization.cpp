@@ -1,6 +1,7 @@
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
@@ -1323,7 +1324,7 @@ bool UpdateMemoKey(const CompiledResourcePlan& compiled, const SrtRuntime& runti
 
 // KYTY_DEBUG_SRT_FAIL=1 reports the first 32 failed materializations by stage.
 bool ReportMaterializeFailure(const ResourcePlan& program, const char* stage, uint32_t index) {
-	static const bool enabled = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_SRT_FAIL") != nullptr;
 	static std::atomic<uint32_t> reported {0};
 	if (enabled && reported.fetch_add(1, std::memory_order_relaxed) < 32u) {
 		std::printf("materialize-failed: shader=0x%016llx stage=%s index=%u\n",

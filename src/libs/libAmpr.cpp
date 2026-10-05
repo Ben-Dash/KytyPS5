@@ -3,6 +3,7 @@
 #include "common/file.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "kernel/eventQueue.h"
 #include "kernel/fileSystem.h"
@@ -202,7 +203,7 @@ static int GetHostPathStat(const std::string& host_path, LibKernel::FileSystem::
 // KYTY_DEBUG_APR=1 prints each path's first resolution, file reads as DebugAprRead describes and
 // the read rate, to find reads a game keeps repeating.
 static bool AprDebugEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_APR") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_APR") != nullptr;
 	return enabled;
 }
 

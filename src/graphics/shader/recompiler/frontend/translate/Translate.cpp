@@ -1,4 +1,5 @@
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/shader/recompiler/frontend/translate/Translator.h"
 #include "graphics/shader/shader.h"
 
@@ -127,7 +128,7 @@ Decoder::Operand Translator::PlainOperand(const Decoder::Operand& operand) {
 const LoopHeat& DebugLoopHeat() {
 	static const LoopHeat heat = [] {
 		LoopHeat    result;
-		const char* text = std::getenv("KYTY_DEBUG_LOOP_HEAT");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_LOOP_HEAT");
 		if (text == nullptr) {
 			return result;
 		}
@@ -147,7 +148,7 @@ const LoopHeat& DebugLoopHeat() {
 const PsTap& DebugPsTap() {
 	static const PsTap tap = [] {
 		PsTap       result;
-		const char* text = std::getenv("KYTY_DEBUG_PS_TAP");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_PS_TAP");
 		if (text == nullptr) {
 			return result;
 		}
@@ -172,7 +173,7 @@ const PsTap& DebugPsTap() {
 const CsTap& DebugCsTap() {
 	static const CsTap tap = [] {
 		CsTap       result;
-		const char* text = std::getenv("KYTY_DEBUG_CS_TAP");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_CS_TAP");
 		if (text == nullptr) {
 			return result;
 		}
@@ -283,7 +284,7 @@ void Translator::CountLoopHeat(uint32_t counter) {
 bool WaveHalvesInHostSubgroup(const IR::Program& program) {
 	// KYTY_DEBUG_WAVE_HALVES=0 translates as if the host subgroup matched the guest wave (A/B).
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_WAVE_HALVES");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_WAVE_HALVES");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled && program.wave_size == 32u &&

@@ -1,6 +1,7 @@
 #include "graphics/shader/recompiler/frontend/cfg/ShaderCFG.h"
 
 #include "common/assert.h"
+#include "common/switches.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -41,7 +42,7 @@ void SetFailure(Graph& graph, FailureKind kind, uint32_t block_id, const std::st
                                    const std::string& message) {
 	SetFailure(graph, kind, block_id, message);
 	static const bool strict = [] {
-		const char* env = std::getenv("KYTY_STRICT_SHADER_CFG");
+		const char* env = KYTY_GETENV("KYTY_STRICT_SHADER_CFG");
 		return env != nullptr && env[0] == '1';
 	}();
 	if (strict) {

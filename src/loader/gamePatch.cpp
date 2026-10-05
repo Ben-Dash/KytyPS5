@@ -4,6 +4,7 @@
 #include "common/emulatorConfig.h"
 #include "common/stringUtils.h"
 #include "common/virtualMemory.h"
+#include "common/switches.h"
 #include "kernel/memory.h"
 #include "loader/elf.h"
 #include "loader/runtimeLinker.h"
@@ -280,7 +281,7 @@ bool Apply(const std::filesystem::path& plan_path, Program* main_program,
 void ApplyBuiltIn(Program* main_program) {
 	std::string title_id;
 	std::string version;
-	const char* enabled = std::getenv("KYTY_ASTRO_FIXED_RESOLUTION");
+	const char* enabled = KYTY_GETENV("KYTY_ASTRO_FIXED_RESOLUTION");
 	if (enabled == nullptr || std::strcmp(enabled, "1") != 0 || main_program == nullptr ||
 	    main_program->base_vaddr == 0 || !SystemContentParamSfoGetString("TITLE_ID", &title_id) ||
 	    !SystemContentParamSfoGetString("APP_VER", &version) || title_id != "PPSA21564" ||
@@ -307,9 +308,9 @@ void ApplyBuiltIn(Program* main_program) {
 		if (!IsInsideProgram(*main_program, address, site.off.size()) ||
 		    std::memcmp(reinterpret_cast<const void*>(address), site.off.data(), site.off.size()) !=
 		        0) {
-			::printf("Built-in patch: ASTRO BOT fixed render resolution skipped (code at 0x%llx "
-			         "differs, e.g. changed by a cheat file)\n",
-			         static_cast<unsigned long long>(site.offset));
+			KYTY_INTERNAL_PRINTF("Built-in patch: ASTRO BOT fixed render resolution skipped (code at "
+			                     "0x%llx differs, e.g. changed by a cheat file)\n",
+			                     static_cast<unsigned long long>(site.offset));
 			return;
 		}
 	}
@@ -318,9 +319,9 @@ void ApplyBuiltIn(Program* main_program) {
 		std::memcpy(reinterpret_cast<void*>(address), site.on.data(), site.on.size());
 		(void)Common::VirtualMemory::FlushInstructionCache(address, site.on.size());
 	}
-	::printf("Built-in patch applied: ASTRO BOT fixed render resolution %s (window height %u, "
-	         "KYTY_ASTRO_FIXED_RESOLUTION=1)\n",
-	         Sizes[mode], height);
+	KYTY_INTERNAL_PRINTF("Built-in patch applied: ASTRO BOT fixed render resolution %s (window "
+	                     "height %u)\n",
+	                     Sizes[mode], height);
 	std::fflush(stdout);
 }
 

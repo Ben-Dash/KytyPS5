@@ -3,6 +3,7 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/frontend/cfg/ShaderCFG.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
@@ -538,7 +539,7 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 	// KYTY_DEBUG_DUMP_SPIRV=<hash> also writes that shader's decoded RDNA2 code to rdna_<hash>.txt
 	// (precompiled shaders included, which translate without dumps).
 	static const uint64_t dump_source_hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DUMP_SPIRV");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_SPIRV");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
 	}();
 	if (dump_source_hash != 0 && dump_source_hash == options.shader_hash) [[unlikely]] {
@@ -747,7 +748,7 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 	                               .count()));
 	// KYTY_DEBUG_DUMP_SPIRV=<hash>: writes that shader's module to spv_<hash>.spv.
 	static const uint64_t dump_hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DUMP_SPIRV");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_SPIRV");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
 	}();
 	if (dump_hash != 0 && dump_hash == ir.shader_hash) {

@@ -12,6 +12,7 @@
 #include "common/threads.h"
 #include "common/timer.h"
 #include "common/stringUtils.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
@@ -782,7 +783,7 @@ static void WindowCreate(WindowContext& context) {
 	// macOS 26 window chrome (CoreUI asset decode, SwiftUI titlebar) has been observed
 	// throwing NSExceptions under Rosetta during the first CATransaction commit. A
 	// borderless window skips that machinery entirely.
-	if (std::getenv("KYTY_BORDERLESS") != nullptr) {
+	if (KYTY_GETENV("KYTY_BORDERLESS") != nullptr) {
 		window_flags |= static_cast<uint32_t>(SDL_WINDOW_BORDERLESS);
 	}
 #endif

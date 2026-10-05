@@ -10,6 +10,7 @@
 #include "common/stringUtils.h"
 #include "common/threads.h"
 #include "common/timer.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -426,7 +427,7 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	// transfer-only family (the copy engine).
 	std::array<vk::DeviceQueueCreateInfo, 2> queue_create_infos {queue_create_info, {}};
 	uint32_t                                 queue_create_count = 1;
-	if (const char* readback = std::getenv("KYTY_READBACK_QUEUE");
+	if (const char* readback = KYTY_GETENV("KYTY_READBACK_QUEUE");
 	    readback != nullptr && readback[0] != '0') {
 		uint32_t family_count = 0;
 		physical_device.getQueueFamilyProperties(&family_count, nullptr);
@@ -714,7 +715,7 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	// defined (robustBufferAccess2, checked in units of at most a dword) and a range too short for
 	// one dword can be bound as a null descriptor. The hardware-buffer-bounds setting (on by
 	// default) enables it; KYTY_DEBUG_HW_BUFFER_BOUNDS=0/1 overrides it for A/B runs.
-	const char* hardware_bounds = std::getenv("KYTY_DEBUG_HW_BUFFER_BOUNDS");
+	const char* hardware_bounds = KYTY_GETENV("KYTY_DEBUG_HW_BUFFER_BOUNDS");
 	graphics.hardware_storage_buffer_bounds =
 	    (hardware_bounds != nullptr ? std::strcmp(hardware_bounds, "0") != 0
 	                                : Config::HardwareBufferBoundsEnabled()) &&
@@ -919,7 +920,7 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanDebugMessengerCallback(
 
 	// KYTY_DEBUG_VK_ERRORS_NONFATAL=1 logs validation errors and carries on, to collect them all.
 	static const bool nonfatal = [] {
-		const char* env = std::getenv("KYTY_DEBUG_VK_ERRORS_NONFATAL");
+		const char* env = KYTY_GETENV("KYTY_DEBUG_VK_ERRORS_NONFATAL");
 		return env != nullptr && env[0] == '1';
 	}();
 	if (error && !nonfatal) {
@@ -1163,23 +1164,23 @@ void WindowContext::CreateVulkan() {
 			}
 		}
 		// Debugging aid: the driver's statistics and ISA for chosen pipelines (see shaders.cpp).
-		if (std::getenv("KYTY_DEBUG_PIPELINE_STATS") != nullptr &&
+		if (KYTY_GETENV("KYTY_DEBUG_PIPELINE_STATS") != nullptr &&
 		    HasExtension(available_extensions,
 		                 VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
 		}
 		// Experiment: importing guest memory as buffer memory (see DebugHostImportTest).
-		if (std::getenv("KYTY_DEBUG_HOST_IMPORT_TEST") != nullptr &&
+		if (KYTY_GETENV("KYTY_DEBUG_HOST_IMPORT_TEST") != nullptr &&
 		    HasExtension(available_extensions, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
 		}
 		// Debugging aid: a lost device reports the faulting address (see masterSemaphore.cpp).
-		if (std::getenv("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
+		if (KYTY_GETENV("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
 		    HasExtension(available_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
 		// Debugging aid: a lost device names the draw or dispatch the GPU was in (see GpuZones).
-		if (std::getenv("KYTY_DEBUG_GPU_CHECKPOINTS") != nullptr &&
+		if (KYTY_GETENV("KYTY_DEBUG_GPU_CHECKPOINTS") != nullptr &&
 		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
 			graphic_ctx.checkpoints_enabled = true;

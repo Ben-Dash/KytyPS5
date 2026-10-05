@@ -1,6 +1,7 @@
 #include "graphics/shader/recompiler/ir/passes/ResourceTracking.h"
 
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
@@ -446,7 +447,7 @@ private:
 		    fmt::format("shader resource tracking: hash=0x{:016x} stage={} pc=0x{:08x} {}",
 		                m_program.shader_hash, StageName(m_program.stage), pc, reason);
 		static const bool strict = [] {
-			const char* env = std::getenv("KYTY_STRICT_RESOURCE_TRACKING");
+			const char* env = KYTY_GETENV("KYTY_STRICT_RESOURCE_TRACKING");
 			return env != nullptr && env[0] == '1';
 		}();
 		if (strict) {

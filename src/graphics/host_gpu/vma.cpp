@@ -17,6 +17,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
 
@@ -50,7 +51,7 @@ SmallImagePool g_small_image_pool;
 
 bool SmallImagePoolEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_SMALL_IMAGE_POOL");
+		const char* text = KYTY_GETENV("KYTY_SMALL_IMAGE_POOL");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("imagepool");
@@ -318,7 +319,7 @@ uint64_t                   g_recycled_serial = 0;
 
 bool ImageRecycleEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_IMAGE_RECYCLE");
+		const char* text = KYTY_GETENV("KYTY_IMAGE_RECYCLE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;

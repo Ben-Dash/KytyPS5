@@ -6,6 +6,7 @@
 #include "common/profiler.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/hardwareContext.h"
@@ -119,7 +120,7 @@ static void PrefetchBvhs(BufferCache& buffers,
 }
 // Asked per dispatch: reading the environment each time cost about 1% of the GPU thread.
 static bool BvhCheckEnabled() {
-	static const bool enabled = std::getenv("KYTY_DEBUG_BVH_CHECK") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_BVH_CHECK") != nullptr;
 	return enabled;
 }
 
@@ -130,7 +131,7 @@ static void DebugCheckBvh(const ShaderRecompiler::IR::CompiledShaderInfo& progra
                           const ShaderRecompiler::IR::ResourceSnapshot& resources,
                           const uint32_t* groups) {
 	static const uint64_t hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_BVH_CHECK");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_BVH_CHECK");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
 	}();
 	if (hash == 0 || program.shader_hash != hash) {
@@ -430,7 +431,7 @@ bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& i
 // (e.g. a loop count).
 static void DebugDumpDispatchInputs(RenderContext& context, const ShaderStageRuntime& stage) {
 	static const uint64_t hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DISPATCH_INPUTS");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DISPATCH_INPUTS");
 		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
 	}();
 	if (hash == 0 || stage.program->shader_hash != hash) [[likely]] {
@@ -468,7 +469,7 @@ static void DebugDumpDispatchInputs(RenderContext& context, const ShaderStageRun
 	// KYTY_DEBUG_DISPATCH_PROBE=s<n>+<table offset>:<byte offset> (hex offsets): follows the
 	// 64-bit pointer in user data SGPRs n, n+1 to the buffer descriptor at the table offset and
 	// reads the dword at the byte offset in that buffer, as an S_BUFFER_LOAD would.
-	if (const char* probe = std::getenv("KYTY_DEBUG_DISPATCH_PROBE"); probe != nullptr) {
+	if (const char* probe = KYTY_GETENV("KYTY_DEBUG_DISPATCH_PROBE"); probe != nullptr) {
 		unsigned sgpr = 0, table = 0, byte = 0;
 		if (std::sscanf(probe, "s%u+%x:%x", &sgpr, &table, &byte) == 3 &&
 		    sgpr + 1 < snapshot.user_data.size()) {

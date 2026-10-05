@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
 #include "graphics/guest_gpu/command_processor/pm4Dispatch.h"
 #include "graphics/guest_gpu/pm4.h"
@@ -26,8 +27,7 @@ namespace Libs::Graphics {
 
 namespace {
 
-bool EnvEnabled(const char* name) {
-	const char* value = std::getenv(name);
+bool EnvEnabled(const char* value) {
 	return value != nullptr && std::strcmp(value, "1") == 0;
 }
 
@@ -100,7 +100,7 @@ struct DrawSpeculator::Snapshot {
 DrawSpeculator::DrawSpeculator(RenderContext& renderer, int interrupt_event_id)
     : m_renderer(renderer), m_interrupt_event_id(interrupt_event_id),
       m_snapshot(std::make_unique<Snapshot>()) {
-	if (const char* value = std::getenv("KYTY_SPECULATE_THREADS"); value != nullptr) {
+	if (const char* value = KYTY_GETENV("KYTY_SPECULATE_THREADS"); value != nullptr) {
 		m_workers = std::clamp<uint32_t>(static_cast<uint32_t>(std::strtoul(value, nullptr, 10)), 1u,
 		                                 MaxWorkers);
 	}
@@ -121,7 +121,7 @@ DrawSpeculator::~DrawSpeculator() {
 
 bool DrawSpeculator::Enabled() {
 	static const int forced = [] {
-		const char* value = std::getenv("KYTY_SPECULATE_DRAWS");
+		const char* value = KYTY_GETENV("KYTY_SPECULATE_DRAWS");
 		return value == nullptr ? -1 : std::strcmp(value, "0") == 0 ? 0 : 1;
 	}();
 	return forced >= 0 ? forced != 0 : Config::SpeculativeDrawsEnabled();
@@ -232,7 +232,7 @@ void DrawSpeculator::Release(SpeculatedDraw* draw) {
 			break;
 		}
 	}
-	static const bool stats = EnvEnabled("KYTY_DEBUG_SPEC_STATS");
+	static const bool stats = EnvEnabled(KYTY_GETENV("KYTY_DEBUG_SPEC_STATS"));
 	if (stats && m_gpu_seq % 100000u == 0) {
 		PrintStats();
 	}
@@ -300,7 +300,7 @@ DrawSpeculator::Slot* DrawSpeculator::AcquireSlot(uint64_t seq, uint64_t epoch, 
 		// to use up the other half of the ring and prepare the following draws itself (one draw
 		// in ten in ASTRO BOT's Sky Garden). KYTY_SPEC_SLOT_SPIN_US=<microseconds> (default 2000).
 		static const auto SlotSpin = [] {
-			const char* value = std::getenv("KYTY_SPEC_SLOT_SPIN_US");
+			const char* value = KYTY_GETENV("KYTY_SPEC_SLOT_SPIN_US");
 			return std::chrono::microseconds(value != nullptr ? std::strtoul(value, nullptr, 10)
 			                                                  : 2000u);
 		}();
@@ -375,7 +375,7 @@ void DrawSpeculator::Run(uint32_t worker) {
 		if (!(spin_ab && AbFeatureOff())) {
 			// KYTY_SPEC_SPIN_US=<microseconds> sets how long (default 500).
 			static const auto SpinTime = [] {
-				const char* value = std::getenv("KYTY_SPEC_SPIN_US");
+				const char* value = KYTY_GETENV("KYTY_SPEC_SPIN_US");
 				return std::chrono::microseconds(value != nullptr ? std::strtoul(value, nullptr, 10)
 				                                                  : 500u);
 			}();

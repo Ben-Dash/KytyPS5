@@ -1,6 +1,7 @@
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 
 #include "common/assert.h"
+#include "common/switches.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 
 #include <algorithm>
@@ -1208,7 +1209,7 @@ private:
 		const auto arithmetic = ArithmeticOp(op, count);
 		if (arithmetic == NodeOp::Fail || inst.NumArgs() < count) {
 			// KYTY_DEBUG_SRT_FAIL=1: name the IR opcodes the compiled evaluator cannot evaluate.
-			static const bool report = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+			static const bool report = KYTY_GETENV("KYTY_DEBUG_SRT_FAIL") != nullptr;
 			static std::atomic<uint32_t> reported {0};
 			if (report && reported.fetch_add(1, std::memory_order_relaxed) < 64u) {
 				const auto name = ValueOpcodeName(op);
@@ -2170,7 +2171,7 @@ std::span<const uint8_t> SrtEvaluator::FindActiveSources() {
 // A failed refresh skips the draw or dispatch (KYTY_DEBUG_SRT_FAIL=1 reports the first 32: the
 // SRT read slot and the IR opcode its value comes from).
 static bool ReportSrtRefreshFailure(const ResourcePlan& program, const char* reason, uint32_t slot) {
-	static const bool enabled = std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_SRT_FAIL") != nullptr;
 	static std::atomic<uint32_t> reported {0};
 	if (enabled && reported.fetch_add(1, std::memory_order_relaxed) < 32u) {
 		// The IR behind srt_reads is discarded after compilation: report the read's flat offset
@@ -2226,7 +2227,7 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 			const auto slot = m_compiled.run_entries[info.first + index].slot;
 			if (!Evaluate(m_compiled.slots[slot], flat[m_program.srt_reads[slot].flat_offset])) {
 				static std::atomic<uint32_t> described {0};
-				if (std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr &&
+				if (KYTY_GETENV("KYTY_DEBUG_SRT_FAIL") != nullptr &&
 				    described.fetch_add(1, std::memory_order_relaxed) < 4u) {
 					DescribeFailure(m_compiled.slots[slot], 0);
 				}
@@ -2248,7 +2249,7 @@ bool SrtEvaluator::RefreshFlatBuffer(std::vector<uint32_t>& flat) {
 		auto& evaluator = clean ? *m_clean_evaluator : *this;
 		if (offset >= flat.size() || !evaluator.Evaluate(m_compiled.slots[slot], flat[offset])) {
 			static std::atomic<uint32_t> described {0};
-			if (std::getenv("KYTY_DEBUG_SRT_FAIL") != nullptr &&
+			if (KYTY_GETENV("KYTY_DEBUG_SRT_FAIL") != nullptr &&
 			    described.fetch_add(1, std::memory_order_relaxed) < 6u) {
 				evaluator.DescribeFailure(m_compiled.slots[slot], 0);
 			}

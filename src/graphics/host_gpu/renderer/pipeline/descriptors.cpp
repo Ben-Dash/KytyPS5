@@ -8,6 +8,7 @@
 #include "common/profiler.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/guest_gpu/graphicsRun.h"
@@ -805,7 +806,7 @@ private:
 // AbFeatureOff).
 bool TextureReuseEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_TEXTURE_REUSE");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_TEXTURE_REUSE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("reuse");
@@ -881,7 +882,7 @@ void RenderExecutor::ResolveTextureInto(const ShaderRecompiler::IR::ImageResourc
 	describe_probe.reset();
 	// Debug: KYTY_DEBUG_VOLUME_MIP0=1 views volume textures as their first level only, so every
 	// sample clamps to it: tells wrong lower levels (their layout) from wrong level 0.
-	static const bool volume_mip0 = std::getenv("KYTY_DEBUG_VOLUME_MIP0") != nullptr;
+	static const bool volume_mip0 = KYTY_GETENV("KYTY_DEBUG_VOLUME_MIP0") != nullptr;
 	if (volume_mip0 && desc.info.IsVolume()) [[unlikely]] {
 		desc.view_info.level_count = 1;
 	}
@@ -1051,7 +1052,7 @@ static bool ReuseTexture(TextureCache& cache, const PreparedBindings::ImageSourc
 // alternates.
 static bool ImageGroupsEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_IMAGE_GROUPS");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_IMAGE_GROUPS");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("imagegroups");
@@ -1061,7 +1062,7 @@ static bool ImageGroupsEnabled() {
 // KYTY_VERIFY_IMAGE_GROUPS=1: a draw keeping its stage's image group also resolves each image and
 // acquires its view, and reports what came out differently.
 static bool VerifyImageGroups() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_IMAGE_GROUPS") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_IMAGE_GROUPS") != nullptr;
 	return enabled;
 }
 
@@ -1087,7 +1088,7 @@ static void ReportImageGroupCheck(bool same, uint64_t address) {
 // alternates.
 static bool CleanEpochEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_CLEAN_EPOCH");
+		const char* text = KYTY_GETENV("KYTY_CLEAN_EPOCH");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("cleanepoch");
@@ -1123,7 +1124,7 @@ static bool ImageGroupStands(TextureCache& cache, PreparedBindings& prepared) {
 	const bool epoch_on = group.clear_free && CleanEpochEnabled();
 	const auto epoch    = g_image_clean_epoch.load(std::memory_order_acquire);
 	if (epoch_on && group.clean_epoch == epoch) {
-		static const bool verify = std::getenv("KYTY_VERIFY_CLEAN_EPOCH") != nullptr;
+		static const bool verify = KYTY_GETENV("KYTY_VERIFY_CLEAN_EPOCH") != nullptr;
 		if (verify) [[unlikely]] {
 			static uint64_t checked = 0;
 			static uint64_t differ  = 0;
@@ -1152,7 +1153,7 @@ static bool ImageGroupStands(TextureCache& cache, PreparedBindings& prepared) {
 // image by image (ImageGroupRevalidates).
 bool StageRecordsEnabled() noexcept {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_STAGE_RECORDS");
+		const char* text = KYTY_GETENV("KYTY_STAGE_RECORDS");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("records");
@@ -1191,7 +1192,7 @@ static bool ImageGroupRevalidates(TextureCache& cache, PreparedBindings& prepare
 // alternates.
 static bool ImageRetickEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_IMAGE_RETICK");
+		const char* text = KYTY_GETENV("KYTY_IMAGE_RETICK");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("retick");
@@ -1229,7 +1230,7 @@ static bool ImageGroupRetick(TextureCache& cache, PreparedBindings& prepared) {
 	}
 	cache.MarkImagesAccessed(found);
 	state = current;
-	static const bool verify = std::getenv("KYTY_VERIFY_IMAGE_RETICK") != nullptr;
+	static const bool verify = KYTY_GETENV("KYTY_VERIFY_IMAGE_RETICK") != nullptr;
 	if (verify) [[unlikely]] {
 		static uint64_t checked = 0;
 		static uint64_t differ  = 0;
@@ -1382,7 +1383,7 @@ static void NoteBindingRepeat(PreparedBindings& prepared, const ShaderStageRunti
 	// descriptors (image, buffer and sampler values) that a stage of one of the last four frames
 	// bound too, and how many of those have the same buffers but other images or the reverse:
 	// what a cache of prepared bindings kept across frames could serve.
-	static const bool frame_repeat = std::getenv("KYTY_DEBUG_FRAME_REPEAT") != nullptr;
+	static const bool frame_repeat = KYTY_GETENV("KYTY_DEBUG_FRAME_REPEAT") != nullptr;
 	if (frame_repeat) {
 		auto&          state = g_frame_repeat;
 		const uint64_t program_key = reinterpret_cast<uint64_t>(key.program) * 0x9E3779B97F4A7C15ull;
@@ -1657,7 +1658,7 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 // alternates.
 static bool StorageReuseEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_DEBUG_STORAGE_REUSE");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_STORAGE_REUSE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("storagereuse");
@@ -1667,14 +1668,14 @@ static bool StorageReuseEnabled() {
 // KYTY_VERIFY_STORAGE_REUSE=1: a storage binding that keeps its view acquires it anyway and
 // reports what FindTexture returned differently or changed (see TextureCache::IsStorageCurrent).
 static bool VerifyStorageReuse() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_STORAGE_REUSE") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_STORAGE_REUSE") != nullptr;
 	return enabled;
 }
 
 // KYTY_VERIFY_VIEW_REUSE=1: the same for sampled textures, including views that another slot's
 // binding of the description acquired (the view memo, see ResolveTextureInto).
 static bool VerifyViewReuse() {
-	static const bool enabled = std::getenv("KYTY_VERIFY_VIEW_REUSE") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_VERIFY_VIEW_REUSE") != nullptr;
 	return enabled;
 }
 
@@ -2012,7 +2013,7 @@ bool RecordPushedBindings(vk::CommandBuffer buffer, vk::Device device,
 // KYTY_BINDING_PLAN=0 commits without plans; KYTY_DEBUG_AB=bindplan alternates.
 bool BindingPlanEnabled() {
 	static const bool enabled = [] {
-		const char* text = std::getenv("KYTY_BINDING_PLAN");
+		const char* text = KYTY_GETENV("KYTY_BINDING_PLAN");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	static const bool ab = AbSelected("bindplan");

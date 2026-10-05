@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/frontend/translate/Translator.h"
+#include "common/switches.h"
 
 #include <cstdlib>
 #include <cstring>
@@ -12,7 +13,7 @@ namespace {
 // builds before the merge: a last-bit difference, and one host instruction instead of two.
 IR::ValueOpcode MadOpcode() {
 	static const bool legacy = [] {
-		const char* text = std::getenv("KYTY_LEGACY_MAD");
+		const char* text = KYTY_GETENV("KYTY_LEGACY_MAD");
 		return text != nullptr && std::strcmp(text, "0") != 0;
 	}();
 	return legacy ? IR::ValueOpcode::FPMad32 : IR::ValueOpcode::FPFma32;

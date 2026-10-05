@@ -4,6 +4,7 @@
 #include "common/common.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/host_gpu/renderer/render.h"
@@ -627,7 +628,7 @@ static void AaCheck(const HW::AaSampleControl& c, const HW::AaConfig& cf) {
 
 uint64_t DrawPhaseTimer::Hash() {
 	static const uint64_t hash = [] {
-		const char* text = std::getenv("KYTY_DEBUG_DRAW_PHASES");
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DRAW_PHASES");
 		if (text == nullptr) {
 			return uint64_t {0};
 		}
@@ -643,8 +644,8 @@ uint64_t DrawPhaseTimer::Now() {
 // KYTY_DEBUG_FULL_BARRIERS_FILE=<path> turns them on only while that file exists (checked twice a
 // second): a route that needs the normal frame rate to get somewhere creates it on arrival.
 bool DebugFullBarriers() noexcept {
-	static const bool  enabled = std::getenv("KYTY_DEBUG_FULL_BARRIERS") != nullptr;
-	static const char* file    = std::getenv("KYTY_DEBUG_FULL_BARRIERS_FILE");
+	static const bool  enabled = KYTY_GETENV("KYTY_DEBUG_FULL_BARRIERS") != nullptr;
+	static const char* file    = KYTY_GETENV("KYTY_DEBUG_FULL_BARRIERS_FILE");
 	if (enabled || file == nullptr) {
 		return enabled;
 	}
@@ -661,15 +662,15 @@ bool DebugFullBarriers() noexcept {
 
 bool ComputeChainEnabled() noexcept {
 	static const bool enabled = [] {
-		const char* value = std::getenv("KYTY_COMPUTE_CHAIN");
-		return value != nullptr && value[0] != '0' && std::getenv("KYTY_DEBUG_FULL_BARRIERS") == nullptr &&
-		       std::getenv("KYTY_DEBUG_FULL_BARRIERS_FILE") == nullptr;
+		const char* value = KYTY_GETENV("KYTY_COMPUTE_CHAIN");
+		return value != nullptr && value[0] != '0' && KYTY_GETENV("KYTY_DEBUG_FULL_BARRIERS") == nullptr &&
+		       KYTY_GETENV("KYTY_DEBUG_FULL_BARRIERS_FILE") == nullptr;
 	}();
 	return enabled;
 }
 
 bool ReadbackAgeEnabled() noexcept {
-	static const bool enabled = std::getenv("KYTY_DEBUG_READBACK_AGE") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_READBACK_AGE") != nullptr;
 	return enabled;
 }
 
@@ -730,7 +731,7 @@ static bool LiveSkipListed(const char* file, uint64_t shader_hash) {
 bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) noexcept {
 	// KYTY_DEBUG_SHADER_ACTIVITY=1 prints each shader the first time it runs and again whenever it
 	// runs after 3 s unused, to find the shaders behind a short effect (a splash, a flash).
-	static const bool activity = std::getenv("KYTY_DEBUG_SHADER_ACTIVITY") != nullptr;
+	static const bool activity = KYTY_GETENV("KYTY_DEBUG_SHADER_ACTIVITY") != nullptr;
 	if (activity && shader_hash != 0) {
 		static std::mutex                             mutex;
 		static std::unordered_map<uint64_t, int64_t> last_used;
@@ -750,7 +751,7 @@ bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) no
 		}
 		it->second = now_ms;
 	}
-	static const char* live_file = std::getenv("KYTY_DEBUG_SKIP_SHADERS_LIVE");
+	static const char* live_file = KYTY_GETENV("KYTY_DEBUG_SKIP_SHADERS_LIVE");
 	if (live_file != nullptr && shader_hash != 0 && kind != DebugShaderKind::Compute &&
 	    LiveSkipListed(live_file, shader_hash)) {
 		return true;
@@ -764,7 +765,7 @@ bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) no
 	};
 	static const std::vector<Entry> entries = [] {
 		std::vector<Entry> list;
-		for (const char* text = std::getenv("KYTY_DEBUG_SKIP_SHADERS"); text != nullptr;) {
+		for (const char* text = KYTY_GETENV("KYTY_DEBUG_SKIP_SHADERS"); text != nullptr;) {
 			const bool only_pixel   = std::strncmp(text, "p:", 2) == 0;
 			const bool only_compute = std::strncmp(text, "c:", 2) == 0;
 			text += only_pixel || only_compute ? 2 : 0;
@@ -800,7 +801,7 @@ bool DebugSkipShader(uint64_t shader_hash, DebugShaderKind kind, bool bisect) no
 	if (!listed) {
 		return false;
 	}
-	static const char* file = std::getenv("KYTY_DEBUG_SKIP_SHADERS_FILE");
+	static const char* file = KYTY_GETENV("KYTY_DEBUG_SKIP_SHADERS_FILE");
 	if (file != nullptr) {
 		static std::atomic<int64_t> next_check {0};
 		static std::atomic<bool>    present {false};
@@ -844,7 +845,7 @@ static std::atomic<bool> g_ab_off {false};
 
 static bool AbEnabled() {
 	static const bool enabled =
-	    DrawPhaseTimer::Hash() != 0 && std::getenv("KYTY_DEBUG_AB") != nullptr;
+	    DrawPhaseTimer::Hash() != 0 && KYTY_GETENV("KYTY_DEBUG_AB") != nullptr;
 	return enabled;
 }
 
@@ -852,7 +853,7 @@ bool AbSelected(const char* feature) noexcept {
 	if (!AbEnabled()) {
 		return false;
 	}
-	const std::string_view features = std::getenv("KYTY_DEBUG_AB");
+	const std::string_view features = KYTY_GETENV("KYTY_DEBUG_AB");
 	if (features == "1") {
 		return std::string_view(feature) == "reuse";
 	}
@@ -869,7 +870,7 @@ bool AbSelected(const char* feature) noexcept {
 // KYTY_DEBUG_AB_OFF=1 keeps the selected features off for the whole run instead of alternating
 // (to see a scene without them, e.g. for visual bisection).
 bool AbFeatureOff() noexcept {
-	static const bool forced = std::getenv("KYTY_DEBUG_AB_OFF") != nullptr;
+	static const bool forced = KYTY_GETENV("KYTY_DEBUG_AB_OFF") != nullptr;
 	return forced || g_ab_off.load(std::memory_order_relaxed);
 }
 
@@ -1010,7 +1011,7 @@ int StampSurface(uint64_t address, bool add) {
 } // namespace
 
 bool StampTraceEnabled() noexcept {
-	static const bool enabled = std::getenv("KYTY_DEBUG_STAMP_TRACE") != nullptr;
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_STAMP_TRACE") != nullptr;
 	return enabled;
 }
 
@@ -1071,7 +1072,7 @@ void StampTraceFrame() noexcept {
 
 bool UploadStatsEnabled() noexcept {
 	static const bool enabled =
-	    DrawPhaseTimer::Hash() != 0 && std::getenv("KYTY_DEBUG_UPLOADS") != nullptr;
+	    DrawPhaseTimer::Hash() != 0 && KYTY_GETENV("KYTY_DEBUG_UPLOADS") != nullptr;
 	return enabled;
 }
 
@@ -1150,7 +1151,7 @@ void RecordImageChunks(uint64_t address, uint64_t size) noexcept {
 
 bool BindStatsEnabled() noexcept {
 	static const bool enabled =
-	    DrawPhaseTimer::Hash() != 0 && std::getenv("KYTY_DEBUG_BIND_STATS") != nullptr;
+	    DrawPhaseTimer::Hash() != 0 && KYTY_GETENV("KYTY_DEBUG_BIND_STATS") != nullptr;
 	return enabled;
 }
 
