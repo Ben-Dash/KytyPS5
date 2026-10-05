@@ -106,6 +106,8 @@ struct HudStats {
 	// The most drawn viewport of the last second that is no square (shadow maps), as w << 32 | h.
 	std::atomic<uint64_t> render_size {0};
 	std::atomic<uint64_t> draws_per_second {0};
+	// The game's frame rate as the window title shows it, times 10.
+	std::atomic<uint32_t> game_fps_x10 {0};
 };
 inline HudStats g_hud;
 

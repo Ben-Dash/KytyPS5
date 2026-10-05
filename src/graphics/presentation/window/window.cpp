@@ -13,6 +13,7 @@
 #include "common/timer.h"
 #include "common/stringUtils.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -918,6 +919,8 @@ void WindowContext::UpdateTitle(bool new_frame) {
 	                             Common::Timer::QueryPerformanceFrequency(), new_frame)) {
 		return;
 	}
+	g_hud.game_fps_x10.store(static_cast<uint32_t>(frame_statistics.FrameRate() * 10.0 + 0.5),
+	                         std::memory_order_relaxed);
 	static char title[128];
 	static char title_id[12];
 	static char app_ver[12];

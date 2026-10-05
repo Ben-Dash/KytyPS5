@@ -114,6 +114,8 @@ enum class OverlayKind : uint8_t { None, Ime, Error, Settings };
 // so each opening is a new session and the presenter redraws when it closes.
 std::atomic<bool>     g_settings_open {false};
 std::atomic<uint64_t> g_settings_generation {0};
+// Bumped when F3 shows or hides the info display, so the presenter redraws.
+std::atomic<uint64_t> g_hud_generation {0};
 
 struct OverlaySession {
 	OverlayKind kind       = OverlayKind::None;
@@ -494,9 +496,11 @@ SystemOverlayVisualState GetSystemOverlayVisualState() noexcept {
 	const auto dialog = DialogIme::GetVisualState();
 	const auto error  = ErrorDialog::GetVisualState();
 	return {core.active || dialog.active || error.active ||
-	            g_settings_open.load(std::memory_order_acquire),
+	            g_settings_open.load(std::memory_order_acquire) ||
+	            g_hud.active.load(std::memory_order_relaxed),
 	        core.revision + dialog.revision + error.revision +
-	            g_settings_generation.load(std::memory_order_acquire)};
+	            g_settings_generation.load(std::memory_order_acquire) +
+	            g_hud_generation.load(std::memory_order_acquire)};
 }
 
 bool ProcessSystemOverlayInput(const SDL_Event& event) {
@@ -535,6 +539,7 @@ bool ProcessSystemOverlayInput(const SDL_Event& event) {
 	// F3 shows and hides the info display (render resolution, frame rate, draws).
 	if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && event.key.key == SDLK_F3) {
 		g_hud.active.store(!g_hud.active.load(std::memory_order_relaxed), std::memory_order_relaxed);
+		g_hud_generation.fetch_add(1, std::memory_order_acq_rel);
 		return true;
 	}
 	// F2 opens and closes the emulator settings panel, unless a game dialog owns the overlay.
@@ -1226,9 +1231,14 @@ struct SystemOverlay::Impl {
 		                 ImGuiWindowFlags_NoNav);
 		ImGui::Text("Render: %ux%u", static_cast<uint32_t>(size >> 32u), static_cast<uint32_t>(size));
 		ImGui::Text("Window: %ux%u", extent.width, extent.height);
-		ImGui::Text("FPS: %.1f (%.1f ms)", hud_fps, hud_fps > 0.0f ? 1000.0f / hud_fps : 0.0f);
+		// The game's frame rate (new frames, as in the window title); the presents above it are
+		// repeats of the last frame.
+		const float game_fps =
+		    static_cast<float>(g_hud.game_fps_x10.load(std::memory_order_relaxed)) / 10.0f;
+		ImGui::Text("FPS: %.1f (%.1f ms)", game_fps, game_fps > 0.0f ? 1000.0f / game_fps : 0.0f);
+		ImGui::Text("Presents: %.0f/s", hud_fps);
 		ImGui::Text("Draws: %.0f/frame",
-		            hud_fps > 0.0f ? static_cast<double>(draws) / static_cast<double>(hud_fps) : 0.0);
+		            game_fps > 0.0f ? static_cast<double>(draws) / static_cast<double>(game_fps) : 0.0);
 		ImGui::Text("Timestamp scale: %u%%", Config::GetGpuTimestampScalePercent());
 		if (hud_memory_mb != 0) {
 			ImGui::Text("VRAM: %u MB", hud_memory_mb);
