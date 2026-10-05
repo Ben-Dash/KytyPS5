@@ -10,6 +10,7 @@
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
@@ -102,9 +103,27 @@ bool LoopsNeedExitTest(const EmitterState& state) {
 	return state.loop_guard_variable != 0 || state.bda_fault_seen_variable != 0;
 }
 
-// Whether this invocation has to leave its loops: it read a page missing from the BDA page
-// table, or (KYTY_DEBUG_LOOP_GUARD) it passed the iteration limit.
-uint32_t EmitLoopGuardExceeded(EmitterState& state) {
+uint32_t EmitLoopGuardExceededLane(EmitterState& state, bool counted);
+
+// Whether the invocation has to leave its loops: it read a page missing from the BDA page table,
+// or (KYTY_DEBUG_LOOP_GUARD) it passed the iteration limit. A shader that exchanges values
+// between lanes leaves together with its whole subgroup: guest loops run in wave-uniform control
+// flow, and a lane leaving alone takes its share of wave-wide state with it. A BVH traversal
+// whose stack lives one entry per lane (V_WRITELANE/V_READLANE) then popped the entry below the
+// departed lane forever (Playroom lab, cs d0c04d632a1db584).
+uint32_t EmitLoopGuardExceeded(EmitterState& state, bool counted = true) {
+	const auto lane = EmitLoopGuardExceededLane(state, counted);
+	if (!state.requirements.subgroup_ballot && !state.requirements.subgroup_shuffle) {
+		return lane;
+	}
+	state.builder.RequireCapability(spv::CapabilityGroupNonUniformVote);
+	const auto any = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpGroupNonUniformAny, TypeBool(state), any,
+	                          ConstantU32(state, spv::ScopeSubgroup), lane);
+	return any;
+}
+
+uint32_t EmitLoopGuardExceededLane(EmitterState& state, bool counted) {
 	uint32_t faulted = 0;
 	if (state.bda_fault_seen_variable != 0) {
 		const auto seen = state.builder.AllocateId();
@@ -113,7 +132,7 @@ uint32_t EmitLoopGuardExceeded(EmitterState& state) {
 		faulted = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpINotEqual, TypeBool(state), faulted, seen,
 		                          ConstantU32(state, 0));
-		if (state.loop_guard_variable == 0) {
+		if (state.loop_guard_variable == 0 || !counted) {
 			return faulted;
 		}
 	}
@@ -140,12 +159,45 @@ bool EmitStructuredLoopGuard(ValueEmitContext& ctx, const IR::BlockInfo& info) {
 	if (!LoopsNeedExitTest(state) || !term.loop_header) {
 		return false;
 	}
+	// KYTY_DEBUG_LOOP_GUARD_PCS=<hex pc>[,...]: KYTY_DEBUG_LOOP_GUARD only counts the loops whose
+	// first guest block (after a structured header without code) starts at one of these guest
+	// addresses, to find the loop that does not end; the BDA fault exit stays on every loop.
+	static const std::vector<uint32_t> guarded_pcs = [] {
+		std::vector<uint32_t> list;
+		for (const char* p = std::getenv("KYTY_DEBUG_LOOP_GUARD_PCS"); p != nullptr && *p != '\0';) {
+			char*      end   = nullptr;
+			const auto value = std::strtoul(p, &end, 16);
+			if (end == p) {
+				break;
+			}
+			list.push_back(static_cast<uint32_t>(value));
+			p = *end == ',' ? end + 1 : end;
+		}
+		return list;
+	}();
+	bool counted = guarded_pcs.empty() || state.loop_guard_variable == 0;
+	if (!counted) {
+		auto pc = info.start_pc;
+		if (pc == 0) {
+			const auto body = std::ranges::find_if(state.program.block_info, [&](const IR::BlockInfo& b) {
+				return b.id == term.true_block;
+			});
+			pc = body != state.program.block_info.end() ? body->start_pc : 0;
+		}
+		counted = std::ranges::find(guarded_pcs, pc) != guarded_pcs.end();
+		if (counted) {
+			std::printf("loop guard: counting the loop at pc 0x%x\n", pc);
+		}
+	}
+	if (!counted && state.bda_fault_seen_variable == 0) {
+		return false;
+	}
 	const auto* merge = TargetBlock(state.program, term.merge_block);
 	const auto* cont  = TargetBlock(state.program, term.continue_block);
 	if (merge == nullptr || cont == nullptr) {
 		return false;
 	}
-	const auto exceeded = EmitLoopGuardExceeded(state);
+	const auto exceeded = EmitLoopGuardExceeded(state, counted);
 	const auto check    = state.builder.AllocateId();
 	const auto bail     = state.builder.AllocateId();
 	const auto resume   = state.builder.AllocateId();
