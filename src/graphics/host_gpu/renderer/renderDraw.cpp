@@ -1308,6 +1308,7 @@ static bool GetDrawTopology(const HW::UserConfig& ucfg, vk::PrimitiveTopology& t
 			topology = vk::PrimitiveTopology::eTriangleList;
 			break;
 		case Prospero::PrimitiveType::kTriFan:
+		case Prospero::PrimitiveType::kPolygon:
 			topology = vk::PrimitiveTopology::eTriangleFan;
 			break;
 		case Prospero::PrimitiveType::kTriStrip:
@@ -1817,6 +1818,7 @@ static void EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_
 		case Prospero::PrimitiveType::kTriFan:
 		case Prospero::PrimitiveType::kTriStrip:
 		case Prospero::PrimitiveType::kRectList:
+		case Prospero::PrimitiveType::kPolygon:
 		case Prospero::PrimitiveType::kRectListLegacy:
 		case Prospero::PrimitiveType::kPatch:
 			if (draw.IsIndexed()) {
@@ -2574,8 +2576,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		               (uint64_t {static_cast<uint32_t>(ucfg.GetPrimType())} << 32u));
 		if (state.ps_active) {
 			const auto& ps = state.ps_input_info;
-			chain_key.Push(uint64_t {ps.alpha_blend_source_remap} | (uint64_t {ps.ps_sample_shading} << 1u) |
-			               (uint64_t {ps.ps_execute_on_noop} << 2u) | 8u);
+			chain_key.Push(uint64_t {static_cast<uint32_t>(ps.alpha_blend_source)} |
+			               (uint64_t {ps.ps_sample_shading} << 8u) |
+			               (uint64_t {ps.ps_execute_on_noop} << 9u) | (uint64_t {1} << 10u));
 		}
 		chain_key.Push(state.color_count);
 		for (uint32_t i = 0; i < state.color_count; i++) {

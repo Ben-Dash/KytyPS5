@@ -5,8 +5,15 @@
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
 
-void AllocateBindings(Program& program, uint32_t push_data_start_dword = 0);
+void AllocateBindings(Program& program, uint32_t push_data_start_dword = 0,
+                      bool lds_storage = false);
 
+struct SharedMemoryResources {
+	bool lds = false;
+	bool gds = false;
+};
+
+SharedMemoryResources CollectMemoryResources(const Program& program, std::vector<uint32_t>& buffers);
 bool UsesFlattenedSrt(const Program& program);
 
 const DescriptorBinding* FindBinding(const BindingLayout& layout, DescriptorBindingKind kind);

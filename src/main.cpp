@@ -62,6 +62,8 @@ static void PrintUsage() {
 	         Config::DEFAULT_USER_ID);
 	::printf("  --mic <name>                        Capture from this microphone; omit for silence.\n");
 	::printf("  --controller-color <#RRGGBB>        Override the controller lightbar color.\n");
+	::printf("  --controller-volume <0-100>         DualSense speaker volume. Default: 50.\n");
+	::printf("  --controller-vibration <0-100>      DualSense vibration intensity. Default: 100.\n");
 	::printf(
 	    "  --present-mode <value>               Fifo, Mailbox, or Immediate. Default: Mailbox.\n");
 	::printf("  --bda-sync <value>                   Selective, Legacy, or SelectiveChecked. "
@@ -69,6 +71,8 @@ static void PrintUsage() {
 	::printf(
 	    "  --gpu <index>                        Vulkan physical device index. Default: auto.\n");
 	::printf("  --fullscreen                         Run in borderless desktop fullscreen.\n");
+	::printf(
+	    "  --hide-cursor                        Hide the cursor after 2 s idle. Default: off.\n");
 	::printf("  --vr                                 Enable the virtual VR headset.\n");
 	::printf("  --amd-cpu                            Apply AMD CPU instruction patches.\n");
 	::printf("  --dualsense-fix                      Vibration, adaptive triggers and controller speaker\n"
@@ -95,6 +99,8 @@ static void PrintUsage() {
 	::printf("  --spirv-debug-printf <true|false>    Enable SPIR-V debug printf.\n");
 	::printf(
 	    "  --readback-linear-images <true|false> Read back writable linear images on submit.\n");
+	::printf(
+	    "  --trophy-notifications <true|false>   Show trophy unlock toasts and play their sound.\n");
 	::printf("  --playgo-hack                       Use the supplied PlayGo stub fallback.\n");
 	::printf("  --drain-stats <seconds>              Report GPU waits by cause every N seconds.\n");
 	::printf("  --dcc-gpu-clear <true|false>         Apply GPU-written DCC clears on the GPU. "
@@ -326,6 +332,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			continue;
 		}
 
+		if (arg == "--hide-cursor") {
+			options.config.hide_cursor_enabled = true;
+			continue;
+		}
+
 		if (arg == "--vr") {
 			options.config.vr_enabled = true;
 			continue;
@@ -452,6 +463,18 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 				return false;
 			}
 			options.config.controller_color = color;
+		} else if (arg == "--controller-volume") {
+			if (!ParseUint32(value, options.config.controller_speaker_volume) ||
+			    options.config.controller_speaker_volume > 100) {
+				::printf("invalid controller volume: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--controller-vibration") {
+			if (!ParseUint32(value, options.config.controller_vibration_intensity) ||
+			    options.config.controller_vibration_intensity > 100) {
+				::printf("invalid controller vibration intensity: %s\n", value.c_str());
+				return false;
+			}
 		} else if (arg == "--present-mode") {
 			if (!ParseEnum(value, options.config.present_mode)) {
 				::printf("invalid present mode: %s\n", value.c_str());
@@ -619,6 +642,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--readback-linear-images") {
 			if (!ParseBool(value, options.config.readback_linear_images)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--trophy-notifications") {
+			if (!ParseBool(value, options.config.trophy_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}

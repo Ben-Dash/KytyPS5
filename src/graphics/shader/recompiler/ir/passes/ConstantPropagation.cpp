@@ -473,6 +473,11 @@ void FoldInstruction(Block& block, Block::iterator instruction,
                       std::unordered_set<Inst*>& lowered_ancillary, PossibleValues& possible) {
 	auto& inst = *instruction;
 	switch (inst.GetOpcode()) {
+		case ValueOpcode::StoreBufferU32: {
+			const auto data = ResolveActiveU32(Arg(inst, 4), Arg(inst, 5));
+			if (!data.IsEmpty() && data != inst.Arg(4)) inst.SetArg(4, data);
+			return;
+		}
 		case ValueOpcode::Phi: FoldPhi(inst); return;
 		case ValueOpcode::SelectU1:
 			if (!FoldSelect(inst) && IsImmediate(Arg(inst, 2), Type::U1) &&
@@ -774,6 +779,17 @@ void FoldInstruction(Block& block, Block::iterator instruction,
 			} else if (auto* producer = value.TryInstruction();
 			           producer != nullptr && producer->GetOpcode() == ValueOpcode::BitwiseNot32) {
 				Replace(inst, producer->Arg(0));
+			}
+			return;
+		}
+		case ValueOpcode::BitReverse32: {
+			const auto value = Arg(inst, 0);
+			if (IsImmediate(value, Type::U32)) {
+				uint32_t source = value.U32(), reversed = 0;
+				for (uint32_t bit = 0; bit < 32u; ++bit, source >>= 1u) {
+					reversed = (reversed << 1u) | (source & 1u);
+				}
+				Replace(inst, Value(reversed));
 			}
 			return;
 		}

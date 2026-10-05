@@ -24,6 +24,7 @@ void Load(const ConfigOptions& cfg) {
 	EXIT_IF(g_config == nullptr);
 	EXIT_IF(cfg.user_name.empty() || cfg.user_name.size() > MAX_USER_NAME_LENGTH);
 	EXIT_IF(!IsConfiguredUserIdValid(cfg.user_id));
+	EXIT_IF(cfg.controller_speaker_volume > 100 || cfg.controller_vibration_intensity > 100);
 
 	*g_config = cfg;
 }
@@ -52,6 +53,14 @@ const std::optional<ControllerColor>& GetControllerColor() {
 	return g_config->controller_color;
 }
 
+uint32_t GetControllerSpeakerVolume() {
+	return g_config->controller_speaker_volume;
+}
+
+uint32_t GetControllerVibrationIntensity() {
+	return g_config->controller_vibration_intensity;
+}
+
 PresentMode GetPresentMode() {
 	return g_config->present_mode;
 }
@@ -66,6 +75,10 @@ int32_t GetGpuIndex() {
 
 bool FullscreenEnabled() {
 	return g_config->fullscreen_enabled;
+}
+
+bool HideCursorEnabled() {
+	return g_config->hide_cursor_enabled;
 }
 
 bool VrEnabled() {
@@ -150,6 +163,10 @@ bool ReadbackLinearImagesEnabled() {
 
 bool TessellationEnabled() {
 	return g_config->tessellation_enabled;
+}
+
+bool TrophyEnabled() {
+	return g_config->trophy_enabled;
 }
 
 bool PlayGoHackEnabled() {

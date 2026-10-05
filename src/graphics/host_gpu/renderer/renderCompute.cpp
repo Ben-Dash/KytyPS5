@@ -22,6 +22,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
+#include "graphics/shader/recompiler/ir/passes/BindingLayout.h"
 #include "graphics/shader/shader.h"
 #include "kernel/eventQueue.h"
 #include "kernel/memory.h"
@@ -505,6 +506,35 @@ static void DebugDumpDispatchInputs(RenderContext& context, const ShaderStageRun
 	}
 }
 
+static void BindSharedMemory(RenderContext& context, ShaderComputeInputInfo& input,
+                             PreparedBindings& bindings, uint64_t indirect_args = 0) {
+	if (ShaderRecompiler::IR::FindBinding(input.stage.program->bindings,
+	        ShaderRecompiler::IR::DescriptorBindingKind::SharedMemory) == nullptr) {
+		return;
+	}
+	auto& cache = context.GetBufferCache();
+	if (indirect_args != 0) {
+		cache.ReadMemory(indirect_args, sizeof(vk::DispatchIndirectCommand));
+		std::memcpy(input.workgroup_counts, reinterpret_cast<const void*>(indirect_args),
+		            sizeof(input.workgroup_counts));
+	}
+	// LDS has no contents to preserve between dispatches. The existing shader hazard
+	// barriers also order other users of this GPU-only utility buffer.
+	auto& storage = cache.GetUtilityBuffer(MemoryUsage::DeviceLocal);
+	const auto limit = std::min<uint64_t>(storage.Size(),
+	    context.GetGraphics().GetPhysicalDeviceProperties().limits.maxStorageBufferRange);
+	uint64_t size = sizeof(uint32_t);
+	if (std::ranges::find(input.workgroup_counts, 0u) == std::end(input.workgroup_counts)) {
+		size = uint64_t {input.lds_size_dwords} * sizeof(uint32_t);
+		EXIT_IF(size == 0 || size > limit);
+		for (const auto count: input.workgroup_counts) {
+			EXIT_IF(size > limit / count);
+			size *= count;
+		}
+	}
+	bindings.shared_memory = {storage.Handle(), 0, size};
+}
+
 void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
                                     uint32_t thread_group_x, uint32_t thread_group_y,
                                     uint32_t thread_group_z, uint32_t mode) {
@@ -564,6 +594,18 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	ShaderComputeInputInfo input_info {};
 	const bool use_thread_dimensions = (mode & DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0;
 	input_info.dispatch_thread_dimensions = use_thread_dimensions;
+	input_info.workgroup_counts[0] = thread_group_x;
+	input_info.workgroup_counts[1] = thread_group_y;
+	input_info.workgroup_counts[2] = thread_group_z;
+	if (use_thread_dimensions) {
+		const uint32_t group_sizes[] = {cs_regs.cs_regs.num_thread_x, cs_regs.cs_regs.num_thread_y,
+		                                cs_regs.cs_regs.num_thread_z};
+		for (uint32_t axis = 0; axis < 3u; ++axis) {
+			const auto size = std::max(group_sizes[axis], 1u);
+			const auto threads = input_info.workgroup_counts[axis];
+			input_info.workgroup_counts[axis] = threads / size + (threads % size != 0u);
+		}
+	}
 	const auto compute_program = [&] {
 		DrainStats::SlowLookupTimer compile_timer(DrainStats::Kind::ShaderCompile);
 		return m_context.GetPipelineCache().GetComputeProgram(cs_regs, sh_regs, input_info);
@@ -599,22 +641,20 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		return;
 	}
 
-	const bool large_workgroup =
-	    (input_info.threads_num[0] * input_info.threads_num[1] * input_info.threads_num[2] >= 512);
-	const bool                   has_sampler = !program.info.samplers.empty();
-	static std::atomic<uint32_t> dispatch_log_count {0};
-	if ((large_workgroup || has_sampler) &&
-	    dispatch_log_count.fetch_add(1, std::memory_order_relaxed) < 512) {
+	if (Config::GraphicsDebugDumpEnabled()) {
 		const auto sampled_images = std::count_if(
 		    program.info.images.begin(), program.info.images.end(), [](const auto& image) {
 			    return image.resource_class == ShaderRecompiler::IR::ImageResourceClass::Sampled;
 		    });
 		const uint32_t frame_num = static_cast<uint32_t>(m_context.GetGpu().GetFrameNum());
 		LOGF("GraphicsRenderDispatchDirect: frame=%u shader=0x%016" PRIx64
+		     " hash=0x%016" PRIx64 " tick=%" PRIu64
 		     " groups=%ux%ux%u mode=0x%08" PRIx32 " local=%ux%ux%u "
 		     "buffers=%zu textures=%zu sampled=%zu storage=%zu samplers=%zu push=%u\n",
-		     frame_num, sh_ctx.GetCs().cs_regs.data_addr, thread_group_x, thread_group_y,
-		     thread_group_z, mode, input_info.threads_num[0], input_info.threads_num[1],
+		     frame_num, sh_ctx.GetCs().cs_regs.data_addr, program.shader_hash,
+		     m_context.GetCommandScheduler().CurrentTick(),
+		     thread_group_x, thread_group_y, thread_group_z, mode,
+		     input_info.threads_num[0], input_info.threads_num[1],
 		     input_info.threads_num[2], program.info.buffers.size(), program.info.images.size(),
 		     sampled_images, program.info.images.size() - sampled_images,
 		     program.info.samplers.size(),
@@ -648,7 +688,8 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 			     static_cast<uint32_t>(r.TileMode()));
 		}
 		for (uint32_t i = 0; i < program.info.samplers.size(); i++) {
-			const auto r = DecodeNativeDescriptor<ShaderSamplerResource>(resources.samplers[i]);
+			const auto r = DecodeNativeDescriptor<ShaderSamplerResource>(
+			    resources.samplers[program.info.samplers[i].snapshot_index]);
 			LOGF("  CS sampler[%u]: source=%u clamp=%u/%u/%u filter=%u/%u/%u mip=%u "
 			     "lod=%u-%u bias=%d\n",
 			     i, program.info.samplers[i].source, static_cast<uint32_t>(r.ClampX()),
@@ -692,6 +733,10 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}();
 	auto& bindings = m_compute_bindings;
 	PrepareBindings(input_info.stage, bindings);
+	if (program.bindings.dispatch_thread_dword != ShaderRecompiler::IR::PushData::NoStart) {
+		std::copy(std::begin(input_info.dispatch_threads_num), std::end(input_info.dispatch_threads_num),
+		          bindings.shader_data.begin() + program.bindings.dispatch_thread_dword);
+	}
 	FindBuffers(bindings);
 	DebugDumpDispatchInputs(m_context, input_info.stage);
 	if (program.info.uses_dma) {
@@ -710,6 +755,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		}
 	}
 	RebindImages(bindings);
+	BindSharedMemory(m_context, input_info, bindings);
 	if (ImageUsersEnabled()) [[unlikely]] {
 		PreparedBindings* const compute_stages[] {&bindings};
 		NoteImageUsers(m_context.GetTextureCache(), compute_stages, {}, nullptr, 0,
@@ -717,7 +763,8 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	RebindBuffers(bindings);
 
-	const bool        chain            = ComputeChainEnabled();
+	// The large shared memory buffer is reused by every dispatch: no chaining past one.
+	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr;
 	auto              vk_buffer        = chain ? buffer.ChainHandle() : buffer.Handle();
 	PreparedBindings* descriptor_stage = &bindings;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
@@ -727,7 +774,8 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	if (chain) {
 		NoteComputeChain(continues_chain);
 	}
-	bool has_storage_writes = HasShaderBufferWrites(input_info.stage);
+	bool has_storage_writes = bindings.shared_memory.buffer != nullptr ||
+	    HasShaderBufferWrites(input_info.stage);
 	has_storage_writes =
 	    std::any_of(program.info.images.begin(), program.info.images.end(),
 	                [](const auto& image) {
@@ -819,6 +867,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 			                                             0x100u);
 		}
 	}
+	BindSharedMemory(m_context, input_info, bindings, args_addr);
 	RebindImages(bindings);
 	if (ImageUsersEnabled()) [[unlikely]] {
 		PreparedBindings* const compute_stages[] {&bindings};
@@ -831,7 +880,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
 	PreparedBindings* descriptor_stage = &bindings;
-	const bool chain = ComputeChainEnabled();
+	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
 	               std::span {&descriptor_stage, 1u}, chain);
 	const bool continues_chain = chain && buffer.ComputeChainPending();
@@ -839,7 +888,8 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		NoteComputeChain(continues_chain);
 	}
 	const auto vk_buffer = chain ? buffer.ChainHandle() : buffer.Handle();
-	const bool has_storage_writes = HasShaderBufferWrites(input_info.stage) ||
+	const bool has_storage_writes = bindings.shared_memory.buffer != nullptr ||
+	    HasShaderBufferWrites(input_info.stage) ||
 	    std::any_of(program.info.images.begin(), program.info.images.end(), [](const auto& image) {
 		    return image.written && image.resource_class ==
 		                                ShaderRecompiler::IR::ImageResourceClass::Storage;

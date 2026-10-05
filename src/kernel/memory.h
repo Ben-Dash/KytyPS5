@@ -121,6 +121,7 @@ void                   ReadGuestOnGpuThread(uint64_t vaddr, void* data, uint64_t
 // Copies a range within one page when ReadGuestOnGpuThread would read it as a plain copy (no
 // GPU-dirty hint on the page); false otherwise, and nothing is read.
 bool                   TryReadGuestPlainOnGpuThread(uint64_t vaddr, void* data, uint64_t size);
+bool                   TryReadBufferBacking(uint64_t vaddr, void* data, uint64_t size);
 bool                   TryReadSparseBacking(uint64_t vaddr, void* data, uint64_t size);
 [[nodiscard]] uint64_t ClampRangeSize(uint64_t vaddr, uint64_t size);
 void                   WriteBacking(uint64_t vaddr, const void* data, uint64_t size) noexcept;
@@ -197,6 +198,7 @@ bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size, Common::VirtualMemory
 bool FreeGuestMemory(uint64_t vaddr, uint64_t size);
 
 #if defined(KYTY_VIRTUAL_MEMORY_ALLOCATION_TESTS)
+void     TestBeforeNextBackingMap(callback_func_t callback);
 void     TestFailNextPhysicalMemoryUnmap();
 void     TestFailPhysicalMemoryUnmapAfter(uint32_t successful_unmaps);
 void     TestFailGuestBackingStoreUnmapAfter(uint32_t successful_unmaps);
