@@ -8,9 +8,8 @@ namespace Libs::Graphics::ShaderRecompiler::Frontend {
 namespace {
 
 // KYTY_LEGACY_MAD=1 translates V_MAD/V_MAC_F32 with their legacy rounding: multiply and add
-// rounded separately (upstream d8be245c). By default they are fused like V_FMA_F32, which costs a
-// last-bit difference but runs much faster on the host GPU (ASTRO BOT at 4K: about 30 % more
-// frames).
+// rounded separately (upstream d8be245c). By default they stay fused like V_FMA_F32, as in our
+// builds before the merge: a last-bit difference, and one host instruction instead of two.
 IR::ValueOpcode MadOpcode() {
 	static const bool legacy = [] {
 		const char* text = std::getenv("KYTY_LEGACY_MAD");
