@@ -1573,6 +1573,7 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 	for (const auto& cfg_block: cfg.blocks) {
 		const auto typed_index = block_indices.at(cfg_block.id);
 		Translator translator(result, result.blocks[typed_index], vector_limit, flush_f32_inputs);
+		translator.SetEntryLiveExec(options.stage == ShaderType::Pixel && cfg_block.inst_begin == 0);
 		for (uint32_t index = cfg_block.inst_begin; index < cfg_block.inst_end; index++) {
 			const auto& instruction = decoded.instructions[index];
 			for (uint32_t counter = 0; heat_active && counter < heat.pcs.size(); counter++) {

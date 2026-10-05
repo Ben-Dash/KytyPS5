@@ -317,6 +317,18 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 		source_mask = inst.src0.kind == Decoder::OperandKind::VccLo ? ir.GetVcc()
 		                                                          : ReadMask(inst.src0);
 		source_mask_valid = ReadMaskValid(inst.src0);
+		if (entry_live_exec && inst.src0.kind == Decoder::OperandKind::ExecLo &&
+		    inst.dst.kind == Decoder::OperandKind::Sgpr) {
+			// The live pixel mask (s_mov sN, exec before s_wqm): helper invocations are not in it,
+			// as in its scalar bits. A wave-wide reduction over it (a min over the live pixels'
+			// material IDs) would otherwise take a helper's value that no live lane consumes.
+			source_mask = ir.LogicalAnd(
+			    source_mask,
+			    ir.LogicalNot(IR::U1(ir.Emit(IR::ValueOpcode::IsHelperInvocation))));
+		}
+	}
+	if (inst.dst.kind == Decoder::OperandKind::ExecLo) {
+		entry_live_exec = false;
 	}
 	// Preserve all 64 scalar bits independently of the per-thread predicate.
 	WriteU32Pair(inst.dst, ReadU32Pair(inst.src0));
@@ -334,6 +346,9 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 }
 
 void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
+	if (inst.dst.kind == Decoder::OperandKind::ExecLo || inst.dst.kind == Decoder::OperandKind::ExecHi) {
+		entry_live_exec = false;
+	}
 	const bool source_is_mask = inst.src0.kind == Decoder::OperandKind::Sgpr ||
 	                            inst.src0.kind == Decoder::OperandKind::ExecLo ||
 	                            inst.src0.kind == Decoder::OperandKind::VccLo ||

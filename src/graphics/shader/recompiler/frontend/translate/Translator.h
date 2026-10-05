@@ -74,6 +74,8 @@ public:
 	      flush_f32_inputs(flush_f32_inputs) {}
 
 	void TranslateInstruction(const Decoder::Instruction& inst);
+	// See entry_live_exec.
+	void SetEntryLiveExec(bool value) { entry_live_exec = value; }
 	void CountLoopHeat(uint32_t counter);
 	void CopyPsTap();
 	void CopyCsTap(uint32_t pc);
@@ -325,6 +327,10 @@ private:
 	uint32_t        current_pc           = 0;
 	uint32_t        current_vector_limit = 1;
 	bool            flush_f32_inputs;
+	// A pixel shader's entry block before its first EXEC write (usually S_WQM): EXEC holds the
+	// live pixels only, so a copy of it leaves out helper invocations, which the host runs
+	// from the start.
+	bool            entry_live_exec = false;
 };
 
 } // namespace Libs::Graphics::ShaderRecompiler::Frontend
