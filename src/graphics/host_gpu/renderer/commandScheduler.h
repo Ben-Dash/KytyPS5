@@ -163,6 +163,9 @@ private:
 	};
 	static void MarkZoneThunk(void* context, vk::CommandBuffer buffer, DrainStats::Zone zone,
 	                          uint64_t key, uint64_t pixels);
+	// KYTY_DEBUG_GPU_CHECKPOINTS: each mark on the recording buffer sets a checkpoint instead.
+	static void CheckpointThunk(void* context, vk::CommandBuffer buffer, DrainStats::Zone zone,
+	                            uint64_t key, uint64_t pixels);
 	void        BeginZones();
 	void        MarkZone(DrainStats::Zone zone, uint64_t key, uint64_t pixels = 0);
 	void        EndZones();

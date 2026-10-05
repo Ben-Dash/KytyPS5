@@ -4,6 +4,8 @@
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 
 // Sites that record GPU work name its zone (see DrainStats::Zone). With zones off a mark costs
@@ -36,6 +38,17 @@ private:
 [[nodiscard]] inline bool Enabled() {
 	return g_marker != nullptr;
 }
+
+// KYTY_DEBUG_GPU_CHECKPOINTS=1 (NVIDIA, VK_NV_device_diagnostic_checkpoints): the marker records a
+// checkpoint for each mark instead of a timestamp; when the device is lost, the queue's last
+// checkpoints name the zone and key (the shader hash) the GPU was in (see ReportDeviceFault).
+struct Checkpoint {
+	DrainStats::Zone zone = DrainStats::Zone::Unmarked;
+	uint64_t         key  = 0;
+};
+constexpr uint64_t                         CheckpointRing = uint64_t {1} << 16u;
+inline std::array<Checkpoint, CheckpointRing> g_checkpoints {};
+inline std::atomic<uint64_t>               g_checkpoint_next {1};
 
 // `pixels` is a draw's render area; per-pixel costs stay comparable when the game's dynamic
 // resolution changes between runs.

@@ -535,6 +535,20 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(decoded.instructions.size()), phase_ms());
 
+	// KYTY_DEBUG_DUMP_SPIRV=<hash> also writes that shader's decoded RDNA2 code to rdna_<hash>.txt
+	// (precompiled shaders included, which translate without dumps).
+	static const uint64_t dump_source_hash = [] {
+		const char* text = std::getenv("KYTY_DEBUG_DUMP_SPIRV");
+		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
+	}();
+	if (dump_source_hash != 0 && dump_source_hash == options.shader_hash) [[unlikely]] {
+		const auto text = Decoder::ProgramToString(decoded);
+		const auto name = fmt::format("rdna_{:016x}.txt", options.shader_hash);
+		if (auto* file = std::fopen(name.c_str(), "wb"); file != nullptr) {
+			std::fwrite(text.data(), 1, text.size(), file);
+			std::fclose(file);
+		}
+	}
 	std::string decoded_dump;
 	if (options.dump_ir) {
 		decoded_dump = Decoder::ProgramToString(decoded);

@@ -423,6 +423,88 @@ bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& i
 	return true;
 }
 
+// KYTY_DEBUG_DISPATCH_INPUTS=<shader hash>: prints that compute shader's inputs for its first 6
+// dispatches and every 200th after: each buffer (base, size, whether the GPU wrote it, its first
+// dwords as the CPU sees them) and the first flattened SRT constants, to find bad input data
+// (e.g. a loop count).
+static void DebugDumpDispatchInputs(RenderContext& context, const ShaderStageRuntime& stage) {
+	static const uint64_t hash = [] {
+		const char* text = std::getenv("KYTY_DEBUG_DISPATCH_INPUTS");
+		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
+	}();
+	if (hash == 0 || stage.program->shader_hash != hash) [[likely]] {
+		return;
+	}
+	static uint64_t count = 0;
+	const auto      index = count++;
+	const auto& snapshot = *stage.resources;
+	const auto& info     = stage.program->info;
+	std::string text     = fmt::format("dispatch-inputs: cs {:016x} #{} buffers={} flattened={}\n",
+	                                   hash, index, snapshot.buffers.size(),
+	                                   snapshot.flattened_srt.size());
+	for (size_t i = 0; i < snapshot.buffers.size(); i++) {
+		if (snapshot.buffers[i].dword_count < 4) {
+			continue;
+		}
+		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(snapshot.buffers[i]);
+		const auto base       = descriptor.Base48();
+		const auto size       = descriptor.GetSize();
+		std::string words;
+		for (uint64_t w = 0; base != 0 && w < std::min<uint64_t>(size / 4, 16); w++) {
+			uint32_t value = 0;
+			std::memcpy(&value, reinterpret_cast<const void*>(base + w * 4), sizeof(value));
+			words += fmt::format(" {:08x}", value);
+		}
+		const bool gpu = base != 0 && size != 0 &&
+		                 context.GetBufferCache().IsRegionGpuModified(base, std::min<uint64_t>(size, 64));
+		text += fmt::format("  buffer {} first_use_pc=0x{:x} scalar={} written={} base=0x{:x} "
+		                    "size=0x{:x} gpu={}:{}\n",
+		                    i, i < info.buffers.size() ? info.buffers[i].first_use_pc : 0,
+		                    i < info.buffers.size() && info.buffers[i].scalar ? 1 : 0,
+		                    i < info.buffers.size() && info.buffers[i].written ? 1 : 0, base, size,
+		                    gpu ? 1 : 0, words);
+	}
+	// KYTY_DEBUG_DISPATCH_PROBE=s<n>+<table offset>:<byte offset> (hex offsets): follows the
+	// 64-bit pointer in user data SGPRs n, n+1 to the buffer descriptor at the table offset and
+	// reads the dword at the byte offset in that buffer, as an S_BUFFER_LOAD would.
+	if (const char* probe = std::getenv("KYTY_DEBUG_DISPATCH_PROBE"); probe != nullptr) {
+		unsigned sgpr = 0, table = 0, byte = 0;
+		if (std::sscanf(probe, "s%u+%x:%x", &sgpr, &table, &byte) == 3 &&
+		    sgpr + 1 < snapshot.user_data.size()) {
+			const uint64_t pointer = snapshot.user_data[sgpr] |
+			                         (uint64_t {snapshot.user_data[sgpr + 1]} << 32u);
+			ShaderBufferResource descriptor {};
+			std::memcpy(&descriptor, reinterpret_cast<const void*>(pointer + table),
+			            sizeof(descriptor));
+			const auto base = descriptor.Base48();
+			uint32_t   word = 0;
+			if (base != 0) {
+				std::memcpy(&word, reinterpret_cast<const void*>(base + byte), sizeof(word));
+			}
+			const bool table_gpu = context.GetBufferCache().IsRegionGpuModified(pointer + table, 16);
+			const bool word_gpu  = base != 0 && context.GetBufferCache().IsRegionGpuModified(base + byte, 4);
+			text += fmt::format("  probe s{}+0x{:x}:0x{:x}: table=0x{:x} (gpu {}) buffer base=0x{:x} "
+			                    "size=0x{:x} word=0x{:08x} ({}) (gpu {})\n",
+			                    sgpr, table, byte, pointer, table_gpu ? 1 : 0, base,
+			                    descriptor.GetSize(), word, word, word_gpu ? 1 : 0);
+		}
+	}
+	text += "  flattened:";
+	for (size_t w = 0; w < snapshot.flattened_srt.size(); w++) {
+		text += fmt::format("{}{:08x}", w % 16 == 0 ? "\n   " : " ", snapshot.flattened_srt[w]);
+	}
+	text += "\n";
+	// The last dispatch before a hang survives in its own file.
+	if (std::FILE* file = std::fopen("_dispatch_inputs_last.txt", "wb"); file != nullptr) {
+		std::fwrite(text.data(), 1, text.size(), file);
+		std::fclose(file);
+	}
+	if (index < 3 || index % 200 == 0) {
+		std::fwrite(text.data(), 1, text.size(), stdout);
+		std::fflush(stdout);
+	}
+}
+
 void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
                                     uint32_t thread_group_x, uint32_t thread_group_y,
                                     uint32_t thread_group_z, uint32_t mode) {
@@ -611,6 +693,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	auto& bindings = m_compute_bindings;
 	PrepareBindings(input_info.stage, bindings);
 	FindBuffers(bindings);
+	DebugDumpDispatchInputs(m_context, input_info.stage);
 	if (program.info.uses_dma) {
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 		m_context.PrepareBda();
@@ -711,6 +794,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	auto& bindings = m_compute_bindings;
 	PrepareBindings(input_info.stage, bindings);
 	FindBuffers(bindings);
+	DebugDumpDispatchInputs(m_context, input_info.stage);
 	const auto& program = *input_info.stage.program;
 	{
 		std::array<uint32_t, 3> groups {};

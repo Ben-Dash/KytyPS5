@@ -2,17 +2,54 @@
 
 #include "common/assert.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/gpuZones.h"
 
 #include <cinttypes>
 #include <cstdio>
+#include <iterator>
+#include <utility>
 #include <vector>
 
 namespace Libs::Graphics {
 
 namespace {
 
+// KYTY_DEBUG_GPU_CHECKPOINTS: the last checkpoints each pipeline stage of the queue passed, with
+// the zone and key (shader hash for game draws and dispatches) recorded for them.
+void ReportCheckpoints(GraphicContext& graphics) {
+	static constexpr const char* ZoneNames[] = {"unmarked",  "draw",     "draw-predicated",
+	                                            "dispatch",  "mesh-args", "tiler",
+	                                            "dcc-clear", "fault-buffer", "blit",
+	                                            "image-copy", "buffer-copy"};
+	for (const auto& [name, queue]: {std::pair {"graphics", graphics.queue},
+	                                  std::pair {"readback", graphics.readback_queue}}) {
+		if (queue == nullptr) {
+			continue;
+		}
+		uint32_t count = 0;
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkGetQueueCheckpointDataNV(queue, &count, nullptr);
+		std::vector<VkCheckpointDataNV> data(count, {VK_STRUCTURE_TYPE_CHECKPOINT_DATA_NV});
+		VULKAN_HPP_DEFAULT_DISPATCHER.vkGetQueueCheckpointDataNV(queue, &count, data.data());
+		std::printf("gpu-checkpoints: %s queue, %u entries (newest checkpoint %" PRIu64 ")\n", name,
+		            count, GpuZones::g_checkpoint_next.load() - 1);
+		for (const auto& entry: data) {
+			const auto  index = reinterpret_cast<uintptr_t>(entry.pCheckpointMarker);
+			const auto& mark  = GpuZones::g_checkpoints[index % GpuZones::CheckpointRing];
+			const auto  zone  = static_cast<size_t>(mark.zone);
+			std::printf("gpu-checkpoint: stage=%s checkpoint=%" PRIu64 " zone=%s key=%016" PRIx64 "\n",
+			            vk::to_string(static_cast<vk::PipelineStageFlagBits>(entry.stage)).c_str(),
+			            static_cast<uint64_t>(index),
+			            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key);
+		}
+	}
+	std::fflush(stdout);
+}
+
 // KYTY_DEBUG_DEVICE_FAULT: what the driver recorded for the lost device.
 void ReportDeviceFault(GraphicContext& graphics, vk::Result result) {
+	if (graphics.checkpoints_enabled && result == vk::Result::eErrorDeviceLost) {
+		ReportCheckpoints(graphics);
+	}
 	if (!graphics.device_fault_enabled || result != vk::Result::eErrorDeviceLost) {
 		return;
 	}

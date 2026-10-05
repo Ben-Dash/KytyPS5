@@ -464,6 +464,14 @@ void CommandScheduler::MarkZoneThunk(void* context, vk::CommandBuffer buffer,
 	}
 }
 
+void CommandScheduler::CheckpointThunk(void* /*context*/, vk::CommandBuffer buffer,
+                                       DrainStats::Zone zone, uint64_t key, uint64_t /*pixels*/) {
+	// Marks come from the thread recording `buffer`; the checkpoint value indexes the ring.
+	const auto index = GpuZones::g_checkpoint_next.fetch_add(1, std::memory_order_relaxed);
+	GpuZones::g_checkpoints[index % GpuZones::CheckpointRing] = {zone, key};
+	buffer.setCheckpointNV(reinterpret_cast<const void*>(static_cast<uintptr_t>(index)));
+}
+
 void CommandScheduler::BeginZones() {
 	if (m_zone_pool == nullptr) {
 		vk::QueryPoolCreateInfo info {};
@@ -686,6 +694,10 @@ void CommandScheduler::EnableAsyncSubmit() {
 		m_zones             = true;
 		GpuZones::g_context = this;
 		GpuZones::g_marker  = &MarkZoneThunk;
+	} else if (m_graphics.checkpoints_enabled && GpuZones::g_marker == nullptr) {
+		GpuZones::g_context = this;
+		GpuZones::g_marker  = &CheckpointThunk;
+		std::printf("GPU checkpoints: on (each draw, dispatch and copy)\n");
 	}
 	m_submit_thread = std::jthread([this](std::stop_token stop) { SubmitThread(stop); });
 }
