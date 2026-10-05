@@ -4,7 +4,9 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cinttypes>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +25,18 @@
 #endif
 
 namespace Libs::Graphics {
+
+// One write per line, so other threads' output (stdout is unbuffered for logs) does not split it.
+[[gnu::format(printf, 1, 2)]] static void PrintLine(const char* format, ...) {
+	char    text[2048];
+	va_list args;
+	va_start(args, format);
+	const int length = std::vsnprintf(text, sizeof(text), format, args);
+	va_end(args);
+	if (length > 0) {
+		std::fwrite(text, 1, std::min<size_t>(static_cast<size_t>(length), sizeof(text) - 1), stdout);
+	}
+}
 
 // KYTY_DEBUG_WATCH=<hex address>[,<hex address>...] (up to four, 8-byte aligned): hardware
 // watchpoints on those guest addresses in every thread. Each code address outside the emulator
@@ -103,7 +117,7 @@ LONG CALLBACK WatchHandler(PEXCEPTION_POINTERS info) {
 				const auto slot = i + 1;
 				if (g_watch_addresses[slot] != address) {
 					g_watch_addresses[slot] = address;
-					std::printf("watch-arm: slot %u at 0x%" PRIx64 "\n", slot, address);
+					PrintLine("watch-arm: slot %u at 0x%" PRIx64 "\n", slot, address);
 				}
 				// This thread at once; the others at the next ApplyToThreads.
 				DWORD64* regs[4] = {&ctx->Dr0, &ctx->Dr1, &ctx->Dr2, &ctx->Dr3};
@@ -154,9 +168,10 @@ LONG CALLBACK WatchHandler(PEXCEPTION_POINTERS info) {
 		                           ctx->R12, ctx->R13, ctx->R14, ctx->R15};
 		std::memcpy(hit.regs, regs, sizeof(regs));
 		for (uint32_t i = 0; i < g_watch_count; i++) {
-			hit.values[i] = g_watch_exec[i] || g_watch_addresses[i] == 0
-			                    ? 0
-			                    : *reinterpret_cast<const uint64_t*>(g_watch_addresses[i]);
+			// An execution breakpoint hits on a function's first instruction: [rsp] is its caller.
+			hit.values[i] = g_watch_exec[i]               ? *reinterpret_cast<const uint64_t*>(ctx->Rsp)
+			                : g_watch_addresses[i] == 0 ? 0
+			                                            : *reinterpret_cast<const uint64_t*>(g_watch_addresses[i]);
 		}
 		hit.rip.store(rip_key, std::memory_order_release);
 	}
@@ -219,7 +234,7 @@ void PrintHits(uint32_t& printed) {
 			std::snprintf(text, sizeof(text), "%02x", byte);
 			bytes += text;
 		}
-		std::printf("watch-hit: rip=0x%016" PRIx64 " dr6=0x%x bytes(rip-48..rip+16)=%s\n", rip,
+		PrintLine("watch-hit: rip=0x%016" PRIx64 " dr6=0x%x bytes(rip-48..rip+16)=%s\n", rip,
 		            hit.slot, bytes.c_str());
 		static constexpr const char* Names[16] = {"rax", "rcx", "rdx", "rbx", "rsp", "rbp",
 		                                          "rsi", "rdi", "r8",  "r9",  "r10", "r11",
@@ -230,18 +245,21 @@ void PrintHits(uint32_t& printed) {
 			std::snprintf(text, sizeof(text), " %s=%" PRIx64, Names[i], hit.regs[i]);
 			regs += text;
 		}
-		std::printf("watch-regs:%s\n", regs.c_str());
+		PrintLine("watch-regs:%s\n", regs.c_str());
 		std::string values;
 		for (uint32_t i = 0; i < g_watch_count; i++) {
+			char text[64];
 			if (!g_watch_exec[i]) {
-				char text[64];
 				std::snprintf(text, sizeof(text), " [%" PRIx64 "]=%" PRIx64, g_watch_addresses[i],
 				              hit.values[i]);
+				values += text;
+			} else if ((hit.slot & (1u << i)) != 0) {
+				std::snprintf(text, sizeof(text), " caller=%" PRIx64, hit.values[i]);
 				values += text;
 			}
 		}
 		if (!values.empty()) {
-			std::printf("watch-values:%s\n", values.c_str());
+			PrintLine("watch-values:%s\n", values.c_str());
 		}
 	}
 	std::fflush(stdout);
@@ -287,12 +305,104 @@ static void DebugDumpGuestTick() {
 			std::fclose(file);
 		}
 	}
-	std::printf("guest-dump %u\n", count++);
+	PrintLine("guest-dump %u\n", count++);
 	std::fflush(stdout);
+}
+
+// KYTY_DEBUG_FIND_GUEST=<hex bytes>[,<hex bytes>...] searches all committed memory between 4 GB and
+// 2 TB (the guest's mappings; the emulator's own image is skipped) for those byte patterns at 4-byte
+// aligned addresses, KYTY_DEBUG_FIND_GUEST_AT=<s>[,<s>...] seconds after the first frame (default
+// 20), and prints each hit ("guest-find"), to locate where a game keeps a value (e.g. its render
+// size) before watching it with KYTY_DEBUG_WATCH.
+static void DebugFindGuestTick() {
+	static const std::vector<std::vector<uint8_t>> patterns = [] {
+		std::vector<std::vector<uint8_t>> list;
+		const char*                       text = std::getenv("KYTY_DEBUG_FIND_GUEST");
+		for (const char* p = text; p != nullptr && *p != '\0';) {
+			std::vector<uint8_t> bytes;
+			while (std::isxdigit(static_cast<unsigned char>(p[0])) != 0 &&
+			       std::isxdigit(static_cast<unsigned char>(p[1])) != 0) {
+				const char hex[3] = {p[0], p[1], '\0'};
+				bytes.push_back(static_cast<uint8_t>(std::strtoul(hex, nullptr, 16)));
+				p += 2;
+			}
+			if (bytes.size() >= 4) {
+				list.push_back(std::move(bytes));
+			}
+			if (*p != ',') {
+				break;
+			}
+			p++;
+		}
+		return list;
+	}();
+	if (patterns.empty()) [[likely]] {
+		return;
+	}
+	static std::once_flag started;
+	std::call_once(started, [] {
+		std::vector<uint32_t> times;
+		const char*           text = std::getenv("KYTY_DEBUG_FIND_GUEST_AT");
+		for (const char* p = text; p != nullptr && *p != '\0';) {
+			char* end = nullptr;
+			times.push_back(static_cast<uint32_t>(std::strtoul(p, &end, 10)));
+			p = (end != p && *end == ',') ? end + 1 : "";
+		}
+		if (times.empty()) {
+			times.push_back(20);
+		}
+		std::thread([times] {
+			const auto start  = std::chrono::steady_clock::now();
+			auto*      module = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+			for (const auto at: times) {
+				std::this_thread::sleep_until(start + std::chrono::seconds(at));
+				std::vector<uint8_t> chunk(uint64_t {1} << 20u);
+				uint32_t             hits = 0;
+				for (uint64_t address = uint64_t {1} << 32u; address < (uint64_t {1} << 41u);) {
+					MEMORY_BASIC_INFORMATION info {};
+					if (VirtualQuery(reinterpret_cast<const void*>(address), &info, sizeof(info)) == 0) {
+						break;
+					}
+					const auto base = reinterpret_cast<uint64_t>(info.BaseAddress);
+					const auto next = base + info.RegionSize;
+					const bool readable =
+					    info.State == MEM_COMMIT && info.Type != MEM_IMAGE &&
+					    (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) == 0 &&
+					    (info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ |
+					                     PAGE_EXECUTE_READWRITE | PAGE_WRITECOPY)) != 0 &&
+					    info.AllocationBase != module;
+					for (uint64_t at_address = base; readable && at_address < next && hits < 400;
+					     at_address += chunk.size()) {
+						const auto size  = std::min<uint64_t>(chunk.size(), next - at_address);
+						SIZE_T     moved = 0;
+						if (ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(at_address),
+						                      chunk.data(), size, &moved) == 0) {
+							continue;
+						}
+						for (size_t pi = 0; pi < patterns.size(); pi++) {
+							const auto& pattern = patterns[pi];
+							for (size_t o = 0; o + pattern.size() <= moved; o += 4) {
+								if (std::memcmp(chunk.data() + o, pattern.data(), pattern.size()) == 0 &&
+								    hits++ < 400) {
+									PrintLine("guest-find t=%us pattern=%zu 0x%016" PRIx64
+									            " region=0x%" PRIx64 "+0x%" PRIx64 " prot=0x%lx\n",
+									            at, pi, at_address + o, base, next - base, info.Protect);
+								}
+							}
+						}
+					}
+					address = next;
+				}
+				PrintLine("guest-find t=%us done, %u hits\n", at, hits);
+				std::fflush(stdout);
+			}
+		}).detach();
+	});
 }
 
 void DebugWatchTick() {
 	DebugDumpGuestTick();
+	DebugFindGuestTick();
 	static const bool enabled = [] {
 		const char* text = std::getenv("KYTY_DEBUG_WATCH");
 		if (text == nullptr) {
@@ -341,7 +451,7 @@ void DebugWatchTick() {
 		g_module_end   = g_module_begin + nt->OptionalHeader.SizeOfImage;
 		AddVectoredExceptionHandler(1, WatchHandler);
 		for (uint32_t i = 0; i < g_watch_count; i++) {
-			std::printf("watch: 0x%016" PRIx64 "\n", g_watch_addresses[i]);
+			PrintLine("watch: 0x%016" PRIx64 "\n", g_watch_addresses[i]);
 		}
 		std::fflush(stdout);
 		std::thread([] {
