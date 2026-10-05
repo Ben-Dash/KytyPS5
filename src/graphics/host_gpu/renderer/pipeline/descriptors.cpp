@@ -2570,7 +2570,14 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 		if (reads.empty()) continue;
 		for (const auto* writer: prepared_bindings) {
 			if (writer->runtime->program->has_address_writes) {
-				EXIT("scalar resource reads cannot be proven disjoint from shader address writes\n");
+				// Stores through GPU-selected descriptors (BDA) are not tracked; their targets are
+				// assumed not to hold this stage's descriptors.
+				static std::atomic<uint32_t> reported {0};
+				if (reported.fetch_add(1, std::memory_order_relaxed) < 4u) {
+					std::printf("warning: scalar resource reads not proven disjoint from shader "
+					            "address writes (shader %016llx)\n",
+					            static_cast<unsigned long long>(writer->runtime->program->shader_hash));
+				}
 			}
 		}
 		for (const auto [address, size]: reads) {

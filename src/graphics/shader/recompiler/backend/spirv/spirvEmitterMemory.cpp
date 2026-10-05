@@ -1034,6 +1034,86 @@ uint32_t LoadIndirectSubword(ValueEmitContext& ctx, const IR::Inst& inst, uint32
 	return LoadBda(ctx, buffer.address, in_bounds, bits);
 }
 
+// A dword store by guest address: skipped where the BDA page table has no mapping.
+void StoreBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t value) {
+	auto&      state   = ctx.state;
+	const auto bda     = GetBdaPointer(state, address);
+	const auto present =
+	    Binary(state, spv::OpINotEqual, TypeBool(state), bda, ConstantDeviceAddress(state, 0));
+	EmitIfCondition(state, present, [&]() {
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer, bda);
+		state.builder.AddFunction(spv::OpStore, pointer, value, spv::MemoryAccessAlignedMask,
+		                          static_cast<uint32_t>(sizeof(uint32_t)));
+	});
+}
+
+// A byte or short store by guest address: an atomic AND clears its bits in the dword and an
+// atomic OR sets them, so lanes writing other bytes of the same dword do not lose theirs.
+void StoreBdaSubword(ValueEmitContext& ctx, uint32_t address, uint32_t value, uint32_t bits) {
+	auto&      state   = ctx.state;
+	const auto aligned = Binary(state, spv::OpBitwiseAnd, TypeScalarU64(state), address,
+	                            ConstantDeviceAddress(state, ~uint64_t {3}));
+	const auto bda     = GetBdaPointer(state, aligned);
+	const auto present =
+	    Binary(state, spv::OpINotEqual, TypeBool(state), bda, ConstantDeviceAddress(state, 0));
+	EmitIfCondition(state, present, [&]() {
+		const auto shift = Binary(
+		    state, spv::OpShiftLeftLogical, TypeU32(state),
+		    Binary(state, spv::OpBitwiseAnd, TypeU32(state),
+		           Unary(state, spv::OpUConvert, TypeU32(state), address), ConstantU32(state, 3)),
+		    ConstantU32(state, 3));
+		const auto field = ConstantU32(state, bits == 8u ? 0xffu : 0xffffu);
+		const auto mask  = Binary(state, spv::OpShiftLeftLogical, TypeU32(state), field, shift);
+		const auto bitsv = Binary(state, spv::OpShiftLeftLogical, TypeU32(state),
+		                          Binary(state, spv::OpBitwiseAnd, TypeU32(state), value, field), shift);
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer, bda);
+		const auto scope     = ConstantU32(state, spv::ScopeDevice);
+		const auto semantics = ConstantU32(state, spv::MemorySemanticsMaskNone);
+		const auto cleared   = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpAtomicAnd, TypeU32(state), cleared, pointer, scope, semantics,
+		                          Unary(state, spv::OpNot, TypeU32(state), mask));
+		const auto set = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpAtomicOr, TypeU32(state), set, pointer, scope, semantics,
+		                          bitsv);
+	});
+}
+
+// A raw store through a GPU-selected descriptor (see MemoryInfo::SupportsIndirectBufferStore).
+void StoreIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t components,
+                         uint32_t bits) {
+	auto&      state  = ctx.state;
+	const auto buffer = PrepareIndirectBuffer(ctx, inst);
+	const auto valid_format =
+	    Binary(state, spv::OpINotEqual, TypeBool(state), buffer.format, ConstantU32(state, 0));
+	const auto active = AndCondition(state, ctx.Arg(inst, inst.NumArgs() - 1), valid_format);
+	const auto data   = ctx.Arg(inst, inst.NumArgs() - 2);
+	if (bits != 32u) {
+		EmitIfCondition(state,
+		                AndCondition(state, active,
+		                             IndirectBufferInBounds(state, buffer, 0u, bits / 8u, false)),
+		                [&]() { StoreBdaSubword(ctx, buffer.address, data, bits); });
+		return;
+	}
+	const auto base = Binary(state, spv::OpBitwiseAnd, TypeScalarU64(state), buffer.address,
+	                         ConstantDeviceAddress(state, ~uint64_t {3}));
+	for (uint32_t component = 0; component < components; ++component) {
+		uint32_t value = data;
+		if (components > 1u) {
+			value = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), value, data, component);
+		}
+		const auto address = component == 0u ? base : Binary(
+		    state, spv::OpIAdd, TypeScalarU64(state), base,
+		    ConstantDeviceAddress(state, component * 4u));
+		EmitIfCondition(state,
+		                AndCondition(state, active,
+		                             IndirectBufferInBounds(state, buffer, component * 4u, 4u, false)),
+		                [&]() { StoreBdaDword(ctx, address, value); });
+	}
+}
+
 uint32_t LoadIndirectFormattedX(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto& state = ctx.state;
 	return EmitValueOrZeroIfCondition(state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
@@ -1543,7 +1623,10 @@ void EmitStoreMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 	const auto  buffer_components = IR::BufferComponentCount(op);
 	const auto  shared_components = IR::SharedComponentCount(op);
 	const auto  type              = inst.Arg(inst.NumArgs() - 2).GetType();
-	if (mem.kind == IR::ResourceKind::FlatLocal)
+	if (mem.kind == IR::ResourceKind::IndirectBuffer)
+		StoreIndirectBuffer(ctx, inst, std::max(buffer_components, 1u),
+		                    type == IR::Type::U8 ? 8u : type == IR::Type::U16 ? 16u : 32u);
+	else if (mem.kind == IR::ResourceKind::FlatLocal)
 		StoreLocalFlat(ctx, inst);
 	else if (buffer_components > 1u)
 		StoreWideBuffer(ctx, inst, buffer_components);

@@ -78,6 +78,20 @@ struct MemoryInfo {
 
 	// Loads through a GPU-selected descriptor read guest memory by address (BDA); a formatted
 	// load decodes the descriptor's format at run time (see LoadIndirectFormattedBuffer).
+	// Raw stores through a GPU-selected descriptor write guest memory by address (BDA), bytes and
+	// shorts by atomic read-modify-write of their dword (see StoreIndirectBuffer). The host does
+	// not track these writes (Ghost of Yotei's tile lighting keeps the data on the GPU).
+	[[nodiscard]] bool SupportsIndirectBufferStore(ValueOpcode opcode) const {
+		if (typed || formatted) {
+			return false;
+		}
+		return (data_bits == 8u && opcode == ValueOpcode::StoreBufferU8) ||
+		       (data_bits == 16u && opcode == ValueOpcode::StoreBufferU16) ||
+		       (data_bits == 32u &&
+		        (opcode == ValueOpcode::StoreBufferU32 || opcode == ValueOpcode::StoreBufferU32x2 ||
+		         opcode == ValueOpcode::StoreBufferU32x3 || opcode == ValueOpcode::StoreBufferU32x4));
+	}
+
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
 		// Raw byte and short loads read their bytes by address too (see LoadIndirectSubword).
 		if (!typed && !formatted &&
