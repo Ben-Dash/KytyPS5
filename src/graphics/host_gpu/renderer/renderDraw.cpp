@@ -1377,6 +1377,138 @@ static void RefreshShaders(CommandBuffer& buffer, const DrawCallInfo& draw,
 	    Config::AsyncPipelinesEnabled() ? ProgramWait::Defer : ProgramWait::Wait);
 }
 
+// KYTY_DRAW_CHAIN=0 resolves every indexed draw's targets; KYTY_DEBUG_AB=chain alternates.
+static bool DrawChainEnabled() {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_DRAW_CHAIN");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("chain");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// KYTY_VERIFY_DRAW_CHAIN=1: a draw taking the chain's targets also resolves them and reports
+// what came out differently.
+static bool VerifyDrawChain() {
+	static const bool enabled = std::getenv("KYTY_VERIFY_DRAW_CHAIN") != nullptr;
+	return enabled;
+}
+
+static void ReportDrawChainCheck(const DrawRenderState& taken, const DrawRenderState& resolved) {
+	const char* field = nullptr;
+	if (taken.color_count != resolved.color_count) {
+		field = "color count";
+	}
+	for (uint32_t i = 0; field == nullptr && i < taken.color_count; i++) {
+		const auto& a = taken.color_info[i];
+		const auto& b = resolved.color_info[i];
+		if (a.image_id != b.image_id || a.target_slot != b.target_slot ||
+		    !(a.desc.view_info == b.desc.view_info) || !(a.desc.info.data == b.desc.info.data) ||
+		    a.guest_mip_level != b.guest_mip_level || a.guest_array_layer != b.guest_array_layer) {
+			field = "color target";
+		}
+	}
+	const auto& a = taken.depth_info;
+	const auto& b = resolved.depth_info;
+	if (field == nullptr &&
+	    (a.image_id != b.image_id || (a.image_id && !(a.desc.view_info == b.desc.view_info)) ||
+	     a.depth_test_enable != b.depth_test_enable || a.depth_write_enable != b.depth_write_enable ||
+	     a.depth_compare_op != b.depth_compare_op || a.depth_clear_enable != b.depth_clear_enable ||
+	     a.depth_clear_value != b.depth_clear_value ||
+	     a.depth_bounds_test_enable != b.depth_bounds_test_enable ||
+	     a.stencil_test_enable != b.stencil_test_enable ||
+	     a.stencil_clear_enable != b.stencil_clear_enable || !(a.stencil_front == b.stencil_front) ||
+	     !(a.stencil_back == b.stencil_back))) {
+		field = "depth target";
+	}
+	static std::atomic<uint64_t> checked {0};
+	static std::atomic<uint64_t> missed {0};
+	const auto                   count = checked.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (field != nullptr && missed.fetch_add(1, std::memory_order_relaxed) < 32) {
+		std::printf("draw-chain verify: taken targets differ: %s\n", field);
+	}
+	if (count % 100000 == 0) {
+		std::printf("draw-chain verify: draws=%" PRIu64 " missed=%" PRIu64 "\n", count,
+		            missed.load(std::memory_order_relaxed));
+		std::fflush(stdout);
+	}
+}
+
+// Records the targets an indexed draw resolved, when each came from a lookup ResolveRender*Target
+// can repeat (its source has a generation and holds the same image).
+void RenderExecutor::RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
+                                     const DrawRenderState& state) {
+	auto& chain = m_draw_chain;
+	chain.valid = false;
+	if (!DrawChainEnabled()) {
+		return;
+	}
+	for (uint32_t i = 0; i < state.color_count; i++) {
+		const auto& target = state.color_info[i];
+		const auto& source = m_color_target_sources.at(target.target_slot);
+		if (source.generation == 0 || source.target.image_id != target.image_id) {
+			return;
+		}
+		chain.colors[i]            = target;
+		chain.color_base_layers[i] = source.metadata_base_layer;
+	}
+	if (state.depth_info.image_id) {
+		const auto& source = m_depth_target_source;
+		if (source.generation == 0 || source.image_id != state.depth_info.image_id) {
+			return;
+		}
+		chain.depth_base_layer = source.metadata_base_layer;
+	}
+	chain.depth        = state.depth_info;
+	chain.color_count  = state.color_count;
+	chain.cx_writes    = HW::g_context_register_writes;
+	chain.slice_offset = slice_offset;
+	chain.color_filter = m_color_slot_filter;
+	chain.mrt_mask     = mrt_mask;
+	chain.targets      = m_context.GetTextureCache().CurrentTargetState();
+	chain.valid        = true;
+}
+
+// The chain's targets for a draw after it: no context register changed, so the same registers
+// would resolve again, and with the same target state (no image registered or unregistered, the
+// same tick and GC tick) every lookup would find the same image and touch nothing; only a color
+// clear could still have to be applied (IsColorClearCurrent).
+bool RenderExecutor::TakeDrawChain(uint32_t slice_offset, uint32_t mrt_mask, DrawRenderState& state) {
+	auto& chain = m_draw_chain;
+	if (!chain.valid || !DrawChainEnabled() || chain.cx_writes != HW::g_context_register_writes ||
+	    chain.slice_offset != slice_offset || chain.color_filter != m_color_slot_filter ||
+	    chain.mrt_mask != mrt_mask) {
+		return false;
+	}
+	auto& cache = m_context.GetTextureCache();
+	if (!(cache.CurrentTargetState() == chain.targets)) {
+		return false;
+	}
+	for (uint32_t i = 0; i < chain.color_count; i++) {
+		const auto& target = chain.colors[i];
+		if (!cache.IsColorClearCurrent(target.image_id, target.desc, chain.color_base_layers[i])) {
+			return false;
+		}
+	}
+	if (chain.depth.image_id &&
+	    !cache.IsColorClearCurrent(chain.depth.image_id, chain.depth.desc, chain.depth_base_layer)) {
+		return false;
+	}
+	for (uint32_t i = 0; i < chain.color_count; i++) {
+		if (i == state.color_constructed) {
+			std::construct_at(&state.color_info[state.color_constructed++]);
+		}
+		state.color_info[i] = chain.colors[i];
+		BindRenderTarget(chain.colors[i].image_id);
+	}
+	state.color_count = chain.color_count;
+	state.depth_info  = chain.depth;
+	if (chain.depth.image_id) {
+		BindRenderTarget(chain.depth.image_id);
+	}
+	return true;
+}
+
 bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCallInfo& draw,
                                             uint32_t            render_target_slice_offset,
 	                                        DrawRenderState& state) {
@@ -1468,25 +1600,39 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 			}
 		}
 	}
-	if (draw.IsIndexed()) {
-		LogDrawPhase(draw.Name(), "ResolveRenderColorTarget");
-	}
-	for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
-		if ((mrt_mask & (1u << slot)) != 0) {
-			if (state.color_count == state.color_constructed) {
-				std::construct_at(&state.color_info[state.color_constructed++]);
-			}
-			ResolveRenderColorTarget(buffer, state.color_info[state.color_count],
-			                         render_target_slice_offset, slot);
-			if (state.color_info[state.color_count].image_id) {
-				state.color_count++;
+	const auto resolve_targets = [&](DrawRenderState& out) {
+		if (draw.IsIndexed()) {
+			LogDrawPhase(draw.Name(), "ResolveRenderColorTarget");
+		}
+		for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
+			if ((mrt_mask & (1u << slot)) != 0) {
+				if (out.color_count == out.color_constructed) {
+					std::construct_at(&out.color_info[out.color_constructed++]);
+				}
+				ResolveRenderColorTarget(buffer, out.color_info[out.color_count],
+				                         render_target_slice_offset, slot);
+				if (out.color_info[out.color_count].image_id) {
+					out.color_count++;
+				}
 			}
 		}
+		if (draw.IsIndexed()) {
+			LogDrawPhase(draw.Name(), "ResolveRenderDepthTarget");
+		}
+		ResolveRenderDepthTarget(buffer, out.depth_info);
+	};
+	if (draw.IsIndexed() && TakeDrawChain(render_target_slice_offset, mrt_mask, state)) {
+		if (VerifyDrawChain()) [[unlikely]] {
+			auto check = std::make_unique<DrawRenderState>();
+			resolve_targets(*check);
+			ReportDrawChainCheck(state, *check);
+		}
+	} else {
+		resolve_targets(state);
+		if (draw.IsIndexed()) {
+			RecordDrawChain(render_target_slice_offset, mrt_mask, state);
+		}
 	}
-	if (draw.IsIndexed()) {
-		LogDrawPhase(draw.Name(), "ResolveRenderDepthTarget");
-	}
-	ResolveRenderDepthTarget(buffer, state.depth_info);
 	if (const auto tests = DebugDepthOverride(
 	        state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0);
 	    tests != 0) [[unlikely]] {
@@ -1934,6 +2080,58 @@ static void NoteDepthOnly(DrawRenderState& state, const void* pipeline) {
 	stats.run_pipeline = pipeline;
 	stats.run_program  = program;
 	stats.run_target   = target;
+}
+
+// KYTY_DEBUG_CHAIN_STATS=1 (with KYTY_DEBUG_DRAW_PHASES): how many indexed draws follow the
+// previous one without a context register write between them, and how many of those also keep
+// its target images and programs: what a draw-state chain could reuse.
+static bool ChainStatsEnabled() {
+	static const bool enabled = std::getenv("KYTY_DEBUG_CHAIN_STATS") != nullptr;
+	return enabled;
+}
+
+static void NoteChain(const DrawRenderState& state) {
+	struct Chain {
+		uint64_t writes = UINT64_MAX;
+		std::array<ImageId, RENDER_COLOR_ATTACHMENTS_MAX> colors {};
+		uint32_t color_count = 0;
+		ImageId  depth;
+		const void* vertex = nullptr;
+		const void* pixel  = nullptr;
+		uint64_t draws = 0, chained = 0, same_targets = 0, same_programs = 0, chained_same_targets = 0;
+		std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+	};
+	static Chain c;
+	const bool chained = c.writes == HW::g_context_register_writes;
+	bool       same_targets = c.color_count == state.color_count && c.depth == state.depth_info.image_id;
+	for (uint32_t i = 0; same_targets && i < state.color_count; i++) {
+		same_targets = c.colors[i] == state.color_info[i].image_id;
+	}
+	const void* vertex = state.vertex_info[0].stage.program;
+	const void* pixel  = state.ps_active ? state.ps_input_info.stage.program : nullptr;
+	c.draws++;
+	c.chained += chained ? 1 : 0;
+	c.same_targets += same_targets ? 1 : 0;
+	c.chained_same_targets += chained && same_targets ? 1 : 0;
+	c.same_programs += chained && vertex == c.vertex && pixel == c.pixel ? 1 : 0;
+	c.writes      = HW::g_context_register_writes;
+	c.color_count = state.color_count;
+	for (uint32_t i = 0; i < state.color_count; i++) {
+		c.colors[i] = state.color_info[i].image_id;
+	}
+	c.depth  = state.depth_info.image_id;
+	c.vertex = vertex;
+	c.pixel  = pixel;
+	if (std::chrono::steady_clock::now() - c.start >= std::chrono::seconds(5)) {
+		const auto share = [&](uint64_t n) { return 100.0 * static_cast<double>(n) / static_cast<double>(c.draws); };
+		std::printf("chain-stats: draws=%" PRIu64 " no-cx-write%%=%.1f same-targets%%=%.1f "
+		            "no-cx-write+same-targets%%=%.1f no-cx-write+same-programs%%=%.1f\n",
+		            c.draws, share(c.chained), share(c.same_targets), share(c.chained_same_targets),
+		            share(c.same_programs));
+		std::fflush(stdout);
+		c.draws = c.chained = c.same_targets = c.same_programs = c.chained_same_targets = 0;
+		c.start = std::chrono::steady_clock::now();
+	}
 }
 
 void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buffer,
@@ -2432,7 +2630,11 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 	uc_check(ucfg);
 
-	hw_check(buffer);
+	// The register checks passed for the chain's draw, and no context register changed since.
+	if (!(m_draw_chain.valid && m_draw_chain.cx_writes == HW::g_context_register_writes &&
+	      DrawChainEnabled())) {
+		hw_check(buffer);
+	}
 
 	vk::PrimitiveTopology topology = vk::PrimitiveTopology::ePointList;
 	if (!GetDrawTopology(ucfg, topology)) {
@@ -2501,6 +2703,9 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 			}
 		}
 
+		if (g_draw_phases.Active() && ChainStatsEnabled()) [[unlikely]] {
+			NoteChain(state);
+		}
 		LogDrawStateIfNeeded(buffer, draw, state, args.index_type_and_size,
 		                     args.index_addr);
 

@@ -1956,6 +1956,7 @@ KYTY_CP_OP_PARSER(CpOpIndirectBuffer) {
 
 KYTY_CP_OP_PARSER(CpOpIndirectCxRegs) {
 	KYTY_PROFILER_FUNCTION();
+	HW::g_context_register_writes++;
 
 	EXIT_NOT_IMPLEMENTED(((cmd_id >> 8u) & 0xffu) != Pm4::IT_SET_CONTEXT_REG_INDIRECT);
 	EXIT_NOT_IMPLEMENTED(KYTY_PM4_LEN(cmd_id) != 5u);
@@ -2412,6 +2413,7 @@ KYTY_CP_OP_PARSER(CpOpReleaseMem) {
 
 KYTY_CP_OP_PARSER(CpOpSetContextReg) {
 	KYTY_PROFILER_FUNCTION();
+	HW::g_context_register_writes++;
 
 	auto cmd_offset = NormalizeRegisterOffset(buffer[0]);
 

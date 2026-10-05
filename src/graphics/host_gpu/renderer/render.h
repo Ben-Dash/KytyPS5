@@ -6,6 +6,7 @@
 #include "common/common.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
+#include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
@@ -345,7 +346,29 @@ private:
 		uint64_t                view_meta_generation = 0;
 	};
 
+	// KYTY_DRAW_CHAIN: the targets the last indexed draw resolved, with what they were resolved
+	// under. A draw after it with no context register write between them, the same slot filter,
+	// slice offset and pixel outputs, and an unchanged target state takes them (see
+	// TakeDrawChain in renderDraw.cpp).
+	struct DrawChain {
+		bool                      valid        = false;
+		uint64_t                  cx_writes    = 0;
+		uint32_t                  slice_offset = 0;
+		uint32_t                  color_filter = ~0u;
+		uint32_t                  mrt_mask     = 0;
+		TextureCache::TargetState targets {};
+		uint32_t                  color_count  = 0;
+		std::array<RenderColorInfo, RENDER_COLOR_ATTACHMENTS_MAX> colors {};
+		std::array<uint32_t, RENDER_COLOR_ATTACHMENTS_MAX>        color_base_layers {};
+		RenderDepthInfo           depth {};
+		uint32_t                  depth_base_layer = 0;
+	};
+	[[nodiscard]] bool TakeDrawChain(uint32_t slice_offset, uint32_t mrt_mask, DrawRenderState& state);
+	void               RecordDrawChain(uint32_t slice_offset, uint32_t mrt_mask,
+	                                   const DrawRenderState& state);
+
 	RenderContext&                        m_context;
+	DrawChain                             m_draw_chain;
 	std::array<ColorTargetSource, RENDER_COLOR_ATTACHMENTS_MAX> m_color_target_sources;
 	// Colour slots PrepareDrawRenderState may bind: all but one pass of a draw that binds one
 	// surface to several slots (see AliasedColorSlots in renderDraw.cpp).

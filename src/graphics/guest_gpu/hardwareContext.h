@@ -663,6 +663,10 @@ struct GeUserVgprEn {
 	bool vgpr3 = false;
 };
 
+// SET_CONTEXT_REG packets and indirect context register pairs handled so far (the command
+// processor thread only): draws between which it did not change kept every context register.
+inline uint64_t g_context_register_writes = 0;
+
 class Context {
 public:
 	Context()  = default;
