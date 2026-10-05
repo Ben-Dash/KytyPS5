@@ -1883,7 +1883,7 @@ static uint64_t g_frame_pass_repeats = 0;
 static std::string g_frame_pass_previous;
 
 bool FramePassesRecording() noexcept {
-	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES") != nullptr;
+	static const bool enabled = std::getenv("KYTY_DEBUG_FRAME_PASSES") != nullptr;
 	return enabled && g_frame_passes_left != 0;
 }
 
@@ -1896,12 +1896,12 @@ static void FlushFramePassRepeats() {
 }
 
 void FramePassesFlip() noexcept {
-	static const char* trigger = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES");
+	static const char* trigger = std::getenv("KYTY_DEBUG_FRAME_PASSES");
 	if (trigger == nullptr) {
 		return;
 	}
 	static const uint32_t count = [] {
-		const char* text = KYTY_GETENV("KYTY_DEBUG_FRAME_PASSES_COUNT");
+		const char* text = std::getenv("KYTY_DEBUG_FRAME_PASSES_COUNT");
 		return text != nullptr ? std::max(1u, static_cast<uint32_t>(std::strtoul(text, nullptr, 10))) : 2u;
 	}();
 	static uint64_t flips = 0;
