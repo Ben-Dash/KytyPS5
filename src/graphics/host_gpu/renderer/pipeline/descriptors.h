@@ -103,6 +103,9 @@ struct PreparedBindings {
 	} repeat_key;
 };
 
+// KYTY_STAGE_RECORDS (see descriptors.cpp).
+[[nodiscard]] bool StageRecordsEnabled() noexcept;
+
 [[nodiscard]] vk::DescriptorType
 NativeDescriptorType(ShaderRecompiler::IR::DescriptorBindingKind kind);
 [[nodiscard]] uint32_t

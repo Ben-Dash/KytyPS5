@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -247,7 +248,14 @@ private:
 	struct GraphicsBindings {
 		std::array<PreparedBindings, 3> vertex;
 		std::optional<PreparedBindings> pixel;
+		// KYTY_STAGE_RECORDS: the first vertex stage's and the pixel stage's bindings as the last
+		// draw of each program and image descriptors left them (see StageRecord).
+		std::array<std::unordered_map<uint64_t, std::unique_ptr<PreparedBindings>>, 2> records;
 	};
+	// The bindings to prepare a stage in: with KYTY_STAGE_RECORDS, the record of the runtime's
+	// program and image descriptors (`slot` 0: vertex, 1: pixel), else `fallback`.
+	[[nodiscard]] PreparedBindings& StageRecord(uint32_t slot, const ShaderStageRuntime& runtime,
+	                                            PreparedBindings& fallback);
 
 	[[nodiscard]] TextureBinding ResolveTexture(const ShaderRecompiler::IR::ImageResource& resource,
 	                                            const ShaderRecompiler::IR::DescriptorValue& value,

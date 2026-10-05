@@ -2012,13 +2012,17 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	std::array<PreparedBindings*, 4> descriptor_stages {};
 	uint32_t                         stage_count = 0;
 	for (uint32_t i = 0; i < vertex_stages.size(); i++) {
-		PrepareBindings(state.vertex_info[i].stage, bindings.vertex[i]);
-		descriptor_stages[stage_count++] = &bindings.vertex[i];
+		auto& prepared = vertex_stages.size() == 1
+		                     ? StageRecord(0, state.vertex_info[i].stage, bindings.vertex[i])
+		                     : bindings.vertex[i];
+		PrepareBindings(state.vertex_info[i].stage, prepared);
+		descriptor_stages[stage_count++] = &prepared;
 	}
 	if (state.ps_active) {
 		if (!bindings.pixel) bindings.pixel.emplace();
-		PrepareBindings(state.ps_input_info.stage, *bindings.pixel);
-		descriptor_stages[stage_count++] = &*bindings.pixel;
+		auto& prepared = StageRecord(1, state.ps_input_info.stage, *bindings.pixel);
+		PrepareBindings(state.ps_input_info.stage, prepared);
+		descriptor_stages[stage_count++] = &prepared;
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::StageBindings);
 	const auto stages = std::span {descriptor_stages.data(), stage_count};

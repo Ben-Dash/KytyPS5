@@ -1096,6 +1096,52 @@ static bool ImageGroupStands(TextureCache& cache, const PreparedBindings& prepar
 	return true;
 }
 
+// KYTY_STAGE_RECORDS=0: each stage slot keeps only its previous draw's bindings; KYTY_DEBUG_AB=records
+// alternates. On: the bindings are kept per program and image descriptors (see
+// RenderExecutor::StageRecord), and a group recorded under another tick or image set is checked
+// image by image (ImageGroupRevalidates).
+bool StageRecordsEnabled() noexcept {
+	static const bool enabled = [] {
+		const char* text = std::getenv("KYTY_STAGE_RECORDS");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	static const bool ab = AbSelected("records");
+	return enabled && !(ab && AbFeatureOff());
+}
+
+// A group recorded under another target state (a newer submission tick, GC tick or image set):
+// it still stands when each image's lookup would repeat itself (RefindImage, which also touches
+// the image for this tick and finishes the find as a lookup would) and binds the same clean image
+// with the view it kept, as ReuseTexture and RebindImages would conclude image by image.
+static bool ImageGroupRevalidates(TextureCache& cache, PreparedBindings& prepared) {
+	for (size_t i = 0; i < prepared.images.size(); i++) {
+		const auto& source  = prepared.image_sources[i];
+		const auto& binding = prepared.images[i];
+		if (source.null_image) {
+			continue;
+		}
+		if (source.generation == 0 ||
+		    !cache.RefindImage(source.found, source.generation, binding.desc,
+		                       source.metadata_base_layer)) {
+			return false;
+		}
+		const auto depth = cache.GetImage(source.found).depth_id;
+		if ((depth ? depth : source.found) != binding.image_id ||
+		    source.view_image != binding.image_id || source.view != binding.image_view ||
+		    !cache.IsTextureCurrent(binding.image_id, source.view_generation) ||
+		    !cache.IsColorClearCurrent(source.found, binding.desc, source.metadata_base_layer)) {
+			return false;
+		}
+	}
+	prepared.image_group.state = cache.CurrentTargetState();
+	return true;
+}
+
+static bool ImageGroupStandsOrRevalidates(TextureCache& cache, PreparedBindings& prepared) {
+	return ImageGroupStands(cache, prepared) ||
+	       (StageRecordsEnabled() && ImageGroupRevalidates(cache, prepared));
+}
+
 // Records the stage's images as RebindImages left them, for the next draw of the same program and
 // image descriptors (see PreparedBindings::ImageGroup). Only sampled textures that a lookup can
 // repeat (or null textures) and that keep their views qualify; ImageGroupStands also asks each
@@ -1311,6 +1357,28 @@ void DebugFrameRepeatFlip() {
 	state.frames[state.current].clear();
 }
 
+PreparedBindings& RenderExecutor::StageRecord(uint32_t slot, const ShaderStageRuntime& runtime,
+                                              PreparedBindings& fallback) {
+	if (!StageRecordsEnabled()) {
+		return fallback;
+	}
+	// Draws of one program mostly cycle through a few materials: each program and image descriptor
+	// set keeps its own bindings, so its images (the image group) and buffer and view sources stay
+	// recorded while other draws come between. A key collision only shares one record.
+	const auto& images  = runtime.resources->images;
+	const auto  key     = XXH3_64bits_withSeed(images.data(), images.size() * sizeof(images[0]),
+	                                           reinterpret_cast<uint64_t>(runtime.program));
+	auto&       records = m_graphics_bindings.records[slot];
+	if (const auto found = records.find(key); found != records.end()) {
+		return *found->second;
+	}
+	// Bounded: a scene change starts over.
+	if (records.size() >= 8192) {
+		records.clear();
+	}
+	return *records.emplace(key, std::make_unique<PreparedBindings>()).first->second;
+}
+
 void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
                                      PreparedBindings& prepared) {
 	KYTY_PROFILER_FUNCTION();
@@ -1340,7 +1408,8 @@ void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
 	const auto& group = prepared.image_group;
 	prepared.image_group_kept =
 	    ImageGroupsEnabled() && group.program == &program &&
-	    std::ranges::equal(snapshot.images, group.images) && ImageGroupStands(texture_cache, prepared);
+	    std::ranges::equal(snapshot.images, group.images) &&
+	    ImageGroupStandsOrRevalidates(texture_cache, prepared);
 	if (bind_stats) [[unlikely]] {
 		const auto now = DrawPhaseTimer::Now();
 		NoteImageGroup(texture_cache, prepared, &program, snapshot.images,
@@ -1554,7 +1623,7 @@ void RenderExecutor::RebindImages(PreparedBindings& prepared) {
 	    g_draw_phases.Active() && BindStatsEnabled() && !program.info.images.empty();
 	StatsScope stats_scope {bind_stats, group_kept ? 0u : 1u,
 	                        bind_stats ? DrawPhaseTimer::Now() : 0};
-	const bool stands = group_kept && ImageGroupStands(texture_cache, prepared);
+	const bool stands = group_kept && ImageGroupStandsOrRevalidates(texture_cache, prepared);
 	if (bind_stats && group_kept && !stands) [[unlikely]] {
 		g_bind_stats.kept_lost++;
 	}
