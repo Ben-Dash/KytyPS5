@@ -71,8 +71,9 @@ static void PrintUsage() {
 	::printf("  --fullscreen                         Run in borderless desktop fullscreen.\n");
 	::printf("  --vr                                 Enable the virtual VR headset.\n");
 	::printf("  --amd-cpu                            Apply AMD CPU instruction patches.\n");
-	::printf("  --dualsense-fix                      No DualSense vibration; controller speaker sounds\n"
-	         "                                       play on the PC output.\n");
+	::printf("  --dualsense-fix                      Vibration and controller speaker on the DualSense.\n"
+	         "                                       Without it: no vibration, controller speaker\n"
+	         "                                       sounds play on the PC output.\n");
 	::printf("  --vblank-frequency <num>             Virtual vblank frequency. Default: 60.\n");
 	::printf("  --console-language <0-29>            Console language. Default: 1 (English US).\n");
 	::printf("  --vulkan-validation <true|false>     Enable Vulkan validation.\n");
@@ -290,10 +291,14 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		         "gpu-timestamp-scale %u\n",
 		         title_id.c_str(), options.config.gpu_timestamp_scale_percent);
 	}
+	// Without --dualsense-fix nothing goes to the DualSense: no vibration, and controller speaker
+	// sounds play on the PC output.
 	if (g_dualsense_fix) {
+		::printf("DualSense fix: vibration and controller speaker on the DualSense\n");
+	} else {
 		SetDefaultSwitch("KYTY_PAD_VIBRATION", "0");
 		SetDefaultSwitch("KYTY_PAD_SPEAKER", "0");
-		::printf("DualSense fix: no vibration, controller speaker sounds on the PC output\n");
+		::printf("DualSense fix off: no vibration, controller speaker sounds on the PC output\n");
 	}
 }
 

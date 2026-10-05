@@ -307,8 +307,8 @@
         </item>
         <item>
          <widget class="QCheckBox" name="checkBox_dualsense_fix">
-          <property name="toolTip"><string>No controller vibration; sounds the game sends to the controller speaker play on the PC instead.</string></property>
-          <property name="text"><string>DualSense fix (no vibration, no controller speaker)</string></property>
+          <property name="toolTip"><string>On: vibration and the controller speaker on the DualSense. Off: no vibration, controller speaker sounds play on the PC.</string></property>
+          <property name="text"><string>DualSense Fix</string></property>
          </widget>
         </item>
         <item>
