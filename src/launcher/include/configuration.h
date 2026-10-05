@@ -50,11 +50,15 @@ struct ControllerSettings {
 	QString color;
 	int     speaker_volume      = 50;
 	int     vibration_intensity = 100;
+	// DualSense Fix (--dualsense-fix): vibration, adaptive triggers and the controller speaker on
+	// the DualSense, for every game.
+	bool dualsense_fix = false;
 
 	void WriteSettings(QSettings* s) const {
 		s->setValue("controller_color", color);
 		s->setValue("controller_speaker_volume", speaker_volume);
 		s->setValue("controller_vibration_intensity", vibration_intensity);
+		s->setValue("controller_dualsense_fix", dualsense_fix);
 	}
 
 	void ReadSettings(QSettings* s) {
@@ -67,6 +71,9 @@ struct ControllerSettings {
 		};
 		speaker_volume      = read_percent("controller_speaker_volume", 50);
 		vibration_intensity = read_percent("controller_vibration_intensity", 100);
+		// Earlier launchers kept the DualSense Fix with the other emulator settings.
+		dualsense_fix =
+		    s->value("controller_dualsense_fix", s->value("dualsense_fix_enabled", false)).toBool();
 	}
 };
 
@@ -137,7 +144,6 @@ public:
 	bool                   profiler_enabled            = false;
 	bool                   renderdoc_enabled           = false;
 	bool                   amd_cpu_enabled             = false;
-	bool                   dualsense_fix_enabled       = false;
 #if defined(_WIN32)
 	bool red_zone_protection_enabled = false;
 #endif
@@ -171,7 +177,6 @@ public:
 		profiler_enabled            = other.profiler_enabled;
 		renderdoc_enabled           = other.renderdoc_enabled;
 		amd_cpu_enabled             = other.amd_cpu_enabled;
-		dualsense_fix_enabled       = other.dualsense_fix_enabled;
 #if defined(_WIN32)
 		red_zone_protection_enabled = other.red_zone_protection_enabled;
 #endif
@@ -220,7 +225,6 @@ public:
 		KYTY_CFG_SET(profiler_enabled);
 		KYTY_CFG_SET(renderdoc_enabled);
 		KYTY_CFG_SET(amd_cpu_enabled);
-		KYTY_CFG_SET(dualsense_fix_enabled);
 #if defined(_WIN32)
 		KYTY_CFG_SET(red_zone_protection_enabled);
 #endif
@@ -268,7 +272,6 @@ public:
 		KYTY_CFG_GET(profiler_enabled);
 		KYTY_CFG_GET(renderdoc_enabled);
 		amd_cpu_enabled = s->value("amd_cpu_enabled", false).toBool();
-		dualsense_fix_enabled = s->value("dualsense_fix_enabled", false).toBool();
 #if defined(_WIN32)
 		red_zone_protection_enabled =
 		    s->value("red_zone_protection_enabled", red_zone_protection_enabled).toBool();

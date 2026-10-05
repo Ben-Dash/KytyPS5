@@ -151,6 +151,17 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	connect(m_ui->slider_controller_volume, &QSlider::valueChanged, this, [this](int value) {
 		m_ui->label_controller_volume_value->setText(tr("%1%").arg(value));
 	});
+	// Vibration and speaker volume only matter with the DualSense Fix on; the lightbar works either way.
+	connect(m_ui->checkBox_dualsense_fix, &QCheckBox::toggled, this, [this](bool on) {
+		for (QWidget* widget: {static_cast<QWidget*>(m_ui->label_controller_vibration),
+		                       static_cast<QWidget*>(m_ui->slider_controller_vibration),
+		                       static_cast<QWidget*>(m_ui->label_controller_vibration_value),
+		                       static_cast<QWidget*>(m_ui->label_controller_volume),
+		                       static_cast<QWidget*>(m_ui->slider_controller_volume),
+		                       static_cast<QWidget*>(m_ui->label_controller_volume_value)}) {
+			widget->setEnabled(on);
+		}
+	});
 	connect(m_ui->comboBox_shader_log_direction, &QComboBox::currentTextChanged, this,
 	        [this](const QString& text) {
 		        auto log = TextToEnum<Configuration::LogDirection>(text);
@@ -210,6 +221,9 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	UpdateControllerColorButton(m_ui->button_controller_color, info.controller.color);
 	m_ui->slider_controller_vibration->setValue(info.controller.vibration_intensity);
 	m_ui->slider_controller_volume->setValue(info.controller.speaker_volume);
+	// Set twice so the toggled handler runs and greys out the sliders that do not apply.
+	m_ui->checkBox_dualsense_fix->setChecked(!info.controller.dualsense_fix);
+	m_ui->checkBox_dualsense_fix->setChecked(info.controller.dualsense_fix);
 	auto* microphone = m_ui->comboBox_audio_input_device;
 	microphone->clear();
 	microphone->addItem(tr("None"), QString {});
@@ -286,7 +300,6 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	m_ui->checkBox_vulkan_validation->setChecked(info.vulkan_validation_enabled);
 	m_ui->checkBox_renderdoc_capture->setChecked(info.renderdoc_enabled);
 	m_ui->checkBox_amd_cpu->setChecked(info.amd_cpu_enabled);
-	m_ui->checkBox_dualsense_fix->setChecked(info.dualsense_fix_enabled);
 #if defined(__APPLE__)
 	m_ui->checkBox_amd_cpu->setVisible(false);
 #endif
@@ -419,6 +432,7 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 		info.controller.color = ui.button_controller_color->property("controllerColor").toString();
 		info.controller.vibration_intensity = ui.slider_controller_vibration->value();
 		info.controller.speaker_volume      = ui.slider_controller_volume->value();
+		info.controller.dualsense_fix       = ui.checkBox_dualsense_fix->isChecked();
 	}
 	info.screen_resolution =
 	    TextToEnum<Configuration::Resolution>(ui.comboBox_screen_resolution->currentText());
@@ -436,7 +450,6 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 	info.shader_validation_enabled = ui.checkBox_shader_validation->isChecked();
 	info.renderdoc_enabled         = ui.checkBox_renderdoc_capture->isChecked();
 	info.amd_cpu_enabled           = ui.checkBox_amd_cpu->isChecked();
-	info.dualsense_fix_enabled     = ui.checkBox_dualsense_fix->isChecked();
 #if defined(_WIN32)
 	info.red_zone_protection_enabled = ui.checkBox_red_zone_protection->isChecked();
 #endif

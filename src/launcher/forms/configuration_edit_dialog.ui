@@ -306,12 +306,6 @@ To use your own sound, replace the emulator's assets/sounds/trophy-unlock.wav wi
          </widget>
         </item>
         <item>
-         <widget class="QCheckBox" name="checkBox_dualsense_fix">
-          <property name="toolTip"><string>On: vibration, adaptive triggers and the controller speaker on the DualSense. Off: none of them; controller speaker sounds play on the PC.</string></property>
-          <property name="text"><string>DualSense Fix</string></property>
-         </widget>
-        </item>
-        <item>
          <widget class="QCheckBox" name="checkBox_red_zone_protection">
           <property name="toolTip"><string>Helps prevent crashes in some games on Windows</string></property>
           <property name="text"><string>Windows SysV red zone crash protection (experimental)</string></property>
@@ -327,12 +321,18 @@ To use your own sound, replace the emulator's assets/sounds/trophy-unlock.wav wi
      <property name="title"><string>Controller</string></property>
      <layout class="QFormLayout" name="controllerLayout">
       <property name="fieldGrowthPolicy"><enum>QFormLayout::AllNonFixedFieldsGrow</enum></property>
-      <item row="0" column="0">
+      <item row="0" column="0" colspan="2">
+       <widget class="QCheckBox" name="checkBox_dualsense_fix">
+        <property name="toolTip"><string>On: vibration, adaptive triggers and the controller speaker on the DualSense. Off: none of them; controller speaker sounds play on the PC. Applies to every game.</string></property>
+        <property name="text"><string>Enable DualSense Fix (vibration, adaptive triggers, speaker)</string></property>
+       </widget>
+      </item>
+      <item row="1" column="0">
        <widget class="QLabel" name="label_controller_color">
         <property name="text"><string>DualSense lightbar:</string></property>
        </widget>
       </item>
-      <item row="0" column="1">
+      <item row="1" column="1">
        <layout class="QHBoxLayout" name="controllerColorLayout">
         <item>
          <widget class="QPushButton" name="button_controller_color">
@@ -348,12 +348,12 @@ To use your own sound, replace the emulator's assets/sounds/trophy-unlock.wav wi
         </item>
        </layout>
       </item>
-      <item row="1" column="0">
+      <item row="2" column="0">
        <widget class="QLabel" name="label_controller_vibration">
         <property name="text"><string>Vibration intensity:</string></property>
        </widget>
       </item>
-      <item row="1" column="1">
+      <item row="2" column="1">
        <layout class="QHBoxLayout" name="controllerVibrationLayout">
         <item>
          <widget class="QSlider" name="slider_controller_vibration">
@@ -371,12 +371,12 @@ To use your own sound, replace the emulator's assets/sounds/trophy-unlock.wav wi
         </item>
        </layout>
       </item>
-      <item row="2" column="0">
+      <item row="3" column="0">
        <widget class="QLabel" name="label_controller_volume">
         <property name="text"><string>Speaker volume:</string></property>
        </widget>
       </item>
-      <item row="2" column="1">
+      <item row="3" column="1">
        <layout class="QHBoxLayout" name="controllerVolumeLayout">
         <item>
          <widget class="QSlider" name="slider_controller_volume">

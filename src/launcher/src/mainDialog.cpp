@@ -279,7 +279,7 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	if (info.amd_cpu_enabled) {
 		args << "--amd-cpu";
 	}
-	if (info.dualsense_fix_enabled) {
+	if (info.controller.dualsense_fix) {
 		args << "--dualsense-fix";
 	}
 #if defined(_WIN32)
