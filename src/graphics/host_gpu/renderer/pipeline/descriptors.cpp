@@ -1185,6 +1185,10 @@ struct FrameRepeat {
 	uint64_t                                    stages = 0;
 	uint64_t                                    full = 0;
 	uint64_t                                    without_buffers = 0;
+	uint64_t                                    relocated = 0;
+	uint64_t                                    user_data = 0;
+	uint64_t                                    user_data_full = 0;
+	uint64_t                                    constants = 0;
 	uint64_t                                    flips = 0;
 };
 static FrameRepeat g_frame_repeat;
@@ -1224,17 +1228,64 @@ static void NoteBindingRepeat(PreparedBindings& prepared, const ShaderStageRunti
 		const uint64_t program_key = reinterpret_cast<uint64_t>(key.program) * 0x9E3779B97F4A7C15ull;
 		const uint64_t full        = program_key ^ key.images ^ (key.buffers * 3u) ^ (key.samplers * 7u);
 		const uint64_t no_buffers  = program_key ^ key.images ^ (key.samplers * 7u) ^ 0x5555u;
-		state.stages++;
-		bool seen_full = false;
-		bool seen_part = false;
+		// The buffer descriptors without their base addresses (V# dword 0 and the low 16 bits of
+		// dword 1): a record whose buffers only moved could be kept and relocated.
+		uint64_t shape = 0;
+		for (const auto& value: snapshot.buffers) {
+			auto masked = value;
+			if (masked.dword_count >= 2) {
+				masked.dwords[0] = 0;
+				masked.dwords[1] &= 0xffff0000u;
+			}
+			shape = XXH3_64bits_withSeed(masked.dwords.data(), sizeof(masked.dwords),
+			                             shape ^ masked.dword_count);
+		}
+		const uint64_t relocated = no_buffers ^ (shape * 11u) ^ 0x3333u;
+		// The Demon's Souls fork's record key: the program and the stage's user data registers.
+		const uint64_t user_data =
+		    program_key ^ 0x7777u ^
+		    (snapshot.user_data.empty()
+		         ? 0
+		         : XXH3_64bits(snapshot.user_data.data(), snapshot.user_data.size() * sizeof(uint32_t)) *
+		               13u);
+		const uint64_t user_data_full = user_data ^ full;
+		// ...and also the same constants read through the shader resource table.
+		const uint64_t constants =
+		    user_data_full ^ 0x1111u ^
+		    (snapshot.flattened_srt.empty()
+		         ? 0
+		         : XXH3_64bits(snapshot.flattened_srt.data(), snapshot.flattened_srt.size() * sizeof(uint32_t)) *
+		               17u);
+		bool seen_constants = false;
 		for (const auto& frame: state.frames) {
-			seen_full = seen_full || frame.contains(full);
-			seen_part = seen_part || frame.contains(no_buffers);
+			seen_constants = seen_constants || frame.contains(constants);
+		}
+		state.constants += seen_constants ? 1 : 0;
+		state.frames[state.current].insert(constants);
+		state.stages++;
+		bool seen_full           = false;
+		bool seen_part           = false;
+		bool seen_relocated      = false;
+		bool seen_user_data      = false;
+		bool seen_user_data_full = false;
+		for (const auto& frame: state.frames) {
+			seen_full           = seen_full || frame.contains(full);
+			seen_part           = seen_part || frame.contains(no_buffers);
+			seen_relocated      = seen_relocated || frame.contains(relocated);
+			seen_user_data      = seen_user_data || frame.contains(user_data);
+			seen_user_data_full = seen_user_data_full || frame.contains(user_data_full);
 		}
 		state.full += seen_full ? 1 : 0;
 		state.without_buffers += seen_part ? 1 : 0;
-		state.frames[state.current].insert(full);
-		state.frames[state.current].insert(no_buffers);
+		state.relocated += seen_relocated ? 1 : 0;
+		state.user_data += seen_user_data ? 1 : 0;
+		state.user_data_full += seen_user_data_full ? 1 : 0;
+		auto& frame = state.frames[state.current];
+		frame.insert(full);
+		frame.insert(no_buffers);
+		frame.insert(relocated);
+		frame.insert(user_data);
+		frame.insert(user_data_full);
 	}
 }
 
@@ -1244,13 +1295,17 @@ void DebugFrameRepeatFlip() {
 		return;
 	}
 	if (++state.flips % 120 == 0) {
-		std::printf("frame-repeat: stages/frame=%llu seen in last 4 frames: all=%.1f%% all but buffers=%.1f%%\n",
-		            static_cast<unsigned long long>(state.stages / 120),
-		            100.0 * static_cast<double>(state.full) / static_cast<double>(state.stages),
-		            100.0 * static_cast<double>(state.without_buffers) /
-		                static_cast<double>(state.stages));
+		const auto percent = [&](uint64_t count) {
+			return 100.0 * static_cast<double>(count) / static_cast<double>(state.stages);
+		};
+		std::printf("frame-repeat: stages/frame=%llu seen in last 4 frames: all=%.1f%% all but buffers=%.1f%% "
+		            "buffers moved only=%.1f%% user data=%.1f%% user data+all=%.1f%% +constants=%.1f%%\n",
+		            static_cast<unsigned long long>(state.stages / 120), percent(state.full),
+		            percent(state.without_buffers), percent(state.relocated), percent(state.user_data),
+		            percent(state.user_data_full), percent(state.constants));
 		std::fflush(stdout);
-		state.stages = state.full = state.without_buffers = 0;
+		state.stages = state.full = state.without_buffers = state.relocated = state.user_data =
+		    state.user_data_full = state.constants = 0;
 	}
 	state.current = (state.current + 1) % state.frames.size();
 	state.frames[state.current].clear();

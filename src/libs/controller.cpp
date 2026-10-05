@@ -224,13 +224,30 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 			}
 			return list;
 		}();
-		if (!replay.empty() && now <= replay.back().time + 0.5) {
+		// KYTY_DEBUG_PAD_REPLAY_START_FILE=<path>: the replay clock starts only once that file exists
+		// (checked twice a second), so a benchmark script can start the route when a scene has loaded.
+		static const char* replay_start_file = std::getenv("KYTY_DEBUG_PAD_REPLAY_START_FILE");
+		static double      replay_origin     = replay_start_file == nullptr ? 0.0 : -1.0;
+		if (replay_origin < 0.0 && !replay.empty()) {
+			static double next_check = 0.0;
+			if (now >= next_check) {
+				next_check = now + 0.5;
+				if (auto* file = std::fopen(replay_start_file, "r"); file != nullptr) {
+					std::fclose(file);
+					replay_origin = now;
+					std::printf("pad replay: started at %.2f s\n", now);
+					std::fflush(stdout);
+				}
+			}
+		}
+		const double replay_now = now - replay_origin;
+		if (!replay.empty() && replay_origin >= 0.0 && replay_now <= replay.back().time + 0.5) {
 			static size_t cursor = 0;
-			while (cursor + 1 < replay.size() && replay[cursor + 1].time <= now) {
+			while (cursor + 1 < replay.size() && replay[cursor + 1].time <= replay_now) {
 				cursor++;
 			}
 			const auto& event = replay[cursor];
-			if (event.time <= now) {
+			if (event.time <= replay_now) {
 				data->buttons           = event.buttons;
 				data->left_stick_x      = static_cast<uint8_t>(event.values[0]);
 				data->left_stick_y      = static_cast<uint8_t>(event.values[1]);
