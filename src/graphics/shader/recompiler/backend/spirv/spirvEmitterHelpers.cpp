@@ -125,6 +125,11 @@ DppTargetLane EmitDppTargetLane(EmitterState& state, const IR::DppMoveFlags& fla
 	return {subid, ConstantBool(state, true)};
 }
 
+bool UsesIdBuffer(const EmitterState& state) {
+	return state.program.stage == ShaderType::Pixel && state.input_info.pixel != nullptr &&
+	       state.input_info.pixel->id_buffer_slot != UINT32_MAX;
+}
+
 bool WaveHalvesInHostSubgroup(const EmitterState& state) {
 	// KYTY_DEBUG_WAVE_HALVES=0 emits as if the host subgroup matched the guest wave (A/B).
 	static const bool enabled = [] {

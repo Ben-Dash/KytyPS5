@@ -650,6 +650,7 @@ void CreateGraphicsLayouts(GraphicContext& graphics, PipelineCache::Pipeline& pi
 void CreateMonolithicPipeline(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                               const GraphicsPipelineState& state, vk::PipelineCache driver_cache) {
 	CreateGraphicsLayouts(graphics, pipeline, state, state.graphics_stages);
+	pipeline.push_constant_stages = state.graphics_stages;
 
 	vk::GraphicsPipelineCreateInfo pipeline_info {};
 	pipeline_info.flags               = state.flags;

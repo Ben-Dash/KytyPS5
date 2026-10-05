@@ -1020,6 +1020,20 @@ uint32_t LoadIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_
 	return ConstructU32Composite(state, components, values);
 }
 
+// A raw byte or short load through a GPU-selected descriptor: the bytes at the computed address,
+// zero when the access is out of the descriptor's bounds.
+uint32_t LoadIndirectSubword(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t bits) {
+	auto&      state  = ctx.state;
+	const auto buffer = PrepareIndirectBuffer(ctx, inst);
+	const auto valid_format =
+	    Binary(state, spv::OpINotEqual, TypeBool(state), buffer.format, ConstantU32(state, 0));
+	const auto in_bounds = AndCondition(
+	    state, ctx.Arg(inst, inst.NumArgs() - 1),
+	    AndCondition(state, valid_format,
+	                 IndirectBufferInBounds(state, buffer, 0u, bits / 8u, false)));
+	return LoadBda(ctx, buffer.address, in_bounds, bits);
+}
+
 uint32_t LoadIndirectFormattedX(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto& state = ctx.state;
 	return EmitValueOrZeroIfCondition(state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
@@ -1511,6 +1525,9 @@ void EmitLoadMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 	else if (op == IR::ValueOpcode::LoadBufferU32 && mem.formatted)
 		value = mem.kind == IR::ResourceKind::IndirectBuffer ? LoadIndirectFormattedX(ctx, inst)
 		                                                     : FormattedLoad(ctx, inst, mem);
+	else if (mem.kind == IR::ResourceKind::IndirectBuffer &&
+	         (inst.GetType() == IR::Type::U8 || inst.GetType() == IR::Type::U16))
+		value = LoadIndirectSubword(ctx, inst, inst.GetType() == IR::Type::U8 ? 8u : 16u);
 	else if (inst.GetType() == IR::Type::U8)
 		value = LoadSubword(ctx, inst, mem, 8, false);
 	else if (inst.GetType() == IR::Type::U16)

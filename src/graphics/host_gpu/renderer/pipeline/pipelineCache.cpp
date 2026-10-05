@@ -1689,6 +1689,27 @@ static std::array<ShaderParams, 3> PrepareGraphicsStages(
 			}
 		}
 	}
+	// Hardware ID buffer: an enabled 32-bit uint color slot that the shader does not export to
+	// (SPI_SHADER_COL_FORMAT zero, CB_SHADER_MASK clear) receives VGT_OBJECT_ID | primitive id per
+	// pixel (Ghost of Yotei's visibility pre-pass). KYTY_ID_BUFFER=0 turns it off.
+	static const bool id_buffer_enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_ID_BUFFER");
+		return text == nullptr || text[0] != '0';
+	}();
+	if (pixel_active && id_buffer_enabled && !pixel_info.dual_source_blending &&
+	    vertex_info[0].logical_stage != ShaderType::Mesh) {
+		for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
+			const auto& rt = context.GetRenderTarget(slot);
+			if (rt.base.addr != 0 && render_target_mask_slot(context.GetRenderTargetMask(), slot) != 0 &&
+			    render_target_mask_slot(sh.m_cbShaderMask, slot) == 0 &&
+			    pixel_info.target_output_mode[slot] == 0 &&
+			    rt.info.format == Prospero::ChannelLayout::k32 &&
+			    rt.info.channel_type == Prospero::ChannelType::kUInt) {
+				pixel_info.id_buffer_slot = slot;
+				break;
+			}
+		}
+	}
 	if (context.GetClipControl().clip_disable) {
 		const auto& viewport = context.GetScreenViewport().viewports[0];
 		const auto& limits   = graphics.GetPhysicalDeviceProperties().limits;

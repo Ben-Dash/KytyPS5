@@ -400,6 +400,13 @@ void CollectOutputs(const Program& program, ShaderStageInputInfo input_info, Sha
 			}
 		}
 	}
+	// The hardware ID buffer slot: written from gl_PrimitiveID and the draw's object id.
+	if (program.stage == ShaderType::Pixel && input_info.pixel != nullptr &&
+	    input_info.pixel->id_buffer_slot != UINT32_MAX) {
+		const auto slot = input_info.pixel->id_buffer_slot;
+		AddOutput(info, StageOutputKind::Mrt, slot, slot, "out_id_buffer");
+		AddInput(info, StageInputKind::PrimitiveId, 0, 1, "gl_PrimitiveID");
+	}
 }
 
 } // namespace

@@ -279,7 +279,8 @@ void DefineBindlessImages(EmitterState& state) {
 
 void DefineDescriptors(EmitterState& state) {
 	DefineBindlessImages(state);
-	if (state.program.bindings.UsesPushData() || state.program.stage == ShaderType::Mesh) {
+	if (state.program.bindings.UsesPushData() || state.program.stage == ShaderType::Mesh ||
+	    UsesIdBuffer(state)) {
 		const auto type              = PushConstantBlockType(state);
 		state.push_constant_variable = state.builder.DefineGlobalVariable(
 		    TypePointer(state, spv::StorageClassPushConstant, type), spv::StorageClassPushConstant);
@@ -587,7 +588,9 @@ void DefineInputs(EmitterState& state) {
 		}
 		input.variable_id =
 		    DefineInterfaceVariable(state, type, spv::StorageClassInput, input.debug_name.c_str());
-		if (input.kind == IR::StageInputKind::Layer || input.kind == IR::StageInputKind::SampleId) {
+		if (input.kind == IR::StageInputKind::Layer || input.kind == IR::StageInputKind::SampleId ||
+		    (input.kind == IR::StageInputKind::PrimitiveId &&
+		     state.program.stage == ShaderType::Pixel)) {
 			state.builder.AddAnnotation(spv::OpDecorate, input.variable_id, spv::DecorationFlat);
 		}
 		if (input.kind == IR::StageInputKind::Parameter) {
@@ -714,7 +717,8 @@ void DefineOutputs(EmitterState& state) {
 				    binding.kind == IR::StageOutputKind::Mrt &&
 				    state.program.stage == ShaderType::Pixel &&
 				    binding.index < std::size(state.input_info.pixel->target_output_mode) &&
-				    state.input_info.pixel->target_output_mode[binding.index] == 7u;
+				    (state.input_info.pixel->target_output_mode[binding.index] == 7u ||
+				     state.input_info.pixel->id_buffer_slot == binding.index);
 				const auto type = uint_output ? TypeU32Vector(state, 4) : TypeF32Vector(state, 4);
 				binding.variable_id = DefineInterfaceVariable(state, type, spv::StorageClassOutput,
 				                                              binding.debug_name.c_str());
@@ -771,6 +775,10 @@ void DefineModule(EmitterState& state) {
 	state.entry_label = state.builder.AllocateId();
 
 	state.builder.RequireCapability(spv::CapabilityShader);
+	if (UsesIdBuffer(state)) {
+		// Fragment gl_PrimitiveID; the device enables tessellationShader.
+		state.builder.RequireCapability(spv::CapabilityTessellation);
+	}
 	state.builder.RequireCapability(spv::CapabilitySignedZeroInfNanPreserve);
 	if (state.requirements.buffer_u8) {
 		state.builder.RequireExtension("SPV_KHR_8bit_storage");

@@ -185,6 +185,8 @@ struct ShaderPixelInputInfo {
 	bool                                           dual_source_blending         = false;
 	// Export logical alpha or per-channel source factors through MRT1 after channel swizzling.
 	ShaderAlphaBlendSource                         alpha_blend_source = ShaderAlphaBlendSource::None;
+	// Color slot the hardware ID buffer writes (object id | primitive id), UINT32_MAX: none.
+	uint32_t                                       id_buffer_slot               = UINT32_MAX;
 	bool                                           ps_early_z                   = false;
 	bool                                           ps_execute_on_noop           = false;
 	ShaderStageRuntime                             stage;

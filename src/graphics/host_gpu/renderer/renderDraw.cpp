@@ -1632,7 +1632,11 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	// Attachments follow the write masks, not the export format: in Astro Bot's Sky Garden the tall
 	// grass beside the path (an alpha-tested shader, so it runs anyway) writes a slot whose format
 	// register reads 0 at the draw, and binding only formatted slots dropped that grass.
-	mrt_mask &= DrawColorWriteMask(buffer.GetRegisters()) & m_color_slot_filter;
+	// The hardware ID buffer slot has no shader export but is written (see id_buffer_slot).
+	const uint32_t id_slot_mask = state.ps_active && state.ps_input_info.id_buffer_slot != UINT32_MAX
+	                                  ? 1u << state.ps_input_info.id_buffer_slot
+	                                  : 0u;
+	mrt_mask &= (DrawColorWriteMask(buffer.GetRegisters()) | id_slot_mask) & m_color_slot_filter;
 	// KYTY_DEBUG_MRT_SHADER=<pixel shader hash>: print that shader's colour slots (target address,
 	// target and shader write masks, export format, blend) for its first 16 draws, to see how a draw
 	// that binds one surface to several slots splits the channels.
@@ -2821,6 +2825,13 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	CommitBindings(buffer, vk::PipelineBindPoint::eGraphics, pipeline, stages);
 	if (!mesh_active) {
 		CommitIndexBuffer(vk_buffer, index_binding);
+	}
+	if (state.ps_active && state.ps_input_info.id_buffer_slot != UINT32_MAX && !mesh_active) {
+		// The draw's VGT_OBJECT_ID for the ID buffer (the last push dword).
+		const uint32_t object_id = buffer.GetUserConfig().GetObjectId();
+		vk_buffer.pushConstants(pipeline.pipeline_layout, pipeline.push_constant_stages,
+		                        ShaderRecompiler::IR::PushData::ObjectIdDword * sizeof(uint32_t),
+		                        sizeof(object_id), &object_id);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::Commit);
 

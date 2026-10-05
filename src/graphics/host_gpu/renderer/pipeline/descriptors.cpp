@@ -584,6 +584,24 @@ struct TextureDescription {
 	bool                    shader_conversion = false;
 };
 
+// A texture the host cannot represent ends the session, except while a bindless key is
+// resolved: that key then samples the placeholder (the shader keeps running).
+static thread_local bool g_soft_texture_failures = false;
+static thread_local bool g_soft_texture_failed   = false;
+#define KYTY_TEXTURE_FAIL(...)                                                                   \
+	do {                                                                                         \
+		if (g_soft_texture_failures) {                                                           \
+			g_soft_texture_failed = true;                                                        \
+			static std::atomic<uint32_t> soft_logged {0};                                        \
+			if (soft_logged.fetch_add(1) < 16) {                                                 \
+				std::printf("bindless: texture kept as placeholder: " __VA_ARGS__);              \
+				std::fflush(stdout);                                                             \
+			}                                                                                    \
+			return {};                                                                           \
+		}                                                                                        \
+		EXIT(__VA_ARGS__);                                                                       \
+	} while (false)
+
 TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& resource,
                                    const ShaderTextureResource&               descriptor) {
 	const bool storage         = resource.written;
@@ -613,7 +631,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	     (base_level != 0 || last_level == 0 || last_level > 3 || max_mip != last_level ||
 	      !msaa_tile || (descriptor.MsaaDepth() && !depth_tile) ||
 	      (!msaa_array && (descriptor.Depth() != 0 || descriptor.BaseArray5() != 0))))) {
-		EXIT("unsupported texture mip view: base=%u last=%u levels=%u max=%u type=%u tile=%u "
+		KYTY_TEXTURE_FAIL("unsupported texture mip view: base=%u last=%u levels=%u max=%u type=%u tile=%u "
 		     "class=%u numeric=%u dimension=%u mip_mode=%u read=%d written=%d "
 		     "dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
 		     base_level, last_level, levels, descriptor.MaxMip(),
@@ -635,7 +653,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	    storage || resource.numeric_class == Prospero::SampledTextureNumericClass(format);
 	if (!storage && resource.resource_class == ShaderRecompiler::IR::ImageResourceClass::Sampled &&
 	    !sampled_numeric_class) {
-		EXIT("sampled image numeric class mismatch: numeric=%u format=%u addr=0x%016" PRIx64 "\n",
+		KYTY_TEXTURE_FAIL("sampled image numeric class mismatch: numeric=%u format=%u addr=0x%016" PRIx64 "\n",
 		     static_cast<uint32_t>(resource.numeric_class), static_cast<uint32_t>(format), address);
 	}
 
@@ -651,7 +669,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		    width, height, volume ? depth : 1u, physical_levels, image_layers};
 		if (!ResolveTextureMipView(physical, !resource.r128 && descriptor.MetaCompress(),
 		                           view_levels, levels, view_base)) {
-			EXIT("unsupported texture mip view changes physical layout: base=%u last=%u max=%u "
+			KYTY_TEXTURE_FAIL("unsupported texture mip view changes physical layout: base=%u last=%u max=%u "
 			     "extent=%ux%ux%u tile=%u\n",
 			     base_level, last_level, max_mip, width, height, depth,
 			     static_cast<uint32_t>(tile));
@@ -665,7 +683,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		                              : TileGetRenderTargetPitch(width, bytes, last_level);
 		if (pitch == 0 || !TileGetRenderTargetSize(width, height, pitch, bytes, size, last_level) ||
 		    size.size > UINT32_MAX / image_layers) {
-			EXIT("unsupported multisample texture layout\n");
+			KYTY_TEXTURE_FAIL("unsupported multisample texture layout\n");
 		}
 		size.size *= image_layers;
 	} else {
@@ -676,7 +694,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	// Ghost of Yotei places small swizzled textures (16x16 in a 4 KiB mode) inside a block, so
 	// only the descriptor's own 256-byte address granularity is required.
 	if (size.size == 0 || size.align == 0 || (address & 0xffu) != 0) {
-		EXIT("unsupported texture layout: format=%u tile=%u type=%u extent=%ux%ux%u levels=%u "
+		KYTY_TEXTURE_FAIL("unsupported texture layout: format=%u tile=%u type=%u extent=%ux%ux%u levels=%u "
 		     "address=0x%016" PRIx64 " size=%u align=%u\n",
 		     static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
 		     static_cast<uint32_t>(type), width, height, depth, physical_levels, address,
@@ -787,7 +805,7 @@ public:
 		}
 		victim->description = DescribeTexture(resource, descriptor);
 		victim->hash        = hash;
-		victim->last_use    = ++m_clock;
+		victim->last_use    = g_soft_texture_failures && g_soft_texture_failed ? 0 : ++m_clock;
 		victim->value       = value;
 		victim->resource    = resource;
 		victim->generation  = 0;
@@ -1547,7 +1565,14 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
-	auto binding = ResolveTexture(heap.resource, value);
+	g_soft_texture_failures = true;
+	g_soft_texture_failed   = false;
+	auto binding            = ResolveTexture(heap.resource, value);
+	g_soft_texture_failures = false;
+	if (g_soft_texture_failed) {
+		table.SetTranslation(heap, key, 0u);
+		return false;
+	}
 	auto& texture_cache = m_context.GetTextureCache();
 	auto* image = texture_cache.m_slot_images.try_get(binding.image_id);
 	if (image == nullptr || image->info.data.Empty()) {
@@ -1557,14 +1582,18 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	BindImage(binding.image_id, false);
 	const auto view = texture_cache.FindTexture(binding.image_id, binding.desc);
 	image           = texture_cache.m_slot_images.try_get(binding.image_id);
-	const auto slot = table.AllocateSlot(heap.binding);
+	const auto layout = image != nullptr && image->info.IsDepth()
+	                        ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
+	                        : vk::ImageLayout::eShaderReadOnlyOptimal;
+	// One array slot per (array, view), shared by every heap and key showing that view:
+	// per-frame material tables would otherwise use the array up.
+	const auto slot = image != nullptr && view != nullptr
+	                      ? table.SharedSlot(heap.binding, binding.image_id, view, layout)
+	                      : 0u;
 	if (image == nullptr || view == nullptr || slot == 0) {
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
-	const auto layout = image->info.IsDepth() ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
-	                                          : vk::ImageLayout::eShaderReadOnlyOptimal;
-	table.WriteSlot(heap.binding, slot, view, layout);
 	heap.slots[key]         = slot;
 	image->bindless_pinned  = true;
 	image->usage.texture    = true;
@@ -1692,6 +1721,16 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		                                    BindlessBindingFor(resource), entries, resource);
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
+		}
+		// A table of material records is rewritten at a new address every frame, so its heap
+		// is new each frame and the shader's feedback would name its keys only after the heap
+		// is gone. A small one is resolved completely right away.
+		if (use.record_stride != 32u && entries <= 512u) {
+			for (uint32_t key = 0; key < entries && key < heap->settled.size(); key++) {
+				if (heap->settled[key] == 0) {
+					(void)ResolveBindlessKey(*heap, key);
+				}
+			}
 		}
 		prepared.bindless_patches.push_back(
 		    {use.mapping_offset, heap->region, std::min(entries, heap->entries)});

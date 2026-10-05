@@ -79,6 +79,12 @@ struct MemoryInfo {
 	// Loads through a GPU-selected descriptor read guest memory by address (BDA); a formatted
 	// load decodes the descriptor's format at run time (see LoadIndirectFormattedBuffer).
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
+		// Raw byte and short loads read their bytes by address too (see LoadIndirectSubword).
+		if (!typed && !formatted &&
+		    ((data_bits == 8u && opcode == ValueOpcode::LoadBufferU8) ||
+		     (data_bits == 16u && opcode == ValueOpcode::LoadBufferU16))) {
+			return true;
+		}
 		return !typed && data_bits == 32u &&
 		       (formatted ? opcode == ValueOpcode::LoadBufferU32
 		                  : opcode == ValueOpcode::ReadConstBuffer ||
@@ -329,6 +335,8 @@ struct PushData {
 	// Mesh draws reserve seven dwords: index_count, vertex offset, first
 	// instance, index element size, index address, and the slice base group.
 	static constexpr uint32_t        MeshDrawDwordCount = 7;
+	// Last dword: VGT_OBJECT_ID of the draw, for a pixel shader writing the hardware ID buffer.
+	static constexpr uint32_t        ObjectIdDword      = DwordCount - 1;
 	static constexpr uint32_t NoStart    = UINT32_MAX;
 	std::array<uint32_t, DwordCount> dwords {};
 

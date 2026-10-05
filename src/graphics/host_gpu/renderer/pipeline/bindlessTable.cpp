@@ -438,11 +438,54 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	heap.record_stride = record_stride;
 	heap.binding      = binding;
 	heap.resource     = resource;
-	if (!AllocateRegion(heap, std::max(entries, 1u << 14u))) {
+	// A plain T# heap grows as the guest streams textures in; a table of larger records (one
+	// per material) has a fixed size.
+	const auto initial = record_stride == 32u ? std::max(entries, 1u << 14u) : std::max(entries, 16u);
+	if (!AllocateRegion(heap, initial)) {
 		m_heaps.pop_back();
-		return nullptr;
+		static std::atomic<uint32_t> resets {0};
+		if (resets.fetch_add(1) < 8) {
+			std::printf("bindless: translation regions full (%zu heaps); starting over\n",
+			            m_heaps.size());
+			std::fflush(stdout);
+		}
+		ResetHeaps();
+		auto& fresh         = m_heaps.emplace_back();
+		fresh.base          = base;
+		fresh.table_offset  = table_offset;
+		fresh.record_stride = record_stride;
+		fresh.binding       = binding;
+		fresh.resource      = resource;
+		if (!AllocateRegion(fresh, initial)) {
+			m_heaps.pop_back();
+			return nullptr;
+		}
+		return &fresh;
 	}
 	return &heap;
+}
+
+void BindlessTable::ResetHeaps() {
+	m_heaps.clear();
+	m_image_refs.clear();
+	m_next_region = 1;
+}
+
+uint32_t BindlessTable::SharedSlot(uint32_t binding, ImageId id, vk::ImageView view,
+                                   vk::ImageLayout layout) {
+	const auto key =
+	    (static_cast<uint64_t>(binding) << 60u) ^ reinterpret_cast<uint64_t>(static_cast<VkImageView>(view));
+	if (const auto found = m_shared_slots.find(key); found != m_shared_slots.end()) {
+		return found->second;
+	}
+	const auto slot = AllocateSlot(binding);
+	if (slot == 0) {
+		return 0;
+	}
+	WriteSlot(binding, slot, view, layout);
+	m_shared_slots.emplace(key, slot);
+	m_image_shared_slots[ImageKey(id)].push_back({binding, slot, key});
+	return slot;
 }
 
 uint32_t BindlessTable::AllocateSlot(uint32_t binding) {
@@ -586,6 +629,15 @@ void BindlessTable::AddImageReference(ImageId id, Heap& heap, uint32_t key) {
 }
 
 void BindlessTable::OnImageUnregistered(ImageId id) {
+	if (const auto shared = m_image_shared_slots.find(ImageKey(id));
+	    shared != m_image_shared_slots.end()) {
+		for (const auto& [binding, slot, key]: shared->second) {
+			WriteSlot(static_cast<uint32_t>(binding), static_cast<uint32_t>(slot),
+			          m_placeholder_views[binding], vk::ImageLayout::eShaderReadOnlyOptimal);
+			m_shared_slots.erase(key);
+		}
+		m_image_shared_slots.erase(shared);
+	}
 	const auto found = m_image_refs.find(ImageKey(id));
 	if (found == m_image_refs.end()) {
 		return;

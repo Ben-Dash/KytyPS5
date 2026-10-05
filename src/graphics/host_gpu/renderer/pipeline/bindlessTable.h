@@ -103,6 +103,10 @@ public:
 	// (BindlessBindings.h), then clears the count.
 	void DrainWatchdogReports(uint64_t frame);
 	void AddImageReference(ImageId id, Heap& heap, uint32_t key);
+	// The array slot showing this view: one per (array, view), shared by every heap and key that
+	// resolves to it, so per-frame descriptor tables do not use up the array. 0 when full.
+	[[nodiscard]] uint32_t SharedSlot(uint32_t binding, ImageId id, vk::ImageView view,
+	                                  vk::ImageLayout layout);
 
 	// A guest sampler heap as one kind of use samples it: a region of the sampler array that
 	// mirrors its S# records, key for key. Uses differ in whether the depth-compare function is
@@ -151,6 +155,12 @@ private:
 	GraphicContext&         m_graphics;
 	std::deque<Heap>        m_heaps;
 	std::unordered_map<uint64_t, std::vector<std::pair<Heap*, uint32_t>>> m_image_refs;
+	// (binding, view) -> slot, and the shared slots of each image (binding, slot, map key).
+	std::unordered_map<uint64_t, uint32_t>                               m_shared_slots;
+	std::unordered_map<uint64_t, std::vector<std::array<uint64_t, 3>>>   m_image_shared_slots;
+	// Drops every heap and starts the translation regions over: per-frame descriptor tables
+	// create a heap per base address, and the regions are never freed one by one.
+	void ResetHeaps();
 	uint32_t                m_next_region = 1; // translation[0] is the out-of-range entry
 	std::array<uint32_t, ImageArrays> m_next_slot {PlaceholderColors, PlaceholderColors,
 	                                               PlaceholderColors, PlaceholderColors};

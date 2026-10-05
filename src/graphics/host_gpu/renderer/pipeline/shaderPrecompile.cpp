@@ -12,7 +12,7 @@ namespace Libs::Graphics::ShaderPrecompile {
 namespace {
 
 constexpr std::array<uint8_t, 8> Magic {'K', 'Y', 'T', 'Y', 'S', 'H', 'D', 'R'};
-constexpr uint32_t               FormatVersion  = 6; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images.
+constexpr uint32_t               FormatVersion  = 7; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images; 7: pixel id_buffer_slot.
 constexpr uint32_t               MaxCodeWords   = 256u * 1024u;
 constexpr uint32_t               MaxRecordBytes = 4u * 1024u * 1024u;
 constexpr uint64_t               MaxFileBytes   = 256u * 1024u * 1024u;
@@ -172,7 +172,7 @@ void Fields(Archive& a, ShaderPixelInputInfo& i) {
 	a(i.scratch_size_dwords, i.ps_pos_x, i.ps_pos_y, i.ps_pos_z, i.ps_pos_w, i.ps_front_face,
 	  i.ps_ancillary, i.ps_no_perspective, i.ps_pixel_kill_enable, i.ps_depth_export_enable,
 	  i.ps_sample_mask_export_enable, i.ps_sample_shading, i.dual_source_blending, i.ps_early_z,
-	  i.ps_execute_on_noop, i.alpha_blend_source);
+	  i.ps_execute_on_noop, i.alpha_blend_source, i.id_buffer_slot);
 }
 
 template <typename Archive>
