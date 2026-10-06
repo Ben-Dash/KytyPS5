@@ -211,29 +211,63 @@ void RecordBdaFault(EmitterState& state, uint32_t page) {
 	                          ConstantU32(state, spv::MemorySemanticsMaskNone), bit);
 }
 
+// A DWORD load at a physical address for FLAT/GLOBAL loads with DLC or GLC (IR::MemoryInfo::coherent):
+// through a Coherent block member and Volatile, so it is not served from a stale cache.
+uint32_t LoadCoherentU32(EmitterState& state, uint32_t address) {
+	const auto block = state.builder.DecoratedType(
+	    spv::OpTypeStruct,
+	    {{spv::OpMemberDecorate, {0, spv::DecorationOffset, 0}},
+	     {spv::OpMemberDecorate, {0, spv::DecorationCoherent}},
+	     {spv::OpDecorate, {spv::DecorationBlock}}},
+	    TypeU32(state));
+	const auto base = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpConvertUToPtr,
+	                          TypePointer(state, spv::StorageClassPhysicalStorageBuffer, block), base,
+	                          address);
+	const auto pointer = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpAccessChain, TypePhysicalU32Pointer(state), pointer, base,
+	                          ConstantU32(state, 0));
+	const auto value = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer,
+	                          spv::MemoryAccessAlignedMask | spv::MemoryAccessVolatileMask,
+	                          uint32_t {4});
+	return value;
+}
+
 // A dword load by guest address; zero where `active` (default true) is false or the page is not
 // mapped. With the zero page there is no branch: an unmapped or inactive lane reads a valid
 // address and its value is replaced by zero.
-uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t active = 0) {
+uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t active = 0,
+                      bool coherent = false) {
 	auto& state = ctx.state;
 	if (state.bda_load_pointer_function != 0) {
-		const auto always  = active == 0 || active == ConstantBool(state, true);
-		const auto pointer = state.builder.AllocateId();
-		state.builder.AddFunction(
-		    spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer,
-		    GetBdaLoadPointer(state, address, always ? ConstantBool(state, true) : active));
-		const auto value = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer,
-		                          spv::MemoryAccessAlignedMask, uint32_t {4});
+		const auto always = active == 0 || active == ConstantBool(state, true);
+		uint32_t   value  = 0;
+		if (coherent) {
+			value = LoadCoherentU32(
+			    state, GetBdaLoadPointer(state, address, always ? ConstantBool(state, true) : active));
+		} else {
+			const auto pointer = state.builder.AllocateId();
+			state.builder.AddFunction(
+			    spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer,
+			    GetBdaLoadPointer(state, address, always ? ConstantBool(state, true) : active));
+			value = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer,
+			                          spv::MemoryAccessAlignedMask, uint32_t {4});
+		}
 		return always ? value : Select(state, TypeU32(state), active, value, ConstantU32(state, 0));
 	}
 	if (active != 0 && active != ConstantBool(state, true)) {
-		return EmitValueOrZeroIfCondition(state, active, [&]() { return LoadBdaDword(ctx, address); });
+		return EmitValueOrZeroIfCondition(state, active,
+		                                  [&]() { return LoadBdaDword(ctx, address, 0, coherent); });
 	}
 	const auto bda     = GetBdaPointer(state, address);
 	const auto present =
 	    Binary(state, spv::OpINotEqual, TypeBool(state), bda, ConstantDeviceAddress(state, 0));
 	return EmitValueOrZeroIfCondition(state, present, [&]() {
+		if (coherent) {
+			return LoadCoherentU32(state, bda);
+		}
 		const auto pointer = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer,
 		                          bda);
@@ -246,7 +280,7 @@ uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t active =
 }
 
 std::array<uint32_t, 2> LoadElementWordPair(EmitterState& state, uint32_t address, uint32_t bytes,
-                                            uint32_t active);
+                                            uint32_t active, bool coherent);
 
 // usable[i]: the DWORD belongs to the element, is mapped, and `active` holds. With the zero page
 // (`zero_page`) every pointer is readable and usable[i] does not test the mapping: an unmapped
@@ -264,9 +298,11 @@ struct ElementWords {
 ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t bytes, uint32_t active,
                              uint32_t count, bool load, bool dword_aligned, bool masks);
 std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
-                                         const std::array<uint32_t, 5>& usable);
+                                         const std::array<uint32_t, 5>& usable, bool coherent);
 
-uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint32_t bits) {
+// `coherent`: a FLAT/GLOBAL load with DLC or GLC (see LoadCoherentU32).
+uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint32_t bits,
+                 bool coherent = false) {
 	auto& state = ctx.state;
 	if (state.bda_load_pointer_function != 0 && BdaNoWordMasksEnabled()) {
 		// KYTY_BDA_NO_WORD_MASKS: the two DWORDs unmasked (both readable with the zero page), shifted
@@ -276,7 +312,7 @@ uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint3
 		const auto u64    = TypeScalarU64(state);
 		const auto window = MapElementWords(state, address, ConstantU32(state, bits / 8u), active, 2u,
 		                                    true, false, false);
-		const auto words  = LoadElementWords(state, window, {});
+		const auto words  = LoadElementWords(state, window, {}, coherent);
 		const auto pair   = Binary(state, spv::OpBitwiseOr, u64, Unary(state, spv::OpUConvert, u64, words[0]),
 		                           Binary(state, spv::OpShiftLeftLogical, u64,
 		                                  Unary(state, spv::OpUConvert, u64, words[1]),
@@ -294,7 +330,7 @@ uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint3
 	// The one or two DWORDs the bytes cover, through one page lookup (two when they cross a page)
 	// under one branch. Zero when `active` is false.
 	const auto [first, second] =
-	    LoadElementWordPair(state, address, ConstantU32(state, bits / 8u), active);
+	    LoadElementWordPair(state, address, ConstantU32(state, bits / 8u), active, coherent);
 	const auto byte =
 	    Binary(state, spv::OpBitwiseAnd, TypeU32(state),
 	           Unary(state, spv::OpUConvert, TypeU32(state), address), ConstantU32(state, 3));
@@ -1064,13 +1100,84 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 		                               ConstantU32(state, PageSize - 1u));
 		const auto first_room = Binary(state, spv::OpISub, u32, ConstantU32(state, PageSize), in_page);
 		const auto crosses    = Binary(state, spv::OpUGreaterThan, TypeBool(state), need, first_room);
-		result.second_page    = GetBdaLoadPointer(
-		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
-		    AndCondition(state, active, crosses));
 		// KYTY_BDA_FAST_DWORD: the first DWORD is always on the first page (at least 4 bytes are
 		// left on it), and every DWORD of an aligned access of whole DWORDs is wanted.
 		const bool fast       = BdaFastDwordEnabled();
 		const bool all_wanted = fast && dword_aligned && bytes == ConstantU32(state, result.count * 4u);
+		if (BdaSingleCrossBranchEnabled()) {
+			// KYTY_BDA_SINGLE_CROSS_BRANCH: one branch per access on whether it crosses into the next
+			// page. Not crossing (nearly always), every DWORD is on the first page; only the crossing
+			// block looks the second page up and picks each DWORD's page. A second lookup and a page
+			// choice per DWORD on every access cost NVIDIA's compiler most of its time (bc8e).
+			std::array<uint32_t, 5> same_page {};
+			for (uint32_t word = 0; word < result.count; ++word) {
+				same_page[word] = word == 0u ? result.first_page
+				                             : Binary(state, spv::OpIAdd, u64, result.first_page,
+				                                      ConstantDeviceAddress(state, word * 4u));
+				if (masks) {
+					result.usable[word] = word == 0u || all_wanted
+					                          ? active
+					                          : AndCondition(state, active,
+					                                         Binary(state, spv::OpULessThan, TypeBool(state),
+					                                                ConstantU32(state, word * 4u), need));
+				}
+			}
+			result.pointer[0] = result.first_page;
+			if (result.count == 1u) {
+				return result;
+			}
+			const auto header      = state.current_label;
+			const auto cross_label = state.builder.AllocateId();
+			const auto merge_label = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpSelectionMerge, merge_label, spv::SelectionControlMaskNone);
+			state.builder.AddFunction(spv::OpBranchConditional, crosses, cross_label, merge_label);
+			EmitLabel(state, cross_label);
+			// Only lanes that cross get here: `active` alone gates the second page's fault record.
+			result.second_page = GetBdaLoadPointer(
+			    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
+			    active);
+			std::array<uint32_t, 5> crossing {};
+			const bool              mux = BdaCrossMuxEnabled();
+			for (uint32_t word = 1; word < result.count; ++word) {
+				const auto offset    = ConstantU32(state, word * 4u);
+				const auto on_second = [&]() {
+					return Binary(state, spv::OpIAdd, u64, result.second_page,
+					              Unary(state, spv::OpUConvert, u64,
+					                    Binary(state, spv::OpISub, u32, offset, first_room)));
+				};
+				if (mux) {
+					// KYTY_BDA_SINGLE_CROSS_BRANCH=2: the page choice as a bit mask instead of a select:
+					// offset - first_room is negative (first_room is 4..16384) exactly when the DWORD is
+					// on the first page, so its sign spread over 64 bits picks the first page's pointer.
+					const auto first_mask = Unary(
+					    state, spv::OpSConvert, u64,
+					    Binary(state, spv::OpShiftRightArithmetic, u32,
+					           Binary(state, spv::OpISub, u32, offset, first_room), ConstantU32(state, 31)));
+					crossing[word] = Binary(
+					    state, spv::OpBitwiseOr, u64, Binary(state, spv::OpBitwiseAnd, u64, same_page[word], first_mask),
+					    Binary(state, spv::OpBitwiseAnd, u64, on_second(), Unary(state, spv::OpNot, u64, first_mask)));
+				} else {
+					const auto in_first = Binary(state, spv::OpULessThan, TypeBool(state), offset, first_room);
+					crossing[word]      = Select(state, u64, in_first, same_page[word], on_second());
+				}
+			}
+			const auto cross_exit = state.current_label;
+			state.builder.AddFunction(spv::OpBranch, merge_label);
+			EmitLabel(state, merge_label);
+			for (uint32_t word = 1; word < result.count; ++word) {
+				result.pointer[word] = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpPhi, u64, result.pointer[word], crossing[word], cross_exit,
+				                          same_page[word], header);
+			}
+			// The V# values cached in the header dominate the merge block (KYTY_INDIRECT_BOUNDS_ONCE).
+			if (state.indirect_vsharp_label == header) {
+				state.indirect_vsharp_label = merge_label;
+			}
+			return result;
+		}
+		result.second_page = GetBdaLoadPointer(
+		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
+		    AndCondition(state, active, crosses));
 		for (uint32_t word = 0; word < result.count; ++word) {
 			const auto offset = ConstantU32(state, word * 4u);
 			if (fast && word == 0u) {
@@ -1139,19 +1246,25 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 // With the zero page every pointer is readable and there is no branch at all; words past
 // window.count are zero then, and a word whose usable[] is 0 is returned unmasked.
 std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
-                                         const std::array<uint32_t, 5>& usable) {
+                                         const std::array<uint32_t, 5>& usable,
+                                         bool coherent = false) {
 	const auto u32    = TypeU32(state);
 	const auto u64    = TypeScalarU64(state);
 	std::array<uint32_t, 5> result {};
 	if (window.zero_page) {
 		result.fill(ConstantU32(state, 0));
 		for (uint32_t word = 0; word < window.count; ++word) {
-			const auto physical = state.builder.AllocateId();
-			state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
-			                          window.pointer[word]);
-			const auto value = state.builder.AllocateId();
-			state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
-			                          uint32_t {4});
+			uint32_t value = 0;
+			if (coherent) {
+				value = LoadCoherentU32(state, window.pointer[word]);
+			} else {
+				const auto physical = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
+				                          window.pointer[word]);
+				value = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
+				                          uint32_t {4});
+			}
 			result[word] = usable[word] == 0u || usable[word] == ConstantBool(state, true)
 			                   ? value
 			                   : Select(state, u32, usable[word], value, ConstantU32(state, 0));
@@ -1171,12 +1284,17 @@ std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords
 	EmitLabel(state, then_label);
 	std::array<uint32_t, 5> loaded {};
 	for (uint32_t word = 0; word < window.count; ++word) {
-		const auto physical = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
-		                          Select(state, u64, usable[word], window.pointer[word], safe));
-		const auto value = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
-		                          uint32_t {4});
+		uint32_t value = 0;
+		if (coherent) {
+			value = LoadCoherentU32(state, Select(state, u64, usable[word], window.pointer[word], safe));
+		} else {
+			const auto physical = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
+			                          Select(state, u64, usable[word], window.pointer[word], safe));
+			value = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
+			                          uint32_t {4});
+		}
 		loaded[word] = Select(state, u32, usable[word], value, ConstantU32(state, 0));
 	}
 	const auto then_exit = state.current_label;
@@ -1193,9 +1311,9 @@ std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords
 // The two DWORDs from the aligned start of `bytes` (at most 4) bytes at a guest address; a DWORD
 // the bytes do not cover, or that is not mapped, is zero.
 std::array<uint32_t, 2> LoadElementWordPair(EmitterState& state, uint32_t address, uint32_t bytes,
-                                            uint32_t active) {
+                                            uint32_t active, bool coherent) {
 	const auto window = MapElementWords(state, address, bytes, active, 2u, true);
-	const auto words  = LoadElementWords(state, window, window.usable);
+	const auto words  = LoadElementWords(state, window, window.usable, coherent);
 	return {words[0], words[1]};
 }
 
@@ -2318,6 +2436,26 @@ bool BdaNoWordMasksEnabled() {
 	return enabled;
 }
 
+bool BdaSingleCrossBranchEnabled() {
+	// KYTY_BDA_SINGLE_CROSS_BRANCH=1 (opt-in): one branch per element window on crossing a page;
+	// =2: the crossing block chooses pages with bit masks. Off by default: NVIDIA's compiler took
+	// longer with either (3e82 35.0 / 27.9 s, c089 88.3 / 87.4 s, 15f4 113.8 / 111.6 s) than with
+	// the second lookup and the per-DWORD page selects at every access (21.7, 71.7, 100.8 s).
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_SINGLE_CROSS_BRANCH");
+		return text != nullptr && (std::strcmp(text, "1") == 0 || std::strcmp(text, "2") == 0);
+	}();
+	return enabled;
+}
+
+bool BdaCrossMuxEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_SINGLE_CROSS_BRANCH");
+		return text != nullptr && std::strcmp(text, "2") == 0;
+	}();
+	return enabled;
+}
+
 bool BdaZeroPageEnabled() {
 	// KYTY_BDA_ZERO_PAGE=0: loads by guest address branch on the page being mapped, as stores do.
 	static const bool enabled = [] {
@@ -2692,7 +2830,7 @@ void EmitLoadMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 	else if (address_info.access == IR::AddressAccess::Read &&
 	         mem.kind != IR::ResourceKind::Scratch)
 		value = LoadBda(ctx, GuestAddress(ctx, inst, mem), ctx.Arg(inst, inst.NumArgs() - 1),
-		                address_info.data_bits);
+		                address_info.data_bits, mem.coherent);
 	else if (op == IR::ValueOpcode::LoadBufferU32 && mem.formatted)
 		// A per-format switch at each load made shaders with many such loads (Yotei's tile
 		// lighting: 16 X loads) grow to megabytes of SPIR-V; the table decoder is shared.
