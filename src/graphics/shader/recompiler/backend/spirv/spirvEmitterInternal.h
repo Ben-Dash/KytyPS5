@@ -598,6 +598,7 @@ uint32_t GetBdaPointer(EmitterState& state, uint32_t address);
 // not mapped. `active` gates only the fault record. Without the zero page, GetBdaPointer.
 uint32_t GetBdaLoadPointer(EmitterState& state, uint32_t address, uint32_t active);
 bool     BdaZeroPageEnabled();
+bool     BdaFastDwordEnabled();
 void     EmitBdaZeroPageInit(EmitterState& state);
 uint32_t ConstantDeviceAddress(EmitterState& state, uint64_t value);
 uint32_t DeviceAddressFromWords(EmitterState& state, uint32_t low, uint32_t high);

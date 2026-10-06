@@ -1036,18 +1036,27 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 		result.second_page    = GetBdaLoadPointer(
 		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
 		    AndCondition(state, active, crosses));
+		// KYTY_BDA_FAST_DWORD: the first DWORD is always on the first page (at least 4 bytes are
+		// left on it), and every DWORD of an aligned access of whole DWORDs is wanted.
+		const bool fast       = BdaFastDwordEnabled();
+		const bool all_wanted = fast && dword_aligned && bytes == ConstantU32(state, result.count * 4u);
 		for (uint32_t word = 0; word < result.count; ++word) {
-			const auto offset   = ConstantU32(state, word * 4u);
-			const auto in_first = Binary(state, spv::OpULessThan, TypeBool(state), offset, first_room);
-			result.pointer[word] = Select(
-			    state, u64, in_first,
-			    Binary(state, spv::OpIAdd, u64, result.first_page, Unary(state, spv::OpUConvert, u64, offset)),
-			    Binary(state, spv::OpIAdd, u64, result.second_page,
-			           Unary(state, spv::OpUConvert, u64, Binary(state, spv::OpISub, u32, offset, first_room))));
-			result.usable[word] = word == 0u ? active
-			                                 : AndCondition(state, active,
-			                                                Binary(state, spv::OpULessThan, TypeBool(state),
-			                                                       offset, need));
+			const auto offset = ConstantU32(state, word * 4u);
+			if (fast && word == 0u) {
+				result.pointer[word] = result.first_page;
+			} else {
+				const auto in_first = Binary(state, spv::OpULessThan, TypeBool(state), offset, first_room);
+				result.pointer[word] = Select(
+				    state, u64, in_first,
+				    Binary(state, spv::OpIAdd, u64, result.first_page, Unary(state, spv::OpUConvert, u64, offset)),
+				    Binary(state, spv::OpIAdd, u64, result.second_page,
+				           Unary(state, spv::OpUConvert, u64, Binary(state, spv::OpISub, u32, offset, first_room))));
+			}
+			result.usable[word] = word == 0u || all_wanted
+			                          ? active
+			                          : AndCondition(state, active,
+			                                         Binary(state, spv::OpULessThan, TypeBool(state),
+			                                                offset, need));
 		}
 		return result;
 	}
@@ -2124,6 +2133,15 @@ uint32_t GetBdaLoadPointer(EmitterState& state, uint32_t address, uint32_t activ
 	state.builder.AddFunction(spv::OpFunctionCall, TypeScalarU64(state), result,
 	                          state.bda_load_pointer_function, address, active);
 	return result;
+}
+
+bool BdaFastDwordEnabled() {
+	// KYTY_BDA_FAST_DWORD=0: element windows test every DWORD's page and size at run time.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_FAST_DWORD");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
 }
 
 bool BdaZeroPageEnabled() {
