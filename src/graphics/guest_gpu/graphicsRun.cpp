@@ -1341,9 +1341,10 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 				// The dispatch path skips zero-sized dispatches before translating (see
 				// CpOpDispatchDirect for the layout: groups x, y, z, then the initiator).
 				if (packet_dw == 5u && packet[1] != 0 && packet[2] != 0 && packet[3] != 0) {
+					const std::array<uint32_t, 3> groups {packet[1], packet[2], packet[3]};
 					parts += pipelines.PrefetchComputePipeline(shadow->m_ctx, shadow->m_sh_ctx,
-					                                           packet[4], wait,
-					                                           &pending);
+					                                           packet[4], wait, &pending,
+					                                           &groups);
 				}
 				break;
 			case Pm4::IT_DISPATCH_INDIRECT:
