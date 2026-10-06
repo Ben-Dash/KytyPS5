@@ -1560,6 +1560,22 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 		return;
 	}
 
+	// KYTY_DEBUG_STALE_INDIRECT=1: GPU-written arguments the CPU reads from guest memory below
+	// (stale unless read back).
+	static const bool stale_log = KYTY_GETENV("KYTY_DEBUG_STALE_INDIRECT") != nullptr;
+	if (stale_log && gpu_args) [[unlikely]] {
+		static std::atomic<uint32_t> logged {0};
+		if (logged.fetch_add(1) < 200) {
+			uint32_t words[5] {};
+			std::memcpy(words, args_addr, indexed ? 20u : 16u);
+			std::printf("stale-indirect: addr=0x%016llx indexed=%d mesh=%d prim=%u index_type=%u "
+			            "ib_size=%u cpu_args=%u,%u,%u,%u,%u\n",
+			            static_cast<unsigned long long>(address), indexed ? 1 : 0, mesh ? 1 : 0,
+			            static_cast<uint32_t>(prim_type), m_index_type_and_size, m_index_buffer_size,
+			            words[0], words[1], words[2], words[3], words[4]);
+			std::fflush(stdout);
+		}
+	}
 	if (!indexed) {
 		DrawIndirectArgs args {};
 		std::memcpy(&args, args_addr, sizeof(args));
@@ -1624,6 +1640,23 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		}
 	}
 
+	static const bool stale_log = KYTY_GETENV("KYTY_DEBUG_STALE_INDIRECT") != nullptr;
+	if (stale_log) [[unlikely]] {
+		const auto base      = m_draw_indirect_args_base_addr + data_offset;
+		const bool gpu_count = count_addr != nullptr &&
+		                       m_renderer.GetBufferCache().IsRegionGpuModified(
+		                           reinterpret_cast<uint64_t>(count_addr), sizeof(uint32_t));
+		const bool gpu_args  = m_renderer.GetBufferCache().IsRegionGpuModified(
+		    base, uint64_t {std::max(max_count_or_count, 1u)} * stride_in_bytes);
+		static std::atomic<uint32_t> logged {0};
+		if ((gpu_count || gpu_args) && logged.fetch_add(1) < 200) {
+			std::printf("stale-indirect-multi: base=0x%016llx indexed=%d gpu_count=%d gpu_args=%d "
+			            "max=%u cpu_count=%u stride=%u\n",
+			            static_cast<unsigned long long>(base), indexed ? 1 : 0, gpu_count ? 1 : 0,
+			            gpu_args ? 1 : 0, max_count_or_count, draw_count, stride_in_bytes);
+			std::fflush(stdout);
+		}
+	}
 	if (draw_count == 0) {
 		return;
 	}
