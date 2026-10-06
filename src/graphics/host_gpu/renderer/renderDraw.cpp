@@ -2855,6 +2855,22 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		CommitIndexBuffer(vk_buffer, index_binding);
 	}
 	if (state.ps_active && state.ps_input_info.id_buffer_slot != UINT32_MAX && !mesh_active) {
+		// Layouts reserve this dword for graphics stages (BindingLayout::reserve_object_id); a stage
+		// whose shader data covers it would read the object id instead.
+		for (const auto* stage: stages) {
+			const auto& layout = stage->runtime->program->bindings;
+			if (layout.UsesPushData() &&
+			    layout.push_data_start_dword + layout.ShaderDataDwords() >
+			        ShaderRecompiler::IR::PushData::ObjectIdDword) {
+				static std::atomic<uint32_t> warned {0};
+				if (warned.fetch_add(1, std::memory_order_relaxed) < 8u) {
+					std::printf("Warning: push-data: object id overwrites shader data (hash %016" PRIx64
+					            " start %u dwords %u)\n",
+					            stage->runtime->program->shader_hash, layout.push_data_start_dword,
+					            layout.ShaderDataDwords());
+				}
+			}
+		}
 		// The draw's VGT_OBJECT_ID for the ID buffer (the last push dword).
 		const uint32_t object_id = buffer.GetUserConfig().GetObjectId();
 		vk_buffer.pushConstants(pipeline.pipeline_layout, pipeline.push_constant_stages,

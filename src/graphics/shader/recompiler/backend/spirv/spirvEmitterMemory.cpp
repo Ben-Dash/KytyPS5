@@ -3081,17 +3081,15 @@ uint32_t EmitBpermuteU32(ValueEmitContext& ctx, const IR::Inst& inst) {
 // tables (LookupDynamicBufferFormat), and per output component its source, width, bit offset,
 // conversion maxima and constant.
 void EmitGenericBufferFormats(EmitterState& state) {
-	if (state.program.bindings.buffer_format_count == 0u) {
+	if (state.program.bindings.buffer_formats.empty()) {
 		return;
 	}
 	const auto u32     = TypeU32(state);
 	const auto f32     = TypeF32(state);
 	const auto boolean = TypeBool(state);
-	for (uint32_t i = 0; i < state.program.bindings.buffer_format_count; i++) {
-		if (state.program.info.buffers[i].descriptor_format != IR::GenericBufferFormat) {
-			continue;
-		}
-		const auto word  = EmitShaderDataDwordLoad(state, state.program.bindings.BufferFormatDword() + i);
+	for (uint32_t k = 0; k < state.program.bindings.buffer_formats.size(); k++) {
+		const auto i     = state.program.bindings.buffer_formats[k];
+		const auto word  = EmitShaderDataDwordLoad(state, state.program.bindings.BufferFormatDword() + k);
 		const auto field = [&](uint32_t value, uint32_t first, uint32_t count) {
 			return EmitBitFieldUExtract(state, value, ConstantU32(state, first), ConstantU32(state, count));
 		};

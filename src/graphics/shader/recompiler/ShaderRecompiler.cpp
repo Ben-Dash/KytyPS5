@@ -734,7 +734,7 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 	auto& ir = translated.program;
 	// Replays of older records (baked strides and formats) build the module a dispatch builds now.
 	auto normalized = specialization;
-	IR::NormalizeBufferSpecialization(normalized, ir.info);
+	IR::NormalizeBufferSpecialization(normalized, ir.stage, ir.info);
 	IR::ApplyResourceSpecialization(ir, normalized);
 	// The resource plan owns host descriptor evaluation now. Keep only dependencies consumed
 	// by GPU memory operations; bound descriptor dwords must not retain shader instructions.

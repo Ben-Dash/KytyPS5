@@ -112,13 +112,14 @@ void EmitMemoryOffsets(EmitterState& state) {
 		    state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, word, shift),
 		    ConstantU32(state, 0xffu));
 	}
-	for (uint32_t i = 0; i < state.program.bindings.buffer_stride_count; i++) {
-		if ((state.program.info.buffers[i].packed_stride & IR::DynamicBufferStride) != 0u) {
-			state.buffer_strides[i] = EmitBinaryU32(
-			    state, spv::OpBitwiseAnd,
-			    EmitShaderDataDwordLoad(state, state.program.bindings.BufferStrideDword() + i),
-			    ConstantU32(state, 0x3fffu));
+	const auto& strides = state.program.bindings.buffer_strides;
+	for (uint32_t k = 0; k < strides.size(); k++) {
+		auto word = EmitShaderDataDwordLoad(state, state.program.bindings.BufferStrideDword() + k / 2u);
+		if (k % 2u != 0u) {
+			word = EmitBinaryU32(state, spv::OpShiftRightLogical, word, ConstantU32(state, 16));
 		}
+		state.buffer_strides[strides[k]] =
+		    EmitBinaryU32(state, spv::OpBitwiseAnd, word, ConstantU32(state, 0x3fffu));
 	}
 }
 

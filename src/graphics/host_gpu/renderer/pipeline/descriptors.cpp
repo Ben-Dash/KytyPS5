@@ -2022,17 +2022,20 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		}
 		pack_memory_offset(i, buffer_offset);
 	}
-	// The strides of this dispatch's V#s, for buffers whose module reads them (stride-generic).
-	EXIT_IF(layout.buffer_stride_count > snapshot.buffers.size());
-	for (uint32_t i = 0; i < layout.buffer_stride_count; i++) {
-		prepared.shader_data[layout.BufferStrideDword() + i] =
-		    ShaderRecompiler::IR::CanonicalPackedStride(snapshot.buffers[i]);
+	// The strides of this dispatch's V#s, two per DWORD, for the buffers whose module reads them.
+	for (uint32_t k = 0; k < layout.buffer_strides.size(); k++) {
+		const auto index = layout.buffer_strides[k];
+		EXIT_IF(index >= snapshot.buffers.size());
+		prepared.shader_data[layout.BufferStrideDword() + k / 2u] |=
+		    (ShaderRecompiler::IR::CanonicalPackedStride(snapshot.buffers[index]) & 0x3fffu)
+		    << ((k % 2u) * 16u);
 	}
-	// The formats and dst_sels of buffers whose formatted loads decode them (GenericBufferFormat).
-	EXIT_IF(layout.buffer_format_count > snapshot.buffers.size());
-	for (uint32_t i = 0; i < layout.buffer_format_count; i++) {
-		prepared.shader_data[layout.BufferFormatDword() + i] =
-		    ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[i]);
+	// The formats and dst_sels of the buffers whose formatted loads decode them.
+	for (uint32_t k = 0; k < layout.buffer_formats.size(); k++) {
+		const auto index = layout.buffer_formats[k];
+		EXIT_IF(index >= snapshot.buffers.size());
+		prepared.shader_data[layout.BufferFormatDword() + k] =
+		    ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[index]);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::BufferViews);
 	if (ShaderRecompiler::IR::FindBinding(

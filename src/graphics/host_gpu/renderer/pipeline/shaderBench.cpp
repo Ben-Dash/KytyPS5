@@ -224,6 +224,8 @@ struct Result {
 	uint32_t              ir_blocks    = 0;
 	uint32_t              ir_phis      = 0;
 	uint32_t              ir_selects   = 0;
+	// The shader-data block: push start (NoStart: storage), DWORDs, stride and format words.
+	uint32_t              data_start = 0, data_dwords = 0, data_strides = 0, data_formats = 0;
 	SpirvStats            stats;
 	std::string           validation;
 	double                driver_s      = -1;
@@ -288,6 +290,10 @@ void Translate(const Options& o, PermutationRecord record, uint32_t max_lds_byte
 			out.emit_ms      = std::chrono::duration<double, std::milli>(t2 - t1).count();
 			out.wave_size    = compiled.program.wave_size;
 			out.ir_blocks    = static_cast<uint32_t>(compiled.program.blocks.size());
+			out.data_start   = compiled.program.bindings.push_data_start_dword;
+			out.data_dwords  = compiled.program.bindings.ShaderDataDwords();
+			out.data_strides = static_cast<uint32_t>(compiled.program.bindings.buffer_strides.size());
+			out.data_formats = static_cast<uint32_t>(compiled.program.bindings.buffer_formats.size());
 			for (const auto* block: compiled.program.blocks) {
 				for (const auto& inst: *block) {
 					const auto op = inst.GetOpcode();
@@ -793,6 +799,11 @@ int Run(int argc, char* argv[]) {
 		}
 		std::string extra = Describe(record) + fmt::format(" ir_blocks={} ir_phis={} ir_selects={}",
 		                                                   r.ir_blocks, r.ir_phis, r.ir_selects);
+		extra += fmt::format(" sdata={}+{} strides={} formats={}",
+		                     r.data_start == ShaderRecompiler::IR::PushData::NoStart
+		                         ? std::string("storage")
+		                         : std::to_string(r.data_start),
+		                     r.data_dwords, r.data_strides, r.data_formats);
 		if (r.repeat_diffs != 0) extra += fmt::format(" NONDETERMINISTIC({}/{})", r.repeat_diffs, o.repeat - 1);
 		if (!r.validation.empty()) extra += " val=" + r.validation;
 		if (r.driver_result != 0) extra += fmt::format(" vkresult={}", r.driver_result);

@@ -395,6 +395,10 @@ struct PushData {
 	[[nodiscard]] static constexpr uint32_t StartFor(uint32_t cursor, uint32_t size) {
 		return CanFit(cursor, size) ? cursor : NoStart;
 	}
+	// As StartFor, with the block ending before `end` (ObjectIdDword for graphics stages).
+	[[nodiscard]] static constexpr uint32_t StartFor(uint32_t cursor, uint32_t size, uint32_t end) {
+		return size != 0 && cursor <= end && size <= end - cursor ? cursor : NoStart;
+	}
 };
 
 static_assert(sizeof(PushData) == 128);
@@ -515,12 +519,14 @@ struct BindingLayout {
 	uint32_t                       dispatch_thread_dword = PushData::NoStart;
 	uint32_t                       memory_offset_dword = 0;
 	uint32_t                       memory_offset_count = 0;
-	// One DWORD per buffer after the memory offsets, holding the packed stride of a buffer with
-	// DynamicBufferStride (the shader takes its stride, bits 0-13); 0 or up to the last such buffer.
-	uint32_t                       buffer_stride_count = 0;
-	// One DWORD per buffer after the strides: the V#'s format (bits 0-6) and dst_sel (bits 7-18)
-	// for a buffer with GenericBufferFormat; 0 or up to the last such buffer.
-	uint32_t                       buffer_format_count = 0;
+	// The buffers with DynamicBufferStride, in order: after the memory offsets, two strides per
+	// DWORD (16 bits each, the stride in bits 0-13).
+	std::vector<uint32_t>          buffer_strides;
+	// The buffers with GenericBufferFormat, in order: after the strides, one DWORD each with the
+	// V#'s format (bits 0-6) and dst_sel (bits 7-18).
+	std::vector<uint32_t>          buffer_formats;
+	// Graphics stages leave PushData::ObjectIdDword to the draw (its VGT_OBJECT_ID).
+	bool                           reserve_object_id = false;
 	std::vector<uint32_t>          user_data_registers;
 	std::vector<DescriptorBinding> descriptors;
 
@@ -528,10 +534,15 @@ struct BindingLayout {
 		return memory_offset_dword + (memory_offset_count + 3u) / 4u;
 	}
 	[[nodiscard]] uint32_t BufferFormatDword() const {
-		return BufferStrideDword() + buffer_stride_count;
+		return BufferStrideDword() + static_cast<uint32_t>(buffer_strides.size() + 1u) / 2u;
 	}
 	[[nodiscard]] uint32_t ShaderDataDwords() const {
-		return BufferFormatDword() + buffer_format_count;
+		return BufferFormatDword() + static_cast<uint32_t>(buffer_formats.size());
+	}
+	// Where the shader data goes in push data from `cursor` on, or PushData::NoStart (storage).
+	[[nodiscard]] uint32_t PushStartFor(uint32_t cursor) const {
+		return PushData::StartFor(cursor, ShaderDataDwords(),
+		                          reserve_object_id ? PushData::ObjectIdDword : PushData::DwordCount);
 	}
 	[[nodiscard]] bool UsesPushData() const {
 		return push_data_start_dword != PushData::NoStart;

@@ -737,9 +737,7 @@ struct PipelineCache::ProgramCache {
 			DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::ProgramMatch);
 			const auto matches = [&](const Permutation& candidate) {
 				const auto& layout = candidate.program.bindings;
-				return layout.push_data_start_dword ==
-				           ShaderRecompiler::IR::PushData::StartFor(push_data_cursor,
-				                                                    layout.ShaderDataDwords()) &&
+				return layout.push_data_start_dword == layout.PushStartFor(push_data_cursor) &&
 				       candidate.specialization == source.specialization;
 			};
 			auto index = source.last_permutation;
@@ -1111,8 +1109,7 @@ struct PipelineCache::ProgramCache {
 			const auto& last   = source.permutations.back();
 			reason = fmt::format(" new specialization ({} existing):", source.permutations.size()) +
 			         SpecializationDiff(last.specialization, source.specialization);
-			const auto start = ShaderRecompiler::IR::PushData::StartFor(
-			    push_data_cursor, last.program.bindings.ShaderDataDwords());
+			const auto start = last.program.bindings.PushStartFor(push_data_cursor);
 			if (last.program.bindings.push_data_start_dword != start) {
 				reason += fmt::format(" push_start {}->{}", last.program.bindings.push_data_start_dword,
 				                      start);
@@ -1520,9 +1517,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		    std::ranges::any_of(entry->second.permutations, [&](const auto& candidate) {
 			    const auto& layout = candidate.program.bindings;
 			    return candidate.specialization == record.specialization &&
-				       layout.push_data_start_dword ==
-				           ShaderRecompiler::IR::PushData::StartFor(record.push_data_start_dword,
-				                                                    layout.ShaderDataDwords());
+				       layout.push_data_start_dword == layout.PushStartFor(record.push_data_start_dword);
 		    })) {
 			m_graphics.device.destroyShaderModule(result.compiled.module, nullptr);
 			return nullptr;

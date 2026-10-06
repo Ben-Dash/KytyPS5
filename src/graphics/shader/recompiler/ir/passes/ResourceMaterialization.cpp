@@ -601,14 +601,14 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 		}
 		const auto packed_stride = CanonicalPackedStride(descriptor_value);
 		const auto stride        = packed_stride & 0x3fffu;
-		buffer.packed_stride = stride != 0u && !BufferStrideSpecialization()
+		buffer.packed_stride = stride != 0u && BufferGenericStage(program.stage)
 		                           ? DynamicBufferStride | (packed_stride & ~0x3fffu)
 		                           : packed_stride;
 		buffer.descriptor_format =
 		    base.formatted ? descriptor.Format() : Prospero::BufferFormat::kInvalid;
 		buffer.descriptor_swizzle = base.formatted ? descriptor.DstSelXYZW() : DstSel(4, 5, 6, 7);
 		buffer.zero_stride_oob    = descriptor.OutOfBounds() == 0u && stride == 0u;
-		if (GenericBufferFormatEligible(base, buffer)) {
+		if (GenericBufferFormatEligible(program.stage, base, buffer)) {
 			buffer.descriptor_format  = GenericBufferFormat;
 			buffer.descriptor_swizzle = DstSel(4, 5, 6, 7);
 		}
@@ -1852,15 +1852,8 @@ uint32_t CanonicalPackedStride(const DescriptorValue& descriptor) {
 	return packed_stride;
 }
 
-void NormalizeBufferSpecialization(ResourceSpecialization& specialization) {
-	if (BufferStrideSpecialization()) {
-		return;
-	}
-	for (auto& buffer: specialization.buffers) {
-		if ((buffer.packed_stride & 0x3fffu) != 0u) {
-			buffer.packed_stride = DynamicBufferStride | (buffer.packed_stride & ~0x3fffu);
-		}
-	}
+bool BufferGenericStage(ShaderType stage) {
+	return stage == ShaderType::Compute && !BufferStrideSpecialization();
 }
 
 uint32_t RuntimeBufferFormatWord(const DescriptorValue& descriptor) {
@@ -1871,13 +1864,14 @@ uint32_t RuntimeBufferFormatWord(const DescriptorValue& descriptor) {
 	return buffer.RawFormat() | (buffer.DstSelXYZW() << 7u);
 }
 
-bool GenericBufferFormatEligible(const BufferResource& base, const ResourceSpecialization::Buffer& buffer) {
+bool GenericBufferFormatEligible(ShaderType stage, const BufferResource& base,
+                                 const ResourceSpecialization::Buffer& buffer) {
 	// KYTY_BUFFER_SPECIALIZE=2: strides dynamic, formats baked (A/B runs).
 	static const bool formats_baked = [] {
 		const char* text = KYTY_GETENV("KYTY_BUFFER_SPECIALIZE");
 		return text != nullptr && std::strcmp(text, "2") == 0;
 	}();
-	if (BufferStrideSpecialization() || formats_baked || !base.formatted || base.written ||
+	if (!BufferGenericStage(stage) || formats_baked || !base.formatted || base.written ||
 	    buffer.zero_stride_oob) {
 		return false;
 	}
@@ -1898,13 +1892,19 @@ bool GenericBufferFormatEligible(const BufferResource& base, const ResourceSpeci
 	return true;
 }
 
-void NormalizeBufferSpecialization(ResourceSpecialization& specialization, const ShaderInfo& info) {
-	NormalizeBufferSpecialization(specialization);
+void NormalizeBufferSpecialization(ResourceSpecialization& specialization, ShaderType stage,
+                                   const ShaderInfo& info) {
+	if (!BufferGenericStage(stage)) {
+		return;
+	}
 	for (uint32_t i = 0; i < specialization.buffers.size(); i++) {
-		auto&      buffer     = specialization.buffers[i];
+		auto& buffer = specialization.buffers[i];
+		if ((buffer.packed_stride & 0x3fffu) != 0u) {
+			buffer.packed_stride = DynamicBufferStride | (buffer.packed_stride & ~0x3fffu);
+		}
 		const auto base_index = i < info.buffers.size() ? i : buffer.indirect_root;
 		if (base_index < info.buffers.size() &&
-		    GenericBufferFormatEligible(info.buffers[base_index], buffer)) {
+		    GenericBufferFormatEligible(stage, info.buffers[base_index], buffer)) {
 			buffer.descriptor_format  = GenericBufferFormat;
 			buffer.descriptor_swizzle = DstSel(4, 5, 6, 7);
 		}
