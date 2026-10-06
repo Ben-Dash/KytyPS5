@@ -1199,7 +1199,9 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
                                                             vk::PipelineCache driver_cache,
                                                             bool              prefetch) {
 	EXIT_IF(compute_module == nullptr);
-	EXIT_IF(!input_info.stage);
+	// Only the program is read: the precompile replay builds pipelines before any dispatch
+	// materialized resources for them.
+	EXIT_IF(input_info.stage.program == nullptr);
 
 	std::vector<vk::DescriptorSetLayoutBinding> descriptor_bindings;
 	AddLayoutBindings(descriptor_bindings, *input_info.stage.program,
