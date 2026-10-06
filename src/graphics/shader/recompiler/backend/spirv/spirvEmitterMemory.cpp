@@ -1094,15 +1094,15 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 // instead of one branch per word: a word that is not usable reads the element's first mapped
 // DWORD, a valid address, and gives zero. A branch and a page lookup per DWORD made Yotei's
 // buffer-heavy compute shaders take minutes in NVIDIA's compiler (cs bc8eaa9cea77f9c3).
-// With the zero page every pointer is readable and there is no branch at all. Words past
-// window.count are zero.
+// With the zero page every pointer is readable and there is no branch at all; words past
+// window.count are zero then.
 std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
                                          const std::array<uint32_t, 5>& usable) {
 	const auto u32    = TypeU32(state);
 	const auto u64    = TypeScalarU64(state);
 	std::array<uint32_t, 5> result {};
-	result.fill(ConstantU32(state, 0));
 	if (window.zero_page) {
+		result.fill(ConstantU32(state, 0));
 		for (uint32_t word = 0; word < window.count; ++word) {
 			const auto physical = state.builder.AllocateId();
 			state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
