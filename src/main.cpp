@@ -9,6 +9,7 @@
 #include "common/virtualMemory.h"
 #include "common/switches.h"
 #include "emulator.h"
+#include "graphics/host_gpu/renderer/pipeline/shaderBench.h"
 #include "kytyGitVersion.h"
 
 #include <algorithm>
@@ -698,6 +699,10 @@ static int Main(int argc, char* argv[]) {
 	// killed (stdout to a file is block-buffered otherwise).
 	if (KYTY_GETENV("KYTY_DEBUG_UNBUFFERED") != nullptr) {
 		std::setvbuf(stdout, nullptr, _IONBF, 0);
+	}
+	// Offline shader bench (no game, no window): see shaderBench.h.
+	if (argc >= 2 && std::string_view(argv[1]) == "--shader-bench") {
+		return Libs::Graphics::ShaderBench::Run(argc - 1, argv + 1);
 	}
 	VirtualMemory::Init();
 	InitializeThreads();
