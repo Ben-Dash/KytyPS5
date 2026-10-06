@@ -1249,8 +1249,20 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 		info.basePipelineIndex = -1;
 		vk::Pipeline pipeline  = nullptr;
 		const auto   started   = std::chrono::steady_clock::now();
-		if (graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline) !=
-		    vk::Result::eSuccess) {
+		// A compile still running after 10 s names its shader while the game stalls on it.
+		std::promise<void> compiled;
+		auto watch = std::async(std::launch::async, [finished = compiled.get_future(), shader_hash] {
+			if (finished.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
+				std::printf("PipelineCache: compute pipeline %016llx still compiling in the driver\n",
+				            static_cast<unsigned long long>(shader_hash));
+				std::fflush(stdout);
+			}
+		});
+		const auto created =
+		    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline);
+		compiled.set_value();
+		watch.wait();
+		if (created != vk::Result::eSuccess) {
 			LOGF("PipelineCache: compute pipeline creation failed\n");
 			return vk::Pipeline {};
 		}

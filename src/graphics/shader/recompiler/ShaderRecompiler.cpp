@@ -27,6 +27,7 @@
 #include <map>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler {
 
@@ -494,6 +495,22 @@ bool HardwareStorageBufferBounds() {
 	return g_hardware_storage_buffer_bounds.load(std::memory_order_relaxed);
 }
 
+// KYTY_DEBUG_DUMP_SPIRV=<hash>[,<hash>...]: the shaders whose RDNA2 code and SPIR-V get dumped.
+static bool DumpRequested(uint64_t shader_hash) {
+	static const std::vector<uint64_t> hashes = [] {
+		std::vector<uint64_t> list;
+		const char*           text = KYTY_GETENV("KYTY_DEBUG_DUMP_SPIRV");
+		while (text != nullptr && *text != '\0') {
+			char* end = nullptr;
+			if (const auto hash = std::strtoull(text, &end, 16); hash != 0) list.push_back(hash);
+			if (end == text) break;
+			text = (*end == ',') ? end + 1 : end;
+		}
+		return list;
+	}();
+	return std::find(hashes.begin(), hashes.end(), shader_hash) != hashes.end();
+}
+
 static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
                                                const CompileOptions&     options) {
 	if (code.empty()) {
@@ -536,13 +553,9 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 	     GetDumpLabel(options), StageName(options.stage), options.shader_hash,
 	     static_cast<uint64_t>(decoded.instructions.size()), phase_ms());
 
-	// KYTY_DEBUG_DUMP_SPIRV=<hash> also writes that shader's decoded RDNA2 code to rdna_<hash>.txt
-	// (precompiled shaders included, which translate without dumps).
-	static const uint64_t dump_source_hash = [] {
-		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_SPIRV");
-		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
-	}();
-	if (dump_source_hash != 0 && dump_source_hash == options.shader_hash) [[unlikely]] {
+	// KYTY_DEBUG_DUMP_SPIRV also writes the decoded RDNA2 code to rdna_<hash>.txt (precompiled
+	// shaders included, which translate without dumps).
+	if (DumpRequested(options.shader_hash)) [[unlikely]] {
 		const auto text = Decoder::ProgramToString(decoded);
 		const auto name = fmt::format("rdna_{:016x}.txt", options.shader_hash);
 		if (auto* file = std::fopen(name.c_str(), "wb"); file != nullptr) {
@@ -747,12 +760,8 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 	     static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 	                               std::chrono::steady_clock::now() - emit_begin)
 	                               .count()));
-	// KYTY_DEBUG_DUMP_SPIRV=<hash>: writes that shader's module to spv_<hash>.spv.
-	static const uint64_t dump_hash = [] {
-		const char* text = KYTY_GETENV("KYTY_DEBUG_DUMP_SPIRV");
-		return text != nullptr ? std::strtoull(text, nullptr, 16) : 0ull;
-	}();
-	if (dump_hash != 0 && dump_hash == ir.shader_hash) {
+	// KYTY_DEBUG_DUMP_SPIRV: writes the module to spv_<hash>.spv.
+	if (DumpRequested(ir.shader_hash)) {
 		const auto name = fmt::format("spv_{:016x}.spv", ir.shader_hash);
 		if (auto* file = std::fopen(name.c_str(), "wb"); file != nullptr) {
 			std::fwrite(spirv.data(), sizeof(uint32_t), spirv.size(), file);
