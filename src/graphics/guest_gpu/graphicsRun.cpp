@@ -1524,6 +1524,55 @@ void CommandProcessor::DrawIndexOffset(uint32_t index_offset, uint32_t index_cou
 	DrawIndex({.index_count = index_count, .index_addr = index_addr});
 }
 
+// Reading GPU-written arguments on the CPU would wait for the dispatch that wrote them. A
+// mesh-emulated indexed draw instead builds its mesh dispatch from them on the GPU, and an indexed
+// list draw with 16- or 32-bit indices draws from them directly: the guest layout is
+// VkDrawIndexedIndirectCommand's. (Strips could need a primitive restart scan, and 8-bit indices
+// are widened on the CPU.) Returns false when the draw has to take the CPU path.
+bool CommandProcessor::TryDrawIndexedIndirectOnGpu(uint64_t address) {
+	const bool mesh      = (m_ctx.GetShaderStages() & 0x20u) != 0; // As in PrepareProgram.
+	const auto prim_type = m_ucfg.GetPrimType();
+	const bool list      = prim_type == Prospero::PrimitiveType::kTriList ||
+	                  prim_type == Prospero::PrimitiveType::kLineList ||
+	                  prim_type == Prospero::PrimitiveType::kPointList;
+	if (!(mesh || (list && m_index_type_and_size != 2u)) || m_index_buffer_size == 0 ||
+	    !Config::GpuMeshIndirectEnabled()) {
+		return false;
+	}
+	m_num_instances_address = address + offsetof(DrawIndexedIndirectArgs, instance_count);
+	DrawIndex({.index_count    = 1,
+	           .index_addr     = reinterpret_cast<const void*>(m_index_base_addr),
+	           .instance_count = 1,
+	           .offset_source  = DrawOffsetSource::IndirectArgs,
+	           .indirect_args  = address,
+	           .index_limit    = m_index_buffer_size});
+	return true;
+}
+
+// The non-indexed counterpart: the guest layout is VkDrawIndirectCommand's, so a draw whose
+// primitive type Vulkan draws natively (no mesh emulation, no rect or quad lists) draws from the
+// GPU-written arguments directly.
+bool CommandProcessor::TryDrawIndirectOnGpu(uint64_t address) {
+	static const bool enabled = KYTY_GETENV("KYTY_GPU_DRAW_INDIRECT") == nullptr ||
+	                            std::strcmp(KYTY_GETENV("KYTY_GPU_DRAW_INDIRECT"), "0") != 0;
+	const bool mesh      = (m_ctx.GetShaderStages() & 0x20u) != 0; // As in PrepareProgram.
+	const auto prim_type = m_ucfg.GetPrimType();
+	const bool native    = prim_type == Prospero::PrimitiveType::kTriList ||
+	                    prim_type == Prospero::PrimitiveType::kTriStrip ||
+	                    prim_type == Prospero::PrimitiveType::kLineList ||
+	                    prim_type == Prospero::PrimitiveType::kLineStrip ||
+	                    prim_type == Prospero::PrimitiveType::kPointList;
+	if (!enabled || mesh || !native) {
+		return false;
+	}
+	m_num_instances_address = address + offsetof(DrawIndirectArgs, instance_count);
+	DrawIndexAuto({.vertex_count   = 1,
+	               .instance_count = 1,
+	               .offset_source  = DrawOffsetSource::IndirectArgs,
+	               .indirect_args  = address});
+	return true;
+}
+
 void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed) {
 	EXIT_NOT_IMPLEMENTED((draw_initiator & ~0x20u) != 2u);
 	EXIT_NOT_IMPLEMENTED(m_draw_indirect_args_base_addr == 0);
@@ -1539,24 +1588,8 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 		                            : DrainStats::Kind::IndirectArgsCpu,
 		                   mesh ? 1 : 0);
 	}
-	// Reading GPU-written arguments here would wait for the dispatch that wrote them. A
-	// mesh-emulated indexed draw instead builds its mesh dispatch from them on the GPU, and an
-	// indexed list draw with 16- or 32-bit indices draws from them directly: the guest layout is
-	// VkDrawIndexedIndirectCommand's. (Strips could need a primitive restart scan, and 8-bit
-	// indices are widened on the CPU.)
 	const auto prim_type = m_ucfg.GetPrimType();
-	const bool list      = prim_type == Prospero::PrimitiveType::kTriList ||
-	                  prim_type == Prospero::PrimitiveType::kLineList ||
-	                  prim_type == Prospero::PrimitiveType::kPointList;
-	if (indexed && gpu_args && (mesh || (list && m_index_type_and_size != 2u)) &&
-	    m_index_buffer_size != 0 && Config::GpuMeshIndirectEnabled()) {
-		m_num_instances_address = address + offsetof(DrawIndexedIndirectArgs, instance_count);
-		DrawIndex({.index_count    = 1,
-		           .index_addr     = reinterpret_cast<const void*>(m_index_base_addr),
-		           .instance_count = 1,
-		           .offset_source  = DrawOffsetSource::IndirectArgs,
-		           .indirect_args  = address,
-		           .index_limit    = m_index_buffer_size});
+	if (gpu_args && (indexed ? TryDrawIndexedIndirectOnGpu(address) : TryDrawIndirectOnGpu(address))) {
 		return;
 	}
 
@@ -1651,9 +1684,11 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		static std::atomic<uint32_t> logged {0};
 		if ((gpu_count || gpu_args) && logged.fetch_add(1) < 200) {
 			std::printf("stale-indirect-multi: base=0x%016llx indexed=%d gpu_count=%d gpu_args=%d "
-			            "max=%u cpu_count=%u stride=%u\n",
+			            "max=%u cpu_count=%u stride=%u prim=%u index_type=%u ib_size=%u\n",
 			            static_cast<unsigned long long>(base), indexed ? 1 : 0, gpu_count ? 1 : 0,
-			            gpu_args ? 1 : 0, max_count_or_count, draw_count, stride_in_bytes);
+			            gpu_args ? 1 : 0, max_count_or_count, draw_count, stride_in_bytes,
+			            static_cast<uint32_t>(m_ucfg.GetPrimType()), m_index_type_and_size,
+			            m_index_buffer_size);
 			std::fflush(stdout);
 		}
 	}
@@ -1679,6 +1714,10 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		                       static_cast<uint64_t>(i) * stride_in_bytes;
 
 		if (!indexed) {
+			if (m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size) &&
+			    TryDrawIndirectOnGpu(args_addr)) {
+				continue;
+			}
 			auto* args = reinterpret_cast<const DrawIndirectArgs*>(args_addr);
 			m_num_instances = args->instance_count;
 			m_num_instances_address = 0;
@@ -1687,6 +1726,12 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 			               .first_vertex   = args->start_vertex_location,
 			               .first_instance = args->start_instance_location,
 			               .offset_source  = DrawOffsetSource::IndirectArgs});
+			continue;
+		}
+
+		// The count is CPU-written, but a culling pass may have written the arguments.
+		if (m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size) &&
+		    TryDrawIndexedIndirectOnGpu(args_addr)) {
 			continue;
 		}
 

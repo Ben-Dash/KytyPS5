@@ -114,6 +114,8 @@ public:
 	void DrawIndexOffset(uint32_t index_offset, uint32_t index_count);
 	void DrawIndexAuto(DrawAutoArgs args);
 	void DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed);
+	bool TryDrawIndexedIndirectOnGpu(uint64_t address);
+	bool TryDrawIndirectOnGpu(uint64_t address);
 	void DrawIndirectMulti(uint32_t data_offset, uint32_t max_count_or_count,
 	                       const volatile uint32_t* count_addr, uint32_t stride_in_bytes,
 	                       uint32_t draw_initiator, bool indexed);
