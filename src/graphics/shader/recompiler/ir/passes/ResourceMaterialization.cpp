@@ -5,6 +5,7 @@
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
+#include "graphics/shader/recompiler/ir/passes/BindingLayout.h"
 #include "graphics/shader/shaderBindings.h"
 
 #include <algorithm>
@@ -601,18 +602,14 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 		}
 		const auto packed_stride = CanonicalPackedStride(descriptor_value);
 		const auto stride        = packed_stride & 0x3fffu;
-		buffer.packed_stride = stride != 0u && BufferGenericStage(program.stage)
-		                           ? DynamicBufferStride | (packed_stride & ~0x3fffu)
-		                           : packed_stride;
+		buffer.packed_stride = packed_stride;
 		buffer.descriptor_format =
 		    base.formatted ? descriptor.Format() : Prospero::BufferFormat::kInvalid;
 		buffer.descriptor_swizzle = base.formatted ? descriptor.DstSelXYZW() : DstSel(4, 5, 6, 7);
 		buffer.zero_stride_oob    = descriptor.OutOfBounds() == 0u && stride == 0u;
-		if (GenericBufferFormatEligible(program.stage, base, buffer)) {
-			buffer.descriptor_format  = GenericBufferFormat;
-			buffer.descriptor_swizzle = DstSel(4, 5, 6, 7);
-		}
 	}
+	NormalizeBufferSpecialization(specialization, program.stage, program.info,
+	                              program.shader_data_base_dwords);
 	for (uint32_t i = 0; i < specialization.images.size(); i++) {
 		const auto& descriptor = snapshot.images[i];
 		auto&       image      = specialization.images[i];
@@ -1090,6 +1087,7 @@ ResourcePlan ExtractResourcePlan(const Program& program) {
 	plan.shader_hash                = program.shader_hash;
 	plan.user_data_base             = program.user_data_base;
 	plan.user_data_count            = program.user_data_count;
+	plan.shader_data_base_dwords    = ShaderDataBaseDwords(program);
 	plan.info                       = program.info;
 	plan.memory_info                = program.memory_info;
 	plan.srt_plan_complete          = program.srt_plan_complete;
@@ -1856,12 +1854,18 @@ bool BufferGenericStage(ShaderType stage) {
 	return stage == ShaderType::Compute && !BufferStrideSpecialization();
 }
 
-uint32_t RuntimeBufferFormatWord(const DescriptorValue& descriptor) {
+uint32_t RuntimeBufferSlotWord(const DescriptorValue& descriptor) {
 	ShaderBufferResource buffer;
 	if (!DecodeBufferDescriptor(descriptor, buffer) || buffer.Type() != 0) {
 		return 0;
 	}
-	return buffer.RawFormat() | (buffer.DstSelXYZW() << 7u);
+	// Reserved selectors (2, 3) read as 0.
+	uint32_t selectors = 0;
+	for (uint32_t component = 4; component-- > 0;) {
+		const auto selector = (buffer.DstSelXYZW() >> (component * 3u)) & 7u;
+		selectors = selectors * 6u + (selector < 2u ? selector : selector < 4u ? 0u : selector - 2u);
+	}
+	return buffer.Stride() | (static_cast<uint32_t>(buffer.RawFormat()) << 14u) | (selectors << 21u);
 }
 
 bool GenericBufferFormatEligible(ShaderType stage, const BufferResource& base,
@@ -1893,12 +1897,13 @@ bool GenericBufferFormatEligible(ShaderType stage, const BufferResource& base,
 }
 
 void NormalizeBufferSpecialization(ResourceSpecialization& specialization, ShaderType stage,
-                                   const ShaderInfo& info) {
+                                   const ShaderInfo& info, uint32_t base_dwords) {
 	if (!BufferGenericStage(stage)) {
 		return;
 	}
-	for (uint32_t i = 0; i < specialization.buffers.size(); i++) {
-		auto& buffer = specialization.buffers[i];
+	auto generic = specialization.buffers;
+	for (uint32_t i = 0; i < generic.size(); i++) {
+		auto& buffer = generic[i];
 		if ((buffer.packed_stride & 0x3fffu) != 0u) {
 			buffer.packed_stride = DynamicBufferStride | (buffer.packed_stride & ~0x3fffu);
 		}
@@ -1908,6 +1913,21 @@ void NormalizeBufferSpecialization(ResourceSpecialization& specialization, Shade
 			buffer.descriptor_format  = GenericBufferFormat;
 			buffer.descriptor_swizzle = DstSel(4, 5, 6, 7);
 		}
+	}
+	// The words must fit in push data after the base and the memory offsets (one byte per buffer).
+	uint32_t strides = 0;
+	uint32_t formats = 0;
+	for (const auto& buffer: generic) {
+		formats += buffer.descriptor_format == GenericBufferFormat ? 1u : 0u;
+		strides += buffer.descriptor_format != GenericBufferFormat &&
+		                   (buffer.packed_stride & DynamicBufferStride) != 0u
+		               ? 1u
+		               : 0u;
+	}
+	const auto dwords = base_dwords + static_cast<uint32_t>(generic.size() + 3u) / 4u +
+	                    (strides + 1u) / 2u + formats;
+	if (dwords <= PushData::DwordCount) {
+		specialization.buffers = std::move(generic);
 	}
 }
 

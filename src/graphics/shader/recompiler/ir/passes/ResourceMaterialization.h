@@ -129,20 +129,23 @@ bool BufferGenericStage(ShaderType stage);
 // OOB folding are generic; packed formats (10_11_11, 2_10_10_10, 5_6_5, ...) stay specialized.
 constexpr auto GenericBufferFormat = static_cast<Prospero::BufferFormat>(0x1ffu);
 
-// The shader-data word of a GenericBufferFormat buffer: the V#'s format (bits 0-6) and dst_sel
-// (bits 7-18); 0 (kInvalid) for an invalid or non-buffer descriptor.
-uint32_t RuntimeBufferFormatWord(const DescriptorValue& descriptor);
+// The shader-data word of a GenericBufferFormat buffer: the V#'s stride (bits 0-13), format
+// (bits 14-20) and dst_sel (bits 21-31: the four 3-bit selectors, each 0, 1 or 4-7, as base-6
+// digits, X lowest); 0 (kInvalid) for an invalid or non-buffer descriptor.
+uint32_t RuntimeBufferSlotWord(const DescriptorValue& descriptor);
 
 // Whether a buffer slot (base) of a stage with this specialization takes GenericBufferFormat.
 bool GenericBufferFormatEligible(ShaderType stage, const BufferResource& base,
                                  const ResourceSpecialization::Buffer& buffer);
 
 // Replaces baked nonzero strides by DynamicBufferStride and the formats of eligible formatted
-// slots by GenericBufferFormat, for a specialization made with KYTY_BUFFER_SPECIALIZE=1 or read
-// from an older journal record (specializations made now already are), of the shader (its
-// untranslated info) the specialization applies to.
+// slots by GenericBufferFormat when the resulting stride and format words still fit in push data
+// with `base_dwords` (ShaderDataBaseDwords) before them; otherwise the specialization stays baked,
+// so no shader data moves to storage. Specializations are made this way, and CompileProgram
+// applies it to records made with KYTY_BUFFER_SPECIALIZE=1 or by an older build. `info`: the
+// shader's untranslated info.
 void NormalizeBufferSpecialization(ResourceSpecialization& specialization, ShaderType stage,
-                                   const ShaderInfo& info);
+                                   const ShaderInfo& info, uint32_t base_dwords);
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR
 

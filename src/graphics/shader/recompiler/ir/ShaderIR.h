@@ -519,11 +519,11 @@ struct BindingLayout {
 	uint32_t                       dispatch_thread_dword = PushData::NoStart;
 	uint32_t                       memory_offset_dword = 0;
 	uint32_t                       memory_offset_count = 0;
-	// The buffers with DynamicBufferStride, in order: after the memory offsets, two strides per
-	// DWORD (16 bits each, the stride in bits 0-13).
+	// The buffers with DynamicBufferStride and a baked format, in order: after the memory
+	// offsets, two strides per DWORD (16 bits each, the stride in bits 0-13).
 	std::vector<uint32_t>          buffer_strides;
-	// The buffers with GenericBufferFormat, in order: after the strides, one DWORD each with the
-	// V#'s format (bits 0-6) and dst_sel (bits 7-18).
+	// The buffers with GenericBufferFormat, in order: after the strides, one DWORD each
+	// (RuntimeBufferSlotWord: stride, format and dst_sel).
 	std::vector<uint32_t>          buffer_formats;
 	// Graphics stages leave PushData::ObjectIdDword to the draw (its VGT_OBJECT_ID).
 	bool                           reserve_object_id = false;
@@ -794,6 +794,8 @@ struct ResourcePlan {
 	uint64_t                      shader_hash     = 0;
 	uint32_t                      user_data_base  = 0;
 	uint32_t                      user_data_count = 64;
+	// ShaderDataBaseDwords of the program (stride/format words fit in push data or stay baked).
+	uint32_t                      shader_data_base_dwords = 0;
 	std::list<Inst>                     value_storage;
 	std::vector<MemoryInfo>             memory_info;
 	std::vector<DescriptorSource>       descriptor_sources;

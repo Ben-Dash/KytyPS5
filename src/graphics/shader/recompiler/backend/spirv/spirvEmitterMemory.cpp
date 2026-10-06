@@ -3089,10 +3089,26 @@ void EmitGenericBufferFormats(EmitterState& state) {
 	const auto boolean = TypeBool(state);
 	for (uint32_t k = 0; k < state.program.bindings.buffer_formats.size(); k++) {
 		const auto i     = state.program.bindings.buffer_formats[k];
-		const auto word  = EmitShaderDataDwordLoad(state, state.program.bindings.BufferFormatDword() + k);
+		const auto slot  = EmitShaderDataDwordLoad(state, state.program.bindings.BufferFormatDword() + k);
 		const auto field = [&](uint32_t value, uint32_t first, uint32_t count) {
 			return EmitBitFieldUExtract(state, value, ConstantU32(state, first), ConstantU32(state, count));
 		};
+		if ((state.program.info.buffers[i].packed_stride & IR::DynamicBufferStride) != 0u) {
+			state.buffer_strides[i] = field(slot, 0, 14);
+		}
+		// RuntimeBufferSlotWord's base-6 selectors back to 3-bit ones: format | dst_sel << 7.
+		auto       selectors = field(slot, 21, 11);
+		auto       word      = field(slot, 14, 7);
+		for (uint32_t component = 0; component < 4u; ++component) {
+			const auto digit = Binary(state, spv::OpUMod, u32, selectors, ConstantU32(state, 6));
+			selectors        = Binary(state, spv::OpUDiv, u32, selectors, ConstantU32(state, 6));
+			const auto selector = Select(
+			    state, u32, Binary(state, spv::OpUGreaterThanEqual, boolean, digit, ConstantU32(state, 2)),
+			    Binary(state, spv::OpIAdd, u32, digit, ConstantU32(state, 2)), digit);
+			word = Binary(state, spv::OpBitwiseOr, u32, word,
+			              Binary(state, spv::OpShiftLeftLogical, u32, selector,
+			                     ConstantU32(state, 7u + component * 3u)));
+		}
 		const auto info      = LookupDynamicBufferFormat(state, field(word, 0, 7));
 		const auto count     = EmitUMax32(state, field(info.layout, 0, 3), ConstantU32(state, 1));
 		const auto byte_size = EmitUMax32(state, field(info.layout, 3, 5), ConstantU32(state, 1));

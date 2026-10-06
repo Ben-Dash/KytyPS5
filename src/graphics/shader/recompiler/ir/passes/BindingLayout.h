@@ -13,6 +13,11 @@ struct SharedMemoryResources {
 	bool gds = false;
 };
 
+// The shader-data DWORDs before the memory offsets (user data registers, dispatch thread
+// counts) the layout of this translated program will have at most; resource specialization can
+// only drop user data reads.
+uint32_t ShaderDataBaseDwords(const Program& program);
+
 SharedMemoryResources CollectMemoryResources(const Program& program, std::vector<uint32_t>& buffers);
 bool UsesFlattenedSrt(const Program& program);
 

@@ -126,7 +126,8 @@ static Prospero::BufferFormat RuntimeBufferFormat(const ShaderRecompiler::IR::Re
                                            uint32_t                                     index) {
 	return index < snapshot.buffers.size()
 	           ? static_cast<Prospero::BufferFormat>(
-	                 ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[index]) & 0x7fu)
+	                 (ShaderRecompiler::IR::RuntimeBufferSlotWord(snapshot.buffers[index]) >> 14u) &
+	                 0x7fu)
 	           : Prospero::BufferFormat::kInvalid;
 }
 
@@ -2030,12 +2031,12 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		    (ShaderRecompiler::IR::CanonicalPackedStride(snapshot.buffers[index]) & 0x3fffu)
 		    << ((k % 2u) * 16u);
 	}
-	// The formats and dst_sels of the buffers whose formatted loads decode them.
+	// Stride, format and dst_sel of the buffers whose formatted loads decode them.
 	for (uint32_t k = 0; k < layout.buffer_formats.size(); k++) {
 		const auto index = layout.buffer_formats[k];
 		EXIT_IF(index >= snapshot.buffers.size());
 		prepared.shader_data[layout.BufferFormatDword() + k] =
-		    ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[index]);
+		    ShaderRecompiler::IR::RuntimeBufferSlotWord(snapshot.buffers[index]);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::BufferViews);
 	if (ShaderRecompiler::IR::FindBinding(
