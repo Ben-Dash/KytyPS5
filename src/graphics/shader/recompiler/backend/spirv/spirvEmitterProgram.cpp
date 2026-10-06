@@ -540,11 +540,255 @@ bool EmitIndexedSelect(ValueEmitContext& ctx, const IR::Inst& inst) {
 	return true;
 }
 
+enum class HalfInvariance { Never, Source, Operands };
+
+// How an opcode's result relates to the wave half it is computed for. Source results are the same
+// in both halves; Operands results are when all operands are (pure operations that never read the
+// lane identity, EXEC or per-lane memory).
+HalfInvariance HalfInvarianceOf(IR::ValueOpcode opcode) {
+	using Op = IR::ValueOpcode;
+	switch (opcode) {
+		case Op::GetUserData:
+		case Op::Ballot:
+		case Op::ReadFirstLane: return HalfInvariance::Source;
+		case Op::Phi:
+		case Op::Identity:
+		case Op::UndefU1:
+		case Op::UndefU8:
+		case Op::UndefU16:
+		case Op::UndefU32:
+		case Op::UndefU64:
+		case Op::BitCastU16F16:
+		case Op::BitCastF16U16:
+		case Op::BitCastU32F32:
+		case Op::BitCastF32U32:
+		case Op::BitCastU64F64:
+		case Op::BitCastF64U64:
+		case Op::ConvertU16U32:
+		case Op::ConvertU32U16:
+		case Op::ConvertU8U32:
+		case Op::ConvertU32U8:
+		case Op::ConvertF32F16:
+		case Op::ConvertF16F32:
+		case Op::ConvertS32F32:
+		case Op::ConvertU32F32:
+		case Op::ConvertF32S32:
+		case Op::ConvertF64S32:
+		case Op::ConvertF32F64:
+		case Op::ConvertF64F32:
+		case Op::ConvertF32U32:
+		case Op::ConvertF64U32:
+		case Op::CompositeConstructU64:
+		case Op::CompositeConstructU32x2:
+		case Op::CompositeConstructU32x3:
+		case Op::CompositeConstructF32x2:
+		case Op::CompositeConstructU32x4:
+		case Op::CompositeExtractU64:
+		case Op::CompositeExtractU32x2:
+		case Op::CompositeExtractU32x3:
+		case Op::CompositeExtractU32x4:
+		case Op::PackHalf2x16:
+		case Op::FPAddF16x2:
+		case Op::FPMulF16x2:
+		case Op::FPFmaF16x2:
+		case Op::FPSaturateF16x2:
+		case Op::FPMinF16x2:
+		case Op::FPMaxF16x2:
+		case Op::FPMinTriF16x2:
+		case Op::FPMaxTriF16x2:
+		case Op::FPMedTriF16x2:
+		case Op::PackSnorm2x16:
+		case Op::PackUnorm2x16:
+		case Op::PackFloat2x16Rtz:
+		case Op::FPAbs32:
+		case Op::FPNeg32:
+		case Op::FPSaturate32:
+		case Op::BitFieldInsert:
+		case Op::BitFieldUExtract:
+		case Op::BitFieldSExtract:
+		case Op::SelectU1:
+		case Op::SelectF32:
+		case Op::SelectU32:
+		case Op::IAdd32:
+		case Op::IAdd64:
+		case Op::IAddCarry32:
+		case Op::ISub32:
+		case Op::ISub64:
+		case Op::IMul32:
+		case Op::IMul64:
+		case Op::UDiv32:
+		case Op::SMulHi:
+		case Op::UMulHi:
+		case Op::IAbs32:
+		case Op::ShiftLeftLogical32:
+		case Op::ShiftLeftLogical64:
+		case Op::ShiftRightLogical32:
+		case Op::ShiftRightLogical64:
+		case Op::ShiftRightArithmetic32:
+		case Op::ShiftRightArithmetic64:
+		case Op::BitwiseAnd32:
+		case Op::BitwiseAnd64:
+		case Op::BitwiseOr32:
+		case Op::BitwiseXor32:
+		case Op::BitwiseNot32:
+		case Op::BitReverse32:
+		case Op::BitCount32:
+		case Op::BitCount64:
+		case Op::FindUMsb32:
+		case Op::FindUMsb64:
+		case Op::FindILsb32:
+		case Op::SMin32:
+		case Op::UMin32:
+		case Op::SMax32:
+		case Op::UMax32:
+		case Op::SMinTri32:
+		case Op::UMinTri32:
+		case Op::SMaxTri32:
+		case Op::UMaxTri32:
+		case Op::SMedTri32:
+		case Op::UMedTri32:
+		case Op::SLessThan32:
+		case Op::SLessThan64:
+		case Op::SLessThanEqual64:
+		case Op::ULessThanEqual64:
+		case Op::UGreaterThanEqual64:
+		case Op::ULessThan32:
+		case Op::ULessThan64:
+		case Op::IEqual32:
+		case Op::IEqual64:
+		case Op::SLessThanEqual32:
+		case Op::ULessThanEqual32:
+		case Op::SGreaterThan32:
+		case Op::UGreaterThan32:
+		case Op::UGreaterThan64:
+		case Op::INotEqual32:
+		case Op::INotEqual64:
+		case Op::SGreaterThanEqual32:
+		case Op::UGreaterThanEqual32:
+		case Op::LogicalOr:
+		case Op::LogicalAnd:
+		case Op::LogicalXor:
+		case Op::LogicalNot:
+		case Op::FPOrdEqual32:
+		case Op::FPOrdEqual64:
+		case Op::FPOrdLessThanEqual64:
+		case Op::FPOrdGreaterThanEqual64:
+		case Op::FPUnordEqual32:
+		case Op::FPOrdNotEqual32:
+		case Op::FPUnordNotEqual32:
+		case Op::FPOrdLessThan32:
+		case Op::FPUnordLessThan32:
+		case Op::FPOrdGreaterThan32:
+		case Op::FPUnordGreaterThan32:
+		case Op::FPOrdLessThanEqual32:
+		case Op::FPUnordLessThanEqual32:
+		case Op::FPOrdGreaterThanEqual32:
+		case Op::FPUnordGreaterThanEqual32:
+		case Op::FPIsNan32:
+		case Op::FPCmpClass32:
+		case Op::FPCmpClass16:
+		case Op::FPAdd32:
+		case Op::FPSub32:
+		case Op::FPFma32:
+		case Op::FPMad32:
+		case Op::FPMul32:
+		case Op::FPAdd64:
+		case Op::FPMul64:
+		case Op::FPFma64:
+		case Op::FPRecip64:
+		case Op::FPMin32:
+		case Op::FPMax32:
+		case Op::FPMin64:
+		case Op::FPMax64:
+		case Op::FPMinTri32:
+		case Op::FPMaxTri32:
+		case Op::FPMedTri32:
+		case Op::FPRecip32:
+		case Op::FPRecipIFlag32:
+		case Op::FPRecipSqrt32:
+		case Op::FPSqrt:
+		case Op::FPSin:
+		case Op::FPCos:
+		case Op::FPExp2:
+		case Op::FPLog2:
+		case Op::FPLdexp:
+		case Op::FPRoundEven32:
+		case Op::FPFloor32:
+		case Op::FPCeil32:
+		case Op::FPTrunc32:
+		case Op::FPFloor64:
+		case Op::FPCeil64:
+		case Op::FPTrunc64:
+		case Op::FPFract32:
+		case Op::FPFract64:
+		// Scalar memory: descriptors and loads without an EXEC operand.
+		case Op::GetSrtResource:
+		case Op::GetBufferResource:
+		case Op::ReadConst:
+		case Op::ReadConstBuffer: return HalfInvariance::Operands;
+		default: return HalfInvariance::Never;
+	}
+}
+
+// KYTY_DEBUG_NO_HALF_UNIFORM=1: emits every value in both wave halves (A/B runs).
+bool HalfUniformDedupEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_NO_HALF_UNIFORM") == nullptr;
+	return enabled;
+}
+
+// Values every lane of the wave computes identically. Branches are wave-uniform, so a Phi of such
+// values is too; Phis start optimistic and the set shrinks to a fixpoint.
+void FindHalfInvariantValues(EmitterState& state) {
+	auto& invariant = state.half_invariant;
+	for (const auto* block: state.program.blocks) {
+		for (const auto& inst: *block) {
+			if (HalfInvarianceOf(inst.GetOpcode()) != HalfInvariance::Never) {
+				invariant.insert(&inst);
+			}
+		}
+	}
+	const auto operands_invariant = [&](const IR::Inst& inst) {
+		for (size_t index = 0; index < inst.NumArgs(); index++) {
+			const auto  arg        = inst.Arg(index).Resolve();
+			const auto* definition = arg.IsImmediate() ? nullptr : arg.TryInstruction();
+			if (!arg.IsImmediate() && (definition == nullptr || !invariant.contains(definition))) {
+				return false;
+			}
+		}
+		return true;
+	};
+	for (bool changed = true; changed;) {
+		changed = false;
+		for (const auto* block: state.program.blocks) {
+			for (const auto& inst: *block) {
+				if (HalfInvarianceOf(inst.GetOpcode()) == HalfInvariance::Operands &&
+				    invariant.contains(&inst) && !operands_invariant(inst)) {
+					invariant.erase(&inst);
+					changed = true;
+				}
+			}
+		}
+	}
+}
+
+// Half 1 reuses half 0's result for a half-invariant value half 0 has defined.
+bool AliasHalfInvariant(ValueEmitContext& ctx, const IR::Inst& inst) {
+	if (ctx.half == 0 || !ctx.state.half_invariant.contains(&inst) ||
+	    ctx.definitions.contains(&inst) || !ctx.other_half->definitions.contains(&inst)) {
+		return false;
+	}
+	ctx.Define(inst, ctx.other_half->definitions.at(&inst));
+	return true;
+}
+
 void EmitDirectInstruction(ValueEmitContext& ctx, const IR::Inst& inst) {
 	if (ctx.half != 0 && (inst.GetOpcode() == IR::ValueOpcode::Ballot ||
 	                     inst.GetOpcode() == IR::ValueOpcode::ReadFirstLane)) {
 		// Both operations already combine both emulated halves into one whole-wave result.
 		ctx.Define(inst, ctx.other_half->Result(inst));
+		return;
+	}
+	if (AliasHalfInvariant(ctx, inst)) {
 		return;
 	}
 	if (inst.GetOpcode() == IR::ValueOpcode::SelectU32 && EmitIndexedSelect(ctx, inst)) {
@@ -562,6 +806,9 @@ void EmitDirectInstruction(ValueEmitContext& ctx, const IR::Inst& inst) {
 void EmitStructuredInstruction(ValueEmitContext& ctx, StructuredFunctionState& structured,
                                const IR::Inst& inst) {
 	if (inst.GetOpcode() == IR::ValueOpcode::Phi) {
+		if (AliasHalfInvariant(ctx, inst)) {
+			return;
+		}
 		const auto type = TypeId(ctx.state, inst.GetType());
 		if (type == 0 || inst.NumArgs() == 0) {
 			ctx.Fail(inst, "has no native SPIR-V representation");
@@ -947,6 +1194,9 @@ void EmitProgram(EmitterState& state) {
 		ctx.other_half  = &high;
 		high.other_half = &ctx;
 		high.half       = 1;
+		if (!program.dispatcher_fallback && HalfUniformDedupEnabled()) {
+			FindHalfInvariantValues(state);
+		}
 	}
 	std::optional<DispatcherFunctionState> dispatcher;
 	if (state.program.stage == ShaderType::Pixel && state.requirements.pixel_valid_mask) {

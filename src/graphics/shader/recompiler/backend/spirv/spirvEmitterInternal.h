@@ -124,6 +124,8 @@ struct EmitterState {
 	const SpirvRequirements                          requirements;
 	uint32_t                                         lane_count              = 1;
 	uint32_t                                         lane_half               = 0;
+	// lane_count == 2: values equal in both wave halves, emitted once in half 0.
+	std::unordered_set<const IR::Inst*>              half_invariant;
 	uint32_t                                         storage_buffer_variable = 0;
 	uint32_t                                         storage_buffer_u8_variable = 0;
 	uint32_t                                         storage_buffer_u16_variable = 0;
