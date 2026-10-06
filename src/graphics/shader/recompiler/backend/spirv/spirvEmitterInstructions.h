@@ -45,6 +45,15 @@ inline constexpr auto EmitCompositeExtractU32x2 = EmitCompositeExtractU64;
 inline constexpr auto EmitCompositeExtractU32x3 = EmitCompositeExtractU64;
 inline constexpr auto EmitCompositeExtractU32x4 = EmitCompositeExtractU64;
 inline constexpr auto EmitPackHalf2x16 = EmitGlsl<GLSLstd450PackHalf2x16, IR::Type::U32, uint32_t>;
+uint32_t EmitFPAddF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs);
+uint32_t EmitFPMulF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs);
+uint32_t EmitFPFmaF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c);
+uint32_t EmitFPSaturateF16x2(EmitterState& state, uint32_t value);
+uint32_t EmitFPMinF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs);
+uint32_t EmitFPMaxF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs);
+uint32_t EmitFPMinTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c);
+uint32_t EmitFPMaxTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c);
+uint32_t EmitFPMedTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c);
 inline constexpr auto EmitPackSnorm2x16 =
     EmitGlsl<GLSLstd450PackSnorm2x16, IR::Type::U32, uint32_t>;
 inline constexpr auto EmitPackUnorm2x16 =

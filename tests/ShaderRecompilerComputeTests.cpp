@@ -1318,6 +1318,9 @@ void CheckLeastRecentlyUsedCacheOrdering() {
 // --hardware-buffer-bounds: the cases run with storage buffer word accesses left to the
 // device's robustBufferAccess2 (ShaderRecompiler::SetHardwareStorageBufferBounds).
 bool g_hardware_buffer_bounds_requested = false;
+// --native-fp16: the device enables shaderFloat16 and the recompiler emits packed FP16 arithmetic
+// natively (ShaderRecompiler::SetNativeFloat16).
+bool g_native_float16_requested = false;
 
 // Payload calls (ReserveRecordedCall/CommitRecordedCall) run on the stream's consumer in order
 // with pushed work, with the routed buffer and their whole payload; other threads and buffers
@@ -18692,6 +18695,7 @@ private:
     device_features12.bufferDeviceAddress = true;
     device_features12.shaderOutputLayer = true;
     device_features12.shaderSharedInt64Atomics = true;
+    device_features12.shaderFloat16 = g_native_float16_requested;
     vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR workgroup_layout{};
     workgroup_layout.workgroupMemoryExplicitLayout = true;
     device_features12.pNext = &device_features11;
@@ -18831,6 +18835,7 @@ private:
       }
       ShaderRecompiler::SetHardwareStorageBufferBounds(true);
     }
+    ShaderRecompiler::SetNativeFloat16(g_native_float16_requested);
     VULKAN_HPP_DEFAULT_DISPATCHER.init(m_device);
     m_device.getQueue(m_queue_family, 0, &m_queue);
 
@@ -23587,6 +23592,41 @@ TestCase Vop3pOpselHiUsesArchitecturalSourceBits() {
           {},
           {0x4f004d00u, 0x4e004d00u, 0x50804d00u},
           {O::V_MOV_B32, O::V_PK_FMA_F16, O::BUFFER_STORE_DWORD, O::S_ENDPGM}};
+}
+
+// V_PK_ADD/MUL/FMA_F16 on exactly representable halves: native 16-bit float vectors with
+// --native-fp16, F32 arithmetic packed with PackHalf2x16 otherwise; same results either way.
+TestCase PackedFloat16ArithmeticNativeOrEmulated() {
+  using O = ShaderOpcode;
+
+  std::vector<u32> code;
+  AppendVMovLiteral(&code, 0, 0xc0003e00u); // low=1.5h, high=-2.0h
+  AppendVMovLiteral(&code, 1, 0x34004000u); // low=2.0h, high=0.25h
+  AppendVMovLiteral(&code, 2, 0x48003800u); // low=0.5h, high=8.0h
+  AppendVop3p(&code, 0x0f, 10, Vgpr(0), Vgpr(1), 0, 0x3); // V_PK_ADD_F16
+  AppendVop3p(&code, 0x10, 11, Vgpr(0), Vgpr(1), 0, 0x3); // V_PK_MUL_F16
+  AppendVop3p(&code, 0x0e, 12, Vgpr(0), Vgpr(1), Vgpr(2), 0x7); // V_PK_FMA_F16
+  for (u32 i = 0; i < 3; i++) {
+    AppendStoreVgpr(&code, 10 + i, i);
+  }
+  AppendEnd(&code);
+
+  TestCase test{"PackedFloat16ArithmeticNativeOrEmulated",
+                code,
+                {},
+                // (3.5, -1.75), (3.0, -0.5), (3.5, 7.5)
+                {0xbf004300u, 0xb8004200u, 0x47804300u},
+                {O::V_MOV_B32, O::V_PK_ADD_F16, O::V_PK_MUL_F16, O::V_PK_FMA_F16,
+                 O::BUFFER_STORE_DWORD, O::S_ENDPGM}};
+  if (g_native_float16_requested) {
+    test.required_spirv = {"OpCapability Float16", "OpTypeFloat 16", "OpFAdd", "OpFMul",
+                           " Fma ", "DenormPreserve 16"};
+    test.forbidden_spirv = {" PackHalf2x16 ", " UnpackHalf2x16 "};
+  } else {
+    test.required_spirv = {" PackHalf2x16 ", " UnpackHalf2x16 "};
+    test.forbidden_spirv = {"OpCapability Float16"};
+  }
+  return test;
 }
 
 TestCase Vop3pIntegerNegationCapturedAndSelectedHalves() {
@@ -30133,6 +30173,41 @@ TestCase TBufferStoreVariants() {
            O::S_ENDPGM}};
 }
 
+TestCase FlatLoadDlcCaptured(u32 wave_size) {
+  using O = ShaderOpcode;
+  TestCase test;
+  test.name = wave_size == 64 ? "FlatLoadDlcCapturedWave64" : "FlatLoadDlcCapturedWave32";
+  auto &code = test.code;
+  code.push_back(EncodeSop1(0x04, 126, InlineU32(1)));
+  AppendVMovU32(&code, 4, 0);
+  AppendVMovU32(&code, 5, 31);
+  // PPSA04288 CS 05b58beb842bacbf:0x638, FLAT_LOAD_DWORDX2 v[0:1], v[4:5] DLC.
+  code.insert(code.end(), {0xdc341000u, 0x007d0004u});
+  AppendStoreVgpr(&code, 0, 0);
+  AppendStoreVgpr(&code, 1, 1);
+  // The descriptor store aliases the physical address read by the next load.
+  AppendStoreVgpr(&code, 1, 8);
+  code.push_back(0xbbfd0000u); // S_WAITCNT_VSCNT null, 0.
+  code.insert(code.end(), {0xdc341000u, 0x007d0004u});
+  AppendStoreVgpr(&code, 0, 2);
+  AppendStoreVgpr(&code, 1, 3);
+  AppendEnd(&code);
+  test.initial = {0, 0, 0, 0, 0, 0, 0, 0, 0x11223344u, 0x55667788u};
+  test.expected = {0x11223344u, 0x55667788u, 0x55667788u, 0x55667788u,
+                   0, 0, 0, 0, 0x55667788u, 0x55667788u};
+  test.bda_mappings = {{0x1f00000000ull, 32}};
+  test.opcodes = {O::S_MOV_B64, O::V_MOV_B32, O::FLAT_LOAD_DWORDX2,
+                  O::BUFFER_STORE_DWORD, O::S_WAITCNT_VSCNT, O::S_ENDPGM};
+  test.required_spirv = {"OpDecorate %buffers Coherent", " 0 Coherent", "Volatile|Aligned 4"};
+  test.decoded_counts = {{"dlc=1", 2}};
+  test.compute_info.threads_num[0] = wave_size;
+  test.compute_info.threads_num[1] = 1;
+  test.compute_info.threads_num[2] = 1;
+  test.compute_info.wave_size = wave_size;
+  test.has_compute_info = true;
+  return test;
+}
+
 TestCase FlatLoadVariants() {
   using O = ShaderOpcode;
 
@@ -35763,6 +35838,7 @@ std::vector<TestCase> MakeCases() {
   AddCase(Vop2PkFmacF16AccumulatesPackedHalvesIndependently);
   AddCase(Vop2PkFmacF16DppNegatesBothPackedHalves);
   AddCase(Vop3pOpselHiUsesArchitecturalSourceBits);
+  AddCase(PackedFloat16ArithmeticNativeOrEmulated);
   AddCase(Vop3pIntegerNegationCapturedAndSelectedHalves);
   AddCase(CvtPkU8F32PacksSelectedByte);
   AddCase(CvtPkrtzF16F32SubnormalRoundsTowardZero);
@@ -35982,6 +36058,8 @@ std::vector<TestCase> MakeCases() {
   AddCase(TBufferStoreFormatXy88IntegerComponents);
   AddCase(TBufferLoadFormatXy88IntegerComponents);
   AddCase(TBufferStoreVariants);
+  cases.push_back(FlatLoadDlcCaptured(32));
+  cases.push_back(FlatLoadDlcCaptured(64));
   AddCase(FlatLoadVariants);
   AddCase(FlatSubdwordLoadsApplyByteOffset);
   cases.push_back(GlobalLoadShortD16Captured(32));
@@ -41062,6 +41140,12 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc >= 2 && std::strcmp(argv[1], "--native-fp16") == 0) {
+    g_native_float16_requested = true;
+    argv[1] = argv[0];
+    ++argv;
+    --argc;
+  }
   if (argc >= 2 && std::strcmp(argv[1], "--hardware-buffer-bounds") == 0) {
     g_hardware_buffer_bounds_requested = true;
     argv[1] = argv[0];
@@ -41327,6 +41411,8 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--flat-d16-only") == 0) {
     VulkanHarness vulkan;
+    RunCase(&vulkan, FlatLoadDlcCaptured(32));
+    RunCase(&vulkan, FlatLoadDlcCaptured(64));
     RunCase(&vulkan, GlobalLoadShortD16Captured(32));
     RunCase(&vulkan, GlobalLoadShortD16Captured(64));
     RunCase(&vulkan, FlatLoadShortD16AddressSegments());

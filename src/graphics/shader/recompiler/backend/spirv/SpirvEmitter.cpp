@@ -289,6 +289,15 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
 			requirements.float64 |= inst.GetType() == IR::Type::F64;
+			requirements.float16 |= inst.GetOpcode() == IR::ValueOpcode::FPAddF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMulF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPFmaF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPSaturateF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMinF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMaxF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMinTriF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMaxTriF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMedTriF16x2;
 			if (IR::BufferAccessOf(inst.GetOpcode()) == IR::BufferAccess::Atomic &&
 			    inst.GetType() == IR::Type::U64) {
 				requirements.buffer_int64_atomics = true;
@@ -299,7 +308,8 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 				if (memory_index >= program.memory_info.size()) {
 					Fail(program, "address operation has invalid memory metadata");
 				}
-				const auto kind = program.memory_info[memory_index].kind;
+				const auto& memory = program.memory_info[memory_index];
+				const auto  kind   = memory.kind;
 				if (kind == IR::ResourceKind::Scratch || kind == IR::ResourceKind::FlatLocal) {
 					if (program.scratch_dwords == 0) {
 						Fail(program, "scratch operation has no per-thread storage");
@@ -311,6 +321,9 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 					}
 				} else if (address_access == IR::AddressAccess::Write) {
 					Fail(program, "writable FLAT/GLOBAL addresses require GPU ownership tracking");
+				} else {
+					// Descriptor stores can alias coherent physical-address loads.
+					requirements.coherent_buffers |= memory.coherent;
 				}
 			}
 			if (IR::BufferAccessOf(inst.GetOpcode()) != IR::BufferAccess::None) {

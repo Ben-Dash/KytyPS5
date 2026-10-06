@@ -367,6 +367,104 @@ uint32_t EmitPackFloat2x16Rtz(EmitterState& state, uint32_t arg0, uint32_t arg1)
 	return Binary(state, spv::OpBitwiseOr, TypeU32(state), low, high);
 }
 
+namespace {
+
+// A U32 holding two FP16 values as a 16-bit float vector, and back.
+uint32_t AsF16x2(EmitterState& state, uint32_t bits) {
+	return Unary(state, spv::OpBitcast, TypeF16x2(state), bits);
+}
+
+uint32_t FromF16x2(EmitterState& state, uint32_t value) {
+	return Unary(state, spv::OpBitcast, TypeU32(state), value);
+}
+
+// EmitMinMaxF32Value per half of two f16vec2 values: a NaN takes the other operand, two zeros
+// give the bitwise AND (max) or OR (min) of their bits so -0 < +0, otherwise the ordered pick.
+uint32_t MinMaxF16x2Value(EmitterState& state, uint32_t lhs, uint32_t rhs, bool max_value) {
+	const auto f16x2   = TypeF16x2(state);
+	const auto bool2   = TypeBoolVector(state, 2);
+	const auto ordered = Select(state, f16x2,
+	                            Binary(state, max_value ? spv::OpFOrdGreaterThanEqual : spv::OpFOrdLessThan,
+	                                   bool2, lhs, rhs),
+	                            lhs, rhs);
+	const auto zero      = AsF16x2(state, ConstantU32(state, 0));
+	const auto both_zero = Binary(state, spv::OpLogicalAnd, bool2,
+	                              Binary(state, spv::OpFOrdEqual, bool2, lhs, zero),
+	                              Binary(state, spv::OpFOrdEqual, bool2, rhs, zero));
+	const auto zero_bits = Binary(state, max_value ? spv::OpBitwiseAnd : spv::OpBitwiseOr,
+	                              TypeU32(state), FromF16x2(state, lhs), FromF16x2(state, rhs));
+	const auto numeric   = Select(state, f16x2, both_zero, AsF16x2(state, zero_bits), ordered);
+	const auto rhs_nan   = Select(state, f16x2, Unary(state, spv::OpIsNan, bool2, rhs), lhs, numeric);
+	return Select(state, f16x2, Unary(state, spv::OpIsNan, bool2, lhs), rhs, rhs_nan);
+}
+
+uint32_t PackedF16Binary(EmitterState& state, spv::Op op, uint32_t lhs, uint32_t rhs) {
+	const auto result = Binary(state, op, TypeF16x2(state), AsF16x2(state, lhs), AsF16x2(state, rhs));
+	state.builder.AddAnnotation(spv::OpDecorate, result, spv::DecorationNoContraction);
+	return FromF16x2(state, result);
+}
+
+} // namespace
+
+uint32_t EmitFPAddF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return PackedF16Binary(state, spv::OpFAdd, lhs, rhs);
+}
+
+uint32_t EmitFPMulF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return PackedF16Binary(state, spv::OpFMul, lhs, rhs);
+}
+
+uint32_t EmitFPFmaF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c) {
+	const auto result = EmitExt(state, TypeF16x2(state), GLSLstd450Fma,
+	                            {AsF16x2(state, a), AsF16x2(state, b), AsF16x2(state, c)});
+	state.builder.AddAnnotation(spv::OpDecorate, result, spv::DecorationNoContraction);
+	return FromF16x2(state, result);
+}
+
+uint32_t EmitFPMinF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return FromF16x2(state, MinMaxF16x2Value(state, AsF16x2(state, lhs), AsF16x2(state, rhs), false));
+}
+
+uint32_t EmitFPMaxF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return FromF16x2(state, MinMaxF16x2Value(state, AsF16x2(state, lhs), AsF16x2(state, rhs), true));
+}
+
+uint32_t EmitFPMinTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c) {
+	const auto ab = MinMaxF16x2Value(state, AsF16x2(state, a), AsF16x2(state, b), false);
+	return FromF16x2(state, MinMaxF16x2Value(state, ab, AsF16x2(state, c), false));
+}
+
+uint32_t EmitFPMaxTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c) {
+	const auto ab = MinMaxF16x2Value(state, AsF16x2(state, a), AsF16x2(state, b), true);
+	return FromF16x2(state, MinMaxF16x2Value(state, ab, AsF16x2(state, c), true));
+}
+
+// As EmitFPMedTri32: the median, or the minimum when any input is NaN.
+uint32_t EmitFPMedTriF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c) {
+	const auto bool2    = TypeBoolVector(state, 2);
+	const auto va       = AsF16x2(state, a);
+	const auto vb       = AsF16x2(state, b);
+	const auto vc       = AsF16x2(state, c);
+	const auto min_ab   = MinMaxF16x2Value(state, va, vb, false);
+	const auto min3     = MinMaxF16x2Value(state, min_ab, vc, false);
+	const auto max_ab   = MinMaxF16x2Value(state, va, vb, true);
+	const auto high_min = MinMaxF16x2Value(state, max_ab, vc, false);
+	const auto median   = MinMaxF16x2Value(state, min_ab, high_min, true);
+	const auto nan_ab   = Binary(state, spv::OpLogicalOr, bool2, Unary(state, spv::OpIsNan, bool2, va),
+	                             Unary(state, spv::OpIsNan, bool2, vb));
+	const auto any_nan  = Binary(state, spv::OpLogicalOr, bool2, nan_ab,
+	                             Unary(state, spv::OpIsNan, bool2, vc));
+	return FromF16x2(state, Select(state, TypeF16x2(state), any_nan, min3, median));
+}
+
+uint32_t EmitFPSaturateF16x2(EmitterState& state, uint32_t value) {
+	// FP16 0.0 and 1.0 in both halves, as F32 FPSaturate clamps.
+	const auto zero = AsF16x2(state, ConstantU32(state, 0x00000000u));
+	const auto one  = AsF16x2(state, ConstantU32(state, 0x3c003c00u));
+	return FromF16x2(state,
+	                 EmitExt(state, TypeF16x2(state), GLSLstd450FClamp, {AsF16x2(state, value), zero, one}));
+}
+
 uint32_t EmitFPSaturate32(EmitterState& state, uint32_t arg0) {
 	return EmitExt(state, TypeF32(state), GLSLstd450FClamp,
 	               {arg0, ConstantF32(state, 0), ConstantF32(state, 0x3f800000u)});

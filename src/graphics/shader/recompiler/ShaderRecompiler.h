@@ -49,6 +49,12 @@ struct CompileResult {
 void SetHardwareStorageBufferBounds(bool enabled);
 [[nodiscard]] bool HardwareStorageBufferBounds();
 
+// Packed FP16 arithmetic runs as native 16-bit float vectors (shaderFloat16 with FP16 denormals
+// and signed zero/Inf/NaN preserved) instead of through F32. Set before any compile, only when the
+// device enables those; KYTY_NATIVE_FP16=0 turns it off.
+void SetNativeFloat16(bool enabled);
+[[nodiscard]] bool NativeFloat16();
+
 [[nodiscard]] TranslateResult TranslateProgram(std::span<const uint32_t> code,
                                                const CompileOptions& options);
 [[nodiscard]] CompileResult CompileProgram(TranslateResult translated,

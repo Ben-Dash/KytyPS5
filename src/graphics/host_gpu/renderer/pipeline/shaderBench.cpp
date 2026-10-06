@@ -329,6 +329,7 @@ struct Device {
 	uint32_t                   max_subgroup = 0;
 	bool                       subgroup_control = false;
 	bool                       hw_bounds        = false;
+	bool                       native_float16   = false;
 };
 
 #define BENCH_VK(x)                                                                         \
@@ -380,8 +381,11 @@ bool CreateDevice(Device& out) {
 		if (pr.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) out.physical = p;
 	}
 
+	VkPhysicalDeviceFloatControlsProperties float_controls {
+	    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES};
 	VkPhysicalDeviceRobustness2PropertiesEXT robust_props {
 	    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_PROPERTIES_EXT};
+	robust_props.pNext = &float_controls;
 	VkPhysicalDeviceSubgroupSizeControlProperties subgroup_props {
 	    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
 	subgroup_props.pNext = &robust_props;
@@ -406,6 +410,10 @@ bool CreateDevice(Device& out) {
 	out.subgroup_control = f13.subgroupSizeControl == VK_TRUE;
 	out.hw_bounds = robust.robustBufferAccess2 == VK_TRUE && robust.nullDescriptor == VK_TRUE &&
 	                robust_props.robustStorageBufferAccessSizeAlignment <= sizeof(uint32_t);
+	// As vulkanWindow.cpp decides it.
+	out.native_float16 = f12.shaderFloat16 == VK_TRUE &&
+	                     float_controls.shaderDenormPreserveFloat16 == VK_TRUE &&
+	                     float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
 
 	// Every supported feature on, as spvtime does; robustness2 needs its extension.
 	const char*             extensions[] = {VK_EXT_ROBUSTNESS_2_EXTENSION_NAME};
@@ -734,9 +742,11 @@ int Run(int argc, char* argv[]) {
 	                                              : 48u * 1024u;
 	const bool hw_bounds = o.hw_bounds >= 0 ? o.hw_bounds != 0 : !have_device || device.hw_bounds;
 	ShaderRecompiler::SetHardwareStorageBufferBounds(hw_bounds);
-	std::printf("device: %s, max LDS %u, hw bounds %s, bindless %s\n",
+	ShaderRecompiler::SetNativeFloat16(have_device && device.native_float16);
+	std::printf("device: %s, max LDS %u, hw bounds %s, bindless %s, native fp16 %s\n",
 	            have_device ? device.properties.deviceName : "(none)", max_lds,
-	            hw_bounds ? "on" : "off", o.bindless ? "on" : "off");
+	            hw_bounds ? "on" : "off", o.bindless ? "on" : "off",
+	            ShaderRecompiler::NativeFloat16() ? "on" : "off");
 
 	std::vector<size_t> selected;
 	for (size_t i = 0; i < records.size() && selected.size() < o.limit; i++) {
