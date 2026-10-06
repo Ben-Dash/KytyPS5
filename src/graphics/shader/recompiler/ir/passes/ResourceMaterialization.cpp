@@ -515,7 +515,8 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 	                                   .table_offset   = indirect.table_offset,
 	                                   .record_stride  = indirect.table_stride,
 	                                   .image          = image_index,
-	                                   .mapping_offset = mapping_offset});
+	                                   .mapping_offset = mapping_offset,
+	                                   .pointer_offset = indirect.pointer_offset});
 	auto& root                      = specializations[image_index];
 	root.indirect_root              = image_index;
 	root.indirect_mapping_offset    = mapping_offset;

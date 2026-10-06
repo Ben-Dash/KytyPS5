@@ -419,14 +419,14 @@ bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries) {
 BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
     uint64_t base, uint32_t table_offset, uint32_t record_stride, uint32_t binding,
     uint32_t entries,
-    const ShaderRecompiler::IR::ImageResource& resource) {
+    const ShaderRecompiler::IR::ImageResource& resource, uint32_t pointer_offset) {
 	if (entries == 0) {
 		return nullptr;
 	}
 	for (auto& heap: m_heaps) {
 		if (heap.base == base && heap.table_offset == table_offset &&
 		    heap.record_stride == record_stride && heap.binding == binding &&
-		    heap.resource.r128 == resource.r128) {
+		    heap.resource.r128 == resource.r128 && heap.pointer_offset == pointer_offset) {
 			if (entries > heap.entries && !AllocateRegion(heap, entries)) {
 				return nullptr;
 			}
@@ -439,6 +439,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	heap.record_stride = record_stride;
 	heap.binding      = binding;
 	heap.resource     = resource;
+	heap.pointer_offset = pointer_offset;
 	// A plain T# heap grows as the guest streams textures in; a table of larger records (one
 	// per material) has a fixed size.
 	const auto initial = record_stride == 32u ? std::max(entries, 1u << 14u) : std::max(entries, 16u);
@@ -457,6 +458,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		fresh.record_stride = record_stride;
 		fresh.binding       = binding;
 		fresh.resource      = resource;
+		fresh.pointer_offset = pointer_offset;
 		if (!AllocateRegion(fresh, initial)) {
 			m_heaps.pop_back();
 			return nullptr;

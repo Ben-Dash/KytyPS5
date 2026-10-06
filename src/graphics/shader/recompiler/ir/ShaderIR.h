@@ -574,6 +574,9 @@ struct DescriptorSource {
 		uint32_t selector_bits   = UINT32_MAX;
 		// No enumeration: the shader looks the key up in the bindless translation table.
 		bool     bindless        = false;
+		// Bindless only: each record holds a 64-bit pointer at this offset, and the T# lies at
+		// pointer + table_offset (UINT32_MAX: the T# is in the record itself).
+		uint32_t pointer_offset  = UINT32_MAX;
 		Value    key_count;
 		Value                 selector_first;
 		Value    selector_mask;

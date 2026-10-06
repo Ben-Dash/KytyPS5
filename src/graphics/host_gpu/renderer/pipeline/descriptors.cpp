@@ -468,6 +468,24 @@ static void PopulateTextureMipLayout(ImageInfo& info) {
 	}
 }
 
+// A texture the host cannot represent ends the session, except while a bindless key is
+// resolved: that key then samples the placeholder (the shader keeps running).
+static thread_local bool g_soft_texture_failures = false;
+static thread_local bool g_soft_texture_failed   = false;
+#define KYTY_TEXTURE_FAIL(...)                                                                   \
+	do {                                                                                         \
+		if (g_soft_texture_failures) {                                                           \
+			g_soft_texture_failed = true;                                                        \
+			static std::atomic<uint32_t> soft_logged {0};                                        \
+			if (soft_logged.fetch_add(1) < 16) {                                                 \
+				std::printf("bindless: texture kept as placeholder: " __VA_ARGS__);              \
+				std::fflush(stdout);                                                             \
+			}                                                                                    \
+			return {};                                                                           \
+		}                                                                                        \
+		EXIT(__VA_ARGS__);                                                                       \
+	} while (false)
+
 static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& resource,
                                      const ShaderTextureResource& descriptor, vk::Format format,
                                      const SurfaceFormatInfo& surface_format, bool storage,
@@ -478,7 +496,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 	view.base_level  = descriptor.BaseLevel();
 	view.level_count = view_levels;
 	if (descriptor.MinLod() > descriptor.LastLevel() * 256u) {
-		EXIT("texture minimum LOD exceeds last mip level: min_lod=%u last_level=%u\n",
+		KYTY_TEXTURE_FAIL("texture minimum LOD exceeds last mip level: min_lod=%u last_level=%u\n",
 		     descriptor.MinLod(), descriptor.LastLevel());
 	}
 	const auto base_lod = view.base_level * 256u;
@@ -495,7 +513,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			view.type       = vk::ImageViewType::e1D;
 			view.base_layer = descriptor.BaseArray5();
 			if (view.base_layer >= image_layers) {
-				EXIT("texture base layer is out of bounds\n");
+				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
 			}
 			view.layer_count = 1;
 			break;
@@ -503,7 +521,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			view.type       = vk::ImageViewType::e1DArray;
 			view.base_layer = descriptor.BaseArray5();
 			if (view.base_layer >= image_layers) {
-				EXIT("texture array base layer is out of bounds\n");
+				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
 			}
 			view.layer_count = image_layers - view.base_layer;
 			break;
@@ -517,7 +535,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			view.type       = vk::ImageViewType::e2DArray;
 			view.base_layer = descriptor.BaseArray5();
 			if (view.base_layer >= image_layers) {
-				EXIT("texture array base layer is out of bounds\n");
+				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
 			}
 			view.layer_count = image_layers - view.base_layer;
 			break;
@@ -526,11 +544,11 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			view.type       = vk::ImageViewType::e2D;
 			view.base_layer = descriptor.BaseArray5();
 			if (view.base_layer >= image_layers) {
-				EXIT("texture base layer is out of bounds\n");
+				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
 			}
 			view.layer_count = 1;
 			break;
-		default: EXIT("unsupported texture view dimension\n");
+		default: KYTY_TEXTURE_FAIL("unsupported texture view dimension\n");
 	}
 	return view;
 }
@@ -592,23 +610,6 @@ struct TextureDescription {
 	bool                    shader_conversion = false;
 };
 
-// A texture the host cannot represent ends the session, except while a bindless key is
-// resolved: that key then samples the placeholder (the shader keeps running).
-static thread_local bool g_soft_texture_failures = false;
-static thread_local bool g_soft_texture_failed   = false;
-#define KYTY_TEXTURE_FAIL(...)                                                                   \
-	do {                                                                                         \
-		if (g_soft_texture_failures) {                                                           \
-			g_soft_texture_failed = true;                                                        \
-			static std::atomic<uint32_t> soft_logged {0};                                        \
-			if (soft_logged.fetch_add(1) < 16) {                                                 \
-				std::printf("bindless: texture kept as placeholder: " __VA_ARGS__);              \
-				std::fflush(stdout);                                                             \
-			}                                                                                    \
-			return {};                                                                           \
-		}                                                                                        \
-		EXIT(__VA_ARGS__);                                                                       \
-	} while (false)
 
 TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& resource,
                                    const ShaderTextureResource&               descriptor) {
@@ -654,6 +655,9 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	const auto samples = multisampled ? 1u << last_level : 1u;
 	const auto depth          = static_cast<uint32_t>(descriptor.Depth()) + 1u;
 	const auto format         = descriptor.Format();
+	if (!TextureHasSurfaceFormat(format)) {
+		KYTY_TEXTURE_FAIL("unknown texture format: %u\n", static_cast<uint32_t>(format));
+	}
 	const auto surface_format = TextureGetSurfaceFormatInfo(format);
 	const bool shader_conversion =
 	    surface_format.conversion_format != Prospero::BufferFormat::kInvalid;
@@ -708,6 +712,12 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		     static_cast<uint32_t>(type), width, height, depth, physical_levels, address,
 		     static_cast<uint32_t>(size.size), static_cast<uint32_t>(size.align));
 	}
+	// A descriptor read from guest data at run time (a bindless key) can name memory outside
+	// the guest's address space; the texture cache must not see it.
+	if (!GuestRange {address, size.size}.Valid()) {
+		KYTY_TEXTURE_FAIL("texture outside guest memory: address=0x%016" PRIx64 " size=0x%x\n",
+		                  address, static_cast<uint32_t>(size.size));
+	}
 	if (storage) {
 		ValidateStorageTexture(resource, descriptor, size.size);
 	}
@@ -717,6 +727,10 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		if (const auto* depth_format = FindGuestDepthFormatPolicy(format)) {
 			pixel_format = depth_format->depth_attachment_format;
 		}
+	}
+	if (pixel_format == vk::Format::eUndefined) {
+		KYTY_TEXTURE_FAIL("texture format has no host format: format=%u\n",
+		                  static_cast<uint32_t>(format));
 	}
 	const bool sint_storage = storage && !resource.atomic &&
 	                          Prospero::SampledTextureNumericClass(format) ==
@@ -758,6 +772,9 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	}
 	desc.view_info = TextureViewInfo(resource, descriptor, view_format, surface_format, storage,
 	                                 view_levels, desc.info.resources.layers);
+	if (g_soft_texture_failures && g_soft_texture_failed) {
+		return {};
+	}
 	desc.view_info.base_level = view_base;
 	desc.type = storage ? TextureCache::BindingType::Storage : TextureCache::BindingType::Texture;
 	return {std::move(desc), pixel_format, view_format, size.size, shader_conversion};
@@ -908,6 +925,20 @@ void RenderExecutor::ResolveTextureInto(const ShaderRecompiler::IR::ImageResourc
 	out.desc              = described.desc;
 	auto&       desc      = out.desc;
 	describe_probe.reset();
+	if (g_soft_texture_failures && g_soft_texture_failed) {
+		// The bindless key samples the placeholder (see ResolveBindlessKey).
+		return;
+	}
+	if (desc.info.pixel_format == vk::Format::eUndefined) [[unlikely]] {
+		std::printf("texture-desc undefined: soft=%d failed=%d last_use=%llu format=%u bindless=%d "
+		            "dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
+		            g_soft_texture_failures ? 1 : 0, g_soft_texture_failed ? 1 : 0,
+		            static_cast<unsigned long long>(entry.last_use),
+		            static_cast<uint32_t>(descriptor.Format()), resource.bindless ? 1 : 0,
+		            value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3],
+		            value.dwords[4], value.dwords[5], value.dwords[6], value.dwords[7]);
+		std::fflush(stdout);
+	}
 	// Debug: KYTY_DEBUG_VOLUME_MIP0=1 views volume textures as their first level only, so every
 	// sample clamps to it: tells wrong lower levels (their layout) from wrong level 0.
 	static const bool volume_mip0 = KYTY_GETENV("KYTY_DEBUG_VOLUME_MIP0") != nullptr;
@@ -1563,9 +1594,21 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	auto&                                 table = m_context.GetBindlessTable();
 	ShaderRecompiler::IR::DescriptorValue value {};
 	value.dword_count  = 8u;
-	const auto address =
+	auto address =
 	    heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	heap.settled[key]  = 1;
+	if (heap.pointer_offset != UINT32_MAX) {
+		// The record holds a pointer to the structure that contains the T#.
+		uint64_t pointer = 0;
+		if (!Libs::LibKernel::Memory::TryReadBacking(
+		        heap.base + static_cast<uint64_t>(key) * heap.record_stride + heap.pointer_offset,
+		        &pointer, sizeof(pointer)) ||
+		    (pointer & 0x0000ffffffffffffull) == 0) {
+			table.SetTranslation(heap, key, 0u);
+			return false;
+		}
+		address = (pointer & 0x0000ffffffffffffull) + heap.table_offset;
+	}
 	if (!Libs::LibKernel::Memory::TryReadBacking(address, value.dwords.data(), 32u)) {
 		table.SetTranslation(heap, key, 0u);
 		return false;
@@ -1583,7 +1626,9 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	g_soft_texture_failed   = false;
 	auto binding            = ResolveTexture(heap.resource, value);
 	g_soft_texture_failures = false;
-	if (g_soft_texture_failed) {
+	const bool soft_failed  = g_soft_texture_failed;
+	g_soft_texture_failed   = false;
+	if (soft_failed) {
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
@@ -1726,13 +1771,19 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		}
 		const auto& resource = program.info.images[use.image];
 		const uint64_t span  = use.size > use.table_offset ? use.size - use.table_offset : 0;
-		// Keys whose whole 32-byte descriptor lies inside the table.
-		const uint64_t keys  = use.record_stride == 32u ? span / 32u
-		                       : span >= 32u             ? (span - 32u) / use.record_stride + 1u
-		                                                 : 0u;
+		// Keys whose whole 32-byte descriptor (or 8-byte pointer) lies inside the table.
+		const uint64_t keys =
+		    use.pointer_offset != UINT32_MAX
+		        ? (use.size >= uint64_t {use.pointer_offset} + 8u
+		               ? (use.size - use.pointer_offset - 8u) / use.record_stride + 1u
+		               : 0u)
+		    : use.record_stride == 32u ? span / 32u
+		    : span >= 32u              ? (span - 32u) / use.record_stride + 1u
+		                               : 0u;
 		const auto entries   = static_cast<uint32_t>(std::min<uint64_t>(keys, 1u << 18u));
 		auto* heap = table.FindOrCreateHeap(use.base, use.table_offset, use.record_stride,
-		                                    BindlessBindingFor(resource), entries, resource);
+		                                    BindlessBindingFor(resource), entries, resource,
+		                                    use.pointer_offset);
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
 		}

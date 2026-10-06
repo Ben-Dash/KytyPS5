@@ -1795,8 +1795,136 @@ private:
 		return true;
 	}
 
+	// A T# read through a 64-bit pointer the shader loads from a record of a table it indexes
+	// with a GPU-computed key (Yotei's instance culling 8457901d80b91921: batch record +0 ->
+	// view structure, T# at +976):
+	//   lo = ReadConstBuffer(table, key * stride + p), hi = ReadConstBuffer(table, ... + 4)
+	//   dword d = LoadAddressU32(GetAddressResource(lo, hi), t + 4 * d)
+	// The bindless lookup follows the pointer of each key's record (BindlessHeapUse).
+	bool TryMakePointerRecordImage(Inst& handle, IndirectDescriptorPlan& plan) {
+		const bool  r128              = UsedAsR128(handle);
+		const Inst* address_handle    = nullptr;
+		uint32_t    descriptor_offset = 0;
+		bool        image_users_only  = true;
+		const auto  resolve           = [&](Value value) {
+			const auto resolved = ResolveInvariantPhi(m_program, value);
+			return resolved.IsEmpty() ? value.Resolve() : resolved;
+		};
+		for (uint32_t dword = 0; dword < handle.NumArgs(); ++dword) {
+			if (dword >= 4u && r128 && handle.Arg(dword).Resolve().IsImmediate()) {
+				plan.memory[dword] = plan.memory[0];
+				plan.reads[dword]  = plan.reads[0];
+				continue;
+			}
+			auto*       read         = resolve(handle.Arg(dword)).TryInstruction();
+			uint32_t    memory_index = 0;
+			const auto* memory = read != nullptr ? ScalarReadMemory(*read, memory_index) : nullptr;
+			uint32_t    immediate = 0;
+			if (memory == nullptr || memory->kind != ResourceKind::ScalarAddress ||
+			    !ImmediateU32(read->Arg(1), immediate) || memory->offset > INT32_MAX ||
+			    immediate > INT32_MAX || !MemoryIndexBelongsTo(memory_index, *read)) {
+				return false;
+			}
+			const auto* current = read->Arg(0).Resolve().TryInstruction();
+			if (current == nullptr || current->GetOpcode() != ValueOpcode::GetAddressResource ||
+			    current->NumArgs() != 2u ||
+			    (address_handle != nullptr &&
+			     !EquivalentValue(m_program, Value(address_handle), Value(current)))) {
+				return false;
+			}
+			const auto offset = memory->offset + immediate;
+			if (dword == 0u) {
+				descriptor_offset = offset;
+			} else if (static_cast<uint64_t>(descriptor_offset) + dword * 4u != offset) {
+				return false;
+			}
+			address_handle = current;
+			image_users_only &= UsesOnlyImageDescriptors(*read);
+			plan.memory[dword] = memory_index;
+			plan.reads[dword]  = read;
+		}
+		if (address_handle == nullptr) {
+			return false;
+		}
+		// The pointer: two consecutive dwords of one record, the high one maybe masked to 48 bits.
+		const auto record_read = [&](Value value, Value& key, uint32_t& offset, uint32_t& stride,
+		                             const Inst*& read) {
+			const auto* inst      = resolve(value).TryInstruction();
+			uint32_t    immediate = 0;
+			while (inst != nullptr && inst->NumArgs() >= 2u &&
+			       ((inst->GetOpcode() == ValueOpcode::BitwiseAnd32 &&
+			         ImmediateU32(inst->Arg(1), immediate)) ||
+			        (inst->GetOpcode() == ValueOpcode::BitFieldUExtract && inst->NumArgs() == 3u &&
+			         ImmediateU32(inst->Arg(1), immediate) && immediate == 0u))) {
+				inst = resolve(inst->Arg(0)).TryInstruction();
+			}
+			uint32_t    memory_index = 0;
+			const auto* memory = inst != nullptr ? ScalarReadMemory(*inst, memory_index) : nullptr;
+			if (memory == nullptr || memory->kind != ResourceKind::ScalarBuffer ||
+			    memory->offset > INT32_MAX) {
+				return false;
+			}
+			const auto* table = inst->Arg(0).Resolve().TryInstruction();
+			if (table == nullptr || table->GetOpcode() != ValueOpcode::GetBufferResource ||
+			    !MatchTableOffset(inst->Arg(1), key, offset, stride) ||
+			    offset > UINT32_MAX - memory->offset) {
+				return false;
+			}
+			offset += memory->offset;
+			read = inst;
+			return true;
+		};
+		Value       key;
+		Value       high_key;
+		uint32_t    pointer_offset = 0;
+		uint32_t    high_offset    = 0;
+		uint32_t    stride         = 0;
+		uint32_t    high_stride    = 0;
+		const Inst* low_read       = nullptr;
+		const Inst* high_read      = nullptr;
+		if (!record_read(address_handle->Arg(0), key, pointer_offset, stride, low_read) ||
+		    !record_read(address_handle->Arg(1), high_key, high_offset, high_stride, high_read) ||
+		    high_stride != stride || stride < 8u || high_offset != pointer_offset + 4u ||
+		    WorkgroupAxis(key) != UINT32_MAX || !EquivalentValue(m_program, key, high_key) ||
+		    !EquivalentValue(m_program, low_read->Arg(0), high_read->Arg(0))) {
+			return false;
+		}
+		DescriptorSource table_source;
+		if (!MakeRuntimeTableSource(*low_read, table_source) || table_source.dword_count != 4u) {
+			return false;
+		}
+		if (!image_users_only) {
+			// Other users keep the T# reads (they are not planning-only).
+			plan.reads.fill(nullptr);
+		}
+		DescriptorSource::IndirectDescriptor indirect;
+		indirect.table_offset   = descriptor_offset;
+		indirect.table_stride   = stride;
+		indirect.bindless       = true;
+		indirect.pointer_offset = pointer_offset;
+		indirect.table_source   = InternSource(table_source);
+		DescriptorSource image_source;
+		image_source.dword_count = 8u;
+		image_source.dwords.fill(Value(0u));
+		std::copy_n(table_source.dwords.begin(), 4u, image_source.dwords.begin() + 4u);
+		image_source.indirect_descriptor = indirect;
+		plan.handle = &handle;
+		plan.source = InternSource(image_source);
+		plan.key    = key;
+		plan.roots  = image_source.dwords;
+		return true;
+	}
+
 	bool TryMakeIndirectImage(Inst& handle, const DescriptorSource& descriptor,
 	                          IndirectDescriptorPlan& plan) {
+		if (handle.GetOpcode() == ValueOpcode::GetImageResource && handle.NumArgs() == 8u &&
+		    m_program.bindless_images && !UsedAsStorage(handle)) {
+			IndirectDescriptorPlan pointer_plan;
+			if (TryMakePointerRecordImage(handle, pointer_plan)) {
+				plan = std::move(pointer_plan);
+				return true;
+			}
+		}
 		if (handle.GetOpcode() != ValueOpcode::GetImageResource || handle.NumArgs() != 8u) return RejectImage(__LINE__);
 		DescriptorSource table_source;
 		Value key;

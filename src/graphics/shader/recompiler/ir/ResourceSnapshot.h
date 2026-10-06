@@ -39,6 +39,9 @@ struct BindlessHeapUse {
 	uint32_t record_stride  = 32;
 	uint32_t image          = 0;
 	uint32_t mapping_offset = 0;
+	// The record holds a pointer at this offset; the T# is at pointer + table_offset
+	// (UINT32_MAX: the T# is in the record).
+	uint32_t pointer_offset = UINT32_MAX;
 
 	bool operator==(const BindlessHeapUse&) const = default;
 };

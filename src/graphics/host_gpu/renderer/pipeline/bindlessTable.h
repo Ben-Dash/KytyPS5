@@ -66,6 +66,8 @@ public:
 		uint64_t                            base         = 0;
 		uint32_t                            table_offset = 0;
 		uint32_t                            record_stride = 32;
+		// The record holds a pointer here; the T# is at pointer + table_offset (UINT32_MAX: none).
+		uint32_t                            pointer_offset = UINT32_MAX;
 		uint32_t                            binding      = 0;
 		uint32_t                            region       = 0;
 		// Keys the region holds. The guest appends textures to a heap as it streams them in and
@@ -82,7 +84,8 @@ public:
 	// the translation buffer is full.
 	[[nodiscard]] Heap* FindOrCreateHeap(uint64_t base, uint32_t table_offset,
 	                                     uint32_t record_stride, uint32_t binding, uint32_t entries,
-	                                     const ShaderRecompiler::IR::ImageResource& resource);
+	                                     const ShaderRecompiler::IR::ImageResource& resource,
+	                                     uint32_t pointer_offset = UINT32_MAX);
 	[[nodiscard]] std::deque<Heap>& Heaps() noexcept { return m_heaps; }
 	// 0 when the array is full (slots are not reused yet).
 	[[nodiscard]] uint32_t AllocateSlot(uint32_t binding);
