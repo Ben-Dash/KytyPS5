@@ -1538,8 +1538,16 @@ TextureCache::MaterializeColorClearNow(ImageId id, const ImageDesc& desc,
 	for (uint32_t slice = 0; slice < count; slice++) {
 		const auto address = range.address + slice_size * (first + slice);
 		uint8_t code = 0;
+		// Metadata whose backing is not mapped (a descriptor naming freed or unmapped memory) has
+		// no clear to materialize: the slice stays as it is instead of ending the session.
 		if (!LibKernel::Memory::TryReadBacking(address, &code, sizeof(code))) {
-			EXIT("TextureCache: failed to read color metadata backing\n");
+			settled = false;
+			static std::atomic<uint32_t> unmapped_logged {0};
+			if (unmapped_logged.fetch_add(1, std::memory_order_relaxed) < 8) {
+				std::printf("TextureCache: color metadata 0x%" PRIx64 " is not mapped; slice not cleared\n",
+				            address);
+			}
+			continue;
 		}
 		if (settled) {
 			keys.addresses[keys.count] = address;
@@ -1554,7 +1562,7 @@ TextureCache::MaterializeColorClearNow(ImageId id, const ImageDesc& desc,
 		settled = false;
 		std::vector<uint8_t> bytes(slice_size);
 		if (!LibKernel::Memory::TryReadBacking(address, bytes.data(), bytes.size())) {
-			EXIT("TextureCache: failed to read color metadata slice\n");
+			continue;
 		}
 		if (!std::all_of(bytes.begin(), bytes.end(), [code](uint8_t byte) { return byte == code; })) {
 			continue;
