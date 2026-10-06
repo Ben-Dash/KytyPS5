@@ -74,6 +74,13 @@ public:
 	      flush_f32_inputs(flush_f32_inputs) {}
 
 	void TranslateInstruction(const Decoder::Instruction& inst);
+	// See entry_live_exec.
+	void SetEntryLiveExec(bool value) { entry_live_exec = value; }
+	// See live_lanes.
+	void SetLiveLanes(const std::array<IR::U32, 2>& lanes) {
+		live_lanes     = lanes;
+		has_live_lanes = true;
+	}
 	void CountLoopHeat(uint32_t counter);
 	void CopyPsTap();
 	void CopyCsTap(uint32_t pc);
@@ -151,6 +158,7 @@ private:
 	void          IMAGE_ATOMIC(const Decoder::Instruction& inst, IR::ValueOpcode opcode32,
 	                           IR::ValueOpcode opcode64 = IR::ValueOpcode::Count);
 	void DS_ATOMIC(const Decoder::Instruction& inst, IR::ValueOpcode opcode, bool returns_value);
+	IR::U32 GdsAddress(const Decoder::Instruction& inst, IR::U32 address);
 	void FLAT_LOAD(const Decoder::Instruction& inst);
 	void FLAT_STORE(const Decoder::Instruction& inst);
 	void IMAGE_GET_RESINFO(const Decoder::Instruction& inst);
@@ -325,6 +333,17 @@ private:
 	uint32_t        current_pc           = 0;
 	uint32_t        current_vector_limit = 1;
 	bool            flush_f32_inputs;
+	// A pixel shader's entry block before its first EXEC write (usually S_WQM): EXEC holds the
+	// live pixels only, so a copy of it leaves out helper invocations, which the host runs
+	// from the start.
+	bool            entry_live_exec = false;
+	// The lanes the host runs (the entry ballot), outside pixel shaders: EXEC written from a
+	// scalar value keeps only these. An NGG shader sets EXEC from its vertex count
+	// (s_lshr_b64 exec, -1, 64 - n); host subgroups hold fewer lanes than the guest wave, and a
+	// waterfall loop over EXEC (s_ff1, v_readlane, v_cmp, s_andn2) waited forever for lanes that
+	// do not exist (Yotei vs af2ffc6bd2815379, a GPU hang).
+	std::array<IR::U32, 2> live_lanes {};
+	bool                   has_live_lanes = false;
 };
 
 } // namespace Libs::Graphics::ShaderRecompiler::Frontend

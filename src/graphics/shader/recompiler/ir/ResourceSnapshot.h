@@ -29,7 +29,38 @@ struct UniformFill {
 	bool operator==(const UniformFill&) const = default;
 };
 
+// A guest descriptor heap a bindless image indexes: the host owns its key -> slot translation
+// and patches the image's two flattened-SRT words (region base, entry count) before upload.
+struct BindlessHeapUse {
+	uint64_t base           = 0;
+	uint64_t size           = 0;
+	uint32_t table_offset   = 0;
+	// Bytes between two keys' records (32 for a plain T# heap, more for material tables).
+	uint32_t record_stride  = 32;
+	uint32_t image          = 0;
+	uint32_t mapping_offset = 0;
+	// The record holds a pointer at this offset; the T# is at pointer + table_offset
+	// (UINT32_MAX: the T# is in the record).
+	uint32_t pointer_offset = UINT32_MAX;
+
+	bool operator==(const BindlessHeapUse&) const = default;
+};
+
+// A guest sampler heap a bindless sampler indexes: the host mirrors its S# records into the
+// bindless sampler array and patches the sampler's two flattened-SRT words (region base, count).
+struct BindlessSamplerHeapUse {
+	uint64_t base           = 0;
+	uint64_t size           = 0;
+	uint32_t table_offset   = 0;
+	uint32_t sampler        = 0;
+	uint32_t mapping_offset = 0;
+
+	bool operator==(const BindlessSamplerHeapUse&) const = default;
+};
+
 struct ResourceSnapshot {
+	std::vector<BindlessHeapUse>        bindless_heaps;
+	std::vector<BindlessSamplerHeapUse> bindless_sampler_heaps;
 	std::vector<DescriptorValue> buffers;
 	std::vector<DescriptorValue> images;
 	std::vector<DescriptorValue> samplers;

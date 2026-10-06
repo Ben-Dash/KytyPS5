@@ -45,7 +45,11 @@ private:
 struct Checkpoint {
 	DrainStats::Zone zone = DrainStats::Zone::Unmarked;
 	uint64_t         key  = 0;
+	// Draws: index/vertex count << 32 | instance count, the vertex shader hash, and the
+	// GPU-written indirect arguments' address (t_detail, set before the mark).
+	std::array<uint64_t, 3> detail {};
 };
+inline thread_local std::array<uint64_t, 3> t_detail {};
 constexpr uint64_t                         CheckpointRing = uint64_t {1} << 16u;
 inline std::array<Checkpoint, CheckpointRing> g_checkpoints {};
 inline std::atomic<uint64_t>               g_checkpoint_next {1};

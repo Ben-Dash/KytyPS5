@@ -7,6 +7,7 @@
 #include <array>
 #include <bit>
 #include <cstdlib>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -528,14 +529,20 @@ void Translator::WriteRawU32(const Decoder::Operand& operand, IR::U32 value) {
 			ir.SetVcc(ThreadBit({ir.GetVccLo(), value}));
 			break;
 		case Decoder::OperandKind::M0: ir.SetM0(IR::U32(value)); break;
-		case Decoder::OperandKind::ExecLo:
-			ir.SetExecLo(IR::U32(value));
-			ir.SetExec(ThreadBit({value, ir.GetExecHi()}));
+		case Decoder::OperandKind::ExecLo: {
+			const auto lanes = has_live_lanes ? ir.BitwiseAnd(IR::U32(value), live_lanes[0])
+			                                  : IR::U32(value);
+			ir.SetExecLo(lanes);
+			ir.SetExec(ThreadBit({lanes, ir.GetExecHi()}));
 			break;
-		case Decoder::OperandKind::ExecHi:
-			ir.SetExecHi(IR::U32(value));
-			ir.SetExec(ThreadBit({ir.GetExecLo(), value}));
+		}
+		case Decoder::OperandKind::ExecHi: {
+			const auto lanes = has_live_lanes ? ir.BitwiseAnd(IR::U32(value), live_lanes[1])
+			                                  : IR::U32(value);
+			ir.SetExecHi(lanes);
+			ir.SetExec(ThreadBit({ir.GetExecLo(), lanes}));
 			break;
+		}
 		case Decoder::OperandKind::Scc:
 			ir.SetScc(ir.INotEqual(value, IR::U32(IR::Value(0u))));
 			break;
@@ -765,11 +772,16 @@ void Translator::WriteU32Pair(const Decoder::Operand&       operand,
 		return;
 	}
 	switch (operand.kind) {
-		case Decoder::OperandKind::ExecLo:
-			ir.SetExec(ThreadBit(value));
-			ir.SetExecLo(value[0]);
-			ir.SetExecHi(value[1]);
+		case Decoder::OperandKind::ExecLo: {
+			const std::array<IR::U32, 2> lanes =
+			    has_live_lanes ? std::array<IR::U32, 2> {ir.BitwiseAnd(value[0], live_lanes[0]),
+			                                             ir.BitwiseAnd(value[1], live_lanes[1])}
+			                   : value;
+			ir.SetExec(ThreadBit(lanes));
+			ir.SetExecLo(lanes[0]);
+			ir.SetExecHi(lanes[1]);
 			return;
+		}
 		case Decoder::OperandKind::VccLo:
 			ir.SetVcc(ThreadBit(value));
 			ir.SetVccLo(value[0]);
@@ -1260,6 +1272,8 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 			result.blocks[source_index]->AddBranch(result.blocks[target->second]);
 		}
 	}
+	// The entry ballot outside pixel shaders (see Translator::live_lanes).
+	std::optional<std::array<IR::U32, 2>> live_lanes;
 	{
 		result.blocks.front()->AddBranch(result.blocks.at(block_indices.at(cfg.blocks.front().id)));
 		IR::IREmitter entry_ir(result.blocks.front());
@@ -1302,11 +1316,16 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 		}
 		entry_ir.SetExec(initial_exec);
 		const auto initial_mask = entry_ir.Emit(IR::ValueOpcode::Ballot, {initial_exec});
-		entry_ir.SetExecLo(options.wave_size == 64u
-		                       ? entry_ir.CompositeExtract(initial_mask, 0)
-		                       : GuestWaveMask(entry_ir, result, initial_mask));
-		entry_ir.SetExecHi(options.wave_size == 64u ? entry_ir.CompositeExtract(initial_mask, 1)
-		                                            : IR::U32(IR::Value(0u)));
+		const std::array<IR::U32, 2> entry_lanes {
+		    options.wave_size == 64u ? entry_ir.CompositeExtract(initial_mask, 0)
+		                             : GuestWaveMask(entry_ir, result, initial_mask),
+		    options.wave_size == 64u ? entry_ir.CompositeExtract(initial_mask, 1)
+		                             : IR::U32(IR::Value(0u))};
+		entry_ir.SetExecLo(entry_lanes[0]);
+		entry_ir.SetExecHi(entry_lanes[1]);
+		if (options.stage != ShaderType::Pixel) {
+			live_lanes = entry_lanes;
+		}
 		if (DebugLoopHeat().Active(result)) {
 			for (uint32_t counter = 0; counter < 3u; counter++) {
 				entry_ir.SetVectorReg(static_cast<IR::VectorReg>(LoopHeat::FirstRegister + counter),
@@ -1573,6 +1592,10 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 	for (const auto& cfg_block: cfg.blocks) {
 		const auto typed_index = block_indices.at(cfg_block.id);
 		Translator translator(result, result.blocks[typed_index], vector_limit, flush_f32_inputs);
+		translator.SetEntryLiveExec(options.stage == ShaderType::Pixel && cfg_block.inst_begin == 0);
+		if (live_lanes) {
+			translator.SetLiveLanes(*live_lanes);
+		}
 		for (uint32_t index = cfg_block.inst_begin; index < cfg_block.inst_end; index++) {
 			const auto& instruction = decoded.instructions[index];
 			for (uint32_t counter = 0; heat_active && counter < heat.pcs.size(); counter++) {

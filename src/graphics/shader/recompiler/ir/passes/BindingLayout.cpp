@@ -108,7 +108,11 @@ bool UsesFlattenedSrt(const Program& program) {
 			return inst.GetOpcode() == ValueOpcode::ReadConst;
 		});
 	}) || std::ranges::any_of(program.info.buffers, uses_mapping) ||
-	       std::ranges::any_of(program.info.images, uses_mapping);
+	       std::ranges::any_of(program.info.images, [&](const ImageResource& image) {
+		       // A bindless image reads its heap region from the flattened SRT.
+		       return uses_mapping(image) || image.bindless;
+	       }) ||
+	       std::ranges::any_of(program.info.samplers, &SamplerResource::bindless);
 }
 
 void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds_storage) {

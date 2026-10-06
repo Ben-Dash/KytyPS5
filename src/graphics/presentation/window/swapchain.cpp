@@ -1082,6 +1082,7 @@ Swapchain::Status Swapchain::Present() {
 	present.pWaitSemaphores    = &ready;
 	present.waitSemaphoreCount = 1;
 
+	m_window.graphic_ctx.presented_frames.fetch_add(1, std::memory_order_relaxed);
 	vk::Result result;
 	{
 		DrainStats::ReasonScope reason(DrainStats::Reason::PresentFrame);

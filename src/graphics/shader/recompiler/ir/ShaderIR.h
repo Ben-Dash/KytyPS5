@@ -78,9 +78,62 @@ struct MemoryInfo {
 
 	// Loads through a GPU-selected descriptor read guest memory by address (BDA); a formatted
 	// load decodes the descriptor's format at run time (see LoadIndirectFormattedBuffer).
+	// Raw stores through a GPU-selected descriptor write guest memory by address (BDA), bytes and
+	// shorts by atomic read-modify-write of their dword (see StoreIndirectBuffer). The host does
+	// not track these writes (Ghost of Yotei's tile lighting keeps the data on the GPU).
+	// Formatted stores (D16 too) encode by the descriptor's format (StoreIndirectFormatted).
+	[[nodiscard]] bool SupportsIndirectBufferStore(ValueOpcode opcode) const {
+		if (typed) {
+			return false;
+		}
+		if (formatted) {
+			return data_bits == 32u &&
+			       (opcode == ValueOpcode::StoreBufferU32 || opcode == ValueOpcode::StoreBufferU32x2 ||
+			        opcode == ValueOpcode::StoreBufferU32x3 || opcode == ValueOpcode::StoreBufferU32x4);
+		}
+		return (data_bits == 8u && opcode == ValueOpcode::StoreBufferU8) ||
+		       (data_bits == 16u && opcode == ValueOpcode::StoreBufferU16) ||
+		       (data_bits == 32u &&
+		        (opcode == ValueOpcode::StoreBufferU32 || opcode == ValueOpcode::StoreBufferU32x2 ||
+		         opcode == ValueOpcode::StoreBufferU32x3 || opcode == ValueOpcode::StoreBufferU32x4));
+	}
+
+	// 32-bit buffer atomics through a GPU-selected descriptor operate on guest memory by address
+	// (see EmitAtomic32); the read-modify-write forms that need a compare loop are not handled.
+	[[nodiscard]] bool SupportsIndirectBufferAtomic(ValueOpcode opcode) const {
+		if (typed || formatted || data_bits != 32u) {
+			return false;
+		}
+		switch (opcode) {
+			case ValueOpcode::BufferAtomicIAdd32:
+			case ValueOpcode::BufferAtomicISub32:
+			case ValueOpcode::BufferAtomicSMin32:
+			case ValueOpcode::BufferAtomicUMin32:
+			case ValueOpcode::BufferAtomicSMax32:
+			case ValueOpcode::BufferAtomicUMax32:
+			case ValueOpcode::BufferAtomicAnd32:
+			case ValueOpcode::BufferAtomicOr32:
+			case ValueOpcode::BufferAtomicXor32:
+			case ValueOpcode::BufferAtomicSwap32:
+			case ValueOpcode::BufferAtomicCmpSwap32: return true;
+			default: return false;
+		}
+	}
+
 	[[nodiscard]] bool SupportsIndirectBufferLoad(ValueOpcode opcode) const {
+		// Raw byte and short loads read their bytes by address too (see LoadIndirectSubword).
+		if (!typed && !formatted &&
+		    ((data_bits == 8u && opcode == ValueOpcode::LoadBufferU8) ||
+		     (data_bits == 16u && opcode == ValueOpcode::LoadBufferU16))) {
+			return true;
+		}
+		// Formatted XY/XYZ/XYZW loads (D16 too) decode the format from a table
+		// (LoadIndirectFormatted).
 		return !typed && data_bits == 32u &&
-		       (formatted ? opcode == ValueOpcode::LoadBufferU32
+		       (formatted ? opcode == ValueOpcode::LoadBufferU32 ||
+		                        opcode == ValueOpcode::LoadBufferU32x2 ||
+		                        opcode == ValueOpcode::LoadBufferU32x3 ||
+		                        opcode == ValueOpcode::LoadBufferU32x4
 		                  : opcode == ValueOpcode::ReadConstBuffer ||
 		                        opcode == ValueOpcode::LoadBufferU32 ||
 		                        opcode == ValueOpcode::LoadBufferU32x2 ||
@@ -157,6 +210,9 @@ struct ImageResource {
 	uint32_t                      indirect_root     = NoIndirectImage;
 	uint32_t                      indirect_mapping_offset   = 0;
 	uint32_t                      indirect_search_iterations = 0;
+	// Sampled through the bindless image arrays (descriptor set 1) at the slot the translation
+	// table gives for the handle's key; the mapping offset locates the heap's region and size.
+	bool                          bindless          = false;
 	std::vector<uint32_t>         indirect_resources;
 
 	bool operator==(const ImageResource& other) const = default;
@@ -171,6 +227,10 @@ struct SamplerResource {
 	bool     depth_compare         = false;
 	bool     integer_border        = false;
 	bool     gather_lod            = false;
+	// Selected per draw by a GPU-computed key from a guest sampler heap: the shader indexes the
+	// bindless sampler array with the region base and entry count at bindless_mapping_offset.
+	bool     bindless                = false;
+	uint32_t bindless_mapping_offset = 0;
 
 	bool operator==(const SamplerResource& other) const = default;
 };
@@ -322,6 +382,8 @@ struct PushData {
 	// Mesh draws reserve seven dwords: index_count, vertex offset, first
 	// instance, index element size, index address, and the slice base group.
 	static constexpr uint32_t        MeshDrawDwordCount = 7;
+	// Last dword: VGT_OBJECT_ID of the draw, for a pixel shader writing the hardware ID buffer.
+	static constexpr uint32_t        ObjectIdDword      = DwordCount - 1;
 	static constexpr uint32_t NoStart    = UINT32_MAX;
 	std::array<uint32_t, DwordCount> dwords {};
 
@@ -510,6 +572,11 @@ struct DescriptorSource {
 		uint32_t workgroup_axis  = UINT32_MAX;
 		uint32_t selector_shift  = 0;
 		uint32_t selector_bits   = UINT32_MAX;
+		// No enumeration: the shader looks the key up in the bindless translation table.
+		bool     bindless        = false;
+		// Bindless only: each record holds a 64-bit pointer at this offset, and the T# lies at
+		// pointer + table_offset (UINT32_MAX: the T# is in the record itself).
+		uint32_t pointer_offset  = UINT32_MAX;
 		Value    key_count;
 		Value                 selector_first;
 		Value    selector_mask;
@@ -710,6 +777,9 @@ struct ResourcePlan {
 	std::vector<uint8_t>                clean_flat_slots;
 	bool                                requires_specialization_memory = false;
 	bool                                capture_specialization_reads = false;
+	// The device supports bindless images: an indirect image the enumeration cannot cover
+	// becomes a bindless one instead of failing tracking.
+	bool                                bindless_images = false;
 	bool                                srt_plan_complete          = false;
 	bool                                resource_tracking_complete = false;
 	ShaderInfo                          info;

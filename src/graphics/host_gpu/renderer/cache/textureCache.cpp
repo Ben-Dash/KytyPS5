@@ -416,6 +416,12 @@ void TextureCache::UnregisterImage(ImageId id) {
 	if (!image.registered) {
 		return;
 	}
+	if (image.bindless_pinned) {
+		image.bindless_pinned = false;
+		if (on_bindless_unregister) {
+			on_bindless_unregister(id);
+		}
+	}
 	UntrackImage(id);
 	ImagePageTable::PageRange pages {};
 	if (!ImagePageTable::TryGetPageRange(image.info.data.address, image.info.data.size, pages)) {
@@ -1062,15 +1068,19 @@ TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& reques
 			            ? result_id
 			            : ImageId {}};
 		}
-		EXIT("TextureCache: unresolvable equal-address image overlap, address=0x%016" PRIx64
-		     " requested=%ux%u "
-		     "cached=%ux%u requested_size=0x%016" PRIx64 " cached_size=0x%016" PRIx64
-		     " type=%u/%u tile=%u/%u\n",
-		     requested.data.address, requested.resources.levels, requested.resources.layers,
-		     cached.info.resources.levels, cached.info.resources.layers, requested.data.size,
-		     cached.info.data.size, static_cast<uint32_t>(requested.type),
-		     static_cast<uint32_t>(cached.info.type), static_cast<uint32_t>(requested.tile_mode),
-		     static_cast<uint32_t>(cached.info.tile_mode));
+		// Same address, extent, format and type, but the request spans more guest memory (seen in
+		// Ghost of Yotei: 1x1 R8 views of 0x1000 and 0x2000 bytes). The larger image replaces the
+		// cached one, which it fully contains.
+		static std::atomic<uint32_t> grow_logs {0};
+		if (grow_logs.fetch_add(1, std::memory_order_relaxed) < 8) {
+			std::printf("TextureCache: equal-address image grows, address=0x%016" PRIx64
+			            " levels=%u/%u layers=%u/%u size=0x%" PRIx64 "/0x%" PRIx64 " tile=%u\n",
+			            requested.data.address, requested.resources.levels,
+			            cached.info.resources.levels, requested.resources.layers,
+			            cached.info.resources.layers, requested.data.size, cached.info.data.size,
+			            static_cast<uint32_t>(requested.tile_mode));
+		}
+		return {ExpandImage(requested, cached_id)};
 	}
 
 	const int32_t requested_mip = requested.MipOf(cached.info);
@@ -3150,6 +3160,9 @@ bool TextureCache::CollectGarbage(bool pressure_only) {
 			auto owner = m_slot_images.try_get(id);
 			if (owner == nullptr || !owner->registered || owner->depth_id ||
 			    std::ranges::find(pending_retirement, id) != pending_retirement.end()) {
+				continue;
+			}
+			if (owner->bindless_pinned) {
 				continue;
 			}
 			if (pressure_only && owner->tick_accessed_last == m_scheduler.CurrentTick()) {

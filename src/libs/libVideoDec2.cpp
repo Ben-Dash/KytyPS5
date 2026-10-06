@@ -4,7 +4,10 @@
 #include "libs/videoDec2Decoder.h"
 #include "loader/symbolDatabase.h"
 
+#include <atomic>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -385,7 +388,17 @@ static int32_t KYTY_SYSV_ABI QueryDecoderMemoryInfo(const Videodec2DecoderConfig
 	memory_info->gpu_memory             = nullptr;
 	memory_info->cpu_gpu_memory_size    = VIDEODEC2_MIN_MEMORY_SIZE;
 	memory_info->cpu_gpu_memory         = nullptr;
-	memory_info->max_frame_buffer_size  = VIDEODEC2_MIN_MEMORY_SIZE;
+	// One NV12 frame as the decoder writes it (luma pitch aligned to 256 bytes, half-height
+	// chroma). Games carve their frame pool by this size and need several frames: Ghost of Yotei
+	// gives up on every movie (no frame decoded) when fewer than four 16 MiB frames fit.
+	if (config->max_frame_width > 0 && config->max_frame_height > 0) {
+		const uint64_t pitch  = (static_cast<uint64_t>(config->max_frame_width) + 255u) & ~uint64_t {255u};
+		const uint64_t height = static_cast<uint64_t>(config->max_frame_height);
+		memory_info->max_frame_buffer_size =
+		    static_cast<size_t>((pitch * height + pitch * ((height + 1u) / 2u) + 0xffu) & ~uint64_t {0xffu});
+	} else {
+		memory_info->max_frame_buffer_size = VIDEODEC2_MIN_MEMORY_SIZE;
+	}
 	memory_info->frame_buffer_alignment = 0x100;
 	memory_info->reserved0              = 0;
 
@@ -414,7 +427,7 @@ static int32_t KYTY_SYSV_ABI CreateDecoder(const Videodec2DecoderConfigInfo* con
 	if (memory_info->cpu_memory_size < VIDEODEC2_MIN_MEMORY_SIZE ||
 	    memory_info->gpu_memory_size < VIDEODEC2_MIN_MEMORY_SIZE ||
 	    memory_info->cpu_gpu_memory_size < VIDEODEC2_MIN_MEMORY_SIZE ||
-	    memory_info->max_frame_buffer_size < VIDEODEC2_MIN_MEMORY_SIZE) {
+	    memory_info->max_frame_buffer_size == 0) {
 		return VIDEODEC2_ERROR_MEMORY_SIZE;
 	}
 
@@ -650,18 +663,98 @@ static int32_t KYTY_SYSV_ABI GetPictureInfo(const Videodec2OutputInfo* output_in
 	return OK;
 }
 
+// KYTY_DEBUG_VIDEODEC=1 prints each Videodec2 call with its arguments of interest and result.
+static bool VideodecDebug() {
+	static const bool enabled = std::getenv("KYTY_DEBUG_VIDEODEC") != nullptr;
+	return enabled;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedQueryComputeMemoryInfo(Videodec2ComputeMemoryInfo* info) {
+	const auto r = QueryComputeMemoryInfo(info);
+	if (VideodecDebug()) {
+		std::printf("videodec: QueryComputeMemoryInfo -> %08x\n", static_cast<uint32_t>(r));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedAllocateComputeQueue(const Videodec2ComputeConfigInfo* config,
+                                                        const Videodec2ComputeMemoryInfo* memory,
+                                                        Videodec2ComputeQueue*            queue) {
+	const auto r = AllocateComputeQueue(config, memory, queue);
+	if (VideodecDebug()) {
+		std::printf("videodec: AllocateComputeQueue -> %08x\n", static_cast<uint32_t>(r));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedQueryDecoderMemoryInfo(const Videodec2DecoderConfigInfo* config,
+                                                          Videodec2DecoderMemoryInfo*       memory) {
+	const auto r = QueryDecoderMemoryInfo(config, memory);
+	if (VideodecDebug()) {
+		std::printf("videodec: QueryDecoderMemoryInfo codec=%u size=%dx%d -> %08x\n",
+		            config != nullptr ? config->codec_type : 0u,
+		            config != nullptr ? config->max_frame_width : 0,
+		            config != nullptr ? config->max_frame_height : 0, static_cast<uint32_t>(r));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedCreateDecoder(const Videodec2DecoderConfigInfo* config,
+                                                 const Videodec2DecoderMemoryInfo* memory,
+                                                 Videodec2Decoder*                 decoder) {
+	const auto r = CreateDecoder(config, memory, decoder);
+	if (VideodecDebug()) {
+		std::printf("videodec: CreateDecoder codec=%u size=%dx%d -> %08x caller=%p\n",
+		            config != nullptr ? config->codec_type : 0u,
+		            config != nullptr ? config->max_frame_width : 0,
+		            config != nullptr ? config->max_frame_height : 0, static_cast<uint32_t>(r),
+		            __builtin_return_address(0));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedDeleteDecoder(Videodec2Decoder decoder) {
+	const auto r = DeleteDecoder(decoder);
+	if (VideodecDebug()) {
+		std::printf("videodec: DeleteDecoder -> %08x caller=%p\n", static_cast<uint32_t>(r),
+		            __builtin_return_address(0));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedDecode(Videodec2Decoder decoder, const Videodec2InputData* input,
+                                          Videodec2FrameBuffer* frame, Videodec2OutputInfo* output) {
+	const auto r = Decode(decoder, input, frame, output);
+	static std::atomic<uint32_t> logged {0};
+	if (VideodecDebug() && logged.fetch_add(1) < 64) {
+		std::printf("videodec: Decode au_size=%u -> %08x\n",
+		            input != nullptr ? static_cast<uint32_t>(input->au_size) : 0u,
+		            static_cast<uint32_t>(r));
+	}
+	return r;
+}
+
+static int32_t KYTY_SYSV_ABI LoggedReset(Videodec2Decoder decoder) {
+	const auto r = Reset(decoder);
+	if (VideodecDebug()) {
+		std::printf("videodec: Reset -> %08x caller=%p\n", static_cast<uint32_t>(r),
+		            __builtin_return_address(0));
+	}
+	return r;
+}
+
 LIB_DEFINE(InitVideoDec2_1) {
 	PRINT_NAME_ENABLE(true);
 
-	LIB_FUNC("RnDibcGCPKw", QueryComputeMemoryInfo);
-	LIB_FUNC("eD+X2SmxUt4", AllocateComputeQueue);
+	LIB_FUNC("RnDibcGCPKw", LoggedQueryComputeMemoryInfo);
+	LIB_FUNC("eD+X2SmxUt4", LoggedAllocateComputeQueue);
 	LIB_FUNC("UvtA3FAiF4Y", ReleaseComputeQueue);
-	LIB_FUNC("qqMCwlULR+E", QueryDecoderMemoryInfo);
-	LIB_FUNC("CNNRoRYd8XI", CreateDecoder);
-	LIB_FUNC("jwImxXRGSKA", DeleteDecoder);
-	LIB_FUNC("852F5+q6+iM", Decode);
+	LIB_FUNC("qqMCwlULR+E", LoggedQueryDecoderMemoryInfo);
+	LIB_FUNC("CNNRoRYd8XI", LoggedCreateDecoder);
+	LIB_FUNC("jwImxXRGSKA", LoggedDeleteDecoder);
+	LIB_FUNC("852F5+q6+iM", LoggedDecode);
 	LIB_FUNC("l1hXwscLuCY", Flush);
-	LIB_FUNC("wJXikG6QFN8", Reset);
+	LIB_FUNC("wJXikG6QFN8", LoggedReset);
 	LIB_FUNC("NtXRa3dRzU0", GetPictureInfo);
 	LIB_FUNC("kjrLbcyhEiw", GetPictureInfo);
 }

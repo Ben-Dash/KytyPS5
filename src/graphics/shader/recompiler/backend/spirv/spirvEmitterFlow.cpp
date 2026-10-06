@@ -631,6 +631,16 @@ uint32_t EmitLaneId(EmitterState& state) {
 	           : EmitSubgroupLocalInvocationId(state);
 }
 
+uint32_t EmitIsHelperInvocation(EmitterState& state) {
+	if (state.helper_invocation_variable == 0) {
+		return ConstantBool(state, false);
+	}
+	const auto helper = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeBool(state), helper,
+	                          state.helper_invocation_variable);
+	return helper;
+}
+
 uint32_t EmitMeshDrawParameter(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto&      state  = ctx.state;
 	const auto result = state.builder.AllocateId();
@@ -705,7 +715,27 @@ uint32_t EmitDppMoveU32(ValueEmitContext& ctx, const IR::Inst& inst) {
 		return shuffled;
 	}
 	const auto ballot        = ctx.Ballot(inst.Arg(1));
-	const auto source_active = EmitBallotLaneActiveBool(state, ballot, target.lane);
+	auto       source_active = EmitBallotLaneActiveBool(state, ballot, target.lane);
+	if (state.helper_invocation_variable != 0) {
+		// Ballots leave helper invocations out (they are not in the guest's initial EXEC), but
+		// after S_WQM they are active lanes whose values a DPP read gets, as on the GPU (the min
+		// scan of a material loop otherwise reads 0 from a helper and never ends). A helper source
+		// counts by its own EXEC bit.
+		const auto helper = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, TypeBool(state), helper,
+		                          state.helper_invocation_variable);
+		const auto helpers = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpGroupNonUniformBallot, TypeU32Vector(state, 4), helpers,
+		                          ConstantU32(state, spv::ScopeSubgroup), helper);
+		const auto helper_source = EmitBallotLaneActiveBool(state, helpers, target.lane);
+		const auto helper_active = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLogicalAnd, TypeBool(state), helper_active, helper_source,
+		                          ctx.Shuffle(inst, 1, target.lane));
+		const auto either = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLogicalOr, TypeBool(state), either, source_active,
+		                          helper_active);
+		source_active = either;
+	}
 	const auto can_fetch     = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpLogicalAnd, TypeBool(state), can_fetch, target.valid,
 	                          source_active);

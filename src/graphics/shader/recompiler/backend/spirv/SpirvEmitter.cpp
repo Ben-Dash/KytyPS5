@@ -412,6 +412,10 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 					requirements.subgroup_local_invocation_id = true;
 					break;
 				}
+				case IR::ValueOpcode::IsHelperInvocation:
+					// gl_HelperInvocation is declared with the ballot support of pixel shaders.
+					requirements.subgroup_ballot |= program.stage == ShaderType::Pixel;
+					break;
 				case IR::ValueOpcode::LaneId:
 					requirements.subgroup_local_invocation_id |=
 					    program.stage != ShaderType::TessellationControl;

@@ -165,6 +165,10 @@ bool TessellationEnabled() {
 	return g_config->tessellation_enabled;
 }
 
+bool BindlessImagesEnabled() {
+	return g_config->bindless_images_enabled;
+}
+
 bool TrophyEnabled() {
 	return g_config->trophy_enabled;
 }

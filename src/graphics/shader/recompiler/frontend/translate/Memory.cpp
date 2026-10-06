@@ -495,7 +495,9 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 }
 
 void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
-	const bool      d16      = inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X ||
+	// D16_HI_X stores the register's high half as the one component.
+	const bool      d16_hi   = inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_HI_X;
+	const bool      d16      = inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X || d16_hi ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XY ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZ ||
 	                           inst.opcode == Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZW;
@@ -518,7 +520,7 @@ void Translator::BUFFER_STORE(const Decoder::Instruction& inst) {
 		return d16 ? d16_component(index) : ReadU32(OffsetOperand(data_src, index));
 	};
 	if (d16) {
-		data = d16_component(0);
+		data = d16_component(d16_hi ? 1u : 0u);
 	}
 	if (inst.opcode == Decoder::Opcode::BUFFER_STORE_BYTE_D16_HI ||
 	    inst.opcode == Decoder::Opcode::BUFFER_STORE_SHORT_D16_HI) {
@@ -626,10 +628,22 @@ void Translator::IMAGE_ATOMIC(const Decoder::Instruction& inst, IR::ValueOpcode 
 	}
 }
 
+// A GDS access adds the base in M0[31:16] to its address (M0[15:0] is the region size), as
+// DS_APPEND/DS_CONSUME do. Ghost of Yotei's terrain shaders count vertices at M0 base + 4 * slot
+// (M0 = 0x11700010); without the base the counts went to other slots and the draw arguments the
+// command processor copies from GDS 0x1170 stayed zero.
+IR::U32 Translator::GdsAddress(const Decoder::Instruction& inst, IR::U32 address) {
+	if (!inst.gds) {
+		return address;
+	}
+	const auto m0 = IR::U32(ReadU32(MakeM0Operand()));
+	return ir.IAdd(address, ir.ShiftRightLogical(m0, IR::U32(IR::Value(16u))));
+}
+
 void Translator::DS_ATOMIC(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
                            bool returns_value) {
 	const auto memory  = MemoryInfoFromDecoded(inst);
-	const auto address = ReadU32(inst.src0);
+	const auto address = GdsAddress(inst, IR::U32(ReadU32(inst.src0)));
 	const IR::Value value =
 	    memory.data_dwords == 2u ? IR::Value(ReadU64(inst.src1)) : IR::Value(ReadU32(inst.src1));
 	const auto flags = AddMemoryInfo(memory, inst.pc);
@@ -829,7 +843,7 @@ void Translator::WriteSharedU32(uint32_t width, IR::U32 address,
 
 void Translator::DS_READ(const Decoder::Instruction& inst) {
 	const auto memory  = MemoryInfoFromDecoded(inst);
-	const auto address = ReadU32(MemorySourceAt(inst, 0));
+	const auto address = GdsAddress(inst, IR::U32(ReadU32(MemorySourceAt(inst, 0))));
 	if (memory.data_bits == 32u) {
 		const auto width  = memory.data_dwords;
 		const auto loaded = LoadSharedU32(width, address, memory, inst.pc);
@@ -847,7 +861,7 @@ void Translator::DS_READ(const Decoder::Instruction& inst) {
 void Translator::DS_READ2(const Decoder::Instruction& inst) {
 	const auto memory       = MemoryInfoFromDecoded(inst);
 	const auto width        = memory.data_dwords / 2u;
-	const auto address      = ReadU32(MemorySourceAt(inst, 0));
+	const auto address      = GdsAddress(inst, IR::U32(ReadU32(MemorySourceAt(inst, 0))));
 	auto       first        = memory;
 	first.data_dwords       = width;
 	first.component_count   = width;
@@ -873,7 +887,7 @@ void Translator::DS_WRITE(const Decoder::Instruction& inst) {
 	for (uint32_t index = 0; index < width; index++) {
 		values[index] = ReadU32(OffsetOperand(data_operand, index));
 	}
-	const auto address = ReadU32(MemorySourceAt(inst, 1));
+	const auto address = GdsAddress(inst, IR::U32(ReadU32(MemorySourceAt(inst, 1))));
 	if (memory.data_bits == 32u) {
 		WriteSharedU32(width, address, values, memory, inst.pc);
 		return;
@@ -887,7 +901,7 @@ void Translator::DS_WRITE(const Decoder::Instruction& inst) {
 void Translator::DS_WRITE2(const Decoder::Instruction& inst) {
 	const auto               memory      = MemoryInfoFromDecoded(inst);
 	const auto               width       = memory.data_dwords / 2u;
-	const auto               address     = ReadU32(MemorySourceAt(inst, 1));
+	const auto               address     = GdsAddress(inst, IR::U32(ReadU32(MemorySourceAt(inst, 1))));
 	const auto               first_data  = MemorySourceAt(inst, 0);
 	const auto               second_data = MemorySourceAt(inst, 2);
 	std::array<IR::Value, 4> first_values {};
@@ -1017,6 +1031,7 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XYZ:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_XYZW:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X:
+		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_HI_X:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XY:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZ:
 		case Decoder::Opcode::BUFFER_STORE_FORMAT_D16_XYZW:
@@ -1171,6 +1186,7 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::IMAGE_GATHER4_LZ:
 		case Decoder::Opcode::IMAGE_GATHER4_C:
 		case Decoder::Opcode::IMAGE_GATHER4_C_LZ:
+		case Decoder::Opcode::IMAGE_GATHER4_C_L:
 		case Decoder::Opcode::IMAGE_GATHER4_LZ_O:
 		case Decoder::Opcode::IMAGE_GATHER4_C_O:
 		case Decoder::Opcode::IMAGE_GATHER4_C_LZ_O:

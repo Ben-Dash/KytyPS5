@@ -1116,6 +1116,34 @@ void EmitProgram(EmitterState& state) {
 		                                     ConstantU32(state, LdsDwordCount(state)));
 	}
 	EmitMemoryOffsets(state);
+	if (UsesIdBuffer(state)) {
+		// Hardware ID buffer: object id (push dword) | primitive id, stored once at entry.
+		const auto slot   = state.input_info.pixel->id_buffer_slot;
+		const auto output = std::ranges::find_if(state.outputs, [slot](const OutputBinding& o) {
+			return o.kind == IR::StageOutputKind::Mrt && o.index == slot;
+		});
+		const auto input  = std::ranges::find_if(state.inputs, [](const InputBinding& i) {
+			return i.kind == IR::StageInputKind::PrimitiveId;
+		});
+		EXIT_IF(output == state.outputs.end() || input == state.inputs.end());
+		const auto prim_i = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, TypeI32(state), prim_i, input->variable_id);
+		const auto prim = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitcast, TypeU32(state), prim, prim_i);
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpAccessChain, TypePushConstantElementPointer(state),
+		                          pointer, state.push_constant_variable, ConstantU32(state, 0),
+		                          ConstantU32(state, IR::PushData::ObjectIdDword));
+		const auto object_id = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, TypeU32(state), object_id, pointer);
+		const auto id = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitwiseOr, TypeU32(state), id, object_id, prim);
+		const auto zero  = ConstantU32(state, 0);
+		const auto value = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpCompositeConstruct, TypeU32Vector(state, 4), value, id,
+		                          zero, zero, zero);
+		state.builder.AddFunction(spv::OpStore, output->variable_id, value);
+	}
 	if (program.blocks.empty()) {
 		EmitReturn(ctx);
 	} else if (state.program.dispatcher_fallback) {
@@ -1124,6 +1152,7 @@ void EmitProgram(EmitterState& state) {
 		EmitStructuredFunction(ctx);
 	}
 	state.builder.AddFunction(spv::OpFunctionEnd);
+	EmitIndirectFormattedHelpers(state);
 	if (state.program.stage == ShaderType::Mesh) {
 		EmitMeshEntryPoint(state);
 	}

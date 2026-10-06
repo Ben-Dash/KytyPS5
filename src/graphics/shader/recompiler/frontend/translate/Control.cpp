@@ -317,6 +317,18 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 		source_mask = inst.src0.kind == Decoder::OperandKind::VccLo ? ir.GetVcc()
 		                                                          : ReadMask(inst.src0);
 		source_mask_valid = ReadMaskValid(inst.src0);
+		if (entry_live_exec && inst.src0.kind == Decoder::OperandKind::ExecLo &&
+		    inst.dst.kind == Decoder::OperandKind::Sgpr) {
+			// The live pixel mask (s_mov sN, exec before s_wqm): helper invocations are not in it,
+			// as in its scalar bits. A wave-wide reduction over it (a min over the live pixels'
+			// material IDs) would otherwise take a helper's value that no live lane consumes.
+			source_mask = ir.LogicalAnd(
+			    source_mask,
+			    ir.LogicalNot(IR::U1(ir.Emit(IR::ValueOpcode::IsHelperInvocation))));
+		}
+	}
+	if (inst.dst.kind == Decoder::OperandKind::ExecLo) {
+		entry_live_exec = false;
 	}
 	// Preserve all 64 scalar bits independently of the per-thread predicate.
 	WriteU32Pair(inst.dst, ReadU32Pair(inst.src0));
@@ -334,6 +346,9 @@ void Translator::S_MOV_B64(const Decoder::Instruction& inst) {
 }
 
 void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
+	if (inst.dst.kind == Decoder::OperandKind::ExecLo || inst.dst.kind == Decoder::OperandKind::ExecHi) {
+		entry_live_exec = false;
+	}
 	const bool source_is_mask = inst.src0.kind == Decoder::OperandKind::Sgpr ||
 	                            inst.src0.kind == Decoder::OperandKind::ExecLo ||
 	                            inst.src0.kind == Decoder::OperandKind::VccLo ||
@@ -357,6 +372,17 @@ void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
 		source = ir.ConstructU64(ReadU32(inst.src0), IR::U32(IR::Value(0u)));
 	}
 	const auto result = IR::U64(ir.Emit(IR::ValueOpcode::WqmU64, {source}));
+	// The scalar mask follows the ballots, which leave helper invocations out: a waterfall loop
+	// over the EXEC copy (s_ff1, v_readlane, v_cmp, s_andn2) must find only lanes its compare can
+	// clear, or it never ends. Helpers still run as live lanes (the per-lane `live` below).
+	auto scalar_result = result;
+	if (program.stage == ShaderType::Pixel) {
+		const auto live_ballot = ir.Emit(IR::ValueOpcode::Ballot, {IR::Value(true)});
+		const auto live_mask   = ir.ConstructU64(
+            ir.CompositeExtract(live_ballot, 0),
+            program.wave_size == 64u ? ir.CompositeExtract(live_ballot, 1) : IR::U32(IR::Value(0u)));
+		scalar_result = IR::U64(ir.Emit(IR::ValueOpcode::BitwiseAnd64, {result, live_mask}));
+	}
 	if (!wide) {
 		const auto low = ir.CompositeExtract(result, 0);
 		const bool destination_is_mask = IsExecOrVcc(inst.dst);
@@ -414,7 +440,7 @@ void Translator::S_WQM(const Decoder::Instruction& inst, bool wide) {
 	// from the scalar mask: reconstructing an entry-true predicate from a ballot
 	// otherwise introduces a spurious dependency into every vector write.
 	const auto live = ir.LogicalOr(retained_live, ThreadBit(ExtractU64(result)));
-	WriteOperand(DestinationOperand(inst), result);
+	WriteOperand(DestinationOperand(inst), scalar_result);
 	if (inst.dst.kind == Decoder::OperandKind::ExecLo) {
 		ir.SetExec(live);
 	} else if (inst.dst.kind == Decoder::OperandKind::VccLo) {

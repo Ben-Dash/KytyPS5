@@ -1632,7 +1632,11 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	// Attachments follow the write masks, not the export format: in Astro Bot's Sky Garden the tall
 	// grass beside the path (an alpha-tested shader, so it runs anyway) writes a slot whose format
 	// register reads 0 at the draw, and binding only formatted slots dropped that grass.
-	mrt_mask &= DrawColorWriteMask(buffer.GetRegisters()) & m_color_slot_filter;
+	// The hardware ID buffer slot has no shader export but is written (see id_buffer_slot).
+	const uint32_t id_slot_mask = state.ps_active && state.ps_input_info.id_buffer_slot != UINT32_MAX
+	                                  ? 1u << state.ps_input_info.id_buffer_slot
+	                                  : 0u;
+	mrt_mask &= (DrawColorWriteMask(buffer.GetRegisters()) | id_slot_mask) & m_color_slot_filter;
 	// KYTY_DEBUG_MRT_SHADER=<pixel shader hash>: print that shader's colour slots (target address,
 	// target and shader write masks, export format, blend) for its first 16 draws, to see how a draw
 	// that binds one surface to several slots splits the channels.
@@ -2492,9 +2496,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		}
 	}
 	// The command processor sends GPU-args draws here when the stages select mesh emulation (the
-	// same merged-stage bit PrepareProgram checks), or for indexed list draws, which draw from the
-	// arguments directly.
-	EXIT_IF(gpu_args && !draw.IsIndexed());
+	// same merged-stage bit PrepareProgram checks), or for indexed list draws and non-indexed draws
+	// of native primitive types, which draw from the arguments directly.
+	EXIT_IF(gpu_args && !draw.IsIndexed() && mesh_active);
 
 	if (mesh_active && draw.IsIndexed()) {
 		// Register the original guest indices for shader reads; PrepareGraphicsBindings
@@ -2671,7 +2675,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		gpu_output        = offset;
 		gpu_output_mapped = mapped;
 		gpu_arguments = m_context.GetBufferCache().ObtainBuffer(
-		    draw.indirect_args, MeshIndirectArgs::ArgumentsSize, false);
+		    draw.indirect_args,
+		    draw.IsIndexed() ? MeshIndirectArgs::ArgumentsSize : sizeof(vk::DrawIndirectCommand),
+		    false);
 	} else if (mesh_active) {
 		const auto& limits = m_context.GetGraphics().mesh_shader_properties;
 		const auto& mesh   = state.vertex_info[0].mesh;
@@ -2787,12 +2793,38 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		// arguments. This compute pass and its barriers must precede rendering and the
 		// graphics bindings below.
 		m_context.GetCommandScheduler().EndRendering();
-		if (m_mesh_indirect == nullptr) {
+		if (!draw.IsIndexed()) {
+			// The guest layout is VkDrawIndirectCommand's; copy it into an indirect-capable slot.
+			vk::MemoryBarrier2 before {};
+			before.srcStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
+			before.srcAccessMask = vk::AccessFlagBits2::eMemoryWrite;
+			before.dstStageMask  = vk::PipelineStageFlagBits2::eCopy;
+			before.dstAccessMask =
+			    vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
+			vk::DependencyInfo dependency {};
+			dependency.memoryBarrierCount = 1;
+			dependency.pMemoryBarriers    = &before;
+			vk_buffer.pipelineBarrier2(dependency);
+			const vk::BufferCopy region {gpu_arguments.second, gpu_output,
+			                             sizeof(vk::DrawIndirectCommand)};
+			vk_buffer.copyBuffer(gpu_arguments.first->Handle(), records.Handle(), 1, &region);
+			vk::MemoryBarrier2 after {};
+			after.srcStageMask         = vk::PipelineStageFlagBits2::eCopy;
+			after.srcAccessMask        = vk::AccessFlagBits2::eTransferWrite;
+			after.dstStageMask         = vk::PipelineStageFlagBits2::eDrawIndirect;
+			after.dstAccessMask        = vk::AccessFlagBits2::eIndirectCommandRead;
+			dependency.pMemoryBarriers = &after;
+			vk_buffer.pipelineBarrier2(dependency);
+		} else if (m_mesh_indirect == nullptr) {
 			m_mesh_indirect = std::make_unique<MeshIndirectArgs>(m_context.GetGraphics());
 		}
 		const auto index_limit =
-		    static_cast<uint32_t>(index_source.size / index_source.guest_element_size);
-		if (mesh_active) {
+		    draw.IsIndexed()
+		        ? static_cast<uint32_t>(index_source.size / index_source.guest_element_size)
+		        : 0u;
+		if (!draw.IsIndexed()) {
+			// Copied above.
+		} else if (mesh_active) {
 			const auto& mesh      = state.vertex_info[0].mesh;
 			const auto& limits    = m_context.GetGraphics().mesh_shader_properties;
 			const auto  max_total = std::max(1u, limits.maxMeshWorkGroupTotalCount);
@@ -2822,6 +2854,13 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	if (!mesh_active) {
 		CommitIndexBuffer(vk_buffer, index_binding);
 	}
+	if (state.ps_active && state.ps_input_info.id_buffer_slot != UINT32_MAX && !mesh_active) {
+		// The draw's VGT_OBJECT_ID for the ID buffer (the last push dword).
+		const uint32_t object_id = buffer.GetUserConfig().GetObjectId();
+		vk_buffer.pushConstants(pipeline.pipeline_layout, pipeline.push_constant_stages,
+		                        ShaderRecompiler::IR::PushData::ObjectIdDword * sizeof(uint32_t),
+		                        sizeof(object_id), &object_id);
+	}
 	g_draw_phases.Mark(DrawPhaseTimer::Commit);
 
 	SetGraphicsDynamicParams(buffer, vk_buffer, vertex_stages.back(), state.depth_info, rendering);
@@ -2841,6 +2880,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	if (GpuZones::Enabled()) [[unlikely]] {
 		const auto* program =
 		    state.ps_active ? state.ps_input_info.stage.program : state.vertex_info[0].stage.program;
+		const auto* vertex = state.vertex_info[0].stage.program;
+		GpuZones::t_detail = {(uint64_t {draw.index_count} << 32u) | draw.instance_count,
+		                      vertex != nullptr ? vertex->shader_hash : 0, draw.indirect_args};
 		GpuZones::Mark(vk_buffer,
 		               DrainStats::t_predicated ? DrainStats::Zone::GameDrawPredicated
 		                                        : DrainStats::Zone::GameDraw,
@@ -2881,7 +2923,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 			vk_buffer.drawMeshTasksEXT(slice.group_count, slice.instance_count, 1);
 		}
 	} else {
-		if (gpu_args) {
+		if (gpu_args && !draw.IsIndexed()) {
+			vk_buffer.drawIndirect(records.Handle(), gpu_output, 1, sizeof(vk::DrawIndirectCommand));
+		} else if (gpu_args) {
 			vk_buffer.drawIndexedIndirect(records.Handle(), gpu_output + MeshIndirectArgs::RecordOffset, 1,
 			                              sizeof(vk::DrawIndexedIndirectCommand));
 		} else {
@@ -3174,8 +3218,8 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 
 	hw_check(buffer);
 
-	const DrawCallInfo draw {CommandBufferDebugOp::DrawIndexAuto,
-	                         args.vertex_count, args.instance_count, args.first_instance};
+	const DrawCallInfo draw {CommandBufferDebugOp::DrawIndexAuto, args.vertex_count,
+	                         args.instance_count, args.first_instance, args.indirect_args};
 
 	vk::PrimitiveTopology topology = vk::PrimitiveTopology::ePointList;
 	if (!GetDrawTopology(ucfg, topology)) {

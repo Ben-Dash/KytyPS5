@@ -57,6 +57,10 @@ namespace Libs::Graphics {
 
 namespace {
 
+// Set once by the PipelineCache constructor, before any shader is translated: the device has
+// descriptor indexing and --bindless asked for it.
+bool g_bindless_images = false;
+
 // The library cache key a prefetched compute pipeline compiles under.
 std::string ComputePrefetchKey(uint64_t program_id) {
 	std::string key(1, 'C');
@@ -521,6 +525,7 @@ struct PipelineCache::ProgramCache {
 		options.dump_ir     = Config::GetShaderLogDirection() != Config::LogDirection::Silent;
 		options.early_dump  = options.dump_ir;
 		options.dump_label  = label;
+		options.bindless_images = g_bindless_images;
 		options.input_info  = stage_input;
 
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
@@ -1230,6 +1235,7 @@ struct PipelineCache::ProgramCache {
 PipelineCache::PipelineCache(GraphicContext& graphics)
     : m_graphics(graphics), m_program_cache(std::make_unique<ProgramCache>(graphics.device)) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
+	g_bindless_images = graphics.bindless_enabled && Config::BindlessImagesEnabled();
 	InitializeDriverCache();
 	InitializeShaderPrecompile();
 	// Linking libraries without fast linking costs about as much as a full compile.
@@ -1400,6 +1406,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		options.dump_ir        = false;
 		options.early_dump     = false;
 		options.dump_label     = "ShaderPrecompile";
+		options.bindless_images = g_bindless_images;
 		std::visit(
 		    [&](auto& info) {
 			    using Info = std::decay_t<decltype(info)>;
@@ -1502,7 +1509,14 @@ void PipelineCache::Save() {
 	if (m_driver_cache == nullptr) {
 		return;
 	}
+	(void)WriteDriverCache();
+	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
+	m_driver_cache = nullptr;
+}
 
+// Writes the driver pipeline cache to disk; the caller holds m_mutex. Also called after a slow
+// compile, so a run ended by force (or a lost device) keeps what took long to compile.
+bool PipelineCache::WriteDriverCache() {
 	size_t               size = 0;
 	vk::Result           result;
 	std::vector<uint8_t> payload;
@@ -1523,7 +1537,7 @@ void PipelineCache::Save() {
 	    size > std::numeric_limits<uint32_t>::max()) {
 		PipelineCacheLog("Vulkan pipeline cache: save failed ({}, {} bytes)",
 		                 vk::to_string(result), size);
-		return;
+		return false;
 	}
 	payload.resize(size);
 	auto       prefix       = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
@@ -1531,7 +1545,7 @@ void PipelineCache::Save() {
 	prefix.append(reinterpret_cast<const char*>(&payload_hash), sizeof(payload_hash));
 	if (!Common::File::CreateDirectories(m_driver_cache_path.parent_path())) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to create cache directory");
-		return;
+		return false;
 	}
 	auto temp_path = m_driver_cache_path;
 	temp_path += ".tmp";
@@ -1548,12 +1562,11 @@ void PipelineCache::Save() {
 	    !Common::File::RenameFile(temp_path, m_driver_cache_path)) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to write {}",
 		                 Common::PathToString(m_driver_cache_path));
-		return;
+		return false;
 	}
 	PipelineCacheLog("Vulkan pipeline cache: saved {} bytes to {}", payload.size(),
 	                 Common::PathToString(m_driver_cache_path));
-	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
-	m_driver_cache = nullptr;
+	return true;
 }
 
 // Copies what preparing a non-tessellated draw's stage inputs reads (see GraphicsStageRegisters).
@@ -1679,6 +1692,27 @@ static std::array<ShaderParams, 3> PrepareGraphicsStages(
 				pixel_info.dual_source_blending     = true;
 				pixel_info.target_output_mode[1]    = pixel_info.target_output_mode[0];
 				pixel_info.target_export_mapping[1] = {};
+			}
+		}
+	}
+	// Hardware ID buffer: an enabled 32-bit uint color slot that the shader does not export to
+	// (SPI_SHADER_COL_FORMAT zero, CB_SHADER_MASK clear) receives VGT_OBJECT_ID | primitive id per
+	// pixel (Ghost of Yotei's visibility pre-pass). KYTY_ID_BUFFER=0 turns it off.
+	static const bool id_buffer_enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_ID_BUFFER");
+		return text == nullptr || text[0] != '0';
+	}();
+	if (pixel_active && id_buffer_enabled && !pixel_info.dual_source_blending &&
+	    vertex_info[0].logical_stage != ShaderType::Mesh) {
+		for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
+			const auto& rt = context.GetRenderTarget(slot);
+			if (rt.base.addr != 0 && render_target_mask_slot(context.GetRenderTargetMask(), slot) != 0 &&
+			    render_target_mask_slot(sh.m_cbShaderMask, slot) == 0 &&
+			    pixel_info.target_output_mode[slot] == 0 &&
+			    rt.info.format == Prospero::ChannelLayout::k32 &&
+			    rt.info.channel_type == Prospero::ChannelType::kUInt) {
+				pixel_info.id_buffer_slot = slot;
+				break;
 			}
 		}
 	}
@@ -2353,10 +2387,16 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	if (m_libraries == nullptr || !Config::PipelineLibrariesEnabled()) {
 		return 0;
 	}
-	const auto& cs = sh.GetCs();
-	if (cs.cs_regs.data_addr == 0) {
+	if (sh.GetCs().cs_regs.data_addr == 0) {
 		return 0;
 	}
+	// The wave size comes from this dispatch's initiator, which the command processor applies
+	// only when it executes the dispatch (CommandProcessor::DispatchDirect); the prefetched
+	// state still holds the previous dispatch's. A wave32 shader translated as wave64 reads VALU
+	// mask writes into the SGPR after their destination (Ghost of Yotei f5a93fd534e15940 lost
+	// its T# that way and was skipped).
+	auto cs = sh.GetCs();
+	cs.cs_regs.wave_size = Pm4::ComputeWaveSize(dispatch_initiator);
 	// As the dispatch path prepares it (see RenderExecutor::DispatchDirect/DispatchIndirect).
 	ShaderComputeInputInfo input_info {};
 	input_info.dispatch_thread_dimensions =
@@ -2451,6 +2491,10 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		                       m_driver_cache);
 	}
 	m_compute_pipelines_created++;
+	if (m_driver_cache != nullptr &&
+	    std::chrono::steady_clock::now() - create_start >= std::chrono::seconds(2)) {
+		(void)WriteDriverCache();
+	}
 	if (PermutationLogEnabled()) [[unlikely]] {
 		const auto now = std::chrono::steady_clock::now();
 		std::printf("pipeline: cs=%llu ms=%.1f%s t=%.3f\n",

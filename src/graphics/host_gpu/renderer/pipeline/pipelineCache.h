@@ -145,6 +145,7 @@ public:
 	~PipelineCache();
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
+	bool WriteDriverCache();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
@@ -160,6 +161,8 @@ public:
 		vk::ShaderStageFlags    push_constant_stages {};
 		// Fast-linked from pipeline libraries, with a link-time-optimized link still to swap in.
 		bool                    optimize_pending      = false;
+		// Samples bindless images: descriptor set 1 is the bindless table.
+		bool                    uses_bindless         = false;
 	};
 
 	struct GraphicsPrograms {

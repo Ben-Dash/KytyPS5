@@ -480,6 +480,50 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 	return true;
 }
 
+// The shader looks the key up in the bindless translation table: nothing to enumerate. Record
+// the heap for the host and reserve the two words it patches (region base, entry count); zeros
+// resolve every key to the placeholder in slot 0.
+template <typename Specialization>
+bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indirect,
+                              const DescriptorValue& table_value, uint32_t image_index,
+                              ResourceSnapshot& snapshot, std::vector<Specialization>& specializations) {
+	uint64_t heap_base = 0;
+	uint64_t heap_size = 0;
+	if (table_value.dword_count == 2u) {
+		// A bare address has no bounds: the heap covers a fixed number of records. Keys are
+		// resolved when the shader names them, so only those records are read.
+		constexpr uint64_t AddressHeapKeys = 8192;
+		heap_base = ((static_cast<uint64_t>(table_value.dwords[1]) << 32u) | table_value.dwords[0]) &
+		            AddressMask;
+		heap_size = indirect.table_offset + AddressHeapKeys * std::max(indirect.table_stride, 32u);
+		if (heap_base == 0u) {
+			return false;
+		}
+	} else {
+		ShaderBufferResource heap;
+		if (table_value.dword_count != 4u || !DecodeBufferDescriptor(table_value, heap)) {
+			return false;
+		}
+		heap_base = heap.Base48();
+		heap_size = heap.GetSize();
+	}
+	const auto mapping_offset = static_cast<uint32_t>(snapshot.flattened_srt.size());
+	snapshot.flattened_srt.resize(mapping_offset + 2u, 0u);
+	snapshot.images[image_index] = {.dword_count = 8u};
+	snapshot.bindless_heaps.push_back({.base           = heap_base,
+	                                   .size           = heap_size,
+	                                   .table_offset   = indirect.table_offset,
+	                                   .record_stride  = indirect.table_stride,
+	                                   .image          = image_index,
+	                                   .mapping_offset = mapping_offset,
+	                                   .pointer_offset = indirect.pointer_offset});
+	auto& root                      = specializations[image_index];
+	root.indirect_root              = image_index;
+	root.indirect_mapping_offset    = mapping_offset;
+	root.indirect_search_iterations = 0;
+	root.bindless                   = true;
+	return true;
+}
 
 } // namespace
 
@@ -590,6 +634,14 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 			                                  : Prospero::TextureNumericClass::Float;
 			image.dimension     = Decoder::ImageDimension::Dim2D;
 			image.cube          = false;
+			if (image.bindless) {
+				// No one descriptor describes a bindless image: keep the dimension the
+				// instruction samples, which picks the bindless array.
+				image.dimension = base.dimension == Decoder::ImageDimension::Unknown
+				                      ? Decoder::ImageDimension::Dim2D
+				                      : base.dimension;
+				image.cube      = base.cube;
+			}
 			continue;
 		}
 		const auto descriptor_dimension = DescriptorDimension(descriptor, base.dimension);
@@ -627,15 +679,20 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 		if (storage || image.conversion_format != Prospero::BufferFormat::kInvalid) {
 			image.shader_swizzle = DescriptorImageSwizzle(descriptor);
 		}
-		const bool raw_sint_storage = storage && format == Prospero::BufferFormat::k32SInt &&
-		                              base.written && !base.read && !base.atomic;
 		image.numeric_class         = Prospero::SampledTextureNumericClass(format);
+		// A write-only image of a signed integer format is written through its unsigned view
+		// (the stored bits are the same).
+		const bool raw_sint_storage = storage &&
+		                              image.numeric_class == Prospero::TextureNumericClass::Sint &&
+		                              base.written && !base.read && !base.atomic;
 		if (storage) {
 			if ((!raw_sint_storage && image.numeric_class == Prospero::TextureNumericClass::Sint) ||
 			    image.numeric_class == Prospero::TextureNumericClass::Unsupported) {
 				return SpecializationFail(
-				    fmt::format("storage image descriptor {} uses unsupported format {}", i,
-				                static_cast<uint32_t>(format)));
+				    fmt::format("storage image descriptor {} uses unsupported format {} (read={} "
+				                "written={} atomic={})",
+				                i, static_cast<uint32_t>(format), base.read, base.written,
+				                base.atomic));
 			}
 			if (raw_sint_storage || base.atomic) {
 				image.numeric_class = Prospero::TextureNumericClass::Uint;
@@ -650,7 +707,7 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 	}
 	for (uint32_t root_index = 0; root_index < specialization.images.size(); root_index++) {
 		auto& root = specialization.images[root_index];
-		if (root.indirect_root != root_index) {
+		if (root.indirect_root != root_index || root.bindless) {
 			continue;
 		}
 		const auto key_count = root.indirect_mapping_offset < snapshot.flattened_srt.size()
@@ -1371,6 +1428,8 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			memo->valid = false;
 		}
 	}
+	snapshot.bindless_heaps.clear();
+	snapshot.bindless_sampler_heaps.clear();
 	const auto evaluate = [&](uint32_t source, DescriptorValue& value) {
 		if (source >= program.descriptor_sources.size()) {
 			return false;
@@ -1456,6 +1515,13 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			const auto&     indirect = *source->indirect_descriptor;
 			DescriptorValue material;
 			DescriptorValue table;
+			if (indirect.bindless) {
+				if (!clean.EvaluateDescriptor(indirect.table_source, table) ||
+				    !MaterializeBindlessImage(indirect, table, i, snapshot, specialization.images)) {
+					return ReportMaterializeFailure(program, "bindless image", i);
+				}
+				continue;
+			}
 			const auto      normalize = [&](DescriptorValue& value) {
 				if (NullImageDescriptor(value) || !ValidImageDescriptor(value, image.r128)) {
 					value.dwords.fill(0u);
@@ -1770,6 +1836,7 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 		image.indirect_mapping_offset    = source.indirect_mapping_offset;
 		image.indirect_search_iterations = source.indirect_search_iterations;
 		image.cube                       = source.cube;
+		image.bindless                   = source.bindless;
 		image.indirect_resources.clear();
 	}
 	for (uint32_t index = 0; index < images.size(); index++) {
@@ -1881,7 +1948,9 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 				memory.sampler = sampler_plan.mapping[memory.sampler][type];
 				EXIT_IF(memory.sampler == UINT32_MAX);
 			}
-			EXIT_IF(image.indirect_root == memory.resource &&
+			// Enumerated candidates only sample; a bindless image is loaded per instruction and
+			// serves every image operation.
+			EXIT_IF(image.indirect_root == memory.resource && !image.bindless &&
 			        inst.GetOpcode() != ValueOpcode::ImageSampleRaw);
 		}
 	}
