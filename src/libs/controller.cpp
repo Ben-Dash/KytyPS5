@@ -327,6 +327,24 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 			output.id    = touch.id;
 		}
 	}
+	// KYTY_DEBUG_PAD_AUTOSWIPE=<seconds>: from 15 s on, a finger swipes left to right across the
+	// touchpad during the first 1.5 s of every <seconds>, for unattended runs of touch scenes.
+	static const double swipe_period = [] {
+		const char* text = KYTY_GETENV("KYTY_DEBUG_PAD_AUTOSWIPE");
+		return text != nullptr ? std::atof(text) : 0.0;
+	}();
+	if (swipe_period > 0.0 && data->touch_data.touch_num == 0) {
+		static const auto start = std::chrono::steady_clock::now();
+		const double seconds =
+		    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+		const double phase = std::fmod(seconds, swipe_period);
+		if (seconds > 15.0 && phase < 1.5) {
+			auto& output = data->touch_data.touch[data->touch_data.touch_num++];
+			output.x     = static_cast<uint16_t>(200.0 + phase / 1.5 * 1500.0);
+			output.y     = static_cast<uint16_t>(300.0 + phase / 1.5 * 300.0);
+			output.id    = static_cast<uint8_t>(1 + static_cast<int>(seconds / swipe_period) % 120);
+		}
+	}
 	data->connected              = connected;
 	data->timestamp              = state.time;
 	data->connected_count        = static_cast<uint8_t>(std::min(connected_count, 255));
