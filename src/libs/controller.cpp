@@ -637,7 +637,7 @@ void GameController::TouchPad(int id, int finger, bool down, float x, float y) {
 	}
 
 	Common::LockGuard lock(m_mutex);
-	if (m_active_id == id || id == HOST_INPUT_CONTROLLER_ID) {
+	if (m_active_id == id || id == HOST_INPUT_CONTROLLER_ID || id == HOST_MOUSE_TOUCH_ID) {
 		auto& touch  = m_state.touch[finger];
 		m_state.time = LibKernel::KernelGetProcessTime();
 		if (down && !touch.down) {

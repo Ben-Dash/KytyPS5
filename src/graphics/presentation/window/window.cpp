@@ -475,6 +475,34 @@ void WindowContext::ProcessEvent(double time_s) {
 	if (ProcessSystemOverlayInput(*event)) {
 		return;
 	}
+	// Dragging with the left mouse button in the game window is a finger on the touchpad, for
+	// games that ask for touchpad strokes (Ghost of Yotei's calligraphy) without a DualSense.
+	if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN || event->type == SDL_EVENT_MOUSE_BUTTON_UP ||
+	    event->type == SDL_EVENT_MOUSE_MOTION) {
+		static bool dragging = false;
+		const bool  left_button =
+		    event->type == SDL_EVENT_MOUSE_MOTION
+		        ? (event->motion.state & SDL_BUTTON_LMASK) != 0
+		        : event->button.button == SDL_BUTTON_LEFT;
+		const auto window_id =
+		    event->type == SDL_EVENT_MOUSE_MOTION ? event->motion.windowID : event->button.windowID;
+		const float x = event->type == SDL_EVENT_MOUSE_MOTION ? event->motion.x : event->button.x;
+		const float y = event->type == SDL_EVENT_MOUSE_MOTION ? event->motion.y : event->button.y;
+		int         width  = 0;
+		int         height = 0;
+		if (auto* window = SDL_GetWindowFromID(window_id);
+		    left_button && window != nullptr && SDL_GetWindowSize(window, &width, &height) &&
+		    width > 0 && height > 0) {
+			const bool down = event->type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
+			                  (event->type == SDL_EVENT_MOUSE_MOTION && dragging);
+			if (down || dragging) {
+				Controller::SetTouchPad(Controller::HOST_MOUSE_TOUCH_ID, 0, down,
+				                        x / static_cast<float>(width),
+				                        y / static_cast<float>(height));
+			}
+			dragging = down;
+		}
+	}
 	if (event->type >= SDL_EVENT_WINDOW_FIRST && event->type <= SDL_EVENT_WINDOW_LAST) {
 		ProcessWindowEvent(event->window);
 		return;

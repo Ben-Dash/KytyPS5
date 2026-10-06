@@ -17,6 +17,8 @@ struct Lifecycle {
 };
 
 constexpr int HOST_INPUT_CONTROLLER_ID = -1000;
+// A finger on the touchpad from a mouse drag: touches without pressing the touchpad button.
+constexpr int HOST_MOUSE_TOUCH_ID = -1001;
 
 constexpr uint32_t PAD_BUTTON_L3        = 0x00000002;
 constexpr uint32_t PAD_BUTTON_R3        = 0x00000004;
