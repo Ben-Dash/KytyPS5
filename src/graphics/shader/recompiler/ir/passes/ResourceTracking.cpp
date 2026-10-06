@@ -2193,8 +2193,26 @@ private:
 			const auto op = use.user->GetOpcode();
 			return op != ValueOpcode::ImageSampleRaw && op != ValueOpcode::ImageGatherRaw;
 		})) return false;
+		// A waterfall loop (Ghost of Yotei 7ceb0f3417f926f9: each lane copies the T# of the cascade
+		// it falls into, then readfirstlane + compare loops over the distinct ones) samples, in
+		// each iteration, exactly the descriptor its active lanes hold: the per-lane value under
+		// the readfirstlane names the same image, so the choice is made per lane instead.
+		const auto lane_value = [](Value value) {
+			value = value.Resolve();
+			const auto* inst = value.TryInstruction();
+			return inst != nullptr && inst->GetOpcode() == ValueOpcode::ReadFirstLane &&
+			               inst->NumArgs() >= 1u
+			           ? inst->Arg(0).Resolve()
+			           : value;
+		};
+		const auto is_branch = [](Value value) {
+			const auto* inst = value.Resolve().TryInstruction();
+			return inst != nullptr && (inst->GetOpcode() == ValueOpcode::Phi ||
+			                           (inst->GetOpcode() == ValueOpcode::SelectU32 &&
+			                            inst->NumArgs() == 3u));
+		};
 		bool has_phi = false;
-		for (size_t word = 0; word < handle.NumArgs(); ++word) has_phi |= handle.Arg(word).Resolve().IsPhi();
+		for (size_t word = 0; word < handle.NumArgs(); ++word) has_phi |= is_branch(lane_value(handle.Arg(word)));
 		if (!has_phi) return false;
 		// Normalize the eight synchronized descriptor words to one GPU ordinal.
 		// Build the complete graph before changing IR so an unsupported leaf is transactional.
@@ -2214,6 +2232,28 @@ private:
 			uint32_t bad = 0;
 			if (ValidateSource(descriptor, bad)) return index;
 			const auto* branch = descriptor.dwords[bad].TryInstruction();
+			if (branch != nullptr && branch->Parent() != nullptr &&
+			    branch->GetOpcode() == ValueOpcode::SelectU32 && branch->NumArgs() == 3u) {
+				// A select on one condition picks the true or the false descriptor.
+				choices[index].branch = branch;
+				const auto condition = branch->Arg(0).Resolve();
+				for (uint32_t arm = 1; arm <= 2u; ++arm) {
+					auto child = descriptor;
+					for (uint32_t word = 0; word < child.dword_count; ++word) {
+						const auto* selected = descriptor.dwords[word].TryInstruction();
+						if (selected == nullptr || selected->GetOpcode() != ValueOpcode::SelectU32 ||
+						    selected->NumArgs() != 3u || selected->Arg(0).Resolve() != condition) {
+							if (!ValidateRuntimeValue(m_program, descriptor.dwords[word])) return UINT32_MAX;
+							continue;
+						}
+						child.dwords[word] = selected->Arg(arm);
+					}
+					const auto next = self(self, child);
+					if (next == UINT32_MAX) return UINT32_MAX;
+					choices[index].children.push_back(next);
+				}
+				return index;
+			}
 			if (branch == nullptr || branch->Parent() == nullptr ||
 			    branch->GetOpcode() != ValueOpcode::Phi ||
 			    branch->NumPhiBlocks() != branch->NumArgs()) return UINT32_MAX;
@@ -2250,7 +2290,7 @@ private:
 		};
 		DescriptorSource root;
 		root.dword_count = 8u;
-		for (uint32_t word = 0; word < root.dword_count; ++word) root.dwords[word] = handle.Arg(word);
+		for (uint32_t word = 0; word < root.dword_count; ++word) root.dwords[word] = lane_value(handle.Arg(word));
 		if (visit(visit, root) == UINT32_MAX || choices.front().branch == nullptr) return false;
 		DescriptorSource image_source;
 		image_source.dword_count = 8u;
@@ -2271,6 +2311,12 @@ private:
 			const auto where = std::ranges::find_if(block->Instructions(), [&](const Inst& inst) {
 				return &inst == choice.branch;
 			});
+			if (choice.branch->GetOpcode() == ValueOpcode::SelectU32) {
+				auto& key = *block->PrependNewInst(
+				    where, ValueOpcode::SelectU32, {choice.branch->Arg(0), Value(0u), Value(0u)});
+				choice.key = Value(&key);
+				continue;
+			}
 			auto& key = *block->PrependNewInst(where, choice.branch->GetOpcode());
 			key.SetFlags(Type::U32);
 			choice.key = Value(&key);
@@ -2278,6 +2324,13 @@ private:
 		for (const auto& choice: choices) {
 			if (choice.branch == nullptr) continue;
 			auto* key = choice.key.Instruction();
+			if (choice.branch->GetOpcode() == ValueOpcode::SelectU32) {
+				for (uint32_t arm = 0; arm < 2u; ++arm) {
+					const auto child = choice.children[arm];
+					key->SetArg(arm + 1u, child == UINT32_MAX ? Value(0u) : choices[child].key);
+				}
+				continue;
+			}
 			for (uint32_t arm = 0; arm < choice.children.size(); ++arm) {
 				const auto child = choice.children[arm];
 				const auto value = child == UINT32_MAX ? Value(0u) : choices[child].key;
