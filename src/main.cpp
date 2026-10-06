@@ -122,6 +122,12 @@ static void PrintUsage() {
 	         "separately compiled parts where the driver supports it. Default: true.\n");
 	::printf("  --async-pipelines <true|false>       Skip draws whose new pipeline is still "
 	         "compiling instead of stalling; they appear a few frames late. Default: false.\n");
+	::printf("  --pipeline-compile-threads <n>       Threads that build compute pipelines in the "
+	         "background. Default: 0 (all hardware threads but two, at least two).\n");
+	::printf("  --dispatch-lookahead <true|false>    Walk each submission ahead for new compute "
+	         "shaders and start compiling their pipelines early. Default: true.\n");
+	::printf("  --defer-dispatches <true|false>      Suspend a queue whose dispatch waits for a "
+	         "compiling compute pipeline; other queues go on. Default: false.\n");
 	::printf("  --relaxed-readback <true|false>      Let game threads read memory the GPU is still "
 	         "writing without waiting; a value can be a frame old. Default: false.\n");
 	::printf("  --fxaa <true|false>                  Smooth jagged edges of the presented frame "
@@ -613,6 +619,22 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--async-pipelines") {
 			if (!ParseBool(value, options.config.async_pipelines_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--pipeline-compile-threads") {
+			if (!ParseUint32(value, options.config.pipeline_compile_threads) ||
+			    options.config.pipeline_compile_threads > 256) {
+				::printf("invalid pipeline-compile-threads (0-256): %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--defer-dispatches") {
+			if (!ParseBool(value, options.config.defer_dispatches_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--dispatch-lookahead") {
+			if (!ParseBool(value, options.config.dispatch_lookahead_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}

@@ -536,9 +536,9 @@ static void BindSharedMemory(RenderContext& context, ShaderComputeInputInfo& inp
 	bindings.shared_memory = {storage.Handle(), 0, size};
 }
 
-void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
+bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
                                     uint32_t thread_group_x, uint32_t thread_group_y,
-                                    uint32_t thread_group_z, uint32_t mode) {
+                                    uint32_t thread_group_z, uint32_t mode, bool may_defer) {
 	EXIT_IF(buffer.IsInvalid());
 	m_context.GetCommandScheduler().PopPendingOperations(false);
 	auto& ctx    = buffer.GetRegisters();
@@ -556,7 +556,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 			     thread_group_x, thread_group_y, thread_group_z, mode,
 			     sh_ctx.GetCs().cs_regs.data_addr);
 		}
-		return;
+		return true;
 	}
 
 	Common::LockGuard lock(m_context.GetMutex());
@@ -564,11 +564,11 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		LOGF("GraphicsRenderDispatchDirect: temporary: ignoring dispatch with null CS shader, "
 		     "groups=%ux%ux%u mode=%u\n",
 		     thread_group_x, thread_group_y, thread_group_z, mode);
-		return;
+		return true;
 	}
 
 	if (sh_ctx.GetCs().cs_regs.data_addr == 0) {
-		return;
+		return true;
 	}
 
 	constexpr uint32_t DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS = 1u << 5u;
@@ -613,11 +613,15 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}();
 	if (!compute_program) {
 		// Temporary until RT is implemented.
-		return;
+		return true;
+	}
+	// Nothing is recorded or bound before this point, so the packet can run again later.
+	if (may_defer && !m_context.GetPipelineCache().ComputePipelineReady(input_info, compute_program)) {
+		return false;
 	}
 	if (DebugSkipShader(input_info.stage.program->shader_hash, DebugShaderKind::Compute))
 	    [[unlikely]] {
-		return;
+		return true;
 	}
 	if (use_thread_dimensions) {
 		input_info.dispatch_threads_num[0]    = thread_group_x;
@@ -639,7 +643,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	     TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
 	                                 thread_group_z, mode))) {
 		ResetBindings();
-		return;
+		return true;
 	}
 
 	if (Config::GraphicsDebugDumpEnabled()) {
@@ -806,10 +810,11 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
+	return true;
 }
 
-void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
-                                      uint64_t args_addr, uint32_t mode) {
+bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
+                                      uint64_t args_addr, uint32_t mode, bool may_defer) {
 	EXIT_IF(buffer.IsInvalid() || args_addr == 0 || (args_addr & 3u) != 0 ||
 	        (mode & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0);
 	m_context.GetCommandScheduler().PopPendingOperations(false);
@@ -819,7 +824,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	Common::LockGuard lock(m_context.GetMutex());
 	const auto& cs_regs = buffer.GetShaders().GetCs();
 	if (cs_regs.cs_regs.data_addr == 0) {
-		return;
+		return true;
 	}
 	ShaderComputeInputInfo input_info {};
 	const auto compute_program = [&] {
@@ -829,11 +834,15 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	}();
 	if (!compute_program) {
 		// Temporary until RT is implemented.
-		return;
+		return true;
+	}
+	// Nothing is recorded or bound before this point, so the packet can run again later.
+	if (may_defer && !m_context.GetPipelineCache().ComputePipelineReady(input_info, compute_program)) {
+		return false;
 	}
 	if (DebugSkipShader(input_info.stage.program->shader_hash, DebugShaderKind::Compute))
 	    [[unlikely]] {
-		return;
+		return true;
 	}
 	buffer.EndRendering();
 	auto& pipeline = [&]() -> PipelineCache::Pipeline& {
@@ -920,6 +929,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
+	return true;
 }
 
 } // namespace Libs::Graphics

@@ -11,14 +11,18 @@
 #include "graphics/shader/shader.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <span>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -28,6 +32,7 @@ struct RenderColorInfo;
 struct RenderDepthInfo;
 class BufferCache;
 class CommandBuffer;
+class ComputePipelineQueue;
 class PipelineLibraryCache;
 struct SpeculatedDraw;
 
@@ -146,6 +151,9 @@ public:
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
 	bool WriteDriverCache();
+	// The rest of the render context exists (the bindless table's layout, which compute pipeline
+	// layouts may use): the precompile replay may queue the journal's compute pipelines now.
+	void OnContextReady();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
@@ -200,6 +208,10 @@ public:
 	                              bool                 may_defer        = false);
 	Pipeline& GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	                             const ShaderProgram&          compute_program);
+	// Whether GetComputePipeline would return at once; otherwise the pipeline is compiling (queued
+	// now if it was not, ahead of the other builds) and the caller may run the dispatch later.
+	[[nodiscard]] bool ComputePipelineReady(const ShaderComputeInputInfo& input_info,
+	                                        const ShaderProgram&          compute_program);
 
 	// Graphics pipelines created so far; a change across a draw means it compiled one.
 	[[nodiscard]] uint64_t GraphicsPipelinesCreated() const noexcept {
@@ -229,9 +241,14 @@ public:
 	}
 	// Predicts the compute pipeline a dispatch with these registers and dispatch initiator will
 	// need, translating its shader (like PrefetchGraphicsPipeline), and compiles it on a worker
-	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued.
+	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued. A shader
+	// (address and wave size) a lookup already found a program for is skipped without a lookup.
+	// `groups` are a direct dispatch's group (or, with the thread-dimensions initiator bit, thread)
+	// counts, which shaders indexing tables by workgroup count specialize on; indirect dispatches
+	// look their programs up without them, as the dispatch path does.
 	uint32_t PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
-	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending);
+	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending,
+	                                 const std::array<uint32_t, 3>* groups = nullptr);
 	// Prints a look-ahead's result with KYTY_PERMUTATION_LOG=1.
 	void LogLookahead(uint32_t draws, uint32_t parts) const;
 	// Shader translations and module compiles queued or running on worker threads.
@@ -275,9 +292,30 @@ private:
 	std::unique_ptr<PipelineLibraryCache> m_libraries;
 	uint64_t                              m_graphics_pipelines_created = 0;
 	uint64_t                              m_compute_pipelines_created  = 0;
-	// Prefetched compute pipelines by program id: layouts made, pipeline compiling in the
-	// library cache under ComputePrefetchKey.
-	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_prefetched;
+	// Compute shaders (address, and bit 63 for wave32) a compute lookup found a program for, under
+	// m_mutex: PrefetchComputePipeline passes over them.
+	std::unordered_set<uint64_t> m_compute_sources;
+	// Who asked for a compute pipeline first, for the log line its first dispatch prints.
+	enum class ComputeOrigin : uint8_t { Replay, Prefetch, Sync };
+	// A compute pipeline compiling (or compiled) on m_compute_queue that no dispatch took yet.
+	struct ComputeBuild {
+		// Layouts made; the pipeline is set when a dispatch takes the build.
+		std::unique_ptr<Pipeline>             pipeline;
+		std::shared_future<vk::Pipeline>      result;
+		// The driver compile's duration in microseconds, once it ran.
+		std::shared_ptr<std::atomic<int64_t>> compile_us;
+		uint64_t                              shader_hash = 0;
+		ComputeOrigin                         origin      = ComputeOrigin::Sync;
+		// A dispatch found it compiling and was deferred (ComputePipelineReady).
+		bool                                  deferred    = false;
+	};
+	// By program id, under m_mutex. The dispatch that needs one takes it into m_compute_pipelines,
+	// so each program's pipeline is compiled once.
+	std::unordered_map<uint64_t, ComputeBuild> m_compute_builds;
+	std::unique_ptr<ComputePipelineQueue>      m_compute_queue;
+	std::promise<void>                         m_context_ready;
+	std::shared_future<void>                   m_context_ready_future {m_context_ready.get_future().share()};
+	std::once_flag                             m_context_ready_once;
 	std::unordered_map<GraphicsPipelineKey, std::unique_ptr<Pipeline>, GraphicsPipelineKeyHash>
 	                                                        m_graphics_pipelines;
 	// The last pipeline GetGraphicsPipeline returned and its key, under m_mutex: consecutive draws
@@ -297,6 +335,35 @@ private:
 	void InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& command);
 	void WaitForPrecompile();
 	void ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationRecord> records);
+	// Makes the layouts of `program`'s compute pipeline and queues its compile on m_compute_queue,
+	// unless it is built or queued already. m_mutex must be held. Returns whether it queued one.
+	bool StartComputeBuild(const ShaderComputeInputInfo& input_info, const ShaderProgram& program,
+	                       ComputeOrigin origin, bool urgent);
+	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
+	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
+	// A compute pipeline compile took 2 s or more, on any thread: the save thread writes the driver
+	// cache file soon, so a run ended by force keeps it.
+	void        MarkDriverCacheDirty();
+	void        SaveThread(const std::stop_token& stop);
+	void        LogComputeStats() const;
+	// A compute compile this fast came from the driver cache (a heuristic: NVIDIA reports no hits).
+	static constexpr int64_t ComputeCacheHitMicroseconds = 200'000;
+	struct ComputeStats {
+		std::atomic<uint32_t> built {0};
+		std::atomic<uint32_t> hits {0};
+		std::atomic<uint32_t> taken {0};
+	};
+	// By ComputeOrigin. Counted on the threads that compile and take the pipelines.
+	std::array<ComputeStats, 3> m_compute_stats;
+	std::atomic_bool            m_compute_stats_logged {false};
+	// One write at a time: the save thread's and Save's.
+	std::mutex                            m_driver_cache_write_mutex;
+	std::mutex                            m_save_mutex;
+	std::condition_variable_any           m_save_wake;
+	bool                                  m_driver_cache_dirty = false;
+	std::chrono::steady_clock::time_point m_last_save_request;
+	std::chrono::steady_clock::time_point m_last_save;
+	std::jthread                          m_save_thread;
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);

@@ -61,5 +61,13 @@ if(SOURCE_DIRECTORY)
 		string(SHA256 KYTY_SHADER_CACHE_KEY "${shader_cache_digest}")
 	endif()
 endif()
+# The configure option KYTY_SHADER_CACHE_KEY (passed here as KYTY_SHADER_CACHE_KEY_PINNED) replaces
+# the computed key, so a build whose hashed sources changed only outside code generation (pipeline
+# management, threading) keeps another build's driver cache and shader journal. Only valid when no
+# change can alter the generated SPIR-V or journal records.
+if(KYTY_SHADER_CACHE_KEY_PINNED)
+	message(STATUS "Shader cache key: ${KYTY_SHADER_CACHE_KEY_PINNED} (pinned; computed ${KYTY_SHADER_CACHE_KEY})")
+	set(KYTY_SHADER_CACHE_KEY "${KYTY_SHADER_CACHE_KEY_PINNED}")
+endif()
 
 configure_file("${INPUT_FILE}" "${OUTPUT_FILE}")

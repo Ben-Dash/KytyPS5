@@ -203,10 +203,18 @@ private:
 	// Whether the background work a Prefetch-mode look-ahead left pending has progressed enough
 	// to walk again (see m_lookahead_rewalk).
 	[[nodiscard]] bool LookaheadWorkFinished() const;
+	// At the start of every submission: the same walk for dispatches only, so a compute pipeline
+	// the submission needs first starts compiling on a worker thread before its dispatch. Shaders
+	// a dispatch already used are skipped without a lookup.
+	void RunDispatchLookahead(const Pm4Execution& execution);
 	// One walk of the look-ahead; `pending` is set when a shader it met is still translating.
+	// With `dispatches_only`, draws are passed over.
 	void LookaheadPass(const Pm4Execution& execution, ProgramWait wait, uint32_t& draws,
-	                   uint32_t& parts, bool& pending);
+	                   uint32_t& parts, bool& pending, bool dispatches_only = false);
 	void SuspendPm4();
+	// Whether a dispatch may suspend this queue while its compute pipeline compiles
+	// (--defer-dispatches).
+	[[nodiscard]] bool MayDeferDispatch() const;
 	// Starts the draw speculation walk at the current packet (see DrawSpeculator).
 	void RestartSpeculation(const Pm4Execution& execution);
 	void SynchronizePredicate(uint64_t address, uint64_t size);
