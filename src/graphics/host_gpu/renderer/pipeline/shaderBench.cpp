@@ -19,6 +19,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <random>
@@ -220,6 +221,9 @@ struct Result {
 	std::vector<uint32_t> spirv;
 	uint64_t              spirv_hash = 0;
 	uint32_t              repeat_diffs = 0;
+	uint32_t              ir_blocks    = 0;
+	uint32_t              ir_phis      = 0;
+	uint32_t              ir_selects   = 0;
 	SpirvStats            stats;
 	std::string           validation;
 	double                driver_s      = -1;
@@ -283,6 +287,18 @@ void Translate(const Options& o, PermutationRecord record, uint32_t max_lds_byte
 			out.translate_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
 			out.emit_ms      = std::chrono::duration<double, std::milli>(t2 - t1).count();
 			out.wave_size    = compiled.program.wave_size;
+			out.ir_blocks    = static_cast<uint32_t>(compiled.program.blocks.size());
+			for (const auto* block: compiled.program.blocks) {
+				for (const auto& inst: *block) {
+					const auto op = inst.GetOpcode();
+					out.ir_phis += op == ShaderRecompiler::IR::ValueOpcode::Phi ? 1u : 0u;
+					out.ir_selects += op == ShaderRecompiler::IR::ValueOpcode::SelectU32 ||
+					                          op == ShaderRecompiler::IR::ValueOpcode::SelectF32 ||
+					                          op == ShaderRecompiler::IR::ValueOpcode::SelectU1
+					                      ? 1u
+					                      : 0u;
+				}
+			}
 			out.spirv_hash   = hash;
 			out.spirv        = std::move(compiled.spirv);
 		} else if (hash != out.spirv_hash) {
@@ -574,6 +590,97 @@ bool TimeCompute(const Device& dev, const std::vector<uint32_t>& spirv, uint32_t
 	return true;
 }
 
+// Format 7 journals (before compute float_mode/lds_storage and buffer indirect fields were
+// recorded): their compute records only, read without the codec, missing fields at their
+// defaults (float_mode 0xc0, no indirect buffers; lds_storage per --lds-storage, default the live
+// rule). Checksums are not verified. Lets the bench use journals recorded by older builds.
+std::vector<PermutationRecord> ReadLegacyComputeRecords(const std::filesystem::path& path,
+                                                        std::string& key) {
+	std::vector<PermutationRecord> records;
+	std::ifstream                  in(path, std::ios::binary);
+	std::vector<uint8_t> blob((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+	size_t     offset = 0;
+	bool       ok     = true;
+	const auto word   = [&]() -> uint32_t {
+		if (offset + 4u > blob.size()) {
+			ok = false;
+			return 0;
+		}
+		uint32_t value = 0;
+		std::memcpy(&value, blob.data() + offset, 4);
+		offset += 4;
+		return value;
+	};
+	if (blob.size() < 16 || std::memcmp(blob.data(), "KYTYSHDR", 8) != 0) return records;
+	offset = 8;
+	if (word() != 7u) return records;
+	const auto key_length = word();
+	if (key_length > blob.size() - offset) return records;
+	key.assign(reinterpret_cast<const char*>(blob.data() + offset), key_length);
+	offset += key_length;
+	while (ok && offset + 12u <= blob.size()) {
+		const auto size = word();
+		offset += 8; // checksum
+		const auto end = offset + size;
+		if (size == 0 || end > blob.size()) break;
+		PermutationRecord r;
+		r.stage = static_cast<ShaderType>(word());
+		r.hash  = word();
+		r.hash |= static_cast<uint64_t>(word()) << 32u;
+		r.push_data_start_dword = word();
+		r.user_data_base        = word();
+		r.user_data_count       = word();
+		r.wave_size             = word();
+		for (auto* code: {&r.code, &r.back_code}) {
+			const auto count = word();
+			if (count > (end - offset) / 4u) {
+				ok = false;
+				break;
+			}
+			code->resize(count);
+			for (auto& w: *code) w = word();
+		}
+		if (ok && r.stage == ShaderType::Compute) {
+			r.specialization.buffers.resize(word());
+			for (auto& b: r.specialization.buffers) {
+				b.packed_stride      = word();
+				b.descriptor_format  = static_cast<Prospero::BufferFormat>(word());
+				b.descriptor_swizzle = word();
+				b.zero_stride_oob    = word() != 0;
+			}
+			r.specialization.images.resize(word());
+			for (auto& i: r.specialization.images) {
+				i.numeric_class              = static_cast<Prospero::TextureNumericClass>(word());
+				i.dimension                  = static_cast<ShaderRecompiler::Decoder::ImageDimension>(word());
+				i.mip_count                  = word();
+				i.conversion_format          = static_cast<Prospero::BufferFormat>(word());
+				i.shader_swizzle             = word();
+				i.indirect_root              = word();
+				i.indirect_mapping_offset    = word();
+				i.indirect_search_iterations = word();
+				i.cube                       = word() != 0;
+				i.fmask                      = word() != 0;
+				i.bindless                   = word() != 0;
+			}
+			ShaderComputeInputInfo info;
+			for (auto& t: info.threads_num) t = word();
+			info.lds_size_dwords     = word();
+			info.scratch_size_dwords = word();
+			info.host_subgroup_size  = word();
+			info.wave_size           = word();
+			for (auto& g: info.group_id) g = word() != 0;
+			info.dispatch_thread_dimensions = word() != 0;
+			info.thread_ids_num             = static_cast<int>(word());
+			info.workgroup_register         = static_cast<int>(word());
+			info.tg_size_en                 = word() != 0;
+			r.info                          = info;
+			if (ok && offset == end) records.push_back(std::move(r));
+		}
+		offset = end;
+	}
+	return records;
+}
+
 std::string Describe(const PermutationRecord& r) {
 	std::string text;
 	if (const auto* c = std::get_if<ShaderComputeInputInfo>(&r.info)) {
@@ -605,6 +712,13 @@ int Run(int argc, char* argv[]) {
 
 	std::string key;
 	auto        records = ShaderPrecompile::ReadJournal(o.journal, &key);
+	if (records.empty()) {
+		records = ReadLegacyComputeRecords(o.journal, key);
+		if (!records.empty()) {
+			std::printf("journal: format 7, compute records only\n");
+			if (o.lds_storage < 0) o.lds_storage = 2;
+		}
+	}
 	if (records.empty()) {
 		std::fprintf(stderr, "shader-bench: no readable records in %s\n",
 		             o.journal.string().c_str());
@@ -667,7 +781,8 @@ int Run(int argc, char* argv[]) {
 			file.write(reinterpret_cast<const char*>(r.spirv.data()),
 			           static_cast<std::streamsize>(r.spirv.size() * 4u));
 		}
-		std::string extra = Describe(record);
+		std::string extra = Describe(record) + fmt::format(" ir_blocks={} ir_phis={} ir_selects={}",
+		                                                   r.ir_blocks, r.ir_phis, r.ir_selects);
 		if (r.repeat_diffs != 0) extra += fmt::format(" NONDETERMINISTIC({}/{})", r.repeat_diffs, o.repeat - 1);
 		if (!r.validation.empty()) extra += " val=" + r.validation;
 		if (r.driver_result != 0) extra += fmt::format(" vkresult={}", r.driver_result);

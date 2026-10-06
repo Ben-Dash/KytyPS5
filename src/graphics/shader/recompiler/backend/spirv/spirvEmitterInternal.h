@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <source_location>
 #include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
@@ -279,8 +280,13 @@ inline uint32_t Binary(EmitterState& state, spv::Op opcode, uint32_t type, uint3
 	return result;
 }
 
+// KYTY_DEBUG_SELECT_SITES=1 (diagnostic): counts emitted selects per call site.
+void CountSelectSite(const std::source_location& where);
+
 inline uint32_t Select(EmitterState& state, uint32_t type, uint32_t condition, uint32_t true_value,
-                       uint32_t false_value) {
+                       uint32_t false_value,
+                       const std::source_location& where = std::source_location::current()) {
+	CountSelectSite(where);
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpSelect, type, result, condition, true_value, false_value);
 	return result;
