@@ -266,9 +266,8 @@ public:
 			m_ranges.erase(position);
 			return true;
 		}
-		auto removed = RemoveUnlocked(start, size);
-		MergeUnlocked();
-		return removed;
+		// Removing cannot make the remaining neighbours contiguous, so no merge is needed.
+		return RemoveUnlocked(start, size);
 	}
 
 	bool HasOverlap(uint64_t start, uint64_t size) {
@@ -642,23 +641,30 @@ private:
 			return false;
 		}
 
-		std::vector<Range> out;
+		// Only the sorted, disjoint run overlapping the removal is rebuilt (see EditUnlocked).
+		const auto rem_end = End(start, size);
+		auto       first   = LowerBound(start);
+		if (first != m_ranges.begin() && End(std::prev(first)->start, std::prev(first)->size) > start) {
+			--first;
+		}
+		auto               last = first;
+		std::vector<Range> pieces;
 		bool               removed = false;
-		auto               rem_end = End(start, size);
-
-		for (const auto& r: m_ranges) {
-			auto r_end = End(r.start, r.size);
+		for (; last != m_ranges.end() && last->start < rem_end; ++last) {
+			const auto& r = *last;
 			if (!VirtualRangesOverlap(start, size, r.start, r.size)) {
-				out.push_back(r);
+				pieces.push_back(r);
 				continue;
 			}
-
 			removed = true;
-			AddPiece(&out, r, r.start, std::max(start, r.start));
-			AddPiece(&out, r, std::min(rem_end, r_end), r_end);
+			AddPiece(&pieces, r, r.start, std::max(start, r.start));
+			AddPiece(&pieces, r, std::min(rem_end, End(r.start, r.size)), End(r.start, r.size));
 		}
-
-		m_ranges = out;
+		if (first == last) {
+			return false;
+		}
+		const auto at = m_ranges.erase(first, last);
+		m_ranges.insert(at, pieces.begin(), pieces.end());
 		return removed;
 	}
 
