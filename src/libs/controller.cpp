@@ -193,8 +193,22 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 16))
 			                       : PAD_BUTTON_CROSS;
 		}();
-		if (seconds > 15.0 && std::fmod(seconds, auto_period) < 0.15) {
-			data->buttons |= auto_button;
+		// KYTY_DEBUG_PAD_AUTOPRESS_STOP_FILE=<path>: no more presses once that file exists (a
+		// watcher creates it when a cutscene starts, so the presses do not skip it).
+		static const char* stop_file = KYTY_GETENV("KYTY_DEBUG_PAD_AUTOPRESS_STOP_FILE");
+		static bool        stopped   = false;
+		if (seconds > 15.0 && std::fmod(seconds, auto_period) < 0.15 && !stopped) {
+			if (stop_file != nullptr) {
+				if (auto* file = std::fopen(stop_file, "rb"); file != nullptr) {
+					std::fclose(file);
+					stopped = true;
+					std::printf("pad: autopress stopped (%s exists)\n", stop_file);
+					std::fflush(stdout);
+				}
+			}
+			if (!stopped) {
+				data->buttons |= auto_button;
+			}
 		}
 	}
 	data->left_stick_x      = state.axes[static_cast<int>(Axis::LeftX)];
