@@ -77,6 +77,13 @@ public:
 		std::vector<uint32_t>               slots;    // per key; 0 = not resolved
 		std::vector<uint8_t>                settled;  // per key; resolved, or known placeholder
 		std::vector<ImageId>                resolved; // images to keep readable for draws
+		// Per key, a hash of the record ResolveBindlessKey read (0: never read), and the keys it
+		// resolved, so a later frame notices a record the guest rewrote (a per-frame table whose
+		// address comes round again, a streamed texture replaced) and resolves the key again.
+		std::vector<uint64_t>               record_hash;
+		std::vector<uint8_t>                listed;
+		std::vector<uint32_t>               settled_keys;
+		uint64_t                            checked_frame = 0;
 	};
 
 	// The heap for (base, table offset, view binding), created with every entry pending and
