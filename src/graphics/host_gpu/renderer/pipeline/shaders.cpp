@@ -1233,8 +1233,9 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 	const bool required_subgroup = graphics.compute_subgroup_size_control_enabled &&
 	                               wave_size >= graphics.min_subgroup_size &&
 	                               wave_size <= graphics.max_subgroup_size;
+	const auto shader_hash = input_info.stage.program->shader_hash;
 	return [&graphics, layout = pipeline.pipeline_layout, compute_module, driver_cache, wave_size,
-	        required_subgroup] {
+	        required_subgroup, shader_hash] {
 		vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size {};
 		vk::ComputePipelineCreateInfo                         info {};
 		info.stage.stage  = vk::ShaderStageFlagBits::eCompute;
@@ -1247,10 +1248,31 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 		info.layout            = layout;
 		info.basePipelineIndex = -1;
 		vk::Pipeline pipeline  = nullptr;
-		if (graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline) !=
-		    vk::Result::eSuccess) {
+		const auto   started   = std::chrono::steady_clock::now();
+		// A compile still running after 10 s names its shader while the game stalls on it.
+		std::promise<void> compiled;
+		auto watch = std::async(std::launch::async, [finished = compiled.get_future(), shader_hash] {
+			if (finished.wait_for(std::chrono::seconds(10)) == std::future_status::timeout) {
+				std::printf("PipelineCache: compute pipeline %016llx still compiling in the driver\n",
+				            static_cast<unsigned long long>(shader_hash));
+				std::fflush(stdout);
+			}
+		});
+		const auto created =
+		    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline);
+		compiled.set_value();
+		watch.wait();
+		if (created != vk::Result::eSuccess) {
 			LOGF("PipelineCache: compute pipeline creation failed\n");
 			return vk::Pipeline {};
+		}
+		// Driver compiles that stall the game for seconds name their shader on the console.
+		const auto seconds =
+		    std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+		if (seconds >= 5.0) {
+			std::printf("PipelineCache: compute pipeline %016llx took %.1f s in the driver\n",
+			            static_cast<unsigned long long>(shader_hash), seconds);
+			std::fflush(stdout);
 		}
 		return pipeline;
 	};

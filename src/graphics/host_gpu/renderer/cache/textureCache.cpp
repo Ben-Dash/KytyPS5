@@ -31,6 +31,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -3237,14 +3238,44 @@ bool TextureCache::CollectGarbage(bool pressure_only) {
 }
 
 void TextureCache::ProcessDownloadImages() {
+	// KYTY_DEBUG_IMAGE_DOWNLOADS=1: every 500 batches, the linear images read back to guest
+	// memory (address, extent, format, downloads, MiB), to see which readbacks a game needs.
+	static const bool log_downloads = [] {
+		const char* text = KYTY_GETENV("KYTY_DEBUG_IMAGE_DOWNLOADS");
+		return text != nullptr && *text == '1';
+	}();
+	struct DownloadStat {
+		uint32_t width = 0, height = 0, format = 0;
+		uint64_t count = 0, bytes = 0;
+	};
+	static std::map<uint64_t, DownloadStat> stats;
+	static uint64_t                         batches = 0;
 	std::scoped_lock lock {m_lock};
 	for (const auto id: m_download_images) {
 		const auto owner = m_slot_images.try_get(id);
 		if (owner != nullptr && owner->registered && owner->IsGpuModified()) {
 			(void)DownloadImageMemory(id);
+			if (log_downloads) [[unlikely]] {
+				auto& stat  = stats[owner->info.data.address];
+				stat.width  = owner->info.extent.width;
+				stat.height = owner->info.extent.height;
+				stat.format = static_cast<uint32_t>(owner->info.pixel_format);
+				stat.count++;
+				stat.bytes += owner->info.data.size;
+			}
 		}
 	}
 	m_download_images.clear();
+	if (log_downloads && !stats.empty() && ++batches % 500 == 0) [[unlikely]] {
+		for (const auto& [address, stat]: stats) {
+			std::printf("image-download: %llx %ux%u vkformat=%u n=%llu %.1f MiB\n",
+			            static_cast<unsigned long long>(address), stat.width, stat.height,
+			            stat.format, static_cast<unsigned long long>(stat.count),
+			            static_cast<double>(stat.bytes) / (1024.0 * 1024.0));
+		}
+		std::fflush(stdout);
+		stats.clear();
+	}
 }
 
 } // namespace Libs::Graphics

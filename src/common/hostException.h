@@ -39,6 +39,9 @@ using Handler = bool (*)(const ExceptionInfo&);
 
 bool InstallHandler(Handler handler);
 
+// Prints the memory KYTY_DEBUG_MEM_SAMPLE names, on presented frame `frame`.
+void SampleDebugMemory(uint64_t frame);
+
 #if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
 bool InitializeThreadSignalStack();
 #endif

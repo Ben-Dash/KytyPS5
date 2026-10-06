@@ -738,8 +738,21 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 			                  physical_levels);
 		}
 		pitch = TileGetTexturePitch(format, width, tile);
-		TileGetTextureTotalSize(format, width, height, volume ? depth : image_layers,
-		                        physical_levels, tile, volume, size);
+		if (volume) {
+			TileGetTextureTotalSize(format, width, height, depth, physical_levels, tile, true, size);
+		} else {
+			// One slice, then the layers: an array over 4 GiB (Ghost of Yotei after the
+			// calligraphy scene) would end the session in the tiler.
+			TileGetTextureTotalSize(format, width, height, 1u, physical_levels, tile, false, size);
+			if (size.size > UINT32_MAX / image_layers) {
+				KYTY_TEXTURE_FAIL("texture array larger than 4 GiB: format=%u tile=%u type=%u "
+				                  "extent=%ux%u layers=%u levels=%u address=0x%016" PRIx64 "\n",
+				                  static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
+				                  static_cast<uint32_t>(type), width, height, image_layers,
+				                  physical_levels, address);
+			}
+			size.size *= image_layers;
+		}
 	}
 	// Ghost of Yotei places small swizzled textures (16x16 in a 4 KiB mode) inside a block, so
 	// only the descriptor's own 256-byte address granularity is required.

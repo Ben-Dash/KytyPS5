@@ -13,6 +13,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <tlhelp32.h>
+
+#include <algorithm>
+#include <string>
+#include <vector>
+#include <fmt/format.h>
 #else
 #include <algorithm>
 #include <csignal>
@@ -649,6 +654,70 @@ bool InstallHandler(Handler handler) {
 
 	g_install_state.store(2, std::memory_order_release);
 	return true;
+}
+
+// KYTY_DEBUG_MEM_SAMPLE=<pointer>:<offset>:<floats>[:<every n frames>][,...] (hex, counts
+// decimal): prints the floats at *pointer + offset every n presented frames (default 10), e.g. a
+// game object's position followed through a scene. Pointer 0 samples <offset> directly.
+void SampleDebugMemory(uint64_t frame) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	struct Sample {
+		uint64_t pointer = 0;
+		uint64_t offset  = 0;
+		uint32_t floats  = 1;
+		uint32_t every   = 10;
+	};
+	static const std::vector<Sample> samples = [] {
+		std::vector<Sample> list;
+		const char*         text = std::getenv("KYTY_DEBUG_MEM_SAMPLE");
+		while (text != nullptr && *text != '\0') {
+			Sample sample;
+			char*  end     = nullptr;
+			sample.pointer = std::strtoull(text, &end, 16);
+			if (*end == ':') sample.offset = std::strtoull(end + 1, &end, 16);
+			if (*end == ':') sample.floats = static_cast<uint32_t>(std::strtoul(end + 1, &end, 10));
+			if (*end == ':') sample.every = static_cast<uint32_t>(std::strtoul(end + 1, &end, 10));
+			sample.floats = (std::min)((std::max)(sample.floats, 1u), 16u);
+			sample.every  = (std::max)(sample.every, 1u);
+			list.push_back(sample);
+			if (*end != ',') break;
+			text = end + 1;
+		}
+		return list;
+	}();
+	for (size_t index = 0; index < samples.size(); index++) {
+		const auto& sample = samples[index];
+		if (frame % sample.every != 0) {
+			continue;
+		}
+		uint64_t base = 0;
+		SIZE_T   got  = 0;
+		if (sample.pointer != 0 &&
+		    (ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(sample.pointer),
+		                       &base, sizeof(base), &got) == 0 ||
+		     got != sizeof(base) || base == 0)) {
+			continue;
+		}
+		float values[16] {};
+		if (ReadProcessMemory(GetCurrentProcess(),
+		                      reinterpret_cast<const void*>(base + sample.offset), values,
+		                      sample.floats * sizeof(float), &got) == 0 ||
+		    got != sample.floats * sizeof(float)) {
+			continue;
+		}
+		std::string line = fmt::format("mem-sample[{}]: frame={} at={:x}", index, frame,
+		                               base + sample.offset);
+		for (uint32_t i = 0; i < sample.floats; i++) {
+			line += fmt::format(" {:.3f}", values[i]);
+		}
+		std::printf("%s\n", line.c_str());
+	}
+	if (!samples.empty()) {
+		std::fflush(stdout);
+	}
+#else
+	(void)frame;
+#endif
 }
 
 } // namespace Common::HostException

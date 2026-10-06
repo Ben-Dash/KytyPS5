@@ -871,6 +871,47 @@ static uint32_t BindlessSamplerSlot(ValueEmitContext& ctx, const IR::SamplerReso
 	return slot;
 }
 
+// For an image picked at run time among enumerated candidates that share one binding array and
+// are bound consecutively after the root: the array element for the selected ordinal (ordinal 0
+// is the root), or 0 when the candidates differ or are not consecutive. One descriptor access
+// instead of a switch over every candidate keeps large shaders (Ghost of Yotei 01a5: 35 image
+// loads over 32 candidates each) small enough for the driver's compiler.
+static uint32_t HomogeneousIndirectArrayIndex(EmitterState& state, const IR::ImageResource& image,
+                                              uint32_t root, uint32_t selected) {
+	const auto kind = IR::DescriptorBindingForImage(image);
+	if (!kind.has_value() || image.mip_mode == IR::ImageMipMode::Dynamic) {
+		return 0;
+	}
+	const auto* binding = IR::FindBinding(state.program.bindings, *kind);
+	if (binding == nullptr) {
+		return 0;
+	}
+	uint32_t first_child = 0;
+	for (uint32_t ordinal = 0; ordinal < image.indirect_resources.size(); ++ordinal) {
+		const auto resource  = image.indirect_resources[ordinal];
+		const auto& candidate = state.program.info.images[resource];
+		if (candidate.dimension != image.dimension || candidate.cube != image.cube ||
+		    IR::DescriptorBindingForImage(candidate) != kind || candidate.mip_count != 1u ||
+		    candidate.numeric_class != image.numeric_class) {
+			return 0;
+		}
+		if (ordinal == 1u) first_child = ResourceForDescriptor(state, *kind, resource);
+		const auto child_slot = first_child + ordinal - 1u;
+		if (ordinal > 1u && (child_slot >= binding->resources.size() ||
+		                     binding->resources[child_slot] != resource)) {
+			return 0;
+		}
+	}
+	const auto child_index = Binary(state, spv::OpIAdd, TypeU32(state), selected,
+	                                ConstantU32(state, first_child - 1u));
+	const auto is_root = Binary(state, spv::OpIEqual, TypeBool(state), selected, ConstantU32(state, 0u));
+	const auto array_index = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpSelect, TypeU32(state), array_index, is_root,
+	                          ConstantU32(state, ResourceForDescriptor(state, *kind, root)),
+	                          child_index);
+	return array_index;
+}
+
 void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 	const auto op         = inst.GetOpcode();
 	const auto image_info = IR::ImageOpcodeInfoOf(op);
@@ -955,6 +996,19 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 				        const auto selected = EmitIndirectResourceIndex(
 				            state, ctx.Def(handle->Arg(0)), image.indirect_mapping_offset,
 				            image.indirect_search_iterations, 0u);
+				        if (const auto array_index =
+				                HomogeneousIndirectArrayIndex(state, image, mem.resource, selected);
+				            array_index != 0u) {
+					        const auto descriptor =
+					            LoadImageDescriptor(state, mem.resource, 0u, array_index);
+					        const auto fetched = state.builder.AllocateId();
+					        state.builder.AddFunction(spv::OpImageFetch,
+					                                  ImageVectorType(state, numeric_class, 4), fetched,
+					                                  descriptor, coord, spv::ImageOperandsLodMask,
+					                                  LodU32(ctx, mem, *address, dimension));
+					        return ResultVector(ctx, UnpackImageTexel(ctx, mem, fetched),
+					                            numeric_class, false, mem);
+				        }
 				        const auto default_label = state.builder.AllocateId();
 				        const auto merge_label   = state.builder.AllocateId();
 				        std::vector<uint32_t> labels(image.indirect_resources.size() - 1u);
@@ -1016,6 +1070,12 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 				const auto selected = EmitIndirectResourceIndex(
 				    state, ctx.Def(handle->Arg(0)), image.indirect_mapping_offset,
 				    image.indirect_search_iterations, 0u);
+				if (const auto array_index =
+				        HomogeneousIndirectArrayIndex(state, image, mem.resource, selected);
+				    array_index != 0u) {
+					EmitStorageImageWrite(state, mem.resource, mip_lod, coord, texel, array_index);
+					return;
+				}
 				const auto            default_label = state.builder.AllocateId();
 				const auto            merge_label   = state.builder.AllocateId();
 				std::vector<uint32_t> labels(image.indirect_resources.size() - 1u);
