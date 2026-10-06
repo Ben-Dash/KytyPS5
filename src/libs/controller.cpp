@@ -1033,10 +1033,16 @@ static int32_t trigger_effect_state(const PadTriggerEffectCommand& command, int 
 }
 
 void GameController::GetTriggerEffectState(int32_t* state) {
+	// KYTY_PAD_EFFECT_STATE=0: always "no effect", as before the state was derived (to tell whether
+	// a game that ignores the triggers reacts to the derived state).
+	static const bool derive = [] {
+		const char* text = KYTY_GETENV("KYTY_PAD_EFFECT_STATE");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
 	Common::LockGuard lock(m_mutex);
 	for (int i = 0; i < 2; i++) {
 		const auto axis = i == 0 ? Axis::TriggerLeft : Axis::TriggerRight;
-		state[i] = (m_trigger_effect.trigger_mask & (1u << i)) != 0
+		state[i] = derive && (m_trigger_effect.trigger_mask & (1u << i)) != 0
 		               ? trigger_effect_state(m_trigger_effect.command[i],
 		                                      m_state.axes[static_cast<int>(axis)])
 		               : 0;
