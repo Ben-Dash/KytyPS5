@@ -2320,8 +2320,25 @@ private:
 				uint32_t bad_dword = 0;
 				if (ValidateSource(descriptor, bad_dword)) continue;
 				IndirectDescriptorPlan plan;
-				if (TryMakeIndirectImage(*handle, descriptor, plan) || TryMakeFiniteImage(*handle, plan) ||
-				    TryMakeIndirectBuffer(*handle, descriptor, plan)) {
+				// KYTY_DEBUG_DESCRIBE_HANDLES=<hash>: which indirect plan each handle gets.
+				static const uint64_t describe_hash = [] {
+					const char* text = KYTY_GETENV("KYTY_DEBUG_DESCRIBE_HANDLES");
+					return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
+				}();
+				if (describe_hash != 0 && describe_hash == m_program.shader_hash) [[unlikely]] {
+					std::printf("describe-indirect: hash=%016llx pc=%x dword %u = %s\n",
+					            static_cast<unsigned long long>(m_program.shader_hash), flags.pc,
+					            bad_dword, DescribeValue(descriptor.dwords[bad_dword], 8).c_str());
+				}
+				const bool as_indirect = TryMakeIndirectImage(*handle, descriptor, plan);
+				const bool as_finite   = !as_indirect && TryMakeFiniteImage(*handle, plan);
+				if (describe_hash != 0 && describe_hash == m_program.shader_hash) [[unlikely]] {
+					std::printf("describe-indirect: hash=%016llx pc=%x plan=%s\n",
+					            static_cast<unsigned long long>(m_program.shader_hash), flags.pc,
+					            as_indirect ? "indirect" : as_finite ? "finite" : "other/none");
+					std::fflush(stdout);
+				}
+				if (as_indirect || as_finite || TryMakeIndirectBuffer(*handle, descriptor, plan)) {
 					for (const auto& previous: m_indirect_descriptors) {
 						if (plan.reads[0] != nullptr && previous.reads[0] == plan.reads[0] &&
 						    !EquivalentValue(m_program, previous.key, plan.key))
@@ -2372,40 +2389,60 @@ private:
 			// KYTY_DEBUG_INDIRECT_REJECT=1 also prints the failing dword's expression (3 levels).
 			static const bool explain = KYTY_GETENV("KYTY_DEBUG_INDIRECT_REJECT") != nullptr;
 			if (explain) {
-				std::string text;
-				const std::function<void(Value, int)> describe = [&](Value v, int depth) {
-					v = v.Resolve();
-					if (v.IsImmediate()) {
-						text += fmt::format("imm(0x{:x})", v.GetType() == Type::U32 ? v.U32() : 0u);
-						return;
-					}
-					auto* inst = v.TryInstruction();
-					if (inst == nullptr) {
-						text += "?";
-						return;
-					}
-					text += ValueOpcodeName(inst->GetOpcode());
-					if (depth >= 3) {
-						return;
-					}
-					text += "(";
-					for (size_t a = 0; a < inst->NumArgs(); a++) {
-						if (a != 0) text += ",";
-						describe(inst->Arg(a), depth + 1);
-					}
-					text += ")";
-				};
-				describe(descriptor.dwords[bad_dword], 0);
 				std::printf("indirect-image reject: hash=%016llx wave=%u pc=%x dword %u = %s\n",
 				            static_cast<unsigned long long>(m_program.shader_hash),
-				            m_program.wave_size, pc, bad_dword, text.c_str());
+				            m_program.wave_size, pc, bad_dword,
+				            DescribeValue(descriptor.dwords[bad_dword], 3).c_str());
 				std::fflush(stdout);
 			}
 			Fail(pc, fmt::format("{} dword {} is not a valid runtime value",
 			                     ValueOpcodeName(expected), bad_dword));
 		}
+		// KYTY_DEBUG_DESCRIBE_HANDLES=<shader hash>: prints every accepted descriptor's dwords.
+		static const uint64_t describe_hash = [] {
+			const char* text = KYTY_GETENV("KYTY_DEBUG_DESCRIBE_HANDLES");
+			return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
+		}();
+		if (describe_hash != 0 && describe_hash == m_program.shader_hash) [[unlikely]] {
+			for (uint32_t dword = 0; dword < descriptor.dword_count && dword < 2u; dword++) {
+				std::printf("describe-handle: hash=%016llx pc=%x %s dword %u = %s\n",
+				            static_cast<unsigned long long>(m_program.shader_hash), pc,
+				            ValueOpcodeName(expected), dword,
+				            DescribeValue(descriptor.dwords[dword], 6).c_str());
+			}
+			std::fflush(stdout);
+		}
 		source = InternSource(descriptor);
 		return true;
+	}
+
+	// The expression behind a value, `levels` deep, for diagnostics.
+	static std::string DescribeValue(Value value, int levels) {
+		std::string text;
+		const std::function<void(Value, int)> describe = [&](Value v, int depth) {
+			v = v.Resolve();
+			if (v.IsImmediate()) {
+				text += fmt::format("imm(0x{:x})", v.GetType() == Type::U32 ? v.U32() : 0u);
+				return;
+			}
+			auto* inst = v.TryInstruction();
+			if (inst == nullptr) {
+				text += "?";
+				return;
+			}
+			text += ValueOpcodeName(inst->GetOpcode());
+			if (depth >= levels) {
+				return;
+			}
+			text += "(";
+			for (size_t a = 0; a < inst->NumArgs(); a++) {
+				if (a != 0) text += ",";
+				describe(inst->Arg(a), depth + 1);
+			}
+			text += ")";
+		};
+		describe(value, 0);
+		return text;
 	}
 
 	void ValidateAddressHandle(Value value, uint32_t pc) const {
