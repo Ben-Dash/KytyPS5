@@ -1399,6 +1399,25 @@ struct SystemOverlay::Impl {
 		    "start.");
 		ImGui::PopTextWrapPos();
 		ImGui::Separator();
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		if (red_zone_choice < 0) {
+			red_zone_choice = Config::RedZoneProtectionEnabled() ? 1 : 0;
+		}
+		bool red_zone = red_zone_choice != 0;
+		if (ImGui::Checkbox("Red zone crash protection", &red_zone)) {
+			red_zone_choice = red_zone ? 1 : 0;
+			settings_save_failed =
+			    !Common::SettingsFile::Save("red-zone-protection", red_zone ? "true" : "false");
+		}
+		ImGui::PushTextWrapPos(0.0f);
+		ImGui::TextDisabled(
+		    "Keeps the memory just below a game thread's stack intact when the emulator handles a "
+		    "memory fault on that thread (Windows writes there), which otherwise crashes some games "
+		    "on a null pointer. Patches the game's code at start. Applies at the next start; the "
+		    "launcher's checkbox turns it on as well.");
+		ImGui::PopTextWrapPos();
+		ImGui::Separator();
+#endif
 		if (settings_save_failed) {
 			ImGui::TextColored({1.0f, 0.5f, 0.4f, 1.0f}, "Could not save %s",
 			                   Common::SettingsFile::FileName);
@@ -1557,6 +1576,7 @@ struct SystemOverlay::Impl {
 	bool                                  settings_save_failed   = false;
 	int                                   record_thread_choice   = -1;
 	int                                   hardware_bounds_choice = -1;
+	int                                   red_zone_choice        = -1;
 	ImVec2                                panel_offset {};
 	ImVec2                                right_stick {};
 	OverlaySession                              session;
