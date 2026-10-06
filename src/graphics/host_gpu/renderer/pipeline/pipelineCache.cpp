@@ -2387,10 +2387,16 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	if (m_libraries == nullptr || !Config::PipelineLibrariesEnabled()) {
 		return 0;
 	}
-	const auto& cs = sh.GetCs();
-	if (cs.cs_regs.data_addr == 0) {
+	if (sh.GetCs().cs_regs.data_addr == 0) {
 		return 0;
 	}
+	// The wave size comes from this dispatch's initiator, which the command processor applies
+	// only when it executes the dispatch (CommandProcessor::DispatchDirect); the prefetched
+	// state still holds the previous dispatch's. A wave32 shader translated as wave64 reads VALU
+	// mask writes into the SGPR after their destination (Ghost of Yotei f5a93fd534e15940 lost
+	// its T# that way and was skipped).
+	auto cs = sh.GetCs();
+	cs.cs_regs.wave_size = Pm4::ComputeWaveSize(dispatch_initiator);
 	// As the dispatch path prepares it (see RenderExecutor::DispatchDirect/DispatchIndirect).
 	ShaderComputeInputInfo input_info {};
 	input_info.dispatch_thread_dimensions =

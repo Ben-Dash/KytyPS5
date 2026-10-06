@@ -38,6 +38,7 @@
 #include <immintrin.h>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <optional>
 #include <semaphore>
 #include <string>
@@ -1767,6 +1768,19 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 void CommandProcessor::DispatchDirect(uint32_t thread_group_x, uint32_t thread_group_y,
                                       uint32_t thread_group_z, uint32_t mode) {
 	m_sh_ctx.SetCsWaveSize(Pm4::ComputeWaveSize(mode));
+	// KYTY_DEBUG_DISPATCH_MODES=1 prints each new DISPATCH_INITIATOR value with the shader address.
+	static const bool log_modes = KYTY_GETENV("KYTY_DEBUG_DISPATCH_MODES") != nullptr;
+	if (log_modes) [[unlikely]] {
+		static std::mutex                   modes_mutex;
+		static std::set<uint64_t>           seen;
+		const std::lock_guard               lock(modes_mutex);
+		const auto& cs  = m_sh_ctx.GetCs().cs_regs;
+		const auto  key = (cs.data_addr << 20u) ^ mode;
+		if (seen.insert(key).second && seen.size() < 4096) {
+			std::printf("dispatch-mode: shader=0x%010llx mode=0x%08x wave=%u\n",
+			            static_cast<unsigned long long>(cs.data_addr), mode, Pm4::ComputeWaveSize(mode));
+		}
+	}
 
 	uint32_t frame_num = 0;
 
@@ -1803,6 +1817,19 @@ void CommandProcessor::DispatchIndirect(uint64_t args_addr, uint32_t mode) {
 		return;
 	}
 	m_sh_ctx.SetCsWaveSize(Pm4::ComputeWaveSize(mode));
+	static const bool log_modes = KYTY_GETENV("KYTY_DEBUG_DISPATCH_MODES") != nullptr;
+	if (log_modes) [[unlikely]] {
+		static std::mutex         modes_mutex;
+		static std::set<uint64_t> seen;
+		const std::lock_guard     lock(modes_mutex);
+		const auto& cs  = m_sh_ctx.GetCs().cs_regs;
+		const auto  key = (cs.data_addr << 20u) ^ mode;
+		if (seen.insert(key).second && seen.size() < 4096) {
+			std::printf("dispatch-mode: indirect shader=0x%010llx mode=0x%08x wave=%u\n",
+			            static_cast<unsigned long long>(cs.data_addr), mode,
+			            Pm4::ComputeWaveSize(mode));
+		}
+	}
 	m_renderer.GetRenderExecutor().DispatchIndirect(m_submit_id, CurrentBuffer(), args_addr, mode);
 }
 

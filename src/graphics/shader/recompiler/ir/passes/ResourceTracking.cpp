@@ -8,6 +8,7 @@
 #include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
 #include "graphics/shader/recompiler/ir/passes/SrtWalker.h"
 
+#include <functional>
 #include <algorithm>
 #include <atomic>
 #include <cstdlib>
@@ -2367,6 +2368,38 @@ private:
 				}
 				source = InternSource(descriptor);
 				return true;
+			}
+			// KYTY_DEBUG_INDIRECT_REJECT=1 also prints the failing dword's expression (3 levels).
+			static const bool explain = KYTY_GETENV("KYTY_DEBUG_INDIRECT_REJECT") != nullptr;
+			if (explain) {
+				std::string text;
+				const std::function<void(Value, int)> describe = [&](Value v, int depth) {
+					v = v.Resolve();
+					if (v.IsImmediate()) {
+						text += fmt::format("imm(0x{:x})", v.GetType() == Type::U32 ? v.U32() : 0u);
+						return;
+					}
+					auto* inst = v.TryInstruction();
+					if (inst == nullptr) {
+						text += "?";
+						return;
+					}
+					text += ValueOpcodeName(inst->GetOpcode());
+					if (depth >= 3) {
+						return;
+					}
+					text += "(";
+					for (size_t a = 0; a < inst->NumArgs(); a++) {
+						if (a != 0) text += ",";
+						describe(inst->Arg(a), depth + 1);
+					}
+					text += ")";
+				};
+				describe(descriptor.dwords[bad_dword], 0);
+				std::printf("indirect-image reject: hash=%016llx wave=%u pc=%x dword %u = %s\n",
+				            static_cast<unsigned long long>(m_program.shader_hash),
+				            m_program.wave_size, pc, bad_dword, text.c_str());
+				std::fflush(stdout);
 			}
 			Fail(pc, fmt::format("{} dword {} is not a valid runtime value",
 			                     ValueOpcodeName(expected), bad_dword));
