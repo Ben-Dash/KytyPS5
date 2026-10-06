@@ -1971,8 +1971,18 @@ private:
 			const bool bitscan = selector != nullptr && selector->GetOpcode() == ValueOpcode::FindILsb32 &&
 			    selector->NumArgs() == 1u && !m_shader_writes &&
 			    NonzeroOnEntry(selector->Arg(0), handle.Parent());
+			// A key that is a narrow bit field (Ghost of Yotei 01a51b1204e3be1b: a 5-bit field of a
+			// scalar load picks one of 32 storage-image T#s) bounds the table by its width.
+			uint32_t field_width = 0;
+			const bool bit_field = selector != nullptr &&
+			                       selector->GetOpcode() == ValueOpcode::BitFieldUExtract &&
+			                       selector->NumArgs() == 3u &&
+			                       ImmediateU32(selector->Arg(2), field_width) && field_width != 0u &&
+			                       field_width <= 6u;
 			if (bitscan) {
 				indirect.key_count = Value(32u);
+			} else if (bit_field) {
+				indirect.key_count = Value(1u << field_width);
 			} else if (!m_shader_writes) {
 				if (const auto* bound = BoundedLoop(key, handle.Parent()))
 					indirect.key_count = bound->Arg(1);

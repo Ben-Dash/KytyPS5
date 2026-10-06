@@ -927,19 +927,66 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 		    EmitValueOrDefaultIfCondition(
 		        state, condition, TypeU32Vector(state, 4), ConstantU32CompositeZero(state, 4),
 		        [&]() {
-			        const auto descriptor = LoadImageDescriptor(state, mem.resource);
-			        const auto color      = state.builder.AllocateId();
-			        const auto coord      = CoordU32(ctx, mem, *address, dimension);
-			        if (dimension_info.multisampled != 0u) {
-				        state.builder.AddFunction(
-				            spv::OpImageFetch, ImageVectorType(state, numeric_class, 4), color,
-				            descriptor, coord, spv::ImageOperandsSampleMask,
-				            AddressU32(ctx, mem, *address, dimension_info.coordinate_components));
+			        const auto coord = CoordU32(ctx, mem, *address, dimension);
+			        const auto fetch = [&](uint32_t resource) {
+				        const auto descriptor = LoadImageDescriptor(state, resource);
+				        const auto color      = state.builder.AllocateId();
+				        if (dimension_info.multisampled != 0u) {
+					        state.builder.AddFunction(
+					            spv::OpImageFetch, ImageVectorType(state, numeric_class, 4), color,
+					            descriptor, coord, spv::ImageOperandsSampleMask,
+					            AddressU32(ctx, mem, *address, dimension_info.coordinate_components));
+				        } else {
+					        state.builder.AddFunction(spv::OpImageFetch,
+					                                  ImageVectorType(state, numeric_class, 4), color,
+					                                  descriptor, coord, spv::ImageOperandsLodMask,
+					                                  LodU32(ctx, mem, *address, dimension));
+				        }
+				        return color;
+			        };
+			        auto color = 0u;
+			        // An image picked at run time from an enumerated table: switch over the
+			        // candidates (ordinal 0 is the root).
+			        const auto* handle = image_arg.ResolveInstruction();
+			        if (image.indirect_root == mem.resource && !image.bindless &&
+			            image.indirect_resources.size() >= 2u && handle != nullptr &&
+			            handle->NumArgs() != 0u && state.flattened_srt_variable != 0 &&
+			            image.indirect_search_iterations != 0u) {
+				        const auto selected = EmitIndirectResourceIndex(
+				            state, ctx.Def(handle->Arg(0)), image.indirect_mapping_offset,
+				            image.indirect_search_iterations, 0u);
+				        const auto default_label = state.builder.AllocateId();
+				        const auto merge_label   = state.builder.AllocateId();
+				        std::vector<uint32_t> labels(image.indirect_resources.size() - 1u);
+				        std::vector<uint32_t> switch_words {spv::OpSwitch, selected, default_label};
+				        for (uint32_t candidate = 1; candidate < image.indirect_resources.size();
+				             candidate++) {
+					        labels[candidate - 1u] = state.builder.AllocateId();
+					        switch_words.push_back(candidate);
+					        switch_words.push_back(labels[candidate - 1u]);
+				        }
+				        state.builder.AddFunction(spv::OpSelectionMerge, merge_label,
+				                                  spv::SelectionControlMaskNone);
+				        state.builder.AddFunction(switch_words);
+				        std::vector<uint32_t> phi_words {spv::OpPhi,
+				                                         ImageVectorType(state, numeric_class, 4),
+				                                         state.builder.AllocateId()};
+				        EmitLabel(state, default_label);
+				        phi_words.push_back(fetch(image.indirect_resources[0]));
+				        phi_words.push_back(default_label);
+				        state.builder.AddFunction(spv::OpBranch, merge_label);
+				        for (uint32_t candidate = 1; candidate < image.indirect_resources.size();
+				             candidate++) {
+					        EmitLabel(state, labels[candidate - 1u]);
+					        phi_words.push_back(fetch(image.indirect_resources[candidate]));
+					        phi_words.push_back(labels[candidate - 1u]);
+					        state.builder.AddFunction(spv::OpBranch, merge_label);
+				        }
+				        EmitLabel(state, merge_label);
+				        state.builder.AddFunction(phi_words);
+				        color = phi_words[2];
 			        } else {
-				        state.builder.AddFunction(spv::OpImageFetch,
-				                                  ImageVectorType(state, numeric_class, 4), color,
-				                                  descriptor, coord, spv::ImageOperandsLodMask,
-				                                  LodU32(ctx, mem, *address, dimension));
+				        color = fetch(mem.resource);
 			        }
 			        return ResultVector(ctx, UnpackImageTexel(ctx, mem, color), numeric_class,
 			                            false, mem);
@@ -956,6 +1003,45 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			        : 0u;
 			const auto coord = CoordU32(ctx, mem, *address, dimension);
 			const auto texel = StoreTexel(ctx, mem, ctx.Arg(inst, 2), uint_image);
+			// A storage image picked at run time from an enumerated table (its candidates are
+			// image.indirect_resources, ordinal 0 the root): switch over the candidates.
+			if (image.indirect_root == mem.resource && !image.bindless &&
+			    image.indirect_resources.size() >= 2u) {
+				const auto* handle = image_arg.ResolveInstruction();
+				if (handle == nullptr || handle->NumArgs() == 0u ||
+				    state.flattened_srt_variable == 0 || image.indirect_search_iterations == 0u) {
+					ctx.Fail(inst, "has no indirect storage image runtime mapping");
+					return;
+				}
+				const auto selected = EmitIndirectResourceIndex(
+				    state, ctx.Def(handle->Arg(0)), image.indirect_mapping_offset,
+				    image.indirect_search_iterations, 0u);
+				const auto            default_label = state.builder.AllocateId();
+				const auto            merge_label   = state.builder.AllocateId();
+				std::vector<uint32_t> labels(image.indirect_resources.size() - 1u);
+				std::vector<uint32_t> switch_words {spv::OpSwitch, selected, default_label};
+				for (uint32_t candidate = 1; candidate < image.indirect_resources.size();
+				     candidate++) {
+					labels[candidate - 1u] = state.builder.AllocateId();
+					switch_words.push_back(candidate);
+					switch_words.push_back(labels[candidate - 1u]);
+				}
+				state.builder.AddFunction(spv::OpSelectionMerge, merge_label,
+				                          spv::SelectionControlMaskNone);
+				state.builder.AddFunction(switch_words);
+				EmitLabel(state, default_label);
+				EmitStorageImageWrite(state, image.indirect_resources[0], mip_lod, coord, texel);
+				state.builder.AddFunction(spv::OpBranch, merge_label);
+				for (uint32_t candidate = 1; candidate < image.indirect_resources.size();
+				     candidate++) {
+					EmitLabel(state, labels[candidate - 1u]);
+					EmitStorageImageWrite(state, image.indirect_resources[candidate], mip_lod,
+					                      coord, texel);
+					state.builder.AddFunction(spv::OpBranch, merge_label);
+				}
+				EmitLabel(state, merge_label);
+				return;
+			}
 			EmitStorageImageWrite(state, mem.resource, mip_lod, coord, texel);
 		});
 		return;
