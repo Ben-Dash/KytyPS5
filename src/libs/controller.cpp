@@ -351,7 +351,7 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 			output.id    = touch.id;
 		}
 	}
-	// KYTY_DEBUG_PAD_AUTOSWIPE=<seconds>: from 15 s on, a finger swipes left to right across the
+	// KYTY_DEBUG_PAD_AUTOSWIPE=<seconds>: from 15 s on, a finger swipes across the
 	// touchpad during the first 1.5 s of every <seconds>, for unattended runs of touch scenes.
 	static const double swipe_period = [] {
 		const char* text = KYTY_GETENV("KYTY_DEBUG_PAD_AUTOSWIPE");
@@ -363,10 +363,25 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 		    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 		const double phase = std::fmod(seconds, swipe_period);
 		if (seconds > 15.0 && phase < 1.5) {
-			auto& output = data->touch_data.touch[data->touch_data.touch_num++];
-			output.x     = static_cast<uint16_t>(200.0 + phase / 1.5 * 1500.0);
-			output.y     = static_cast<uint16_t>(300.0 + phase / 1.5 * 300.0);
-			output.id    = static_cast<uint8_t>(1 + static_cast<int>(seconds / swipe_period) % 120);
+			// Each swipe takes the next of eight directions (calligraphy strokes follow guides that
+			// run across, down or diagonally): from (x0, y0) to (x1, y1) in touchpad units.
+			static constexpr std::array<std::array<double, 4>, 8> STROKES = {{
+			    {200, 450, 1700, 600},  // left to right
+			    {950, 100, 950, 950},   // top to bottom
+			    {300, 150, 1600, 900},  // diagonal down-right
+			    {1600, 150, 300, 900},  // diagonal down-left
+			    {1700, 600, 200, 450},  // right to left
+			    {950, 950, 950, 100},   // bottom to top
+			    {1600, 900, 300, 150},  // diagonal up-left
+			    {300, 900, 1600, 150},  // diagonal up-right
+			}};
+			const auto  swipe  = static_cast<int>(seconds / swipe_period);
+			const auto& stroke = STROKES[static_cast<size_t>(swipe) % STROKES.size()];
+			const auto  t      = phase / 1.5;
+			auto&       output = data->touch_data.touch[data->touch_data.touch_num++];
+			output.x           = static_cast<uint16_t>(stroke[0] + t * (stroke[2] - stroke[0]));
+			output.y           = static_cast<uint16_t>(stroke[1] + t * (stroke[3] - stroke[1]));
+			output.id          = static_cast<uint8_t>(1 + swipe % 120);
 		}
 	}
 	data->connected              = connected;
