@@ -91,6 +91,7 @@ struct ConfigOptions {
 	bool                   pipeline_libraries_enabled  = true;
 	bool                   async_pipelines_enabled     = false;
 	uint32_t               pipeline_compile_threads    = 0;
+	bool                   dispatch_lookahead_enabled  = true;
 	bool                   relaxed_readback_enabled    = false;
 	bool                   fxaa_enabled                = false;
 	bool                   speculative_draws_enabled   = true;
@@ -181,6 +182,9 @@ void SetAsyncPipelinesEnabled(bool enabled);
 // Worker threads that build compute pipelines (the journal replay's, look-ahead prefetches and
 // dispatches'): the configured count, or by default all hardware threads but two, at least two.
 uint32_t PipelineCompileThreads();
+// Each submission is walked ahead for dispatches of shaders not dispatched yet, so their compute
+// pipelines start compiling before the dispatch needs them.
+bool DispatchLookaheadEnabled();
 // A game thread reading memory the GPU is still writing gets the previous bytes at once instead
 // of waiting, as on hardware when the CPU reads before the GPU has written; the new bytes follow
 // with the download already under way. Off by default: a value can be a frame old.

@@ -972,6 +972,8 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 	if (execution.m_buffer_stack.size() == 1 && execution.m_buffer_stack.back().offset_dw == 0) {
 		if (m_last_submission_created >= BurstPipelines && m_lookahead_draws_left == 0) {
 			RunPipelineLookahead(execution);
+		} else if (Config::DispatchLookaheadEnabled()) {
+			RunDispatchLookahead(execution);
 		}
 		m_submission_created_start = created;
 	}
@@ -1213,6 +1215,21 @@ void CommandProcessor::RunPipelineLookahead(const Pm4Execution& execution) {
 	pipelines.LogLookahead(draws, parts);
 }
 
+void CommandProcessor::RunDispatchLookahead(const Pm4Execution& execution) {
+	KYTY_PROFILER_FUNCTION();
+	DrainStats::WaitTimer walk_timer(DrainStats::Kind::Lookahead);
+	// Translates on this thread (ProgramWait::Wait), as the dispatch would, so the walk itself
+	// queues the pipeline; the compile then runs while the packets before the dispatch execute.
+	// The look-ahead state of RunPipelineLookahead is left alone.
+	uint32_t dispatches = 0;
+	uint32_t parts      = 0;
+	bool     pending    = false;
+	LookaheadPass(execution, ProgramWait::Wait, dispatches, parts, pending, true);
+	if (parts != 0) {
+		m_renderer.GetPipelineCache().LogLookahead(dispatches, parts);
+	}
+}
+
 bool CommandProcessor::LookaheadWorkFinished() const {
 	// All of it finished, or some of it and a walk costs little next to the time since the last.
 	constexpr auto MinInterval = std::chrono::milliseconds(16);
@@ -1225,7 +1242,8 @@ bool CommandProcessor::LookaheadWorkFinished() const {
 }
 
 void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait wait,
-                                     uint32_t& draws, uint32_t& parts, bool& pending) {
+                                     uint32_t& draws, uint32_t& parts, bool& pending,
+                                     bool dispatches_only) {
 	// Enough for a loading frame's draws; the walk costs a few microseconds per known draw.
 	constexpr uint32_t MaxDraws   = 256;
 	constexpr uint32_t MaxPackets = 1u << 16u;
@@ -1360,7 +1378,7 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 				}
 				break;
 			default:
-				if (IsDrawOpcode(opcode)) {
+				if (IsDrawOpcode(opcode) && !dispatches_only) {
 					draws++;
 					parts += pipelines.PrefetchGraphicsPipeline(shadow->m_ctx, shadow->m_sh_ctx,
 					                                            shadow->m_ucfg, wait, &pending);

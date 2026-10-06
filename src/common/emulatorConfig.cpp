@@ -247,6 +247,10 @@ uint32_t PipelineCompileThreads() {
 	return hardware > 4 ? hardware - 2 : 2;
 }
 
+bool DispatchLookaheadEnabled() {
+	return g_config->dispatch_lookahead_enabled;
+}
+
 static std::atomic<int> g_speculative_draws_override {-1};
 
 bool SpeculativeDrawsEnabled() {

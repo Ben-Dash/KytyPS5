@@ -21,6 +21,7 @@
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -235,7 +236,8 @@ public:
 	}
 	// Predicts the compute pipeline a dispatch with these registers and dispatch initiator will
 	// need, translating its shader (like PrefetchGraphicsPipeline), and compiles it on a worker
-	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued.
+	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued. A shader
+	// (address and wave size) a lookup already found a program for is skipped without a lookup.
 	uint32_t PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
 	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending);
 	// Prints a look-ahead's result with KYTY_PERMUTATION_LOG=1.
@@ -281,9 +283,9 @@ private:
 	std::unique_ptr<PipelineLibraryCache> m_libraries;
 	uint64_t                              m_graphics_pipelines_created = 0;
 	uint64_t                              m_compute_pipelines_created  = 0;
-	// Prefetched compute pipelines by program id: layouts made, pipeline compiling in the
-	// library cache under ComputePrefetchKey.
-	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_prefetched;
+	// Compute shaders (address, and bit 63 for wave32) a compute lookup found a program for, under
+	// m_mutex: PrefetchComputePipeline passes over them.
+	std::unordered_set<uint64_t> m_compute_sources;
 	// Who asked for a compute pipeline first, for the log line its first dispatch prints.
 	enum class ComputeOrigin : uint8_t { Replay, Prefetch, Sync };
 	// A compute pipeline compiling (or compiled) on m_compute_queue that no dispatch took yet.
@@ -328,6 +330,10 @@ private:
 	                       ComputeOrigin origin, bool urgent);
 	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
 	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
+	void        RequestDriverCacheWrite();
+	// One write at a time: the GPU thread's (graphics), a worker's (compute) and Save's.
+	std::mutex       m_driver_cache_write_mutex;
+	std::atomic_bool m_driver_cache_write_queued {false};
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);
