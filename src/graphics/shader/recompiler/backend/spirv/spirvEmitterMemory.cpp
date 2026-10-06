@@ -2437,11 +2437,13 @@ bool BdaNoWordMasksEnabled() {
 }
 
 bool BdaSingleCrossBranchEnabled() {
-	// KYTY_BDA_SINGLE_CROSS_BRANCH=0: element windows look up the second page and choose each DWORD's
-	// page with selects at every access. =2: the crossing block chooses with bit masks.
+	// KYTY_BDA_SINGLE_CROSS_BRANCH=1 (opt-in): one branch per element window on crossing a page;
+	// =2: the crossing block chooses pages with bit masks. Off by default: NVIDIA's compiler took
+	// longer with either (3e82 35.0 / 27.9 s, c089 88.3 / 87.4 s, 15f4 113.8 / 111.6 s) than with
+	// the second lookup and the per-DWORD page selects at every access (21.7, 71.7, 100.8 s).
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_BDA_SINGLE_CROSS_BRANCH");
-		return text == nullptr || std::strcmp(text, "0") != 0;
+		return text != nullptr && (std::strcmp(text, "1") == 0 || std::strcmp(text, "2") == 0);
 	}();
 	return enabled;
 }
