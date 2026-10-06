@@ -63,6 +63,16 @@ namespace {
 // descriptor indexing and --bindless asked for it.
 bool g_bindless_images = false;
 
+// Set while a look-ahead predicts a draw's or dispatch's programs: permutations it compiles are
+// journaled only once a real draw or dispatch uses them (see Permutation::unrecorded).
+thread_local bool t_speculative_lookup = false;
+
+struct SpeculativeLookup {
+	SpeculativeLookup() { t_speculative_lookup = true; }
+	~SpeculativeLookup() { t_speculative_lookup = false; }
+	KYTY_CLASS_NO_COPY(SpeculativeLookup);
+};
+
 // A compute shader as PipelineCache::m_compute_sources keys it: its address, and bit 63 for wave32.
 uint64_t ComputeSourceKey(const HW::ComputeShaderInfo& cs) {
 	return cs.cs_regs.data_addr | (cs.cs_regs.wave_size == 32u ? (uint64_t {1} << 63u) : 0u);
@@ -366,6 +376,9 @@ struct PipelineCache::ProgramCache {
 		ShaderRecompiler::IR::ResourceSpecialization specialization;
 		ShaderRecompiler::IR::CompiledShaderInfo     program;
 		ShaderProgram                                handle;
+		// Compiled by a speculative lookup (a look-ahead): its journal record, appended when a
+		// draw or dispatch first uses the permutation, so mispredictions stay out of the journal.
+		std::optional<ShaderPrecompile::PermutationRecord> unrecorded;
 	};
 
 	// A permutation's shader module and info, compiled on any thread.
@@ -739,6 +752,10 @@ struct PipelineCache::ProgramCache {
 			}
 			if (index < source.permutations.size()) {
 				auto& permutation       = source.permutations[index];
+				if (permutation.unrecorded && !t_speculative_lookup) [[unlikely]] {
+					(void)recording.Append(*permutation.unrecorded);
+					permutation.unrecorded.reset();
+				}
 				source.last_permutation = index;
 				source.last_push_cursor = push_data_cursor;
 				input_info.stage = {.program = &permutation.program, .resources = &source.resources};
@@ -897,11 +914,16 @@ struct PipelineCache::ProgramCache {
 		}
 		source.last_permutation = static_cast<uint32_t>(source.permutations.size() - 1u);
 		source.last_push_cursor = push_data_cursor;
-		const auto& permutation = source.permutations.back();
+		auto& permutation = source.permutations.back();
 		input_info.stage = {.program = &permutation.program, .resources = &source.resources};
 		if (recording.IsOpen()) {
-			(void)recording.Append(ShaderPrecompile::Capture(
-			    params, options, permutation.specialization, push_data_cursor, input_info));
+			auto record = ShaderPrecompile::Capture(params, options, permutation.specialization,
+			                                        push_data_cursor, input_info);
+			if (t_speculative_lookup) {
+				permutation.unrecorded = std::move(record);
+			} else {
+				(void)recording.Append(record);
+			}
 		}
 		permutation.program.bindings.AdvancePushData(push_data_cursor);
 
@@ -2405,6 +2427,7 @@ uint32_t PipelineCache::PrefetchGraphicsPipeline(const HW::Context& ctx, const H
                                                  const HW::UserConfig& user_config,
                                                  ProgramWait wait, bool* pending) {
 	KYTY_PROFILER_FUNCTION();
+	const SpeculativeLookup speculative;
 	if (m_libraries == nullptr || !Config::PipelineLibrariesEnabled()) {
 		return 0;
 	}
@@ -2504,6 +2527,7 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
                                                 uint32_t dispatch_initiator, ProgramWait wait,
                                                 bool* pending, const std::array<uint32_t, 3>* groups) {
 	KYTY_PROFILER_FUNCTION();
+	const SpeculativeLookup speculative;
 	// Compute pipelines need no pipeline libraries: they compile on m_compute_queue.
 	if (sh.GetCs().cs_regs.data_addr == 0) {
 		return 0;
