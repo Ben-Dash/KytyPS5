@@ -463,6 +463,11 @@ void CommandScheduler::MarkZoneThunk(void* context, vk::CommandBuffer buffer,
 	if (self->m_zone_chunk != UINT32_MAX && buffer == self->m_command.m_buffer) {
 		self->MarkZone(zone, key, pixels);
 	}
+	// Zones and checkpoints together: a run with KYTY_GPU_ZONES=1 used to record no checkpoints
+	// at all (Ghost of Yotei's device loss reported "0 entries").
+	if (self->m_graphics.checkpoints_enabled) {
+		CheckpointThunk(context, buffer, zone, key, pixels);
+	}
 }
 
 void CommandScheduler::CheckpointThunk(void* /*context*/, vk::CommandBuffer buffer,
