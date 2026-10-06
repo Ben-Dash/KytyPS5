@@ -2486,6 +2486,7 @@ private:
 		resource.loaded          = resource.loaded || !write;
 		resource.atomic          = resource.atomic || atomic;
 		resource.formatted       = resource.formatted || memory.formatted;
+		resource.unformatted     = resource.unformatted || !memory.formatted || memory.typed;
 		resource.scalar          = resource.scalar || op == ValueOpcode::ReadConstBuffer ||
 		                           memory.kind == ResourceKind::ScalarBuffer;
 	}
