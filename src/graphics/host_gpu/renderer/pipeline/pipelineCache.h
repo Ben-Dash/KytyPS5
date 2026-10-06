@@ -324,11 +324,13 @@ uint32_t PrefetchLibraryParts(GraphicContext& graphics, const PipelineRenderingS
                               bool* ready = nullptr);
 // Creates a compute pipeline's layouts and returns the call that creates the pipeline itself. That
 // call reads only its own copies, so it may run on another thread; it returns null on failure.
+// `prefetch` only labels the diagnostic output (a look-ahead compile on a library thread).
 Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&               graphics,
                                                             PipelineCache::Pipeline&      pipeline,
                                                             const ShaderComputeInputInfo& input_info,
                                                             vk::ShaderModule  compute_module,
-                                                            vk::PipelineCache driver_cache);
+                                                            vk::PipelineCache driver_cache,
+                                                            bool              prefetch = false);
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
                             vk::ShaderModule compute_module, vk::PipelineCache driver_cache);

@@ -2411,7 +2411,7 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	}
 	auto pipeline = std::make_unique<Pipeline>();
 	auto create   = PrepareComputePipeline(m_graphics, *pipeline, input_info, program.module,
-	                                       m_driver_cache);
+	                                       m_driver_cache, true);
 	if (!m_libraries->Prefetch(ComputePrefetchKey(program.id), std::move(create))) {
 		DestroyPipelineObjects(m_graphics, *pipeline);
 		return 0;
