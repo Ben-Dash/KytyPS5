@@ -581,20 +581,27 @@ private:
 			return;
 		}
 
-		std::vector<Range> out;
-		auto               edit_end = End(start, size);
-
-		for (const auto& r: m_ranges) {
-			auto r_end = End(r.start, r.size);
+		// The ranges are sorted and disjoint: only the run overlapping the edit is rebuilt, and
+		// merged with its neighbours. Rebuilding, sorting and copying every range on each call
+		// held Ghost of Yotei's movie playback at 0.1 fps (mprotect on thousands of ranges).
+		const auto edit_end = End(start, size);
+		auto       first    = LowerBound(start);
+		if (first != m_ranges.begin() && End(std::prev(first)->start, std::prev(first)->size) > start) {
+			--first;
+		}
+		auto               last = first;
+		std::vector<Range> pieces;
+		for (; last != m_ranges.end() && last->start < edit_end; ++last) {
+			const auto& r = *last;
 			if (!VirtualRangesOverlap(start, size, r.start, r.size)) {
-				out.push_back(r);
+				pieces.push_back(r);
 				continue;
 			}
+			const auto r_end     = End(r.start, r.size);
+			const auto mid_start = std::max(start, r.start);
+			const auto mid_end   = std::min(edit_end, r_end);
 
-			auto mid_start = std::max(start, r.start);
-			auto mid_end   = std::min(edit_end, r_end);
-
-			AddPiece(&out, r, r.start, mid_start);
+			AddPiece(&pieces, r, r.start, mid_start);
 
 			Range mid = r;
 			mid.start = mid_start;
@@ -603,13 +610,31 @@ private:
 				mid.offset += mid_start - r.start;
 			}
 			edit(&mid);
-			out.push_back(mid);
+			pieces.push_back(mid);
 
-			AddPiece(&out, r, mid_end, r_end);
+			AddPiece(&pieces, r, mid_end, r_end);
 		}
+		if (first == last) {
+			return;
+		}
+		const auto index = static_cast<size_t>(first - m_ranges.begin());
+		const auto at    = m_ranges.erase(first, last);
+		m_ranges.insert(at, pieces.begin(), pieces.end());
 
-		m_ranges = out;
-		MergeUnlocked();
+		// Merge from the left neighbour through the right neighbour of the new pieces.
+		size_t current = index > 0 ? index - 1 : 0;
+		size_t stop    = index + pieces.size();
+		while (current < stop && current + 1 < m_ranges.size()) {
+			auto& left  = m_ranges[current];
+			auto& right = m_ranges[current + 1];
+			if (End(left.start, left.size) == right.start && SameMergeKey(left, right)) {
+				left.size += right.size;
+				m_ranges.erase(m_ranges.begin() + static_cast<std::ptrdiff_t>(current + 1));
+				stop--;
+			} else {
+				current++;
+			}
+		}
 	}
 
 	bool RemoveUnlocked(uint64_t start, uint64_t size) {
