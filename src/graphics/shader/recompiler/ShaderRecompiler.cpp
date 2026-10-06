@@ -12,6 +12,7 @@
 #include "graphics/shader/recompiler/ir/passes/BindingLayout.h"
 #include "graphics/shader/recompiler/ir/passes/ConstantPropagation.h"
 #include "graphics/shader/recompiler/ir/passes/DeadCodeElimination.h"
+#include "graphics/shader/recompiler/ir/passes/ExecSelectSinking.h"
 #include "graphics/shader/recompiler/ir/passes/ReadLaneElimination.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceTracking.h"
@@ -495,6 +496,12 @@ bool HardwareStorageBufferBounds() {
 	return g_hardware_storage_buffer_bounds.load(std::memory_order_relaxed);
 }
 
+// KYTY_DEBUG_NO_SELECT_SINKING=1: keeps every VGPR write's EXEC select (A/B runs).
+static bool ExecSelectSinkingEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_NO_SELECT_SINKING") == nullptr;
+	return enabled;
+}
+
 // KYTY_DEBUG_DUMP_SPIRV=<hash>[,<hash>...]: the shaders whose RDNA2 code and SPIR-V get dumped.
 static bool DumpRequested(uint64_t shader_hash) {
 	static const std::vector<uint64_t> hashes = [] {
@@ -649,6 +656,16 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 		IR::ResolveControlFlowIdentities(ir);
 		IR::RemoveIdentities(ir.blocks);
 		IR::EliminateDeadCode(ir.blocks);
+	}
+	// After read-lane elimination, so the reads it turns lane-local no longer stop a chain.
+	if (ExecSelectSinkingEnabled()) {
+		const auto sinking = IR::SinkExecSelects(ir.blocks);
+		if (sinking.sunk != 0) {
+			LOGF("%s exec select sinking: selects=%" PRIu32 " sunk=%" PRIu32 "\n",
+			     GetDumpLabel(options), sinking.selects, sinking.sunk);
+			IR::RemoveIdentities(ir.blocks);
+			IR::EliminateDeadCode(ir.blocks);
+		}
 	}
 	LowerTessellationMemory(ir, options);
 	std::string cfg_dump;
