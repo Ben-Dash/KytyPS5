@@ -1,22 +1,28 @@
 #include "graphics/shader/recompiler/frontend/translate/Translator.h"
 
 #include <array>
+#include <span>
 #include <utility>
 
 namespace Libs::Graphics::ShaderRecompiler::Frontend {
 
 void Translator::PackedFloat16(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
                                bool accumulator, bool quiet_snan) {
-	// Native: one 16-bit float vector operation, rounded once as the hardware does. Min/max keep
-	// the F32 path below for its NaN and signed-zero rules; OMOD has no native form.
+	// Native: one 16-bit float vector operation, rounded once as the hardware does; min/max keep
+	// the F32 path's NaN and signed-zero rules. OMOD has no native form.
 	const auto native = opcode == IR::ValueOpcode::FPAdd32   ? IR::ValueOpcode::FPAddF16x2
 	                    : opcode == IR::ValueOpcode::FPMul32 ? IR::ValueOpcode::FPMulF16x2
 	                    : opcode == IR::ValueOpcode::FPFma32 ? IR::ValueOpcode::FPFmaF16x2
+	                    : opcode == IR::ValueOpcode::FPMin32 ? IR::ValueOpcode::FPMinF16x2
+	                    : opcode == IR::ValueOpcode::FPMax32 ? IR::ValueOpcode::FPMaxF16x2
 	                                                         : IR::ValueOpcode::Void;
-	if (native_float16 && native != IR::ValueOpcode::Void && !quiet_snan && inst.dst.omod == 0u) {
+	auto raw    = DestinationOperand(inst);
+	raw.omod    = 0u;
+	raw.clamp   = false;
+	IR::U32 result;
+	if (native_float16 && native != IR::ValueOpcode::Void && inst.dst.omod == 0u) {
 		const auto lhs = ReadPackedF16Bits(inst.src0);
 		const auto rhs = ReadPackedF16Bits(inst.src1);
-		IR::U32    result;
 		if (native == IR::ValueOpcode::FPFmaF16x2) {
 			const auto addend = ReadPackedF16Bits(accumulator ? inst.dst : inst.src2);
 			result            = IR::U32(ir.Emit(native, {lhs, rhs, addend}));
@@ -26,11 +32,6 @@ void Translator::PackedFloat16(const Decoder::Instruction& inst, IR::ValueOpcode
 		if (inst.dst.clamp) {
 			result = IR::U32(ir.Emit(IR::ValueOpcode::FPSaturateF16x2, {result}));
 		}
-		auto destination  = DestinationOperand(inst);
-		destination.omod  = 0u;
-		destination.clamp = false;
-		WriteOperand(destination, result);
-		return;
 	}
 	const auto translate_lane = [&](bool high) {
 		const auto lhs = ReadF16LaneAsF32(inst.src0, high);
@@ -45,10 +46,9 @@ void Translator::PackedFloat16(const Decoder::Instruction& inst, IR::ValueOpcode
 		}
 		return ApplyF32ResultModifiers(inst.dst, result);
 	};
-	auto raw    = DestinationOperand(inst);
-	raw.omod    = 0u;
-	raw.clamp   = false;
-	auto result = PackHalf2x16(translate_lane(false), translate_lane(true));
+	if (result.IsEmpty()) {
+		result = PackHalf2x16(translate_lane(false), translate_lane(true));
+	}
 	if (quiet_snan) {
 		const auto quiet_snan_lane = [&](const Decoder::Operand& operand, bool high) {
 			const auto bits     = ReadU16LaneAsU32(operand, high, false);
@@ -130,8 +130,43 @@ void Translator::Float16Trig(const Decoder::Instruction& inst, IR::ValueOpcode o
 	Write16Bits(DestinationOperand(inst), ir.Select(infinite, invalid, bits));
 }
 
+// Native FP16 add/mul/fma and min/max family on the low halves (see PackedFloat16); false when
+// not taken.
+bool Translator::NativeFloat16Scalar(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
+                                     std::span<const Decoder::Operand* const> sources) {
+	const auto native = opcode == IR::ValueOpcode::FPAdd32      ? IR::ValueOpcode::FPAddF16x2
+	                    : opcode == IR::ValueOpcode::FPMul32    ? IR::ValueOpcode::FPMulF16x2
+	                    : opcode == IR::ValueOpcode::FPFma32    ? IR::ValueOpcode::FPFmaF16x2
+	                    : opcode == IR::ValueOpcode::FPMin32    ? IR::ValueOpcode::FPMinF16x2
+	                    : opcode == IR::ValueOpcode::FPMax32    ? IR::ValueOpcode::FPMaxF16x2
+	                    : opcode == IR::ValueOpcode::FPMinTri32 ? IR::ValueOpcode::FPMinTriF16x2
+	                    : opcode == IR::ValueOpcode::FPMaxTri32 ? IR::ValueOpcode::FPMaxTriF16x2
+	                    : opcode == IR::ValueOpcode::FPMedTri32 ? IR::ValueOpcode::FPMedTriF16x2
+	                                                            : IR::ValueOpcode::Void;
+	if (!native_float16 || native == IR::ValueOpcode::Void || inst.dst.omod != 0u) {
+		return false;
+	}
+	// The selected half of each source in the low half; the high half computes on zeros.
+	std::array<IR::Value, 3> args;
+	for (size_t index = 0; index < sources.size(); index++) {
+		args[index] = Read16LaneBits(*sources[index], false);
+	}
+	auto result = sources.size() == 2u ? IR::U32(ir.Emit(native, {args[0], args[1]}))
+	                                   : IR::U32(ir.Emit(native, {args[0], args[1], args[2]}));
+	if (inst.dst.clamp) {
+		result = IR::U32(ir.Emit(IR::ValueOpcode::FPSaturateF16x2, {result}));
+	}
+	Write16Bits(DestinationOperand(inst), result);
+	return true;
+}
+
 void Translator::Float16Binary(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
                                bool reverse) {
+	const std::array<const Decoder::Operand*, 2> sources {reverse ? &inst.src1 : &inst.src0,
+	                                                      reverse ? &inst.src0 : &inst.src1};
+	if (NativeFloat16Scalar(inst, opcode, sources)) {
+		return;
+	}
 	const auto lhs = ReadF16AsF32(reverse ? inst.src1 : inst.src0);
 	const auto rhs = ReadF16AsF32(reverse ? inst.src0 : inst.src1);
 	WriteF16(DestinationOperand(inst), IR::F32(ir.Emit(opcode, {lhs, rhs})));
@@ -139,6 +174,13 @@ void Translator::Float16Binary(const Decoder::Instruction& inst, IR::ValueOpcode
 
 void Translator::Float16Ternary(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
                                 bool accumulator, bool mix) {
+	if (!mix) {
+		const std::array<const Decoder::Operand*, 3> sources {
+		    &SourceAt(inst, 0), &SourceAt(inst, 1), accumulator ? &inst.dst : &SourceAt(inst, 2)};
+		if (NativeFloat16Scalar(inst, opcode, sources)) {
+			return;
+		}
+	}
 	std::array<IR::Value, 3> args;
 	for (uint32_t index = 0; index < args.size(); index++) {
 		const auto& operand = accumulator && index == 2u ? inst.dst : SourceAt(inst, index);

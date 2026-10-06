@@ -292,7 +292,12 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 			requirements.float16 |= inst.GetOpcode() == IR::ValueOpcode::FPAddF16x2 ||
 			                        inst.GetOpcode() == IR::ValueOpcode::FPMulF16x2 ||
 			                        inst.GetOpcode() == IR::ValueOpcode::FPFmaF16x2 ||
-			                        inst.GetOpcode() == IR::ValueOpcode::FPSaturateF16x2;
+			                        inst.GetOpcode() == IR::ValueOpcode::FPSaturateF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMinF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMaxF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMinTriF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMaxTriF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMedTriF16x2;
 			if (IR::BufferAccessOf(inst.GetOpcode()) == IR::BufferAccess::Atomic &&
 			    inst.GetType() == IR::Type::U64) {
 				requirements.buffer_int64_atomics = true;

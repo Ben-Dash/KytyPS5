@@ -220,6 +220,8 @@ private:
 	void V_CVT_PKNORM_F32(const Decoder::Instruction& inst, IR::ValueOpcode opcode);
 	void V_CVT_PK_U8_F32(const Decoder::Instruction& inst);
 	void V_PACK_B32_F16(const Decoder::Instruction& inst);
+	bool NativeFloat16Scalar(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
+	                         std::span<const Decoder::Operand* const> sources);
 	void PackedFloat16(const Decoder::Instruction& inst, IR::ValueOpcode opcode, bool accumulator,
 	                   bool quiet_snan);
 	void Float16Unary(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
