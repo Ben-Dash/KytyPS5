@@ -1196,7 +1196,8 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
                                                             PipelineCache::Pipeline&      pipeline,
                                                             const ShaderComputeInputInfo& input_info,
                                                             vk::ShaderModule  compute_module,
-                                                            vk::PipelineCache driver_cache) {
+                                                            vk::PipelineCache driver_cache,
+                                                            bool              prefetch) {
 	EXIT_IF(compute_module == nullptr);
 	EXIT_IF(!input_info.stage);
 
@@ -1207,6 +1208,15 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 	CreateDescriptorLayout(graphics, pipeline, descriptor_bindings);
 	const vk::PushConstantRange push_constants {vk::ShaderStageFlagBits::eCompute, 0,
 	                                            ShaderRecompiler::IR::NativePushConstantSize};
+	// For the creation-feedback line below: what the pipeline layout is made of.
+	uint64_t layout_hash = pipeline.uses_bindless ? 0x9e3779b97f4a7c15ull : 0xcbf29ce484222325ull;
+	for (const auto& binding: descriptor_bindings) {
+		for (const uint64_t word: {uint64_t {binding.binding}, uint64_t(binding.descriptorType),
+		                           uint64_t {binding.descriptorCount},
+		                           uint64_t(static_cast<VkShaderStageFlags>(binding.stageFlags))}) {
+			layout_hash = (layout_hash ^ word) * 0x100000001b3ull;
+		}
+	}
 
 	// Set 0 is the shader's own descriptors. A bindless shader also gets the shared bindless table
 	// at set 2 (as in graphics pipelines) behind an empty set 1.
@@ -1235,9 +1245,17 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 	                               wave_size <= graphics.max_subgroup_size;
 	const auto shader_hash = input_info.stage.program->shader_hash;
 	return [&graphics, layout = pipeline.pipeline_layout, compute_module, driver_cache, wave_size,
-	        required_subgroup, shader_hash] {
+	        required_subgroup, shader_hash, prefetch, layout_hash] {
 		vk::PipelineShaderStageRequiredSubgroupSizeCreateInfo subgroup_size {};
 		vk::ComputePipelineCreateInfo                         info {};
+		// Whether the driver took the pipeline from driver_cache (core in Vulkan 1.3).
+		vk::PipelineCreationFeedback           feedback {};
+		vk::PipelineCreationFeedback           stage_feedback {};
+		vk::PipelineCreationFeedbackCreateInfo feedback_info {};
+		feedback_info.pPipelineCreationFeedback          = &feedback;
+		feedback_info.pipelineStageCreationFeedbackCount = 1;
+		feedback_info.pPipelineStageCreationFeedbacks    = &stage_feedback;
+		info.pNext                                       = &feedback_info;
 		info.stage.stage  = vk::ShaderStageFlagBits::eCompute;
 		info.stage.module = compute_module;
 		info.stage.pName  = "main";
@@ -1269,9 +1287,21 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 		// Driver compiles that stall the game for seconds name their shader on the console.
 		const auto seconds =
 		    std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-		if (seconds >= 5.0) {
-			std::printf("PipelineCache: compute pipeline %016llx took %.1f s in the driver\n",
-			            static_cast<unsigned long long>(shader_hash), seconds);
+		// KYTY_DEBUG_PIPELINE_FEEDBACK=1: every compute pipeline, with the driver's cache verdict.
+		static const bool feedback_log = KYTY_GETENV("KYTY_DEBUG_PIPELINE_FEEDBACK") != nullptr;
+		if (seconds >= 5.0 || feedback_log) {
+			const auto flag = [](const vk::PipelineCreationFeedback& value,
+			                     vk::PipelineCreationFeedbackFlagBits bit) {
+				return (value.flags & vk::PipelineCreationFeedbackFlagBits::eValid) ? ((value.flags & bit) ? 1 : 0)
+				                                                                     : -1;
+			};
+			std::printf("PipelineCache: compute pipeline %016llx took %.1f s in the driver "
+			            "(cache_hit=%d stage_hit=%d prefetch=%d layout=%016llx)\n",
+			            static_cast<unsigned long long>(shader_hash), seconds,
+			            flag(feedback, vk::PipelineCreationFeedbackFlagBits::eApplicationPipelineCacheHit),
+			            flag(stage_feedback,
+			                 vk::PipelineCreationFeedbackFlagBits::eApplicationPipelineCacheHit),
+			            prefetch ? 1 : 0, static_cast<unsigned long long>(layout_hash));
 			std::fflush(stdout);
 		}
 		return pipeline;

@@ -40,8 +40,12 @@ public:
 	static constexpr uint32_t CACHING_PAGEBITS  = 14;
 	static constexpr uint64_t CACHING_PAGESIZE  = uint64_t {1} << CACHING_PAGEBITS;
 	static constexpr uint64_t CACHING_NUMPAGES  = (LOWER_ADDRESS_SIZE + LibKernel::Memory::kExtendedMemorySize) >> CACHING_PAGEBITS;
+	// The entry after the last page holds the zero page's device address: shaders read it once and
+	// load from the zero page where a page is not mapped, instead of branching around the load.
+	// Unmapped pages keep entry 0, so stores and atomics still see them as not mapped.
+	static constexpr uint64_t BDA_ZERO_PAGE_ENTRY = CACHING_NUMPAGES;
 	static constexpr uint64_t BDA_PAGETABLE_SIZE =
-	    CACHING_NUMPAGES * sizeof(vk::DeviceAddress);
+	    (CACHING_NUMPAGES + 1) * sizeof(vk::DeviceAddress);
 
 	static constexpr uint64_t PageIndex(uint64_t address) {
 		return (address < LOWER_ADDRESS_SIZE
@@ -195,6 +199,7 @@ private:
 	// Whether a recorded download of these bytes has not finished publishing.
 	[[nodiscard]] bool InFlightIntersects(uint64_t vaddr, uint64_t size);
 	void               PruneInFlight();
+	void               EnsureBdaZeroPage();
 	[[nodiscard]] bool SynchronizeBdaWord(size_t word, const RangeSet& mapped);
 	[[nodiscard]] bool SynchronizeBdaRegion(uint64_t region, const RangeSet& mapped);
 	[[nodiscard]] bool SynchronizeDirtyOwners(const RegionBits& dirty, uint64_t region_begin,
@@ -205,6 +210,9 @@ private:
 	FaultManager                                      m_fault_manager;
 	Buffer                                            m_gds_buffer;
 	Buffer                                            m_bda_pagetable_buffer;
+	// Never registered, so never evicted, unmapped or overlapped by a game buffer.
+	Buffer                                            m_bda_zero_page;
+	bool                                              m_bda_zero_page_written = false;
 	Common::SlotVector<Buffer>                        m_slot_buffers;
 	Common::LeastRecentlyUsedCache<BufferId, uint64_t> m_lru_cache;
 	BufferMap                                         m_buffers;

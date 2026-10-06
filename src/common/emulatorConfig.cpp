@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <memory>
+#include <thread>
 
 namespace Config {
 
@@ -236,6 +237,22 @@ bool AsyncPipelinesEnabled() {
 
 void SetAsyncPipelinesEnabled(bool enabled) {
 	g_async_pipelines_override.store(enabled ? 1 : 0, std::memory_order_relaxed);
+}
+
+uint32_t PipelineCompileThreads() {
+	if (g_config->pipeline_compile_threads != 0) {
+		return g_config->pipeline_compile_threads;
+	}
+	const auto hardware = std::thread::hardware_concurrency();
+	return hardware > 4 ? hardware - 2 : 2;
+}
+
+bool DispatchLookaheadEnabled() {
+	return g_config->dispatch_lookahead_enabled;
+}
+
+bool DeferDispatchesEnabled() {
+	return g_config->defer_dispatches_enabled;
 }
 
 static std::atomic<int> g_speculative_draws_override {-1};

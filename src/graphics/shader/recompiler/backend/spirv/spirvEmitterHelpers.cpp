@@ -1,6 +1,12 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
 #include "common/switches.h"
 
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <mutex>
+#include <string>
+
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 
 DppTargetLane EmitDppPermTargetLane(EmitterState& state, uint32_t subid, uint32_t control,
@@ -347,6 +353,28 @@ uint32_t EmitBallotLaneActiveBool(EmitterState& state, uint32_t active_ballot, u
 	                          ConstantU32(state, state.program.wave_size));
 	state.builder.AddFunction(spv::OpLogicalAnd, TypeBool(state), ret, active, in_range);
 	return ret;
+}
+
+void CountSelectSite(const std::source_location& where) {
+	static const bool enabled = std::getenv("KYTY_DEBUG_SELECT_SITES") != nullptr;
+	if (!enabled) return;
+	static std::mutex                      mutex;
+	static std::map<std::string, uint64_t> counts;
+	static const bool                      registered = [] {
+		std::atexit([] {
+			std::lock_guard lock(mutex);
+			for (const auto& [site, count]: counts)
+				std::fprintf(stderr, "select site %8llu %s\n", static_cast<unsigned long long>(count),
+				             site.c_str());
+		});
+		return true;
+	}();
+	(void)registered;
+	std::string site = where.file_name();
+	site = site.substr(site.find_last_of("/\\") + 1) + ":" + std::to_string(where.line()) + " " +
+	       where.function_name();
+	std::lock_guard lock(mutex);
+	counts[site]++;
 }
 
 } // namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter

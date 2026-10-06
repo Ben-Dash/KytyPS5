@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <variant>
 #include <vector>
@@ -52,6 +53,11 @@ PermutationRecord Capture(const ShaderParams&                                 pa
 // representation, padding, runtime pointers, or vertex descriptor/buffer addresses.
 bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes);
 bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record);
+
+// Reads every valid record of a journal without opening it for appending or checking its key
+// (offline tools); `key` receives the journal's key. Stops at the first damaged record.
+std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path,
+                                           std::string*                 key = nullptr);
 
 // A journal belongs to one PipelineCache; its caller serializes Append/Close with that cache.
 // Open validates the header/checksums and repairs a torn tail before permitting appends. A

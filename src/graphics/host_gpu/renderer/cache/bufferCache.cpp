@@ -306,6 +306,8 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
       m_gds_buffer(graphics, scheduler, MemoryUsage::Stream, 0, AllFlags, GdsBufferSize),
       m_bda_pagetable_buffer(graphics, scheduler, MemoryUsage::DeviceLocal, 0, AllFlags,
                              BDA_PAGETABLE_SIZE),
+      m_bda_zero_page(graphics, scheduler, MemoryUsage::DeviceLocal, 0,
+                      AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress, CACHING_PAGESIZE),
       m_memory_tracker(page_manager),
       m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, 512 * MiB),
       m_stream_buffer(graphics, scheduler, MemoryUsage::Stream, 64 * MiB, {},
@@ -319,6 +321,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	m_gds_buffer.Flush(0, m_gds_buffer.Size());
 	SetVulkanObjectNameF(m_graphics.device, m_bda_pagetable_buffer.Handle(),
 	                     "BDA Page Table Buffer");
+	SetVulkanObjectNameF(m_graphics.device, m_bda_zero_page.Handle(), "BDA Zero Page");
 	const auto null_id =
 	    m_slot_buffers.insert(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0, AllFlags, 16);
 	EXIT_IF(null_id != NULL_BUFFER_ID);
@@ -1756,8 +1759,24 @@ void BufferCache::PublishBdaHints(uint64_t vaddr, uint64_t size) noexcept {
 	m_memory_tracker.PublishBdaHints(vaddr, size);
 }
 
+// The zero page and its table entry, before the first draw or dispatch that uses the table: the
+// first PrepareBda always synchronizes (its epoch starts behind), through this or the selective
+// pass. The scheduler is not recording yet when the cache is constructed.
+void BufferCache::EnsureBdaZeroPage() {
+	if (m_bda_zero_page_written) {
+		return;
+	}
+	m_bda_zero_page_written = true;
+	m_bda_zero_page.Fill(0, m_bda_zero_page.Size(), 0);
+	const vk::DeviceAddress address = m_bda_zero_page.BufferDeviceAddress();
+	EXIT_IF(address == 0);
+	WriteDataBuffer(m_bda_pagetable_buffer, BDA_ZERO_PAGE_ENTRY * sizeof(vk::DeviceAddress), &address,
+	                sizeof(address));
+}
+
 void BufferCache::SynchronizeBdaLegacy(const RangeSet& mapped) {
 	const UploadSourceScope upload_source(UploadSource::Bda);
+	EnsureBdaZeroPage();
 	// Clear before the full walk so writes racing with the walk stay pending. Summaries go
 	// first: a hint published in between re-sets its summary bit for the next pass.
 	for (size_t summary = 0; summary < MemoryTracker::BDA_SUMMARY_WORDS; ++summary) {
@@ -1772,6 +1791,7 @@ void BufferCache::SynchronizeBdaLegacy(const RangeSet& mapped) {
 
 bool BufferCache::SynchronizeBdaSelective(const RangeSet& mapped) {
 	const UploadSourceScope upload_source(UploadSource::Bda);
+	EnsureBdaZeroPage();
 	for (size_t summary = 0; summary < MemoryTracker::BDA_SUMMARY_WORDS; ++summary) {
 		uint64_t words = m_memory_tracker.ConsumeBdaSummaryWord(summary);
 		// On failure, words not yet visited keep their hint bits; restore their summary bits.

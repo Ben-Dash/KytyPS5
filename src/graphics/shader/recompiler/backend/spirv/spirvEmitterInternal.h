@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <source_location>
 #include <vector>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
@@ -128,6 +129,9 @@ struct EmitterState {
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
 	uint32_t                                         bda_pointer_function    = 0;
+	// get_bda_load_pointer and the zero page's address read at entry (KYTY_BDA_ZERO_PAGE).
+	uint32_t                                         bda_load_pointer_function = 0;
+	uint32_t                                         bda_zero_page_variable    = 0;
 	uint32_t                                         bvh_intersect_function  = 0;
 	uint32_t                                         gds_variable            = 0;
 	uint32_t                                         gds_length              = 0;
@@ -192,6 +196,16 @@ struct EmitterState {
 		uint32_t function   = 0;
 	};
 	std::vector<IndirectFormattedHelper>             indirect_formatted_helpers;
+	// The index-independent values of a GPU-selected V# (with its SOFFSET), computed at its first
+	// access in a block and reused by later accesses in the same block (KYTY_INDIRECT_BOUNDS_ONCE).
+	struct IndirectVsharpValues {
+		std::array<uint32_t, 5> key {}; // V# words, SOFFSET
+		uint32_t stride = 0, swizzle = 0, not_swizzle = 0, lane_add = 0, index_stride = 0, base = 0;
+		uint32_t format = 0, mode = 0, records = 0, raw_records = 0, scalar_in_bounds = 0;
+		uint32_t mode0 = 0, mode1 = 0, mode2_nonzero = 0, size = 0, base_limit = 0, raw_static = 0;
+	};
+	std::vector<IndirectVsharpValues>                indirect_vsharp_cache;
+	uint32_t                                         indirect_vsharp_label = 0;
 	std::unordered_map<const IR::Block*, uint32_t>   labels;
 	// Long select(index == constant, ...) chains (V_MOVRELS reads) become one OpSwitch at their
 	// outermost select; their inner selects emit nothing (see EmitIndexedSelect).
@@ -266,8 +280,13 @@ inline uint32_t Binary(EmitterState& state, spv::Op opcode, uint32_t type, uint3
 	return result;
 }
 
+// KYTY_DEBUG_SELECT_SITES=1 (diagnostic): counts emitted selects per call site.
+void CountSelectSite(const std::source_location& where);
+
 inline uint32_t Select(EmitterState& state, uint32_t type, uint32_t condition, uint32_t true_value,
-                       uint32_t false_value) {
+                       uint32_t false_value,
+                       const std::source_location& where = std::source_location::current()) {
+	CountSelectSite(where);
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpSelect, type, result, condition, true_value, false_value);
 	return result;
@@ -591,6 +610,13 @@ void DefineGetBdaPointer(EmitterState& state);
 void EmitIndirectFormattedHelpers(EmitterState& state);
 void DefineBvhIntersect(EmitterState& state);
 uint32_t GetBdaPointer(EmitterState& state, uint32_t address);
+// A readable device address for a load by guest address: inside the zero page where the page is
+// not mapped. `active` gates only the fault record. Without the zero page, GetBdaPointer.
+uint32_t GetBdaLoadPointer(EmitterState& state, uint32_t address, uint32_t active);
+bool     BdaZeroPageEnabled();
+bool     BdaFastDwordEnabled();
+bool     BdaNoWordMasksEnabled();
+void     EmitBdaZeroPageInit(EmitterState& state);
 uint32_t ConstantDeviceAddress(EmitterState& state, uint64_t value);
 uint32_t DeviceAddressFromWords(EmitterState& state, uint32_t low, uint32_t high);
 
