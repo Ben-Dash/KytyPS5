@@ -128,6 +128,9 @@ struct EmitterState {
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
 	uint32_t                                         bda_pointer_function    = 0;
+	// get_bda_load_pointer and the zero page's address read at entry (KYTY_BDA_ZERO_PAGE).
+	uint32_t                                         bda_load_pointer_function = 0;
+	uint32_t                                         bda_zero_page_variable    = 0;
 	uint32_t                                         bvh_intersect_function  = 0;
 	uint32_t                                         gds_variable            = 0;
 	uint32_t                                         gds_length              = 0;
@@ -591,6 +594,11 @@ void DefineGetBdaPointer(EmitterState& state);
 void EmitIndirectFormattedHelpers(EmitterState& state);
 void DefineBvhIntersect(EmitterState& state);
 uint32_t GetBdaPointer(EmitterState& state, uint32_t address);
+// A readable device address for a load by guest address: inside the zero page where the page is
+// not mapped. `active` gates only the fault record. Without the zero page, GetBdaPointer.
+uint32_t GetBdaLoadPointer(EmitterState& state, uint32_t address, uint32_t active);
+bool     BdaZeroPageEnabled();
+void     EmitBdaZeroPageInit(EmitterState& state);
 uint32_t ConstantDeviceAddress(EmitterState& state, uint64_t value);
 uint32_t DeviceAddressFromWords(EmitterState& state, uint32_t low, uint32_t high);
 

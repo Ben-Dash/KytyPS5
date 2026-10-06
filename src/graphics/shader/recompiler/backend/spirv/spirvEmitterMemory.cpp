@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cstring>
 #include <utility>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
@@ -210,8 +211,25 @@ void RecordBdaFault(EmitterState& state, uint32_t page) {
 	                          ConstantU32(state, spv::MemorySemanticsMaskNone), bit);
 }
 
-uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address) {
-	auto&      state   = ctx.state;
+// A dword load by guest address; zero where `active` (default true) is false or the page is not
+// mapped. With the zero page there is no branch: an unmapped or inactive lane reads a valid
+// address and its value is replaced by zero.
+uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t active = 0) {
+	auto& state = ctx.state;
+	if (state.bda_load_pointer_function != 0) {
+		const auto always  = active == 0 || active == ConstantBool(state, true);
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(
+		    spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), pointer,
+		    GetBdaLoadPointer(state, address, always ? ConstantBool(state, true) : active));
+		const auto value = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer,
+		                          spv::MemoryAccessAlignedMask, uint32_t {4});
+		return always ? value : Select(state, TypeU32(state), active, value, ConstantU32(state, 0));
+	}
+	if (active != 0 && active != ConstantBool(state, true)) {
+		return EmitValueOrZeroIfCondition(state, active, [&]() { return LoadBdaDword(ctx, address); });
+	}
 	const auto bda     = GetBdaPointer(state, address);
 	const auto present =
 	    Binary(state, spv::OpINotEqual, TypeBool(state), bda, ConstantDeviceAddress(state, 0));
@@ -950,14 +968,19 @@ uint32_t LoadIndirectScalarBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 	    ConstantDeviceAddress(state, ctx.Memory(inst).offset & ~3u));
 	const auto end = Binary(state, spv::OpIAdd, TypeScalarU64(state), offset,
 	                        ConstantDeviceAddress(state, sizeof(uint32_t)));
-	return EmitValueOrZeroIfCondition(
-	    state, Binary(state, spv::OpULessThanEqual, TypeBool(state), end, size), [&]() {
-		    const auto base = DeviceAddressFromWords(
-		        state, Binary(state, spv::OpBitwiseAnd, TypeU32(state), ctx.Arg(handle, 0),
-		                      ConstantU32(state, ~3u)),
-		        Binary(state, spv::OpBitwiseAnd, TypeU32(state), word1, ConstantU32(state, 0xffffu)));
-		    return LoadBdaDword(ctx, Binary(state, spv::OpIAdd, TypeScalarU64(state), base, offset));
-	    });
+	const auto in_bounds = Binary(state, spv::OpULessThanEqual, TypeBool(state), end, size);
+	const auto address   = [&]() {
+		const auto base = DeviceAddressFromWords(
+		    state, Binary(state, spv::OpBitwiseAnd, TypeU32(state), ctx.Arg(handle, 0),
+		                  ConstantU32(state, ~3u)),
+		    Binary(state, spv::OpBitwiseAnd, TypeU32(state), word1, ConstantU32(state, 0xffffu)));
+		return Binary(state, spv::OpIAdd, TypeScalarU64(state), base, offset);
+	};
+	if (state.bda_load_pointer_function != 0) {
+		return LoadBdaDword(ctx, address(), in_bounds);
+	}
+	return EmitValueOrZeroIfCondition(state, in_bounds,
+	                                  [&]() { return LoadBdaDword(ctx, address()); });
 }
 
 // A formatted load through a GPU-selected V#: the format comes from the descriptor at run time
@@ -965,21 +988,69 @@ uint32_t LoadIndirectScalarBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 // aligned start, with one address translation (two when the element crosses a page).
 // The DWORDs an element of `bytes` bytes at a guest address covers: up to five from the aligned
 // start, through one address translation (two when the element crosses a buffer-cache page).
-// usable[i]: the DWORD belongs to the element, is mapped, and `active` holds.
+// usable[i]: the DWORD belongs to the element, is mapped, and `active` holds. With the zero page
+// (`zero_page`) every pointer is readable and usable[i] does not test the mapping: an unmapped
+// page reads zeros.
 struct ElementWords {
 	uint32_t                misalign;
 	uint32_t                first_page;
 	uint32_t                second_page;
 	uint32_t                count;
+	bool                    zero_page;
 	std::array<uint32_t, 5> pointer;
 	std::array<uint32_t, 5> usable;
 };
 
+// `load`: the words are only read, so the lookups may go through the zero page. `dword_aligned`:
+// the address is known to be a multiple of 4; a single aligned DWORD never crosses a page and
+// needs no second lookup.
 ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t bytes, uint32_t active,
-                             uint32_t count = 5) {
+                             uint32_t count = 5, bool load = false, bool dword_aligned = false) {
 	const auto u32 = TypeU32(state);
 	const auto u64 = TypeScalarU64(state);
 	ElementWords result {};
+	result.zero_page = load && state.bda_load_pointer_function != 0;
+	if (result.zero_page) {
+		const auto single = dword_aligned && bytes == ConstantU32(state, 4u);
+		result.misalign   = dword_aligned ? ConstantU32(state, 0)
+		                                  : Binary(state, spv::OpBitwiseAnd, u32,
+		                                           Unary(state, spv::OpUConvert, u32, address),
+		                                           ConstantU32(state, 3));
+		const auto aligned = dword_aligned ? address
+		                                   : Binary(state, spv::OpBitwiseAnd, u64, address,
+		                                            ConstantDeviceAddress(state, ~uint64_t {3}));
+		result.count = std::min<uint32_t>(single ? 1u : count, static_cast<uint32_t>(result.pointer.size()));
+		result.first_page  = GetBdaLoadPointer(state, aligned, active);
+		result.second_page = result.first_page;
+		if (single) {
+			result.pointer[0] = result.first_page;
+			result.usable[0]  = active;
+			return result;
+		}
+		const auto need = Binary(state, spv::OpIAdd, u32, result.misalign, bytes);
+		constexpr auto PageSize = static_cast<uint32_t>(BufferCache::CACHING_PAGESIZE);
+		const auto in_page    = Binary(state, spv::OpBitwiseAnd, u32, Unary(state, spv::OpUConvert, u32, aligned),
+		                               ConstantU32(state, PageSize - 1u));
+		const auto first_room = Binary(state, spv::OpISub, u32, ConstantU32(state, PageSize), in_page);
+		const auto crosses    = Binary(state, spv::OpUGreaterThan, TypeBool(state), need, first_room);
+		result.second_page    = GetBdaLoadPointer(
+		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
+		    AndCondition(state, active, crosses));
+		for (uint32_t word = 0; word < result.count; ++word) {
+			const auto offset   = ConstantU32(state, word * 4u);
+			const auto in_first = Binary(state, spv::OpULessThan, TypeBool(state), offset, first_room);
+			result.pointer[word] = Select(
+			    state, u64, in_first,
+			    Binary(state, spv::OpIAdd, u64, result.first_page, Unary(state, spv::OpUConvert, u64, offset)),
+			    Binary(state, spv::OpIAdd, u64, result.second_page,
+			           Unary(state, spv::OpUConvert, u64, Binary(state, spv::OpISub, u32, offset, first_room))));
+			result.usable[word] = word == 0u ? active
+			                                 : AndCondition(state, active,
+			                                                Binary(state, spv::OpULessThan, TypeBool(state),
+			                                                       offset, need));
+		}
+		return result;
+	}
 	result.misalign = Binary(state, spv::OpBitwiseAnd, u32, Unary(state, spv::OpUConvert, u32, address),
 	                         ConstantU32(state, 3));
 	const auto aligned = Binary(state, spv::OpBitwiseAnd, u64, address,
@@ -1023,10 +1094,28 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 // instead of one branch per word: a word that is not usable reads the element's first mapped
 // DWORD, a valid address, and gives zero. A branch and a page lookup per DWORD made Yotei's
 // buffer-heavy compute shaders take minutes in NVIDIA's compiler (cs bc8eaa9cea77f9c3).
+// With the zero page every pointer is readable and there is no branch at all. Words past
+// window.count are zero.
 std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
                                          const std::array<uint32_t, 5>& usable) {
 	const auto u32    = TypeU32(state);
 	const auto u64    = TypeScalarU64(state);
+	std::array<uint32_t, 5> result {};
+	result.fill(ConstantU32(state, 0));
+	if (window.zero_page) {
+		for (uint32_t word = 0; word < window.count; ++word) {
+			const auto physical = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalU32Pointer(state), physical,
+			                          window.pointer[word]);
+			const auto value = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
+			                          uint32_t {4});
+			result[word] = usable[word] == ConstantBool(state, true)
+			                   ? value
+			                   : Select(state, u32, usable[word], value, ConstantU32(state, 0));
+		}
+		return result;
+	}
 	const auto zero64 = ConstantDeviceAddress(state, 0);
 	const auto safe   = Select(state, u64,
 	                           Binary(state, spv::OpINotEqual, TypeBool(state), window.first_page, zero64),
@@ -1051,7 +1140,6 @@ std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords
 	const auto then_exit = state.current_label;
 	state.builder.AddFunction(spv::OpBranch, merge_label);
 	EmitLabel(state, merge_label);
-	std::array<uint32_t, 5> result {};
 	for (uint32_t word = 0; word < window.count; ++word) {
 		result[word] = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpPhi, u32, result[word], loaded[word], then_exit,
@@ -1064,7 +1152,7 @@ std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords
 // the bytes do not cover, or that is not mapped, is zero.
 std::array<uint32_t, 2> LoadElementWordPair(EmitterState& state, uint32_t address, uint32_t bytes,
                                             uint32_t active) {
-	const auto window = MapElementWords(state, address, bytes, active, 2u);
+	const auto window = MapElementWords(state, address, bytes, active, 2u, true);
 	const auto words  = LoadElementWords(state, window, window.usable);
 	return {words[0], words[1]};
 }
@@ -1256,7 +1344,7 @@ uint32_t LoadIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_
 		               : Binary(state, spv::OpLogicalOr, TypeBool(state), any, in_bounds[component]);
 	}
 	const auto window =
-	    MapElementWords(state, base, ConstantU32(state, components * 4u), any, components);
+	    MapElementWords(state, base, ConstantU32(state, components * 4u), any, components, true, true);
 	std::array<uint32_t, 5> usable {};
 	for (uint32_t component = 0; component < components; ++component) {
 		usable[component] = AndCondition(state, window.usable[component], in_bounds[component]);
@@ -1520,7 +1608,7 @@ uint32_t LoadIndirectFormattedBody(EmitterState& state, const IndirectBufferOper
 	const auto reading = AndCondition(
 	    state, AndCondition(state, info.valid, any_read),
 	    IndirectBufferInBoundsBytes(state, buffer, 0u, byte_size, true));
-	const auto window   = MapElementWords(state, buffer.address, byte_size, reading);
+	const auto window   = MapElementWords(state, buffer.address, byte_size, reading, 5u, true);
 	const auto misalign = window.misalign;
 	const auto element  = LoadElementWords(state, window, window.usable);
 	const auto pick = [&](uint32_t index) {
@@ -2026,19 +2114,49 @@ uint32_t GetBdaPointer(EmitterState& state, uint32_t address) {
 	return result;
 }
 
-void DefineGetBdaPointer(EmitterState& state) {
-	if (!state.program.info.uses_dma) {
-		return;
+uint32_t GetBdaLoadPointer(EmitterState& state, uint32_t address, uint32_t active) {
+	if (state.bda_load_pointer_function == 0) {
+		const auto pointer = GetBdaPointer(state, address);
+		(void)active;
+		return pointer;
 	}
-	const auto type            = TypeScalarU64(state);
-	const auto function_type   = state.builder.Type(spv::OpTypeFunction, type, type);
-	state.bda_pointer_function = state.builder.AllocateId();
-	const auto address         = state.builder.AllocateId();
-	const auto entry_label     = state.builder.AllocateId();
-	state.builder.AddName(state.bda_pointer_function, "get_bda_pointer");
-	state.builder.AddFunction(spv::OpFunction, type, state.bda_pointer_function,
-	                          spv::FunctionControlMaskNone, function_type);
+	const auto result = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpFunctionCall, TypeScalarU64(state), result,
+	                          state.bda_load_pointer_function, address, active);
+	return result;
+}
+
+bool BdaZeroPageEnabled() {
+	// KYTY_BDA_ZERO_PAGE=0: loads by guest address branch on the page being mapped, as stores do.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_ZERO_PAGE");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+namespace {
+
+// get_bda_pointer (load == false): the device address of a guest address, 0 where its page is not
+// mapped. get_bda_load_pointer (load == true): a readable device address even there, inside the
+// zero page whose address the table holds after its last entry (BufferCache::BDA_ZERO_PAGE_ENTRY),
+// so loads need no branch around the access and no phi. Its `active` parameter only gates the
+// fault record: lanes that do not access must not fault their (arbitrary) pages in.
+uint32_t DefineBdaLookup(EmitterState& state, bool load) {
+	const auto type          = TypeScalarU64(state);
+	const auto function_type = load ? state.builder.Type(spv::OpTypeFunction, type, type, TypeBool(state))
+	                                : state.builder.Type(spv::OpTypeFunction, type, type);
+	const auto function    = state.builder.AllocateId();
+	const auto address     = state.builder.AllocateId();
+	const auto active      = load ? state.builder.AllocateId() : 0u;
+	const auto entry_label = state.builder.AllocateId();
+	state.builder.AddName(function, load ? "get_bda_load_pointer" : "get_bda_pointer");
+	state.builder.AddFunction(spv::OpFunction, type, function, spv::FunctionControlMaskNone,
+	                          function_type);
 	state.builder.AddFunction(spv::OpFunctionParameter, type, address);
+	if (load) {
+		state.builder.AddFunction(spv::OpFunctionParameter, TypeBool(state), active);
+	}
 	EmitLabel(state, entry_label);
 
 	const auto extended = Binary(state, spv::OpUGreaterThanEqual, TypeBool(state), address,
@@ -2057,17 +2175,23 @@ void DefineGetBdaPointer(EmitterState& state) {
 	    Binary(state, spv::OpULessThan, TypeBool(state), page64,
 	           ConstantDeviceAddress(state, BufferCache::CACHING_NUMPAGES));
 	// The driver inlines this at every access, so it branches only to record a fault: a page out
-	// of range reads the table's first entry instead and gives zero.
+	// of range reads the table's first entry instead and gives zero (the zero page's entry for a
+	// load).
 	const auto entry_pointer = state.builder.AllocateId();
-	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state, 64),
-	                          entry_pointer, state.bda_pagetable_variable, ConstantU32(state, 0),
-	                          Select(state, TypeU32(state), in_range, page, ConstantU32(state, 0)));
+	state.builder.AddFunction(
+	    spv::OpAccessChain, TypeStorageBufferElementPointer(state, 64), entry_pointer,
+	    state.bda_pagetable_variable, ConstantU32(state, 0),
+	    Select(state, TypeU32(state), in_range, page,
+	           ConstantU32(state, load ? static_cast<uint32_t>(BufferCache::BDA_ZERO_PAGE_ENTRY) : 0u)));
 	const auto base = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpLoad, type, base, entry_pointer);
 	const auto mapped =
 	    Binary(state, spv::OpINotEqual, TypeBool(state), base, ConstantDeviceAddress(state, 0));
-	const auto missing = Binary(state, spv::OpLogicalAnd, TypeBool(state), in_range,
-	                            Unary(state, spv::OpLogicalNot, TypeBool(state), mapped));
+	auto missing = Binary(state, spv::OpLogicalAnd, TypeBool(state), in_range,
+	                      Unary(state, spv::OpLogicalNot, TypeBool(state), mapped));
+	if (load) {
+		missing = Binary(state, spv::OpLogicalAnd, TypeBool(state), active, missing);
+	}
 	EmitIfCondition(state, missing, [&]() {
 		RecordBdaFault(state, page);
 		if (state.bda_fault_seen_variable != 0) {
@@ -2077,11 +2201,48 @@ void DefineGetBdaPointer(EmitterState& state) {
 	});
 	const auto offset = Binary(state, spv::OpBitwiseAnd, type, address,
 	                           ConstantDeviceAddress(state, BufferCache::CACHING_PAGESIZE - 1));
-	const auto result =
-	    Select(state, type, Binary(state, spv::OpLogicalAnd, TypeBool(state), in_range, mapped),
-	           Binary(state, spv::OpIAdd, type, base, offset), ConstantDeviceAddress(state, 0));
+	uint32_t result = 0;
+	if (load) {
+		// Out of range the entry is the zero page's already; the zero page's address was read once
+		// at shader entry.
+		const auto zero_page = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, type, zero_page, state.bda_zero_page_variable);
+		result = Binary(state, spv::OpIAdd, type, Select(state, type, mapped, base, zero_page), offset);
+	} else {
+		result = Select(state, type, Binary(state, spv::OpLogicalAnd, TypeBool(state), in_range, mapped),
+		                Binary(state, spv::OpIAdd, type, base, offset), ConstantDeviceAddress(state, 0));
+	}
 	state.builder.AddFunction(spv::OpReturnValue, result);
 	state.builder.AddFunction(spv::OpFunctionEnd);
+	return function;
+}
+
+} // namespace
+
+void DefineGetBdaPointer(EmitterState& state) {
+	if (!state.program.info.uses_dma) {
+		return;
+	}
+	state.bda_pointer_function = DefineBdaLookup(state, false);
+	if (BdaZeroPageEnabled()) {
+		state.bda_zero_page_variable = state.builder.DefineGlobalVariable(
+		    TypePointer(state, spv::StorageClassPrivate, TypeScalarU64(state)), spv::StorageClassPrivate);
+		state.builder.AddName(state.bda_zero_page_variable, "bda_zero_page");
+		state.bda_load_pointer_function = DefineBdaLookup(state, true);
+	}
+}
+
+void EmitBdaZeroPageInit(EmitterState& state) {
+	if (state.bda_zero_page_variable == 0) {
+		return;
+	}
+	const auto entry_pointer = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state, 64),
+	                          entry_pointer, state.bda_pagetable_variable, ConstantU32(state, 0),
+	                          ConstantU32(state, static_cast<uint32_t>(BufferCache::BDA_ZERO_PAGE_ENTRY)));
+	const auto zero_page = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeScalarU64(state), zero_page, entry_pointer);
+	state.builder.AddFunction(spv::OpStore, state.bda_zero_page_variable, zero_page);
 }
 
 // A 32-bit atomic through a GPU-selected descriptor: on the guest address, zero where the
