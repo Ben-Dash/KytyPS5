@@ -1,12 +1,12 @@
 #include "mainDialog.h"
 
+#include "cheatFile.h"
 #include "configuration.h"
 #include "configurationItem.h"
 #include "configurationListWidget.h"
 #include "controllerLightbar.h"
 #include "emulatorSwitches.h"
 #include "gameContent.h"
-#include "patchesDialog.h"
 #include "updateChecker.h"
 
 #include <QApplication>
@@ -306,7 +306,7 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	}
 	args << "--game" << game;
 
-	const auto patch_plan = PatchesDialog::PatchPlanPath(info.title_id);
+	const auto patch_plan = Cheats::PlanPath(info.title_id);
 	if (QFileInfo::exists(patch_plan)) {
 		args << "--game-patch" << patch_plan;
 	}
