@@ -1638,9 +1638,19 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 		}
 		return false;
 	};
-	const auto& view = desc.view_info;
+	// The flipped image too: Ghost of Yotei presents a fast-cleared, GPU-written target, and the
+	// CPU path read its metadata back at every flip, draining the GPU for 14-20 ms a frame. As
+	// on the CPU path the keys of a flipped image are not consumed, so its check repeats on the
+	// GPU each flip. KYTY_DCC_GPU_VIDEOOUT=0 keeps flips on the CPU path.
+	static const bool video_out = [] {
+		const char* text = KYTY_GETENV("KYTY_DCC_GPU_VIDEOOUT");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	const bool  consume = desc.type != BindingType::VideoOut;
+	const auto& view    = desc.view_info;
 	if (desc.type != BindingType::RenderTarget && desc.type != BindingType::Texture &&
-	    !(storage && desc.type == BindingType::Storage)) {
+	    !(storage && desc.type == BindingType::Storage) &&
+	    !(video_out && desc.type == BindingType::VideoOut)) {
 		return fallback("binding type");
 	}
 	if (desc.info.IsVolume() || count > DccClearResolver::MaxSlices || view.base_level != 0 ||
@@ -1668,7 +1678,7 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 	auto& command = m_scheduler.Current();
 	command.EndRendering();
 	const auto native = command.Handle();
-	m_dcc_resolver.Record(native, *metadata, metadata_offset, slice_size, count, code_mask, true);
+	m_dcc_resolver.Record(native, *metadata, metadata_offset, slice_size, count, code_mask, consume);
 	{
 		std::scoped_lock lock {m_lock};
 		auto&            image = m_slot_images[id];
@@ -1732,7 +1742,9 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 		native.pipelineBarrier2(dependency);
 		CommitGpuWrite(image);
 	}
-	MarkDccSlicesChecked(slices_address, slice_size, count, code_mask);
+	if (consume) {
+		MarkDccSlicesChecked(slices_address, slice_size, count, code_mask);
+	}
 	return true;
 }
 
