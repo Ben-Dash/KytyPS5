@@ -617,6 +617,7 @@ bool     BdaZeroPageEnabled();
 bool     BdaFastDwordEnabled();
 bool     BdaNoWordMasksEnabled();
 bool     BdaSingleCrossBranchEnabled();
+bool     BdaCrossMuxEnabled();
 void     EmitBdaZeroPageInit(EmitterState& state);
 uint32_t ConstantDeviceAddress(EmitterState& state, uint64_t value);
 uint32_t DeviceAddressFromWords(EmitterState& state, uint32_t low, uint32_t high);
