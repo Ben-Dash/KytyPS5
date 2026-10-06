@@ -115,7 +115,9 @@ public:
 	// hot page is downloaded at the next flush point, so its bytes are usually published before
 	// the CPU reads them again. OnCommandRecorded() marks writes of the bindings obtained so far
 	// as recorded; only recorded writes are downloaded.
-	void               OnCommandRecorded();
+	// `may_flush`: the command is a dispatch or copy outside any render pass, so a pending
+	// hot-page flush may submit here.
+	void               OnCommandRecorded(bool may_flush = false);
 	void               RecordEagerReadbacks();
 	void               ProcessFaultBuffer();
 	void               SynchronizeBuffersInRange(uint64_t vaddr, uint64_t size);
@@ -227,6 +229,17 @@ private:
 	// Tracker pages hit by CPU read faults, with the tick of their latest fault.
 	static constexpr size_t HotReadbackPages = 64;
 	std::unordered_map<uint64_t, uint64_t> m_hot_pages;
+	// Tracker pages whose GPU-written bytes Thread_Gpu itself read (descriptor tables, indirect
+	// arguments, COND_EXEC predicates written by a dispatch), with the tick of the latest read.
+	// A later GPU write to one of them, or to a hot page, submits the open command buffer once
+	// its command is recorded (KYTY_HOT_WRITE_FLUSH=0 disables): the GPU starts on the writer
+	// while Thread_Gpu records on, so the next read of the bytes waits for that submission
+	// instead of draining everything recorded since (Ghost of Yotei: 56 ms/frame of full drains).
+	static constexpr size_t                CpHotPages = 256;
+	std::unordered_map<uint64_t, uint64_t> m_cp_hot_pages;
+	bool                                   m_flush_after_command = false;
+	void                                   MarkCpReadHot(uint64_t vaddr);
+	[[nodiscard]] bool                     WriteTouchesHotPage(uint64_t vaddr, uint64_t size) const;
 	std::vector<uint64_t>                  m_eager_pending; // Written by unrecorded commands.
 	std::vector<uint64_t>                  m_eager_ready;   // Written by recorded commands.
 	// Downloaded byte ranges whose backing is not written yet, oldest first. They left

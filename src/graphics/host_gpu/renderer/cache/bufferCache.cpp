@@ -446,6 +446,7 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	const auto state = m_memory_tracker.QueryReadback(vaddr, size);
 	if (state.gpu_dirty) {
 		EXIT_IF(state.unarmed);
+		MarkCpReadHot(vaddr);
 		m_scheduler.Wait(state.tick);
 		m_scheduler.WaitPriorityOperations(state.tick);
 	}
@@ -774,12 +775,65 @@ void BufferCache::QueueEagerReadback(uint64_t vaddr, uint64_t size) {
 	}
 }
 
-void BufferCache::OnCommandRecorded() {
-	if (m_eager_pending.empty()) {
+void BufferCache::OnCommandRecorded(bool may_flush) {
+	if (!m_eager_pending.empty()) {
+		m_eager_ready.insert(m_eager_ready.end(), m_eager_pending.begin(), m_eager_pending.end());
+		m_eager_pending.clear();
+	}
+	if (!m_flush_after_command || !may_flush) {
 		return;
 	}
-	m_eager_ready.insert(m_eager_ready.end(), m_eager_pending.begin(), m_eager_pending.end());
-	m_eager_pending.clear();
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_HOT_WRITE_FLUSH");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	m_flush_after_command = false;
+	if (!enabled || !m_scheduler.Active()) {
+		return;
+	}
+	DrainStats::ReasonScope reason(DrainStats::Reason::EagerReadback);
+	RecordEagerReadbacks();
+	m_scheduler.EndRendering();
+	m_scheduler.Flush();
+}
+
+void BufferCache::MarkCpReadHot(uint64_t vaddr) {
+	const auto page = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
+	const auto tick = m_scheduler.CurrentTick();
+	if (auto it = m_cp_hot_pages.find(page); it != m_cp_hot_pages.end()) {
+		it->second = tick;
+		return;
+	}
+	if (m_cp_hot_pages.size() >= CpHotPages) {
+		const auto oldest = std::min_element(
+		    m_cp_hot_pages.begin(), m_cp_hot_pages.end(),
+		    [](const auto& a, const auto& b) { return a.second < b.second; });
+		m_cp_hot_pages.erase(oldest);
+	}
+	m_cp_hot_pages.emplace(page, tick);
+}
+
+bool BufferCache::WriteTouchesHotPage(uint64_t vaddr, uint64_t size) const {
+	if (m_hot_pages.empty() && m_cp_hot_pages.empty()) {
+		return false;
+	}
+	const auto first = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
+	const auto end   = vaddr + size;
+	// A short write looks its pages up; a long one scans the (small) hot sets instead.
+	if (end - first <= 64 * TRACKER_PAGE_SIZE) {
+		for (auto page = first; page < end; page += TRACKER_PAGE_SIZE) {
+			if (m_cp_hot_pages.contains(page) || m_hot_pages.contains(page)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	const auto overlaps = [&](const auto& pages) {
+		return std::any_of(pages.begin(), pages.end(), [&](const auto& entry) {
+			return entry.first < end && entry.first + TRACKER_PAGE_SIZE > vaddr;
+		});
+	};
+	return overlaps(m_cp_hot_pages) || overlaps(m_hot_pages);
 }
 
 void BufferCache::RecordEagerReadbacks() {
@@ -1451,6 +1505,9 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 		}
 		if (!m_hot_pages.empty()) {
 			QueueEagerReadback(vaddr, size);
+		}
+		if (!m_flush_after_command && WriteTouchesHotPage(vaddr, size)) {
+			m_flush_after_command = true;
 		}
 		if (DrainStats::Enabled()) {
 			DrainStats::RecordGpuWrite(vaddr, size);

@@ -804,7 +804,7 @@ void RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
-	m_context.GetBufferCache().OnCommandRecorded();
+	m_context.GetBufferCache().OnCommandRecorded(true);
 	ResetBindings();
 }
 
@@ -918,7 +918,7 @@ void RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
-	m_context.GetBufferCache().OnCommandRecorded();
+	m_context.GetBufferCache().OnCommandRecorded(true);
 	ResetBindings();
 }
 
