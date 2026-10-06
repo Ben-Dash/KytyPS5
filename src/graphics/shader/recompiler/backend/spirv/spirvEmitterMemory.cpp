@@ -1064,13 +1064,68 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 		                               ConstantU32(state, PageSize - 1u));
 		const auto first_room = Binary(state, spv::OpISub, u32, ConstantU32(state, PageSize), in_page);
 		const auto crosses    = Binary(state, spv::OpUGreaterThan, TypeBool(state), need, first_room);
-		result.second_page    = GetBdaLoadPointer(
-		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
-		    AndCondition(state, active, crosses));
 		// KYTY_BDA_FAST_DWORD: the first DWORD is always on the first page (at least 4 bytes are
 		// left on it), and every DWORD of an aligned access of whole DWORDs is wanted.
 		const bool fast       = BdaFastDwordEnabled();
 		const bool all_wanted = fast && dword_aligned && bytes == ConstantU32(state, result.count * 4u);
+		if (BdaSingleCrossBranchEnabled()) {
+			// KYTY_BDA_SINGLE_CROSS_BRANCH: one branch per access on whether it crosses into the next
+			// page. Not crossing (nearly always), every DWORD is on the first page; only the crossing
+			// block looks the second page up and picks each DWORD's page. A second lookup and a page
+			// choice per DWORD on every access cost NVIDIA's compiler most of its time (bc8e).
+			std::array<uint32_t, 5> same_page {};
+			for (uint32_t word = 0; word < result.count; ++word) {
+				same_page[word] = word == 0u ? result.first_page
+				                             : Binary(state, spv::OpIAdd, u64, result.first_page,
+				                                      ConstantDeviceAddress(state, word * 4u));
+				if (masks) {
+					result.usable[word] = word == 0u || all_wanted
+					                          ? active
+					                          : AndCondition(state, active,
+					                                         Binary(state, spv::OpULessThan, TypeBool(state),
+					                                                ConstantU32(state, word * 4u), need));
+				}
+			}
+			result.pointer[0] = result.first_page;
+			if (result.count == 1u) {
+				return result;
+			}
+			const auto header      = state.current_label;
+			const auto cross_label = state.builder.AllocateId();
+			const auto merge_label = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpSelectionMerge, merge_label, spv::SelectionControlMaskNone);
+			state.builder.AddFunction(spv::OpBranchConditional, crosses, cross_label, merge_label);
+			EmitLabel(state, cross_label);
+			// Only lanes that cross get here: `active` alone gates the second page's fault record.
+			result.second_page = GetBdaLoadPointer(
+			    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
+			    active);
+			std::array<uint32_t, 5> crossing {};
+			for (uint32_t word = 1; word < result.count; ++word) {
+				const auto offset   = ConstantU32(state, word * 4u);
+				const auto in_first = Binary(state, spv::OpULessThan, TypeBool(state), offset, first_room);
+				crossing[word]      = Select(
+				    state, u64, in_first, same_page[word],
+				    Binary(state, spv::OpIAdd, u64, result.second_page,
+				           Unary(state, spv::OpUConvert, u64, Binary(state, spv::OpISub, u32, offset, first_room))));
+			}
+			const auto cross_exit = state.current_label;
+			state.builder.AddFunction(spv::OpBranch, merge_label);
+			EmitLabel(state, merge_label);
+			for (uint32_t word = 1; word < result.count; ++word) {
+				result.pointer[word] = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpPhi, u64, result.pointer[word], crossing[word], cross_exit,
+				                          same_page[word], header);
+			}
+			// The V# values cached in the header dominate the merge block (KYTY_INDIRECT_BOUNDS_ONCE).
+			if (state.indirect_vsharp_label == header) {
+				state.indirect_vsharp_label = merge_label;
+			}
+			return result;
+		}
+		result.second_page = GetBdaLoadPointer(
+		    state, Binary(state, spv::OpIAdd, u64, aligned, Unary(state, spv::OpUConvert, u64, first_room)),
+		    AndCondition(state, active, crosses));
 		for (uint32_t word = 0; word < result.count; ++word) {
 			const auto offset = ConstantU32(state, word * 4u);
 			if (fast && word == 0u) {
@@ -2313,6 +2368,16 @@ bool BdaNoWordMasksEnabled() {
 	// KYTY_BDA_NO_WORD_MASKS=0: with the zero page, element words are still masked one by one.
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_BDA_NO_WORD_MASKS");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+bool BdaSingleCrossBranchEnabled() {
+	// KYTY_BDA_SINGLE_CROSS_BRANCH=0: element windows look up the second page and choose each DWORD's
+	// page with selects at every access.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_SINGLE_CROSS_BRANCH");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
