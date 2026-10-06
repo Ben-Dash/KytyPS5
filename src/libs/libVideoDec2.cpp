@@ -5,6 +5,7 @@
 #include "loader/symbolDatabase.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -699,10 +700,14 @@ static int32_t KYTY_SYSV_ABI LoggedQueryDecoderMemoryInfo(const Videodec2Decoder
 	return r;
 }
 
+// Decodes since the last CreateDecoder (KYTY_DEBUG_VIDEODEC tracing).
+static std::atomic<uint32_t> g_decodes_since_create {0};
+
 static int32_t KYTY_SYSV_ABI LoggedCreateDecoder(const Videodec2DecoderConfigInfo* config,
                                                  const Videodec2DecoderMemoryInfo* memory,
                                                  Videodec2Decoder*                 decoder) {
 	const auto r = CreateDecoder(config, memory, decoder);
+	g_decodes_since_create = 0;
 	if (VideodecDebug()) {
 		std::printf("videodec: CreateDecoder codec=%u size=%dx%d -> %08x caller=%p\n",
 		            config != nullptr ? config->codec_type : 0u,
@@ -724,12 +729,34 @@ static int32_t KYTY_SYSV_ABI LoggedDeleteDecoder(Videodec2Decoder decoder) {
 
 static int32_t KYTY_SYSV_ABI LoggedDecode(Videodec2Decoder decoder, const Videodec2InputData* input,
                                           Videodec2FrameBuffer* frame, Videodec2OutputInfo* output) {
-	const auto r = Decode(decoder, input, frame, output);
-	static std::atomic<uint32_t> logged {0};
-	if (VideodecDebug() && logged.fetch_add(1) < 64) {
-		std::printf("videodec: Decode au_size=%u -> %08x\n",
-		            input != nullptr ? static_cast<uint32_t>(input->au_size) : 0u,
-		            static_cast<uint32_t>(r));
+	const auto start = std::chrono::steady_clock::now();
+	const auto r     = Decode(decoder, input, frame, output);
+	// Every decode is logged (with its duration, output flags and the time since the previous
+	// call), so a movie the game cuts short shows whether decoding or the caller is the bottleneck.
+	static std::atomic<int64_t> previous_us {0};
+	const auto end    = std::chrono::steady_clock::now();
+	const auto now_us = std::chrono::duration_cast<std::chrono::microseconds>(end.time_since_epoch()).count();
+	const auto gap_us = now_us - previous_us.exchange(now_us);
+	if (VideodecDebug()) {
+		std::printf(
+		    "videodec: Decode au_size=%u pts=%llu -> %08x in %.1f ms (gap %.1f ms) accepted=%d "
+		    "valid=%d pictures=%u error=%d discarded=%d\n",
+		    input != nullptr ? static_cast<uint32_t>(input->au_size) : 0u,
+		    input != nullptr ? static_cast<unsigned long long>(input->pts_data) : 0ull,
+		    static_cast<uint32_t>(r),
+		    std::chrono::duration<double, std::milli>(end - start).count(), gap_us / 1000.0,
+		    frame != nullptr && frame->is_accepted ? 1 : 0,
+		    output != nullptr && output->is_valid ? 1 : 0,
+		    output != nullptr ? static_cast<uint32_t>(output->picture_count) : 0u,
+		    output != nullptr && output->is_error_frame ? 1 : 0,
+		    output != nullptr && output->is_discarded_frame ? 1 : 0);
+		std::fflush(stdout);
+		// With KYTY_DEBUG_CALL_COUNTS: after a movie's 12th decode (where Ghost of Yotei's decode
+		// thread stops for seconds), the decoding thread's next calls and 1.5 s of every thread's.
+		if (g_decodes_since_create.fetch_add(1) == 11u) {
+			Libs::TraceCalls(300);
+			Libs::TraceAllCalls(std::chrono::milliseconds(1500));
+		}
 	}
 	return r;
 }

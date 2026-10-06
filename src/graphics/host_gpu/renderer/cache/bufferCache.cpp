@@ -1079,8 +1079,15 @@ void CopyReadableOrZero(uint64_t address, uint8_t* destination, uint64_t size) {
 		    (info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
 		                     PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
 		if (readable) {
-			std::memcpy(destination + done, reinterpret_cast<const void*>(current),
-			            static_cast<size_t>(chunk));
+			// The game can unmap the range between the query and the copy (Ghost of Yotei after the
+			// first calligraphy name): ReadProcessMemory fails instead of faulting, and what it
+			// could not read reads as zero.
+			SIZE_T got = 0;
+			if (ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(current),
+			                      destination + done, static_cast<size_t>(chunk), &got) == 0 &&
+			    got < chunk) {
+				std::memset(destination + done + got, 0, static_cast<size_t>(chunk - got));
+			}
 		} else {
 			std::memset(destination + done, 0, static_cast<size_t>(chunk));
 		}
