@@ -131,8 +131,19 @@ struct EmitterState {
 	uint32_t                                         storage_buffer_u16_variable = 0;
 	uint32_t                                         storage_buffer_u64_variable = 0;
 	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> memory_byte_offsets {};
-	// The packed strides of buffers with IR::DynamicBufferStride, loaded from shader data at entry.
-	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> buffer_packed_strides {};
+	// The strides of buffers with IR::DynamicBufferStride, from shader data at entry.
+	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> buffer_strides {};
+	// The format and dst_sel of a buffer with IR::GenericBufferFormat, decoded once at entry
+	// (EmitGenericBufferFormats); per output component c of a formatted load.
+	struct GenericBufferFormatValues {
+		uint32_t end_offset = 0; // element size - 1
+		uint32_t align_mask = 0; // ~(min(size, 4) - 1)
+		uint32_t valid = 0, one = 0, float_like = 0;
+		uint32_t is_sint = 0, is_uscaled = 0, is_sscaled = 0, is_unorm = 0, is_snorm = 0;
+		std::array<uint32_t, 4> from_memory {}, constant_one {}, bits {}, bit_offset {};
+		std::array<uint32_t, 4> unsigned_max {}, signed_max {}, half {};
+	};
+	std::array<GenericBufferFormatValues, IR::ShaderInfo::MaxBuffers> generic_buffer_formats {};
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
 	uint32_t                                         bda_pointer_function    = 0;
@@ -491,6 +502,9 @@ Prospero::BufferFormat StorageBufferFormat(const EmitterState& state, const IR::
 uint32_t StorageBufferElementBits(const IR::Program& program, const IR::MemoryInfo& mem);
 
 void EmitMemoryOffsets(EmitterState& state);
+
+// Decodes the shader-data format words of IR::GenericBufferFormat buffers at function entry.
+void EmitGenericBufferFormats(EmitterState& state);
 
 uint32_t LdsDwordCount(const EmitterState& state);
 void EnsureLdsStorage(EmitterState& state);

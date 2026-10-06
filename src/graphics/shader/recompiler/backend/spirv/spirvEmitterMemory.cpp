@@ -120,21 +120,12 @@ uint32_t BufferByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR
 	if ((packed & (1u << 20u)) != 0u) {
 		index = Binary(state, spv::OpIAdd, TypeU32(state), index, BufferLane(state));
 	}
-	if ((packed & IR::DynamicBufferStride) != 0u) {
-		// This dispatch's V# fields, from shader data (see BindingLayout::buffer_stride_count).
-		const auto word  = state.buffer_packed_strides[mem.resource];
-		const auto field = [&](uint32_t first, uint32_t count) {
-			return EmitBitFieldUExtract(state, word, ConstantU32(state, first), ConstantU32(state, count));
-		};
-		const auto swizzle_bit = Binary(state, spv::OpINotEqual, TypeBool(state), field(14, 1),
-		                                ConstantU32(state, 0));
-		return CalculateBufferAddress(state, index, ctx.Arg(inst, 2), ctx.Arg(inst, 3), mem.offset,
-		                              field(0, 14), swizzle_bit, field(16, 2))
-		    .byte;
-	}
-	const bool swizzle = stride != 0u && (packed & (1u << 14u)) != 0u;
+	// A DynamicBufferStride buffer: this dispatch's stride from shader data, nonzero.
+	const bool dynamic = (packed & IR::DynamicBufferStride) != 0u;
+	const bool swizzle = (dynamic || stride != 0u) && (packed & (1u << 14u)) != 0u;
 	return CalculateBufferAddress(state, index, ctx.Arg(inst, 2), ctx.Arg(inst, 3), mem.offset,
-	                              ConstantU32(state, stride),
+	                              dynamic ? state.buffer_strides[mem.resource]
+	                                      : ConstantU32(state, stride),
 	                              swizzle ? ConstantBool(state, true) : 0u,
 	                              ConstantU32(state, (packed >> 16u) & 3u))
 	    .byte;
@@ -887,7 +878,22 @@ uint32_t FormattedOutOfBoundsValue(ValueEmitContext& ctx, const IR::MemoryInfo& 
 uint32_t D16LoadComponent(ValueEmitContext& ctx, const Format::BufferFormatInfo& info,
                           uint32_t value);
 
+// A formatted load through the descriptor's format of a buffer whose format and dst_sel the
+// host passes in shader data (IR::GenericBufferFormat).
+bool IsGenericFormattedLoad(const ValueEmitContext& ctx, const IR::MemoryInfo& mem) {
+	return mem.formatted && !mem.typed && mem.kind == IR::ResourceKind::Buffer &&
+	       mem.resource < ctx.state.program.info.buffers.size() &&
+	       ctx.state.program.info.buffers[mem.resource].descriptor_format == IR::GenericBufferFormat;
+}
+
+uint32_t LoadGenericFormatted(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem,
+                              uint32_t components);
+
 uint32_t FormattedLoad(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem) {
+	if (IsGenericFormattedLoad(ctx, mem)) {
+		return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1),
+		                                  [&]() { return LoadGenericFormatted(ctx, inst, mem, 1u); });
+	}
 	return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
 		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
 		const auto info = Format::GetFormatInfo(BufferFormat(ctx, mem));
@@ -1877,6 +1883,98 @@ uint32_t NormalizeDynamicBufferComponent(EmitterState& state, uint32_t raw, uint
 	return Select(state, TypeU32(state), is_type(Format::ComponentType::Float), floating, result);
 }
 
+// The formatted load of a GenericBufferFormat buffer, with the format values decoded at entry
+// (EmitGenericBufferFormats). The whole unaligned element must be in bounds (as
+// PrepareFormattedMemory); out of bounds, each output is its dst_sel's constant. Each output
+// loads the one or two DWORDs its bits lie in: storage-buffer loads past the end are harmless
+// (robust buffer access), so they need no branch.
+uint32_t LoadGenericFormatted(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem,
+                              uint32_t components) {
+	auto&       state    = ctx.state;
+	const auto  u32      = TypeU32(state);
+	const auto  boolean  = TypeBool(state);
+	const auto& format   = state.generic_buffer_formats[mem.resource];
+	const auto  resource = PrepareMemoryResourceAccess(state, mem);
+	const auto  start    = ByteAddress(ctx, inst, mem);
+	const auto  end      = Binary(state, spv::OpIAdd, u32, start, format.end_offset);
+	const auto  in_bounds = AndCondition(
+	    state, Binary(state, spv::OpUGreaterThanEqual, boolean, end, start),
+	    EmitMemoryElementInBounds(state, resource,
+	                              Binary(state, spv::OpShiftRightLogical, u32, end, ConstantU32(state, 2))));
+	// The hardware aligns the element to min(4, size).
+	const auto base       = Binary(state, spv::OpBitwiseAnd, u32, start, format.align_mask);
+	const auto first      = Binary(state, spv::OpShiftRightLogical, u32, base, ConstantU32(state, 2));
+	const auto misaligned = Binary(state, spv::OpShiftLeftLogical, u32,
+	                               Binary(state, spv::OpBitwiseAnd, u32, base, ConstantU32(state, 3)),
+	                               ConstantU32(state, 3));
+	// The element's DWORDs (16 bytes at most, DWORD-aligned past 4 bytes), loaded once.
+	std::array<uint32_t, 5> words {};
+	for (uint32_t index = 0; index < 4u; ++index) {
+		words[index] = LoadWordInBounds(
+		    ctx, resource,
+		    index == 0u ? first : Binary(state, spv::OpIAdd, u32, first, ConstantU32(state, index)));
+	}
+	words[4] = ConstantU32(state, 0);
+	const auto pick = [&](uint32_t index, uint32_t offset) {
+		auto result = words[3u + offset];
+		for (uint32_t i = 3u; i-- > 0;) {
+			result = Select(state, u32, Binary(state, spv::OpIEqual, boolean, index, ConstantU32(state, i)),
+			                words[i + offset], result);
+		}
+		return result;
+	};
+	std::array<uint32_t, 4> values {};
+	for (uint32_t output = 0; output < components; ++output) {
+		const auto bits     = format.bits[output];
+		const auto position = Binary(state, spv::OpIAdd, u32, misaligned, format.bit_offset[output]);
+		const auto index    = Binary(state, spv::OpShiftRightLogical, u32, position, ConstantU32(state, 5));
+		const auto within   = Binary(state, spv::OpBitwiseAnd, u32, position, ConstantU32(state, 31));
+		const auto low      = Binary(state, spv::OpShiftRightLogical, u32, pick(index, 0u), within);
+		const auto high     = Select(
+		    state, u32, Binary(state, spv::OpIEqual, boolean, within, ConstantU32(state, 0)),
+		    ConstantU32(state, 0),
+		    Binary(state, spv::OpShiftLeftLogical, u32, pick(index, 1u),
+		           Binary(state, spv::OpISub, u32, ConstantU32(state, 32), within)));
+		const auto raw = EmitBitFieldUExtract(state, Binary(state, spv::OpBitwiseOr, u32, low, high),
+		                                      ConstantU32(state, 0), bits);
+		// As NormalizeFormatComponent for 8/16/32-bit components; signed types sign-extend.
+		const auto signed_raw = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), signed_raw,
+		                          Unary(state, spv::OpBitcast, TypeI32(state), raw), ConstantU32(state, 0),
+		                          bits);
+		const auto unsigned_float = Unary(state, spv::OpConvertUToF, TypeF32(state), raw);
+		const auto signed_float   = Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw);
+		const auto unorm = Binary(state, spv::OpFDiv, TypeF32(state), unsigned_float, format.unsigned_max[output]);
+		const auto snorm = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpExtInst, TypeF32(state), snorm, GlslStd450(state), GLSLstd450FMax,
+		                          Binary(state, spv::OpFDiv, TypeF32(state), signed_float,
+		                                 format.signed_max[output]),
+		                          ConstantF32Value(state, -1.0f));
+		auto converted = Select(state, u32, format.half[output],
+		                        EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw)), raw);
+		for (const auto [is_type, value]: {std::pair {format.is_sint, Unary(state, spv::OpBitcast, u32, signed_raw)},
+		                                   std::pair {format.is_uscaled, Unary(state, spv::OpBitcast, u32, unsigned_float)},
+		                                   std::pair {format.is_sscaled, Unary(state, spv::OpBitcast, u32, signed_float)},
+		                                   std::pair {format.is_unorm, Unary(state, spv::OpBitcast, u32, unorm)},
+		                                   std::pair {format.is_snorm, Unary(state, spv::OpBitcast, u32, snorm)}}) {
+			converted = Select(state, u32, is_type, value, converted);
+		}
+		values[output] = Select(state, u32, format.constant_one[output], format.one,
+		                        Select(state, u32, AndCondition(state, format.from_memory[output], in_bounds),
+		                               converted, ConstantU32(state, 0)));
+		if (mem.d16) {
+			// As D16LoadComponent: a half for float-like formats, the low 16 bits otherwise.
+			const auto half = EmitPackHalf2x16(
+			    state, EmitCompositeConstructF32x2(state, EmitBitCastF32U32(state, values[output]),
+			                                       ConstantF32Value(state, 0.0f)));
+			values[output] = Select(state, u32, format.float_like, half,
+			                        Binary(state, spv::OpBitwiseAnd, u32, values[output],
+			                               ConstantU32(state, 0xffffu)));
+		}
+	}
+	return ConstructU32Composite(state, components, values);
+}
+
 uint32_t LoadIndirectFormattedBody(EmitterState& state, const IndirectBufferOperands& operands,
                                    uint32_t memory_offset, uint32_t components, bool d16) {
 	const auto u32    = TypeU32(state);
@@ -2225,6 +2323,12 @@ namespace {
 
 uint32_t LoadBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t components) {
 	auto& state = ctx.state;
+	if (IsGenericFormattedLoad(ctx, ctx.Memory(inst))) {
+		return EmitValueOrDefaultIfCondition(
+		    state, ctx.Arg(inst, inst.NumArgs() - 1), TypeU32Composite(state, components),
+		    ConstantU32CompositeZero(state, components),
+		    [&]() { return LoadGenericFormatted(ctx, inst, ctx.Memory(inst), components); });
+	}
 	if (ctx.Memory(inst).kind == IR::ResourceKind::IndirectBuffer && !ctx.Memory(inst).formatted) {
 		// The lane's EXEC bit gates the access with its bounds, without a branch of its own.
 		return LoadIndirectBuffer(ctx, inst, components, ctx.Arg(inst, inst.NumArgs() - 1));
@@ -2970,6 +3074,81 @@ uint32_t EmitBpermuteU32(ValueEmitContext& ctx, const IR::Inst& inst) {
 	                           EmitSubgroupLocalInvocationId(state), ConstantU32(state, ~31u));
 	const auto target = Binary(state, spv::OpBitwiseOr, TypeU32(state), base, index);
 	return EmitDsMaskedLaneRead(state, source, target, ctx.Arg(inst, 2));
+}
+
+// The format words of IR::GenericBufferFormat buffers (the V#'s format and dst_sel), decoded once
+// at function entry for every formatted load of the buffer: the layout from the shared format
+// tables (LookupDynamicBufferFormat), and per output component its source, width, bit offset,
+// conversion maxima and constant.
+void EmitGenericBufferFormats(EmitterState& state) {
+	if (state.program.bindings.buffer_format_count == 0u) {
+		return;
+	}
+	const auto u32     = TypeU32(state);
+	const auto f32     = TypeF32(state);
+	const auto boolean = TypeBool(state);
+	for (uint32_t i = 0; i < state.program.bindings.buffer_format_count; i++) {
+		if (state.program.info.buffers[i].descriptor_format != IR::GenericBufferFormat) {
+			continue;
+		}
+		const auto word  = EmitShaderDataDwordLoad(state, state.program.bindings.BufferFormatDword() + i);
+		const auto field = [&](uint32_t value, uint32_t first, uint32_t count) {
+			return EmitBitFieldUExtract(state, value, ConstantU32(state, first), ConstantU32(state, count));
+		};
+		const auto info      = LookupDynamicBufferFormat(state, field(word, 0, 7));
+		const auto count     = EmitUMax32(state, field(info.layout, 0, 3), ConstantU32(state, 1));
+		const auto byte_size = EmitUMax32(state, field(info.layout, 3, 5), ConstantU32(state, 1));
+		const auto is_type   = [&](Format::ComponentType type) {
+			return Binary(state, spv::OpIEqual, boolean, info.type,
+			              ConstantU32(state, static_cast<uint32_t>(type)));
+		};
+		auto& format      = state.generic_buffer_formats[i];
+		format.end_offset = Binary(state, spv::OpISub, u32, byte_size, ConstantU32(state, 1));
+		format.align_mask = Unary(state, spv::OpNot, u32,
+		                          Binary(state, spv::OpISub, u32, EmitUMin32(state, byte_size, ConstantU32(state, 4)),
+		                                 ConstantU32(state, 1)));
+		format.valid      = info.valid;
+		format.one        = Select(state, u32,
+		                           Binary(state, spv::OpLogicalOr, boolean, is_type(Format::ComponentType::Uint),
+		                                  is_type(Format::ComponentType::Sint)),
+		                           ConstantU32(state, 1), ConstantU32(state, 0x3f800000));
+		const auto is_float = is_type(Format::ComponentType::Float);
+		format.is_sint      = is_type(Format::ComponentType::Sint);
+		format.is_uscaled   = is_type(Format::ComponentType::Uscaled);
+		format.is_sscaled   = is_type(Format::ComponentType::Sscaled);
+		format.is_unorm     = is_type(Format::ComponentType::Unorm);
+		format.is_snorm     = is_type(Format::ComponentType::Snorm);
+		format.float_like   = Binary(state, spv::OpLogicalOr, boolean, is_float,
+		                             Binary(state, spv::OpLogicalOr, boolean, format.is_unorm, format.is_snorm));
+		for (uint32_t output = 0; output < 4u; ++output) {
+			const auto selector = field(word, 7u + output * 3u, 3);
+			format.from_memory[output] = AndCondition(
+			    state, info.valid, Binary(state, spv::OpUGreaterThanEqual, boolean, selector, ConstantU32(state, 4)));
+			format.constant_one[output] = AndCondition(
+			    state, info.valid, Binary(state, spv::OpIEqual, boolean, selector, ConstantU32(state, 1)));
+			// As Format::ResolveFormattedSource: channels repeat past the format's component count.
+			const auto component = Binary(
+			    state, spv::OpUMod, u32, Binary(state, spv::OpBitwiseAnd, u32, selector, ConstantU32(state, 3)),
+			    count);
+			const auto bits = EmitUMax32(
+			    state,
+			    EmitBitFieldUExtract(state, info.widths,
+			                         Binary(state, spv::OpIMul, u32, component, ConstantU32(state, 6)),
+			                         ConstantU32(state, 6)),
+			    ConstantU32(state, 1));
+			format.bits[output]       = bits;
+			format.bit_offset[output] = EmitBitFieldUExtract(
+			    state, info.offsets, Binary(state, spv::OpIMul, u32, component, ConstantU32(state, 7)),
+			    ConstantU32(state, 7));
+			const auto mask = Binary(state, spv::OpShiftRightLogical, u32, ConstantU32(state, UINT32_MAX),
+			                         Binary(state, spv::OpISub, u32, ConstantU32(state, 32), bits));
+			format.unsigned_max[output] = Unary(state, spv::OpConvertUToF, f32, mask);
+			format.signed_max[output]   = Unary(state, spv::OpConvertUToF, f32,
+			                                    Binary(state, spv::OpShiftRightLogical, u32, mask, ConstantU32(state, 1)));
+			format.half[output]         = AndCondition(
+			    state, is_float, Binary(state, spv::OpIEqual, boolean, bits, ConstantU32(state, 16)));
+		}
+	}
 }
 
 } // namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter

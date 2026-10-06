@@ -732,7 +732,10 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
                              uint32_t push_data_start_dword) {
 	const auto emit_begin = std::chrono::steady_clock::now();
 	auto& ir = translated.program;
-	IR::ApplyResourceSpecialization(ir, specialization);
+	// Replays of older records (baked strides and formats) build the module a dispatch builds now.
+	auto normalized = specialization;
+	IR::NormalizeBufferSpecialization(normalized, ir.info);
+	IR::ApplyResourceSpecialization(ir, normalized);
 	// The resource plan owns host descriptor evaluation now. Keep only dependencies consumed
 	// by GPU memory operations; bound descriptor dwords must not retain shader instructions.
 	for (auto& inst: ir.value_storage) {

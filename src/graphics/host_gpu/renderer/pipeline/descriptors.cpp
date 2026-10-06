@@ -122,6 +122,14 @@ static bool IsMultisampledTexture(Prospero::ImageType type) {
 	       type == Prospero::ImageType::kColor2DMsaaArray;
 }
 
+static Prospero::BufferFormat RuntimeBufferFormat(const ShaderRecompiler::IR::ResourceSnapshot& snapshot,
+                                           uint32_t                                     index) {
+	return index < snapshot.buffers.size()
+	           ? static_cast<Prospero::BufferFormat>(
+	                 ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[index]) & 0x7fu)
+	           : Prospero::BufferFormat::kInvalid;
+}
+
 static vk::DescriptorBufferInfo
 NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource& source,
                     const ShaderRecompiler::IR::BufferResource& resource, uint32_t& buffer_offset) {
@@ -2001,8 +2009,17 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	};
 	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
 		uint32_t buffer_offset = 0;
-		prepared.buffers.push_back(NativeStorageBuffer(m_context, prepared.buffer_sources[i],
-		                                               program.info.buffers[i], buffer_offset));
+		const auto& resource = program.info.buffers[i];
+		if (resource.descriptor_format == ShaderRecompiler::IR::GenericBufferFormat) {
+			// The element size the binding offset may follow is this dispatch's format.
+			auto runtime_resource              = resource;
+			runtime_resource.descriptor_format = RuntimeBufferFormat(snapshot, i);
+			prepared.buffers.push_back(NativeStorageBuffer(m_context, prepared.buffer_sources[i],
+			                                               runtime_resource, buffer_offset));
+		} else {
+			prepared.buffers.push_back(NativeStorageBuffer(m_context, prepared.buffer_sources[i],
+			                                               resource, buffer_offset));
+		}
 		pack_memory_offset(i, buffer_offset);
 	}
 	// The strides of this dispatch's V#s, for buffers whose module reads them (stride-generic).
@@ -2010,6 +2027,12 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	for (uint32_t i = 0; i < layout.buffer_stride_count; i++) {
 		prepared.shader_data[layout.BufferStrideDword() + i] =
 		    ShaderRecompiler::IR::CanonicalPackedStride(snapshot.buffers[i]);
+	}
+	// The formats and dst_sels of buffers whose formatted loads decode them (GenericBufferFormat).
+	EXIT_IF(layout.buffer_format_count > snapshot.buffers.size());
+	for (uint32_t i = 0; i < layout.buffer_format_count; i++) {
+		prepared.shader_data[layout.BufferFormatDword() + i] =
+		    ShaderRecompiler::IR::RuntimeBufferFormatWord(snapshot.buffers[i]);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::BufferViews);
 	if (ShaderRecompiler::IR::FindBinding(

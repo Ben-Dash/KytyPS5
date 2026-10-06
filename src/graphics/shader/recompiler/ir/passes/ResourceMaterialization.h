@@ -105,8 +105,8 @@ void SetResourceMaterializationVerification(bool enabled);
 // Applies an already-derived specialization to native IR before layout and emission.
 void ApplyResourceSpecialization(Program& program, const ResourceSpecialization& specialization);
 
-// A buffer's packed_stride when the shader reads its stride, swizzle and index stride from shader
-// data: a nonzero stride, with only ADD_TID (bit 20) left in the permutation key. Ghost of Yotei
+// Marks a buffer's packed_stride whose nonzero stride the shader reads from shader data. The
+// swizzle bit, index stride and ADD_TID (bits 14, 16-17, 20) stay in the permutation key. Ghost of Yotei
 // binds buffers of different strides to the same slots, so baking the stride in compiled one
 // pipeline per combination (3e8244db54b38b0c: 7, at 20-60 s each in the driver).
 constexpr uint32_t DynamicBufferStride = 1u << 31u;
@@ -118,9 +118,27 @@ bool BufferStrideSpecialization();
 // 20) with the fields a zero stride or a disabled swizzle ignores cleared.
 uint32_t CanonicalPackedStride(const DescriptorValue& descriptor);
 
-// Replaces the nonzero strides of a specialization (made with KYTY_BUFFER_SPECIALIZE=1 or read
-// from an older journal record) by DynamicBufferStride. Specializations made now already are.
+// Replaces the stride bits of the nonzero strides of a specialization (made with
+// KYTY_BUFFER_SPECIALIZE=1 or read from an older journal record) by DynamicBufferStride.
+// Specializations made now already are.
 void NormalizeBufferSpecialization(ResourceSpecialization& specialization);
+
+// descriptor_format of a buffer whose formatted loads decode the V#'s format and dst_sel from
+// shader data. The same slots of Ghost of Yotei's shaders see 8-bit UInt, 8-bit UNorm and 8_8
+// UNorm data. Only read-only buffers of an 8/16/32-bit per-component format without zero-stride
+// OOB folding are generic; packed formats (10_11_11, 2_10_10_10, 5_6_5, ...) stay specialized.
+constexpr auto GenericBufferFormat = static_cast<Prospero::BufferFormat>(0x1ffu);
+
+// Whether a buffer slot of `program` (base) with this specialization takes GenericBufferFormat.
+// The shader-data word of a GenericBufferFormat buffer: the V#'s format (bits 0-6) and dst_sel
+// (bits 7-18); 0 (kInvalid) for an invalid or non-buffer descriptor.
+uint32_t RuntimeBufferFormatWord(const DescriptorValue& descriptor);
+
+bool GenericBufferFormatEligible(const BufferResource& base, const ResourceSpecialization::Buffer& buffer);
+
+// NormalizeBufferSpecialization, plus GenericBufferFormat for the eligible formatted slots of
+// the shader (its untranslated info) the specialization applies to.
+void NormalizeBufferSpecialization(ResourceSpecialization& specialization, const ShaderInfo& info);
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR
 
