@@ -327,6 +327,23 @@ void TestJournalRepairAndKeys() {
         "oversized key cannot create a journal");
 }
 
+// Stride- and format-generic buffers (DynamicBufferStride, GenericBufferFormat) are journal
+// values like any other: they survive the codec and validation unchanged.
+void TestGenericBufferKeysRoundTrip() {
+  using namespace Libs::Graphics::ShaderRecompiler;
+  auto record = MakeRecord(ShaderType::Compute);
+  record.specialization.buffers[0].packed_stride =
+      IR::DynamicBufferStride | (1u << 14u) | (2u << 16u) | (1u << 20u);
+  record.specialization.buffers[0].descriptor_format = IR::GenericBufferFormat;
+  record.specialization.buffers[1].descriptor_format = Prospero::BufferFormat::k8_8UNorm;
+  std::vector<uint8_t> bytes;
+  Check(Encode(record, bytes), "generic buffer keys encode");
+  PermutationRecord decoded;
+  Check(Decode(bytes, decoded), "generic buffer keys decode");
+  Check(decoded.specialization == record.specialization,
+        "generic buffer keys round-trip unchanged");
+}
+
 } // namespace
 
 int main() {
@@ -334,6 +351,7 @@ int main() {
   TestRuntimeInputsDoNotChangeRecords();
   TestInvalidRecords();
   TestJournalRepairAndKeys();
+  TestGenericBufferKeysRoundTrip();
   std::printf("ShaderPrecompileRecordTests: all passed\n");
   return 0;
 }
