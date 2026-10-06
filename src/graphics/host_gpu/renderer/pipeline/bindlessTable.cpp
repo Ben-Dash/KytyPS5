@@ -384,10 +384,9 @@ BindlessTable::~BindlessTable() {
 	}
 }
 
-bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries, bool exact) {
+bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries) {
 	// Headroom so a growing heap rarely moves; a move re-writes the keys resolved so far.
-	const auto capacity =
-	    exact ? entries : std::max(entries, std::min<uint32_t>(entries * 2u, 1u << 16u));
+	const auto capacity = std::max(entries, std::min<uint32_t>(entries * 2u, 1u << 16u));
 	if (capacity > ShaderRecompiler::IR::WatchdogReportBase - m_next_region) {
 		return false;
 	}
@@ -437,7 +436,6 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		}
 	}
 	auto& heap        = m_heaps.emplace_back();
-	heap.id           = m_next_heap_id++;
 	heap.base         = base;
 	heap.table_offset = table_offset;
 	heap.record_stride = record_stride;
@@ -450,15 +448,13 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	if (!AllocateRegion(heap, initial)) {
 		m_heaps.pop_back();
 		static std::atomic<uint32_t> resets {0};
-		const auto                   before = m_heaps.size();
-		CompactHeaps();
 		if (resets.fetch_add(1) < 8) {
-			std::printf("bindless: translation regions full (%zu heaps); %zu kept\n", before,
+			std::printf("bindless: translation regions full (%zu heaps); starting over\n",
 			            m_heaps.size());
 			std::fflush(stdout);
 		}
+		ResetHeaps();
 		auto& fresh         = m_heaps.emplace_back();
-		fresh.id            = m_next_heap_id++;
 		fresh.base          = base;
 		fresh.table_offset  = table_offset;
 		fresh.record_stride = record_stride;
@@ -472,38 +468,6 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		return &fresh;
 	}
 	return &heap;
-}
-
-void BindlessTable::CompactHeaps() {
-	uint64_t current = 0;
-	for (const auto& heap: m_heaps) {
-		current = std::max(current, heap.checked_frame);
-	}
-	std::deque<Heap> survivors;
-	for (auto& heap: m_heaps) {
-		if (heap.region != 0 && heap.checked_frame + 2u >= current) {
-			survivors.push_back(std::move(heap));
-		}
-	}
-	m_heaps       = std::move(survivors);
-	m_next_region = 1;
-	for (auto& heap: m_heaps) {
-		// Keeps the entries it had; the resolved keys are written into the new region.
-		if (!AllocateRegion(heap, heap.entries, true)) {
-			ResetHeaps();
-			return;
-		}
-	}
-	// References to dropped heaps find no heap and are skipped.
-}
-
-BindlessTable::Heap* BindlessTable::FindHeapById(uint64_t id) noexcept {
-	for (auto& heap: m_heaps) {
-		if (heap.id == id) {
-			return &heap;
-		}
-	}
-	return nullptr;
 }
 
 void BindlessTable::ResetHeaps() {
@@ -666,7 +630,7 @@ void BindlessTable::DrainWatchdogReports(uint64_t frame) {
 }
 
 void BindlessTable::AddImageReference(ImageId id, Heap& heap, uint32_t key) {
-	m_image_refs[ImageKey(id)].emplace_back(heap.id, key);
+	m_image_refs[ImageKey(id)].emplace_back(&heap, key);
 }
 
 void BindlessTable::OnImageUnregistered(ImageId id) {
@@ -683,11 +647,7 @@ void BindlessTable::OnImageUnregistered(ImageId id) {
 	if (found == m_image_refs.end()) {
 		return;
 	}
-	for (const auto& [heap_id, key]: found->second) {
-		auto* heap = FindHeapById(heap_id);
-		if (heap == nullptr || key >= heap->entries) {
-			continue;
-		}
+	for (const auto& [heap, key]: found->second) {
 		if (heap->slots[key] != 0) {
 			WriteSlot(heap->binding, heap->slots[key], m_placeholder_views[heap->binding],
 			          vk::ImageLayout::eShaderReadOnlyOptimal);

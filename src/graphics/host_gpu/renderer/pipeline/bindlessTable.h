@@ -63,7 +63,6 @@ public:
 	// A guest descriptor heap as one view type samples it: a region of the translation (and
 	// feedback) buffer, one entry per key, and the textures resolved so far.
 	struct Heap {
-		uint64_t                            id           = 0; // stable across compaction
 		uint64_t                            base         = 0;
 		uint32_t                            table_offset = 0;
 		uint32_t                            record_stride = 32;
@@ -151,12 +150,7 @@ public:
 	void OnImageUnregistered(ImageId id);
 
 private:
-	[[nodiscard]] bool AllocateRegion(Heap& heap, uint32_t entries, bool exact = false);
-	// When the translation buffer is full: keeps the heaps used in the last two frames, with
-	// their resolved keys, in new regions from the start; drops the rest (per-frame tables at
-	// addresses that did not come round). Falls back to ResetHeaps when even those do not fit.
-	void CompactHeaps();
-	[[nodiscard]] Heap* FindHeapById(uint64_t id) noexcept;
+	[[nodiscard]] bool AllocateRegion(Heap& heap, uint32_t entries);
 public:
 
 private:
@@ -170,9 +164,7 @@ private:
 
 	GraphicContext&         m_graphics;
 	std::deque<Heap>        m_heaps;
-	// Image -> (heap id, key): heap ids, not pointers, since compaction rebuilds the deque.
-	std::unordered_map<uint64_t, std::vector<std::pair<uint64_t, uint32_t>>> m_image_refs;
-	uint64_t                m_next_heap_id = 1;
+	std::unordered_map<uint64_t, std::vector<std::pair<Heap*, uint32_t>>> m_image_refs;
 	// (binding, view) -> slot, and the shared slots of each image (binding, slot, map key).
 	std::unordered_map<uint64_t, uint32_t>                               m_shared_slots;
 	std::unordered_map<uint64_t, std::vector<std::array<uint64_t, 3>>>   m_image_shared_slots;
