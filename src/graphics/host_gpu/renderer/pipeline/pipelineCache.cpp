@@ -2574,6 +2574,20 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 		return 0;
 	}
 	Common::LockGuard lock(m_mutex);
+	// A specialization made from guest memory (an enumerated descriptor table, a buffer-loaded
+	// value) is read here ahead of the dispatch, often before the game wrote what the dispatch
+	// will see: the pipeline would be a different permutation (Ghost of Yotei b21e373811f28e31
+	// compiled 61 s for one the dispatch never used). The module stays translated; the pipeline is
+	// left to the dispatch.
+	if (const auto* resources = input_info.stage.resources;
+	    resources != nullptr && !resources->specialization_reads.empty()) {
+		if (m_prefetch_deferred_logged.insert(input_info.stage.program->shader_hash).second) {
+			PipelineCacheLog("prefetch: pipeline deferred to dispatch, specialization reads guest "
+			                 "memory: hash={:016x} id={}",
+			                 input_info.stage.program->shader_hash, program.id);
+		}
+		return 0;
+	}
 	return StartComputeBuild(input_info, program, ComputeOrigin::Prefetch, false) ? 1u : 0u;
 }
 
@@ -2612,15 +2626,17 @@ void PipelineCache::InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& 
 
 // One line per compute pipeline a dispatch takes, so a log sums the GPU thread's stalls: where it
 // came from, how long the GPU thread waited for it and how long the driver compiled it.
-void PipelineCache::LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
+// The program id tells two permutations of one shader apart.
+void PipelineCache::LogComputePipeline(uint64_t shader_hash, uint64_t program_id,
+                                       ComputeOrigin                       origin,
                                        std::chrono::steady_clock::duration waited,
                                        int64_t                             compile_us) {
 	const char* from = origin == ComputeOrigin::Replay     ? "replay"
 	                   : origin == ComputeOrigin::Prefetch ? "prefetch"
 	                                                       : "sync";
 	PipelineCacheLog(
-	    "ComputePipeline: hash={:016x} from={} wait_ms={:.1f} compile_ms={:.1f} cache={}",
-	    shader_hash, from, std::chrono::duration<double, std::milli>(waited).count(),
+	    "ComputePipeline: hash={:016x} id={} from={} wait_ms={:.1f} compile_ms={:.1f} cache={}",
+	    shader_hash, program_id, from, std::chrono::duration<double, std::milli>(waited).count(),
 	    compile_us < 0 ? -1.0 : static_cast<double>(compile_us) / 1000.0,
 	    compile_us < 0 ? "?" : compile_us < ComputeCacheHitMicroseconds ? "hit" : "miss");
 }
@@ -2697,8 +2713,8 @@ bool PipelineCache::ComputePipelineReady(const ShaderComputeInputInfo& input_inf
 	if (!build.deferred) {
 		// The line its dispatch prints later shows no wait: the queue waited instead.
 		build.deferred = true;
-		PipelineCacheLog("ComputePipeline: hash={:016x} not ready, dispatch deferred",
-		                 build.shader_hash);
+		PipelineCacheLog("ComputePipeline: hash={:016x} id={} not ready, dispatch deferred",
+		                 build.shader_hash, compute_program.id);
 	}
 	return false;
 }
@@ -2771,7 +2787,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		cached->pipeline = pipeline;
 	}
 	m_compute_stats[static_cast<size_t>(origin)].taken.fetch_add(1, std::memory_order_relaxed);
-	LogComputePipeline(input_info.stage.program->shader_hash, origin,
+	LogComputePipeline(input_info.stage.program->shader_hash, compute_program.id, origin,
 	                   std::chrono::steady_clock::now() - wait_start, compiled_us);
 	m_compute_pipelines_created++;
 	if (PermutationLogEnabled()) [[unlikely]] {
