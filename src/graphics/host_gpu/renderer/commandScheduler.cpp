@@ -488,6 +488,9 @@ void CommandScheduler::BeginZones() {
 		                     "create GPU zone timestamp pool");
 	}
 	m_zone_chunk = m_zone_next_chunk++ % ZoneChunks;
+	if (const auto last = m_zone_chunk_ticks[m_zone_chunk]; last != 0 && !IsFree(last)) {
+		m_master.Wait(last);
+	}
 	m_command.m_buffer.resetQueryPool(m_zone_pool, m_zone_chunk * ZoneChunkQueries,
 	                                  ZoneChunkQueries);
 	m_zone_marks.clear();
@@ -519,6 +522,7 @@ void CommandScheduler::EndZones() {
 	m_command.m_buffer.writeTimestamp(
 	    vk::PipelineStageFlagBits::eBottomOfPipe, m_zone_pool,
 	    chunk * ZoneChunkQueries + static_cast<uint32_t>(m_zone_marks.size()));
+	m_zone_chunk_ticks[chunk] = CurrentTick();
 	std::lock_guard lock(m_operation_mutex);
 	m_pending_operations.push(
 	    {[this, chunk, marks = std::move(m_zone_marks)] { ReadZones(chunk, marks); },

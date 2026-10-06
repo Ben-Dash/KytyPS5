@@ -8,6 +8,7 @@
 #include "graphics/host_gpu/renderer/masterSemaphore.h"
 #include "graphics/host_gpu/renderer/render.h"
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -174,6 +175,10 @@ private:
 	vk::QueryPool         m_zone_pool       = nullptr;
 	uint32_t              m_zone_next_chunk = 0;
 	uint32_t              m_zone_chunk      = UINT32_MAX; // Chunk of the recording buffer.
+	// The tick of the submission that last wrote each chunk: a chunk is reset for reuse only once
+	// that submission has completed (resetting queries a running buffer still writes lost the
+	// device in Ghost of Yotei at ~7000 submits per 10 s, which cycles the 64 chunks in ~100 ms).
+	std::array<uint64_t, ZoneChunks> m_zone_chunk_ticks {};
 	std::vector<ZoneMark> m_zone_marks;
 	std::chrono::steady_clock::time_point m_last_submit {};
 	std::chrono::steady_clock::time_point m_last_pending_refresh {}; // See PopPendingOperations.
