@@ -140,6 +140,8 @@ static void PrintUsage() {
 	         "it supports that, instead of checks compiled into each shader. Default: true.\n");
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	::printf("  --redzone                            Protect the guest SysV red zone.\n");
+	::printf("  --red-zone-protection <true|false>   Same as --redzone; the settings panel (F2) "
+	         "saves it. Default: false.\n");
 #endif
 	::printf("  --keymap <Control=Input>             DualSense mapping; may be repeated.\n");
 	::printf("  --rd                                 Enable RenderDoc capture.\n");
@@ -640,6 +642,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			}
 		} else if (arg == "--speculative-draws") {
 			if (!ParseBool(value, options.config.speculative_draws_enabled)) {
+				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--red-zone-protection") {
+			if (!ParseBool(value, options.config.red_zone_protection_enabled)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
