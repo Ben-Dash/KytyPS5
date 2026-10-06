@@ -91,6 +91,10 @@ bool InitializeThreadSignalStack() {
 // one that stores the value already there) prints the code address after the writing instruction.
 static uint64_t g_hw_watch[4] {};
 static int      g_hw_watch_count = 0;
+// KYTY_DEBUG_HW_EXEC=<address>[,<address>...] (hex): execution breakpoints instead, after the
+// write watches (four slots in all). Each hit prints and dumps like a write hit, before the
+// instruction runs; the first KYTY_DEBUG_HW_EXEC_LIMIT (default 40) hits are reported.
+static bool     g_hw_watch_exec[4] {};
 // Bumped when a watch is added at run time (KYTY_DEBUG_HW_WATCH_FOLLOW): re-arms every thread.
 static std::atomic<uint32_t> g_hw_watch_generation {0};
 
@@ -168,8 +172,9 @@ static DWORD WINAPI HwWatchThread(void* /*unused*/) {
 						DWORD64 control = 0;
 						for (int i = 0; i < g_hw_watch_count; i++) {
 							(&context.Dr0)[i] = g_hw_watch[i];
-							// Local enable, break on write, four bytes.
-							control |= (DWORD64 {1} << (i * 2)) | (DWORD64 {0xd} << (16 + i * 4));
+							// Local enable, break on write, four bytes (or on execution).
+							control |= (DWORD64 {1} << (i * 2)) |
+							           (DWORD64 {g_hw_watch_exec[i] ? 0x0u : 0xdu} << (16 + i * 4));
 						}
 						context.Dr7 = control;
 						context.Dr6 = 0;
@@ -201,6 +206,13 @@ static void StartHwWatch() {
 		}
 		g_hw_watch_ptr_first = g_hw_watch_count;
 	}
+	for (const char* exec = std::getenv("KYTY_DEBUG_HW_EXEC");
+	     exec != nullptr && *exec != '\0' && g_hw_watch_count < 4 && g_hw_watch_ptr == 0;) {
+		char* end                         = nullptr;
+		g_hw_watch_exec[g_hw_watch_count] = true;
+		g_hw_watch[g_hw_watch_count++]    = std::strtoull(exec, &end, 16);
+		exec                              = *end == ',' ? end + 1 : nullptr;
+	}
 	if (g_hw_watch_count != 0 || g_hw_watch_ptr != 0) {
 		CloseHandle(CreateThread(nullptr, 0, HwWatchThread, nullptr, 0, nullptr));
 	}
@@ -212,9 +224,28 @@ static LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS exception) noexcept {
 	if (exception_record->ExceptionCode == EXCEPTION_SINGLE_STEP && g_hw_watch_count != 0 &&
 	    (exception->ContextRecord->Dr6 & 0xfu) != 0) {
 		static std::atomic<uint32_t> count {0};
+		static std::atomic<uint32_t> exec_count {0};
+		static const uint32_t        exec_limit = [] {
+			const char* text = std::getenv("KYTY_DEBUG_HW_EXEC_LIMIT");
+			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 0)) : 40u;
+		}();
 		for (int i = 0; i < g_hw_watch_count; i++) {
-			if ((exception->ContextRecord->Dr6 & (DWORD64 {1} << i)) == 0 ||
-			    count.fetch_add(1, std::memory_order_relaxed) >= 4000) {
+			if ((exception->ContextRecord->Dr6 & (DWORD64 {1} << i)) == 0) {
+				continue;
+			}
+			if (g_hw_watch_exec[i]) {
+				// Resume flag: the instruction runs once without breaking again.
+				exception->ContextRecord->EFlags |= 0x10000u;
+				// KYTY_DEBUG_HW_EXEC_SKIP=<n>: the first n hits are not reported.
+				static const uint32_t exec_skip = [] {
+					const char* text = std::getenv("KYTY_DEBUG_HW_EXEC_SKIP");
+					return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 0)) : 0u;
+				}();
+				const auto hit = exec_count.fetch_add(1, std::memory_order_relaxed);
+				if (hit < exec_skip || hit >= exec_skip + exec_limit) {
+					continue;
+				}
+			} else if (count.fetch_add(1, std::memory_order_relaxed) >= 4000) {
 				continue;
 			}
 			uint32_t value = 0;
