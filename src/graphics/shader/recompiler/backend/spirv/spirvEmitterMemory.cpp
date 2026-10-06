@@ -15,9 +15,13 @@ uint32_t AndCondition(EmitterState& state, uint32_t lhs, uint32_t rhs) {
 	return Binary(state, spv::OpLogicalAnd, TypeBool(state), lhs, rhs);
 }
 
+bool IsStorageBufferKind(IR::ResourceKind kind) {
+	return kind == IR::ResourceKind::Buffer || kind == IR::ResourceKind::ScalarBuffer ||
+	       kind == IR::ResourceKind::Gds;
+}
+
 bool IsStorageBufferAccess(const MemoryResourceAccess& resource) {
-	return resource.kind == IR::ResourceKind::Buffer ||
-	       resource.kind == IR::ResourceKind::ScalarBuffer || resource.kind == IR::ResourceKind::Gds;
+	return IsStorageBufferKind(resource.kind);
 }
 
 // Loads an element that may be out of bounds; out-of-bounds lanes get zero. A storage-buffer load
@@ -303,9 +307,9 @@ uint32_t LoadWordPrepared(ValueEmitContext& ctx, const IR::Inst& inst, const IR:
 			return LoadWordInBounds(ctx, resource, element);
 		});
 	}
-	return EmitValueOrZeroIfCondition(
-	    ctx.state, EmitMemoryElementInBounds(ctx.state, resource, index),
-	    [&]() { return LoadWordInBounds(ctx, resource, index); });
+	return LoadElementOrZero(ctx.state, resource,
+	                         EmitMemoryElementInBounds(ctx.state, resource, index), index,
+	                         [&](uint32_t element) { return LoadWordInBounds(ctx, resource, element); });
 }
 
 // LDS and scratch always hold element 0 (they are arrays of a known nonzero size).
@@ -336,6 +340,13 @@ uint32_t LoadWord(ValueEmitContext& ctx, const IR::Inst& inst, IR::MemoryInfo me
 			                 EmitMemoryElementInBounds(ctx.state, resource, index)));
 		}
 	}
+	if (IsStorageBufferKind(mem.kind)) {
+		// As in LoadElementOrZero: robustBufferAccess keeps the load of a lane outside EXEC
+		// harmless, so EXEC selects the value instead of branching around the load.
+		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
+		return Select(ctx.state, TypeU32(ctx.state), ctx.Arg(inst, inst.NumArgs() - 1),
+		              LoadWordPrepared(ctx, inst, mem, resource), ConstantU32(ctx.state, 0));
+	}
 	return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
 		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
 		return LoadWordPrepared(ctx, inst, mem, resource);
@@ -349,9 +360,10 @@ uint32_t LoadSubwordPrepared(ValueEmitContext& ctx, const IR::Inst& inst, const 
 	const auto index = Binary(
 	    ctx.state, spv::OpShiftRightLogical, TypeU32(ctx.state), address,
 	    ConstantU32(ctx.state, std::countr_zero(resource.element_bits / 8u)));
-	return EmitValueOrZeroIfCondition(
-	    ctx.state, EmitMemoryElementInBounds(ctx.state, resource, index), [&]() {
-		    return LoadSubwordInBounds(ctx, resource, address, index, bits, sign_extend);
+	return LoadElementOrZero(
+	    ctx.state, resource, EmitMemoryElementInBounds(ctx.state, resource, index), index,
+	    [&](uint32_t element) {
+		    return LoadSubwordInBounds(ctx, resource, address, element, bits, sign_extend);
 	    });
 }
 
@@ -392,6 +404,13 @@ uint32_t LoadSubwordInBounds(ValueEmitContext& ctx, const MemoryResourceAccess& 
 
 uint32_t LoadSubword(ValueEmitContext& ctx, const IR::Inst& inst, IR::MemoryInfo mem, uint32_t bits,
                      bool sign_extend) {
+	if (IsStorageBufferKind(mem.kind)) {
+		// As in LoadWord.
+		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
+		return Select(ctx.state, TypeU32(ctx.state), ctx.Arg(inst, inst.NumArgs() - 1),
+		              LoadSubwordPrepared(ctx, inst, mem, resource, bits, sign_extend),
+		              ConstantU32(ctx.state, 0));
+	}
 	return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
 		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
 		return LoadSubwordPrepared(ctx, inst, mem, resource, bits, sign_extend);
@@ -1817,6 +1836,22 @@ uint32_t LoadBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t compon
 	if (ctx.Memory(inst).kind == IR::ResourceKind::IndirectBuffer && !ctx.Memory(inst).formatted) {
 		// The lane's EXEC bit gates the access with its bounds, without a branch of its own.
 		return LoadIndirectBuffer(ctx, inst, components, ctx.Arg(inst, inst.NumArgs() - 1));
+	}
+	if (const auto& mem = ctx.Memory(inst);
+	    IsStorageBufferKind(mem.kind) &&
+	    Format::GetFormatInfo(mem.formatted ? BufferFormat(ctx, mem) : Prospero::BufferFormat::kInvalid)
+	            .type == Format::ComponentType::Unknown) {
+		// Raw DWORDs of a storage buffer: EXEC selects the values, as in LoadWord.
+		const auto              active   = ctx.Arg(inst, inst.NumArgs() - 1);
+		const auto              resource = PrepareMemoryResourceAccess(state, mem);
+		std::array<uint32_t, 4> values {};
+		for (uint32_t component = 0; component < components; component++) {
+			values[component] =
+			    Select(state, TypeU32(state), active,
+			           LoadWordPrepared(ctx, inst, RebaseRawComponent(mem, component), resource),
+			           ConstantU32(state, 0));
+		}
+		return ConstructU32Composite(state, components, values);
 	}
 	return EmitValueOrDefaultIfCondition(
 	    state, ctx.Arg(inst, inst.NumArgs() - 1), TypeU32Composite(state, components),
