@@ -212,6 +212,9 @@ private:
 	void LookaheadPass(const Pm4Execution& execution, ProgramWait wait, uint32_t& draws,
 	                   uint32_t& parts, bool& pending, bool dispatches_only = false);
 	void SuspendPm4();
+	// Whether a dispatch may suspend this queue while its compute pipeline compiles
+	// (--defer-dispatches).
+	[[nodiscard]] bool MayDeferDispatch() const;
 	// Starts the draw speculation walk at the current packet (see DrawSpeculator).
 	void RestartSpeculation(const Pm4Execution& execution);
 	void SynchronizePredicate(uint64_t address, uint64_t size);

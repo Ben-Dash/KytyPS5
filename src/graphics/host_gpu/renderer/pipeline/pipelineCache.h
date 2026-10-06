@@ -207,6 +207,10 @@ public:
 	                              bool                 may_defer        = false);
 	Pipeline& GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	                             const ShaderProgram&          compute_program);
+	// Whether GetComputePipeline would return at once; otherwise the pipeline is compiling (queued
+	// now if it was not, ahead of the other builds) and the caller may run the dispatch later.
+	[[nodiscard]] bool ComputePipelineReady(const ShaderComputeInputInfo& input_info,
+	                                        const ShaderProgram&          compute_program);
 
 	// Graphics pipelines created so far; a change across a draw means it compiled one.
 	[[nodiscard]] uint64_t GraphicsPipelinesCreated() const noexcept {
@@ -297,6 +301,8 @@ private:
 		std::shared_ptr<std::atomic<int64_t>> compile_us;
 		uint64_t                              shader_hash = 0;
 		ComputeOrigin                         origin      = ComputeOrigin::Sync;
+		// A dispatch found it compiling and was deferred (ComputePipelineReady).
+		bool                                  deferred    = false;
 	};
 	// By program id, under m_mutex. The dispatch that needs one takes it into m_compute_pipelines,
 	// so each program's pipeline is compiled once.

@@ -1822,9 +1822,19 @@ void CommandProcessor::DispatchDirect(uint32_t thread_group_x, uint32_t thread_g
 			}
 		}
 
-		m_renderer.GetRenderExecutor().DispatchDirect(m_submit_id, CurrentBuffer(), thread_group_x,
-		                                              thread_group_y, thread_group_z, mode);
+		if (!m_renderer.GetRenderExecutor().DispatchDirect(m_submit_id, CurrentBuffer(),
+		                                                   thread_group_x, thread_group_y,
+		                                                   thread_group_z, mode, MayDeferDispatch())) {
+			SuspendPm4();
+		}
 	}
+}
+
+bool CommandProcessor::MayDeferDispatch() const {
+	// Only inside a PM4 walk: SuspendPm4 stops it before the packet's cursor advances, and the
+	// GPU thread runs the queue's other submissions, then this packet again (blocked submissions
+	// are retried when another completes, and at least every 100 ms).
+	return g_current_execution != nullptr && Config::DeferDispatchesEnabled();
 }
 
 void CommandProcessor::DispatchIndirect(uint64_t args_addr, uint32_t mode) {
@@ -1848,7 +1858,10 @@ void CommandProcessor::DispatchIndirect(uint64_t args_addr, uint32_t mode) {
 			            Pm4::ComputeWaveSize(mode));
 		}
 	}
-	m_renderer.GetRenderExecutor().DispatchIndirect(m_submit_id, CurrentBuffer(), args_addr, mode);
+	if (!m_renderer.GetRenderExecutor().DispatchIndirect(m_submit_id, CurrentBuffer(), args_addr,
+	                                                     mode, MayDeferDispatch())) {
+		SuspendPm4();
+	}
 }
 
 void CommandProcessor::DrawIndexAuto(DrawAutoArgs args) {

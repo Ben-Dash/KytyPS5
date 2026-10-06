@@ -2581,6 +2581,27 @@ void PipelineCache::RequestDriverCacheWrite() {
 	    false);
 }
 
+bool PipelineCache::ComputePipelineReady(const ShaderComputeInputInfo& input_info,
+                                         const ShaderProgram&          compute_program) {
+	EXIT_IF(!compute_program);
+	Common::LockGuard lock(m_mutex);
+	if (m_compute_pipelines.contains(compute_program.id)) {
+		return true;
+	}
+	(void)StartComputeBuild(input_info, compute_program, ComputeOrigin::Sync, true);
+	auto& build = m_compute_builds.at(compute_program.id);
+	if (build.result.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+		return true;
+	}
+	if (!build.deferred) {
+		// The line its dispatch prints later shows no wait: the queue waited instead.
+		build.deferred = true;
+		PipelineCacheLog("ComputePipeline: hash={:016x} not ready, dispatch deferred",
+		                 build.shader_hash);
+	}
+	return false;
+}
+
 PipelineCache::Pipeline&
 PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
                                   const ShaderProgram&          compute_program) {

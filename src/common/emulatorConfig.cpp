@@ -251,6 +251,10 @@ bool DispatchLookaheadEnabled() {
 	return g_config->dispatch_lookahead_enabled;
 }
 
+bool DeferDispatchesEnabled() {
+	return g_config->defer_dispatches_enabled;
+}
+
 static std::atomic<int> g_speculative_draws_override {-1};
 
 bool SpeculativeDrawsEnabled() {

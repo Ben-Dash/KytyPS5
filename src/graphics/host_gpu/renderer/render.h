@@ -234,10 +234,14 @@ public:
 	~RenderExecutor();
 	KYTY_CLASS_NO_COPY(RenderExecutor);
 
-	void DispatchDirect(uint64_t submit_id, CommandBuffer& buffer, uint32_t thread_group_x,
-	                    uint32_t thread_group_y, uint32_t thread_group_z, uint32_t mode);
-	void DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer, uint64_t args_addr,
-	                      uint32_t mode);
+	// With `may_defer`, a dispatch whose compute pipeline is still compiling records nothing and
+	// returns false; the caller runs it again later (see CommandProcessor::DispatchDirect).
+	// Otherwise it waits for the pipeline, and always returns true.
+	bool DispatchDirect(uint64_t submit_id, CommandBuffer& buffer, uint32_t thread_group_x,
+	                    uint32_t thread_group_y, uint32_t thread_group_z, uint32_t mode,
+	                    bool may_defer = false);
+	bool DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer, uint64_t args_addr,
+	                      uint32_t mode, bool may_defer = false);
 
 	void PrepareBindings(const ShaderStageRuntime& runtime, PreparedBindings& prepared);
 	// Bindless heaps: register the draw's heaps, patch their regions, and once per frame resolve
