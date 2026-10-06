@@ -1571,13 +1571,25 @@ bool PipelineCache::StartComputeBuild(const ShaderComputeInputInfo& input_info,
 	                                     m_driver_cache);
 	build.result = m_compute_queue->Post(
 	    program.id,
-	    [create = std::move(create), compile_us = build.compile_us]() mutable {
+	    [this, create = std::move(create), compile_us = build.compile_us, origin]() mutable {
 		    const auto started  = std::chrono::steady_clock::now();
 		    const auto pipeline = create();
-		    compile_us->store(std::chrono::duration_cast<std::chrono::microseconds>(
-		                          std::chrono::steady_clock::now() - started)
-		                          .count(),
-		                      std::memory_order_release);
+		    const auto elapsed  = std::chrono::duration_cast<std::chrono::microseconds>(
+		                             std::chrono::steady_clock::now() - started)
+		                             .count();
+		    compile_us->store(elapsed, std::memory_order_release);
+		    if (pipeline != nullptr) {
+			    auto& stats = m_compute_stats[static_cast<size_t>(origin)];
+			    stats.built.fetch_add(1, std::memory_order_relaxed);
+			    if (elapsed < ComputeCacheHitMicroseconds) {
+				    stats.hits.fetch_add(1, std::memory_order_relaxed);
+			    }
+		    }
+		    // Saved now, not when a dispatch takes it: a run ended by force keeps a slow compile even
+		    // when no dispatch needed the pipeline yet (or none ever does).
+		    if (elapsed >= 2'000'000) {
+			    RequestDriverCacheWrite();
+		    }
 		    return pipeline;
 	    },
 	    urgent);
@@ -1602,6 +1614,9 @@ void PipelineCache::Save() {
 	if (m_compute_queue != nullptr) {
 		// As the library threads: their compiles write to the driver cache.
 		m_compute_queue->Stop();
+		if (!m_compute_stats_logged.exchange(true)) {
+			LogComputeStats();
+		}
 	}
 	Common::LockGuard lock(m_mutex);
 	m_program_cache->recording.Close();
@@ -2487,7 +2502,7 @@ uint32_t PipelineCache::PrefetchGraphicsPipeline(const HW::Context& ctx, const H
 
 uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
                                                 uint32_t dispatch_initiator, ProgramWait wait,
-                                                bool* pending) {
+                                                bool* pending, const std::array<uint32_t, 3>* groups) {
 	KYTY_PROFILER_FUNCTION();
 	// Compute pipelines need no pipeline libraries: they compile on m_compute_queue.
 	if (sh.GetCs().cs_regs.data_addr == 0) {
@@ -2510,6 +2525,17 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	ShaderComputeInputInfo input_info {};
 	input_info.dispatch_thread_dimensions =
 	    (dispatch_initiator & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0;
+	if (groups != nullptr) {
+		const std::array<uint32_t, 3> group_sizes {cs.cs_regs.num_thread_x, cs.cs_regs.num_thread_y,
+		                                           cs.cs_regs.num_thread_z};
+		for (uint32_t axis = 0; axis < 3u; ++axis) {
+			// Thread counts become group counts, as RenderExecutor::DispatchDirect converts them.
+			const auto size  = std::max(group_sizes[axis], 1u);
+			const auto count = (*groups)[axis];
+			input_info.workgroup_counts[axis] =
+			    input_info.dispatch_thread_dimensions ? count / size + (count % size != 0u) : count;
+		}
+	}
 	const auto program = GetComputeProgram(cs, ctx.GetShaderRegisters(), input_info, wait, pending);
 	if (!program) {
 		return 0;
@@ -2559,9 +2585,28 @@ void PipelineCache::LogComputePipeline(uint64_t shader_hash, ComputeOrigin origi
 	const char* from = origin == ComputeOrigin::Replay     ? "replay"
 	                   : origin == ComputeOrigin::Prefetch ? "prefetch"
 	                                                       : "sync";
-	PipelineCacheLog("ComputePipeline: hash={:016x} from={} wait_ms={:.1f} compile_ms={:.1f}",
-	                 shader_hash, from, std::chrono::duration<double, std::milli>(waited).count(),
-	                 compile_us < 0 ? -1.0 : static_cast<double>(compile_us) / 1000.0);
+	PipelineCacheLog(
+	    "ComputePipeline: hash={:016x} from={} wait_ms={:.1f} compile_ms={:.1f} cache={}",
+	    shader_hash, from, std::chrono::duration<double, std::milli>(waited).count(),
+	    compile_us < 0 ? -1.0 : static_cast<double>(compile_us) / 1000.0,
+	    compile_us < 0 ? "?" : compile_us < ComputeCacheHitMicroseconds ? "hit" : "miss");
+}
+
+// At Save: per origin, the compute pipelines compiled, how many of those compiled fast enough to
+// count as driver cache hits, and how many a dispatch took (built but never taken: a look-ahead
+// misprediction, or a journal permutation this run did not dispatch).
+void PipelineCache::LogComputeStats() const {
+	constexpr std::array<const char*, 3> Names {"replay", "prefetch", "sync"};
+	std::string                          line = "Compute pipelines:";
+	for (size_t i = 0; i < Names.size(); i++) {
+		const auto& stats = m_compute_stats[i];
+		line += fmt::format(" {} built={} hits={} taken={};", Names[i],
+		                    stats.built.load(std::memory_order_relaxed),
+		                    stats.hits.load(std::memory_order_relaxed),
+		                    stats.taken.load(std::memory_order_relaxed));
+	}
+	line += fmt::format(" (hit: compile under {} ms)", ComputeCacheHitMicroseconds / 1000);
+	PipelineCacheLog("{}", line);
 }
 
 // After a slow compute compile: saves the driver cache on a worker thread, so a run ended by force
@@ -2658,15 +2703,21 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		compiled_us = std::chrono::duration_cast<std::chrono::microseconds>(
 		                  std::chrono::steady_clock::now() - compile_start)
 		                  .count();
+		auto& stats = m_compute_stats[static_cast<size_t>(origin)];
+		stats.built.fetch_add(1, std::memory_order_relaxed);
+		if (compiled_us < ComputeCacheHitMicroseconds) {
+			stats.hits.fetch_add(1, std::memory_order_relaxed);
+		}
+		if (compiled_us >= 2'000'000) {
+			RequestDriverCacheWrite();
+		}
 	} else {
 		cached->pipeline = pipeline;
 	}
+	m_compute_stats[static_cast<size_t>(origin)].taken.fetch_add(1, std::memory_order_relaxed);
 	LogComputePipeline(input_info.stage.program->shader_hash, origin,
 	                   std::chrono::steady_clock::now() - wait_start, compiled_us);
 	m_compute_pipelines_created++;
-	if (compiled_us >= 2'000'000) {
-		RequestDriverCacheWrite();
-	}
 	if (PermutationLogEnabled()) [[unlikely]] {
 		const auto now = std::chrono::steady_clock::now();
 		std::printf("pipeline: cs=%llu ms=%.1f%s t=%.3f\n",

@@ -242,8 +242,12 @@ public:
 	// need, translating its shader (like PrefetchGraphicsPipeline), and compiles it on a worker
 	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued. A shader
 	// (address and wave size) a lookup already found a program for is skipped without a lookup.
+	// `groups` are a direct dispatch's group (or, with the thread-dimensions initiator bit, thread)
+	// counts, which shaders indexing tables by workgroup count specialize on; indirect dispatches
+	// look their programs up without them, as the dispatch path does.
 	uint32_t PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
-	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending);
+	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending,
+	                                 const std::array<uint32_t, 3>* groups = nullptr);
 	// Prints a look-ahead's result with KYTY_PERMUTATION_LOG=1.
 	void LogLookahead(uint32_t draws, uint32_t parts) const;
 	// Shader translations and module compiles queued or running on worker threads.
@@ -337,6 +341,17 @@ private:
 	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
 	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
 	void        RequestDriverCacheWrite();
+	void        LogComputeStats() const;
+	// A compute compile this fast came from the driver cache (a heuristic: NVIDIA reports no hits).
+	static constexpr int64_t ComputeCacheHitMicroseconds = 200'000;
+	struct ComputeStats {
+		std::atomic<uint32_t> built {0};
+		std::atomic<uint32_t> hits {0};
+		std::atomic<uint32_t> taken {0};
+	};
+	// By ComputeOrigin. Counted on the threads that compile and take the pipelines.
+	std::array<ComputeStats, 3> m_compute_stats;
+	std::atomic_bool            m_compute_stats_logged {false};
 	// One write at a time: the GPU thread's (graphics), a worker's (compute) and Save's.
 	std::mutex       m_driver_cache_write_mutex;
 	std::atomic_bool m_driver_cache_write_queued {false};
