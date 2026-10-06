@@ -41,6 +41,23 @@ void ReportCheckpoints(GraphicContext& graphics) {
 			            static_cast<uint64_t>(index),
 			            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key);
 		}
+		// The marks between the last finished and the last started checkpoint: the hung command
+		// is among them (the driver reports only the newest checkpoint per stage).
+		uintptr_t first = UINTPTR_MAX;
+		uintptr_t last  = 0;
+		for (const auto& entry: data) {
+			const auto index = reinterpret_cast<uintptr_t>(entry.pCheckpointMarker);
+			first            = std::min(first, index);
+			last             = std::max(last, index);
+		}
+		for (uintptr_t index = first; count != 0 && index <= last + 2u && index - first < 64u;
+		     index++) {
+			const auto& mark = GpuZones::g_checkpoints[index % GpuZones::CheckpointRing];
+			const auto  zone = static_cast<size_t>(mark.zone);
+			std::printf("gpu-checkpoint-range: checkpoint=%" PRIu64 " zone=%s key=%016" PRIx64 "\n",
+			            static_cast<uint64_t>(index),
+			            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key);
+		}
 	}
 	std::fflush(stdout);
 }

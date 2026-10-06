@@ -145,6 +145,7 @@ public:
 	~PipelineCache();
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
+	bool WriteDriverCache();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;

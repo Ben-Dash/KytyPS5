@@ -349,9 +349,11 @@ void ValidateStorageTexture(const ShaderRecompiler::IR::ImageResource& resource,
 	const bool descriptor_ok = IsSupportedStorageTextureDescriptor(resource, descriptor);
 	const bool encoding_ok   = IsSupportedStorageTextureEncoding(resource, descriptor);
 	const bool uint_resource    = resource.numeric_class == Prospero::TextureNumericClass::Uint;
-	const bool raw_sint_storage = format == Prospero::BufferFormat::k32SInt && uint_resource &&
-	                              resource.written && !resource.read && !resource.atomic;
 	const auto numeric_class = Prospero::SampledTextureNumericClass(format);
+	// A write-only image of a signed integer format goes through its unsigned view.
+	const bool raw_sint_storage = numeric_class == Prospero::TextureNumericClass::Sint &&
+	                              uint_resource && resource.written && !resource.read &&
+	                              !resource.atomic;
 	const bool raw_float_atomic = format == Prospero::BufferFormat::k32Float && uint_resource &&
 	                              resource.atomic && !resource.atomic64;
 	const bool format_ok =
@@ -716,11 +718,13 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 			pixel_format = depth_format->depth_attachment_format;
 		}
 	}
-	const auto storage_view_format = resource.atomic64 ? vk::Format::eR64Uint
-	                                 : storage && (resource.atomic ||
-	                                               format == Prospero::BufferFormat::k32SInt)
-	                                     ? vk::Format::eR32Uint
-	                                     : SrgbStorageViewFormat(pixel_format);
+	const bool sint_storage = storage && !resource.atomic &&
+	                          Prospero::SampledTextureNumericClass(format) ==
+	                              Prospero::TextureNumericClass::Sint;
+	const auto storage_view_format = resource.atomic64            ? vk::Format::eR64Uint
+	                                 : storage && resource.atomic ? vk::Format::eR32Uint
+	                                 : sint_storage               ? SintStorageViewFormat(pixel_format)
+	                                                              : SrgbStorageViewFormat(pixel_format);
 	const auto view_format         = storage && storage_view_format != vk::Format::eUndefined
 	                                     ? storage_view_format
 	                                     : pixel_format;

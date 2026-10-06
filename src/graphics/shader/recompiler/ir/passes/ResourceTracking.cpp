@@ -1647,6 +1647,15 @@ private:
 		return false;
 	}
 
+	// Whether an image access through `handle` uses it as a storage image (the bindless arrays
+	// hold sampled images only).
+	static bool UsedAsStorage(const Inst& handle) {
+		return std::ranges::any_of(handle.Uses(), [](const Use& use) {
+			return ImageOpcodeInfoOf(use.user->GetOpcode()).resource_class ==
+			       ImageResourceClass::Storage;
+		});
+	}
+
 	// Whether every image access through `handle` takes a 128-bit T#.
 	bool UsedAsR128(const Inst& handle) const {
 		bool any = false;
@@ -1666,12 +1675,25 @@ private:
 		return any;
 	}
 
+	// KYTY_DEBUG_INDIRECT_REJECT=1: prints where an image handle failed to become an indirect
+	// (table-selected) descriptor; "GetImageResource dword 0 is not a valid runtime value" follows.
+	bool RejectImage(int line) const {
+		static const bool enabled = KYTY_GETENV("KYTY_DEBUG_INDIRECT_REJECT") != nullptr;
+		if (enabled) {
+			std::printf("indirect-image reject: hash=%016llx line=%d\n",
+			            static_cast<unsigned long long>(m_program.shader_hash), line);
+			std::fflush(stdout);
+		}
+		return false;
+	}
+
 	bool MatchDescriptorTable(Inst& handle, const DescriptorSource& descriptor,
 	                          IndirectDescriptorPlan& plan,
 	                          DescriptorSource& table_source, Value& key, uint32_t& table_offset,
 	                          uint32_t& table_stride) {
 		Inst* table_handle = nullptr;
-		m_table_cross_block = false;
+		m_table_cross_block  = false;
+		m_table_shared_reads = false;
 		for (uint32_t dword = 0; dword < handle.NumArgs(); ++dword) {
 			// A 128-bit T# (r128): the decoder made its upper half zero; only the lower half is
 			// read from the table (the bindless lookup zeroes the rest of the record too).
@@ -1682,13 +1704,13 @@ private:
 			}
 			auto* read = descriptor.dwords[dword].Resolve().TryInstruction();
 			if (read == nullptr) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			uint32_t memory_index = 0;
 			const auto* memory = ScalarReadMemory(*read, memory_index);
 			if (memory == nullptr || memory->offset > INT32_MAX || (memory->offset & 3u) != 0u ||
 			    !MemoryIndexBelongsTo(memory_index, *read)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			auto* current_handle = read->Arg(0).Resolve().TryInstruction();
 			Value current_key;
@@ -1704,7 +1726,7 @@ private:
 			     !EquivalentValue(m_program, Value(table_handle), Value(current_handle))) ||
 			    !MatchTableOffset(read->Arg(1), current_key, offset, stride) ||
 			    memory->offset > UINT32_MAX - offset) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			// A bare-address table read in another block: the host cannot rely on the address,
 			// so only the bindless lookup (lazy, checked reads) may take it.
@@ -1717,25 +1739,30 @@ private:
 				table_stride = stride;
 			} else if (table_stride != stride || !EquivalentValue(m_program, key, current_key) ||
 			           static_cast<uint64_t>(table_offset) + dword * sizeof(uint32_t) != offset) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			table_handle = current_handle;
+			// Table reads the shader also uses otherwise (e.g. descriptor fields in arithmetic)
+			// stay ordinary reads; only the bindless lookup can then replace the descriptor.
+			const bool shared_image_read = handle.NumArgs() == 8u && WorkgroupAxis(key) == UINT32_MAX &&
+			                               !UsesOnlyImageDescriptors(*read);
+			m_table_shared_reads |= shared_image_read && m_program.bindless_images;
 			if (handle.NumArgs() == 8u
-			        ? WorkgroupAxis(key) == UINT32_MAX && !UsesOnlyImageDescriptors(*read) :
+			        ? shared_image_read && !m_program.bindless_images :
 			    std::ranges::any_of(read->Uses(), [](const Use& use) {
 				return use.user->GetOpcode() != ValueOpcode::GetBufferResource ||
 				       std::ranges::any_of(use.user->Uses(), [](const Use& consumer) {
 					       return consumer.user->GetOpcode() != ValueOpcode::StoreBufferU32;
 				       });
 			    })) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			plan.memory[dword] = memory_index;
 			plan.reads[dword] = read;
 		}
 
 		if (!MakeRuntimeTableSource(*plan.reads[0], table_source)) {
-			return false;
+			return RejectImage(__LINE__);
 		}
 		return true;
 	}
@@ -1770,13 +1797,13 @@ private:
 
 	bool TryMakeIndirectImage(Inst& handle, const DescriptorSource& descriptor,
 	                          IndirectDescriptorPlan& plan) {
-		if (handle.GetOpcode() != ValueOpcode::GetImageResource || handle.NumArgs() != 8u) return false;
+		if (handle.GetOpcode() != ValueOpcode::GetImageResource || handle.NumArgs() != 8u) return RejectImage(__LINE__);
 		DescriptorSource table_source;
 		Value key;
 		uint32_t table_offset = 0;
 		uint32_t table_stride = 0;
 		if (!MatchDescriptorTable(handle, descriptor, plan, table_source, key, table_offset,
-		                          table_stride)) return false;
+		                          table_stride)) return RejectImage(__LINE__);
 		DescriptorSource material_source;
 		DescriptorSource::IndirectDescriptor indirect;
 		indirect.table_offset = table_offset;
@@ -1785,7 +1812,7 @@ private:
 		// A heap behind a V# or behind a bare 64-bit address (its size is then a host cap).
 		const bool bindless_heap =
 		    indirect.workgroup_axis == UINT32_MAX && m_program.bindless_images && table_stride >= 32u &&
-		    (table_source.dword_count == 4u || table_source.dword_count == 2u);
+		    (table_source.dword_count == 4u || table_source.dword_count == 2u) && !UsedAsStorage(handle);
 		const auto take_bindless = [&]() {
 			indirect                = {};
 			indirect.table_offset   = table_offset;
@@ -1793,21 +1820,22 @@ private:
 			indirect.bindless       = true;
 			material_source         = {};
 		};
-		if (bindless_heap && (table_source.dword_count == 4u || m_table_cross_block)) {
+		if (bindless_heap &&
+		    (table_source.dword_count == 4u || m_table_cross_block || m_table_shared_reads)) {
 			// Bindless (--bindless): the shader looks the key up in the host's translation table
 			// at run time. An enumeration that passes here can still fail per draw (a material
 			// table of more records than the probe cap, more textures than a shader binds), and a
 			// compiled shader cannot switch plans, so a V# heap always takes this path.
 			take_bindless();
-		} else if (m_table_cross_block) {
-			return false;
+		} else if (m_table_cross_block || m_table_shared_reads) {
+			return RejectImage(__LINE__);
 		} else if (indirect.workgroup_axis != UINT32_MAX) {
 			// The descriptor also supplies dimensions to shader arithmetic. Keep its reads;
 			// only the image handle is projected onto the bounded workgroup key.
 			plan.reads.fill(nullptr);
 		} else if (table_source.dword_count == 2u && table_stride != 32u) {
 			// A bare-address table of records larger than one descriptor: bindless only.
-			if (!bindless_heap) return false;
+			if (!bindless_heap) return RejectImage(__LINE__);
 			take_bindless();
 		} else if (table_source.dword_count == 2u) {
 			const auto* selector = key.Resolve().TryInstruction();
@@ -1822,11 +1850,11 @@ private:
 			}
 			if (indirect.key_count.IsEmpty() &&
 			    !MatchUniformizedMaterialKey(key, handle, indirect, material_source)) {
-				if (!bindless_heap) return false;
+				if (!bindless_heap) return RejectImage(__LINE__);
 				take_bindless();
 			} else if ((table_offset & 3u) != 0u ||
 			           (bitscan && table_offset > UINT32_MAX - (32u * 32u - 1u))) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 		} else if (!MatchUniformizedBufferKey(key, handle, indirect, material_source)) {
 			auto* material_read = MaterialKey(key, indirect).TryInstruction();
@@ -1835,11 +1863,11 @@ private:
 			                         ? ScalarReadMemory(*material_read, material_memory_index) : nullptr;
 			if (memory == nullptr || memory->kind != ResourceKind::ScalarBuffer ||
 			    memory->offset > INT32_MAX || !MemoryIndexBelongsTo(material_memory_index, *material_read)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			if (!MatchMaterialOffset(material_read->Arg(1), indirect.selector_stride,
 			                         indirect.selector_offset)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			const auto step = std::gcd<uint64_t>(indirect.selector_stride, uint64_t {1} << 32u);
 			indirect.selector_offset =
@@ -1848,7 +1876,7 @@ private:
 			if (material_handle == nullptr ||
 			    material_handle->GetOpcode() != ValueOpcode::GetBufferResource ||
 			    !MakeRuntimeTableSource(*material_read, material_source)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			indirect.material_source = InternSource(material_source);
 		}
@@ -1858,7 +1886,11 @@ private:
 		if (!indirect.bindless && indirect.workgroup_axis == UINT32_MAX &&
 		    table_source.dword_count == 4u && table_offset != 0u &&
 		    uint64_t {maximum_key} * table_stride + table_offset + 28u > UINT32_MAX)
-			return false;
+			return RejectImage(__LINE__);
+		if (indirect.bindless && m_table_shared_reads) {
+			// The other users keep the table reads (they are not planning-only).
+			plan.reads.fill(nullptr);
+		}
 		indirect.table_source = InternSource(table_source);
 		DescriptorSource image_source;
 		image_source.dword_count = 8u;
@@ -2549,6 +2581,8 @@ private:
 	bool                                       m_shader_writes = false;
 	// Set by MatchDescriptorTable: a bare-address table read in another block than the handle.
 	bool                                       m_table_cross_block = false;
+	// Set by MatchDescriptorTable: a table read has users besides image descriptors.
+	bool                                       m_table_shared_reads = false;
 };
 
 } // namespace

@@ -57,6 +57,24 @@ namespace ImageViewOps {
 	}
 }
 
+// The unsigned view of a signed integer format: a write-only storage image of a signed format is
+// written through it, bit for bit (stores keep the low bits either way).
+[[nodiscard]] inline vk::Format SintStorageViewFormat(vk::Format image_format) noexcept {
+	switch (image_format) {
+		case vk::Format::eR8Sint: return vk::Format::eR8Uint;
+		case vk::Format::eR8G8Sint: return vk::Format::eR8G8Uint;
+		case vk::Format::eR8G8B8A8Sint: return vk::Format::eR8G8B8A8Uint;
+		case vk::Format::eR16Sint: return vk::Format::eR16Uint;
+		case vk::Format::eR16G16Sint: return vk::Format::eR16G16Uint;
+		case vk::Format::eR16G16B16A16Sint: return vk::Format::eR16G16B16A16Uint;
+		case vk::Format::eR32Sint: return vk::Format::eR32Uint;
+		case vk::Format::eR32G32Sint: return vk::Format::eR32G32Uint;
+		case vk::Format::eR32G32B32A32Sint: return vk::Format::eR32G32B32A32Uint;
+		case vk::Format::eA2B10G10R10SintPack32: return vk::Format::eA2B10G10R10UintPack32;
+		default: return vk::Format::eUndefined;
+	}
+}
+
 [[nodiscard]] inline bool IsSupportedSampledColorView(vk::Format image_format,
                                                       vk::Format view_format,
                                                       uint32_t   swizzle) noexcept {

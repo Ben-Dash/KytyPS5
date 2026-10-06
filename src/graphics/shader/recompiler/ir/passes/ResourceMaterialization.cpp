@@ -678,15 +678,20 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 		if (storage || image.conversion_format != Prospero::BufferFormat::kInvalid) {
 			image.shader_swizzle = DescriptorImageSwizzle(descriptor);
 		}
-		const bool raw_sint_storage = storage && format == Prospero::BufferFormat::k32SInt &&
-		                              base.written && !base.read && !base.atomic;
 		image.numeric_class         = Prospero::SampledTextureNumericClass(format);
+		// A write-only image of a signed integer format is written through its unsigned view
+		// (the stored bits are the same).
+		const bool raw_sint_storage = storage &&
+		                              image.numeric_class == Prospero::TextureNumericClass::Sint &&
+		                              base.written && !base.read && !base.atomic;
 		if (storage) {
 			if ((!raw_sint_storage && image.numeric_class == Prospero::TextureNumericClass::Sint) ||
 			    image.numeric_class == Prospero::TextureNumericClass::Unsupported) {
 				return SpecializationFail(
-				    fmt::format("storage image descriptor {} uses unsupported format {}", i,
-				                static_cast<uint32_t>(format)));
+				    fmt::format("storage image descriptor {} uses unsupported format {} (read={} "
+				                "written={} atomic={})",
+				                i, static_cast<uint32_t>(format), base.read, base.written,
+				                base.atomic));
 			}
 			if (raw_sint_storage || base.atomic) {
 				image.numeric_class = Prospero::TextureNumericClass::Uint;

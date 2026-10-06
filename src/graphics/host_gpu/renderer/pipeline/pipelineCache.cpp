@@ -1509,7 +1509,14 @@ void PipelineCache::Save() {
 	if (m_driver_cache == nullptr) {
 		return;
 	}
+	(void)WriteDriverCache();
+	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
+	m_driver_cache = nullptr;
+}
 
+// Writes the driver pipeline cache to disk; the caller holds m_mutex. Also called after a slow
+// compile, so a run ended by force (or a lost device) keeps what took long to compile.
+bool PipelineCache::WriteDriverCache() {
 	size_t               size = 0;
 	vk::Result           result;
 	std::vector<uint8_t> payload;
@@ -1530,7 +1537,7 @@ void PipelineCache::Save() {
 	    size > std::numeric_limits<uint32_t>::max()) {
 		PipelineCacheLog("Vulkan pipeline cache: save failed ({}, {} bytes)",
 		                 vk::to_string(result), size);
-		return;
+		return false;
 	}
 	payload.resize(size);
 	auto       prefix       = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
@@ -1538,7 +1545,7 @@ void PipelineCache::Save() {
 	prefix.append(reinterpret_cast<const char*>(&payload_hash), sizeof(payload_hash));
 	if (!Common::File::CreateDirectories(m_driver_cache_path.parent_path())) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to create cache directory");
-		return;
+		return false;
 	}
 	auto temp_path = m_driver_cache_path;
 	temp_path += ".tmp";
@@ -1555,12 +1562,11 @@ void PipelineCache::Save() {
 	    !Common::File::RenameFile(temp_path, m_driver_cache_path)) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to write {}",
 		                 Common::PathToString(m_driver_cache_path));
-		return;
+		return false;
 	}
 	PipelineCacheLog("Vulkan pipeline cache: saved {} bytes to {}", payload.size(),
 	                 Common::PathToString(m_driver_cache_path));
-	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
-	m_driver_cache = nullptr;
+	return true;
 }
 
 // Copies what preparing a non-tessellated draw's stage inputs reads (see GraphicsStageRegisters).
@@ -2479,6 +2485,10 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		                       m_driver_cache);
 	}
 	m_compute_pipelines_created++;
+	if (m_driver_cache != nullptr &&
+	    std::chrono::steady_clock::now() - create_start >= std::chrono::seconds(2)) {
+		(void)WriteDriverCache();
+	}
 	if (PermutationLogEnabled()) [[unlikely]] {
 		const auto now = std::chrono::steady_clock::now();
 		std::printf("pipeline: cs=%llu ms=%.1f%s t=%.3f\n",
