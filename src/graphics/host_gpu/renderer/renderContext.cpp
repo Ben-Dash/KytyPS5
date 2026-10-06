@@ -34,6 +34,7 @@ RenderContext::RenderContext(GraphicContext& graphics)
 	m_texture_cache.on_bindless_unregister = [this](ImageId id) {
 		m_bindless_table.OnImageUnregistered(id);
 	};
+	m_pipeline_cache.OnContextReady();
 }
 
 RenderContext::~RenderContext() {

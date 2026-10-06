@@ -16,6 +16,7 @@
 #include "graphics/host_gpu/renderer/image/imageView.h"
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
+#include "graphics/host_gpu/renderer/pipeline/computePipelineQueue.h"
 #include "graphics/host_gpu/renderer/pipeline/drawSpeculation.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineLibrary.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
@@ -43,6 +44,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <shared_mutex>
 #include <span>
@@ -1237,6 +1239,8 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	g_bindless_images = graphics.bindless_enabled && Config::BindlessImagesEnabled();
 	InitializeDriverCache();
+	// Before the precompile replay, which queues the journal's compute pipelines on it.
+	m_compute_queue = std::make_unique<ComputePipelineQueue>(Config::PipelineCompileThreads());
 	InitializeShaderPrecompile();
 	// Linking libraries without fast linking costs about as much as a full compile.
 	if (m_graphics.pipeline_library_enabled && m_graphics.pipeline_library_fast_linking) {
@@ -1267,6 +1271,13 @@ PipelineCache::~PipelineCache() {
 		(void)id;
 		DestroyPipelineObjects(m_graphics, *pipeline);
 	}
+	// Compute pipelines no dispatch took. Save stopped the queue: every result is set.
+	for (auto& [id, build]: m_compute_builds) {
+		(void)id;
+		build.pipeline->pipeline = build.result.get();
+		DestroyPipelineObjects(m_graphics, *build.pipeline);
+	}
+	m_compute_queue.reset();
 	m_libraries.reset();
 	if (m_driver_cache != nullptr) {
 		m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
@@ -1421,10 +1432,21 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		return options;
 	};
 
+	const auto            started = std::chrono::steady_clock::now();
 	std::vector<Replayed> replayed(records.size());
-	std::atomic_size_t    next {0};
-	const auto            work = [&] {
-		for (size_t index = next.fetch_add(1); index < records.size(); index = next.fetch_add(1)) {
+	// Compute records first, each group in journal order: their pipelines are queued as soon as
+	// their modules exist, and their driver compiles are the longest.
+	std::vector<size_t> order(records.size());
+	std::iota(order.begin(), order.end(), size_t {0});
+	const auto compute_end = std::stable_partition(order.begin(), order.end(), [&](size_t index) {
+		return records[index].stage == ShaderType::Compute;
+	});
+	std::span<const size_t> indices;
+	std::atomic_size_t      next {0};
+	const auto              work = [&] {
+		for (size_t position = next.fetch_add(1); position < indices.size();
+		     position        = next.fetch_add(1)) {
+			const auto   index  = indices[position];
 			auto&        record = records[index];
 			ShaderParams params;
 			const auto   options    = options_for(record, params);
@@ -1444,24 +1466,27 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 			result.valid = true;
 		}
 	};
-	const auto threads = std::clamp(std::thread::hardware_concurrency(), 2u, 8u) - 1u;
-	{
+	const auto threads = std::max(Config::PipelineCompileThreads(), 2u);
+	const auto translate = [&](std::span<const size_t> group) {
+		indices = group;
+		next.store(0);
 		std::vector<std::jthread> helpers;
 		for (uint32_t i = 1; i < threads; i++) {
 			helpers.emplace_back(work);
 		}
 		work();
-	}
+	};
 
-	size_t              compiled = 0;
-	size_t              skipped  = 0;
-	Common::LockGuard   lock(m_mutex);
-	for (size_t index = 0; index < records.size(); index++) {
+	size_t compiled = 0;
+	size_t skipped  = 0;
+	size_t queued   = 0;
+	// Adds a replayed record's permutation; null when the record failed or is known already.
+	const auto insert = [&](size_t index) -> const ProgramCache::Permutation* {
 		auto& record = records[index];
 		auto& result = replayed[index];
 		if (!result.valid) {
 			++skipped;
-			continue;
+			return nullptr;
 		}
 		ShaderParams                    params;
 		const auto                      options = options_for(record, params);
@@ -1481,7 +1506,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 				                                                    layout.ShaderDataDwords());
 		    })) {
 			m_graphics.device.destroyShaderModule(result.compiled.module, nullptr);
-			continue;
+			return nullptr;
 		}
 		if (entry == m_program_cache->programs.end()) {
 			std::unique_lock insert_lock(m_program_cache->programs_mutex);
@@ -1491,18 +1516,99 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		entry->second.permutations.push_back(m_program_cache->MakePermutation(
 		    options, record.specialization, std::move(result.compiled)));
 		++compiled;
+		return &entry->second.permutations.back();
+	};
+
+	translate(std::span(order).first(static_cast<size_t>(compute_end - order.begin())));
+	{
+		// Pipeline layouts of bindless shaders need the bindless table, made after this cache.
+		m_context_ready_future.wait();
+		Common::LockGuard lock(m_mutex);
+		for (auto index = order.begin(); index != compute_end; ++index) {
+			const auto* permutation = insert(*index);
+			if (permutation == nullptr) {
+				continue;
+			}
+			// The layouts read only the program; the dispatch that needs the pipeline takes it.
+			ShaderComputeInputInfo input_info {};
+			input_info.stage = {.program = &permutation->program};
+			queued += StartComputeBuild(input_info, permutation->handle, ComputeOrigin::Replay,
+			                            false)
+			              ? 1u
+			              : 0u;
+		}
 	}
-	PipelineCacheLog("Shader precompile: replayed {} permutations on {} threads; skipped {}",
-	                 compiled, threads, skipped);
+	const auto compute_done = std::chrono::steady_clock::now();
+	translate(std::span(order).subspan(static_cast<size_t>(compute_end - order.begin())));
+	{
+		Common::LockGuard lock(m_mutex);
+		for (auto index = compute_end; index != order.end(); ++index) {
+			(void)insert(*index);
+		}
+	}
+	const auto ms = [](auto duration) {
+		return std::chrono::duration<double, std::milli>(duration).count();
+	};
+	PipelineCacheLog("Shader precompile: replayed {} permutations on {} threads; skipped {}; "
+	                 "compute modules {:.0f} ms, all {:.0f} ms; queued {} compute pipelines on {} "
+	                 "threads",
+	                 compiled, threads, skipped, ms(compute_done - started),
+	                 ms(std::chrono::steady_clock::now() - started), queued,
+	                 m_compute_queue->ThreadCount());
+}
+
+bool PipelineCache::StartComputeBuild(const ShaderComputeInputInfo& input_info,
+                                      const ShaderProgram& program, ComputeOrigin origin,
+                                      bool urgent) {
+	if (m_compute_pipelines.contains(program.id) || m_compute_prefetched.contains(program.id)) {
+		return false;
+	}
+	if (m_compute_builds.contains(program.id)) {
+		if (urgent) {
+			m_compute_queue->Promote(program.id);
+		}
+		return false;
+	}
+	ComputeBuild build;
+	build.pipeline    = std::make_unique<Pipeline>();
+	build.compile_us  = std::make_shared<std::atomic<int64_t>>(-1);
+	build.shader_hash = input_info.stage.program->shader_hash;
+	build.origin      = origin;
+	auto create = PrepareComputePipeline(m_graphics, *build.pipeline, input_info, program.module,
+	                                     m_driver_cache);
+	build.result = m_compute_queue->Post(
+	    program.id,
+	    [create = std::move(create), compile_us = build.compile_us]() mutable {
+		    const auto started  = std::chrono::steady_clock::now();
+		    const auto pipeline = create();
+		    compile_us->store(std::chrono::duration_cast<std::chrono::microseconds>(
+		                          std::chrono::steady_clock::now() - started)
+		                          .count(),
+		                      std::memory_order_release);
+		    return pipeline;
+	    },
+	    urgent);
+	m_compute_builds.emplace(program.id, std::move(build));
+	return true;
+}
+
+void PipelineCache::OnContextReady() {
+	std::call_once(m_context_ready_once, [this] { m_context_ready.set_value(); });
 }
 
 void PipelineCache::Save() {
+	// A replay waiting for the context could not finish otherwise.
+	OnContextReady();
 	// Join before acquiring the cache mutex or destroying the driver cache. This also covers
 	// the WindowRun shutdown path, which calls Save before the PipelineCache destructor.
 	WaitForPrecompile();
 	if (m_libraries != nullptr) {
 		// The link thread writes to the driver cache, which is saved and destroyed below.
 		m_libraries->Stop();
+	}
+	if (m_compute_queue != nullptr) {
+		// As the library threads: their compiles write to the driver cache.
+		m_compute_queue->Stop();
 	}
 	Common::LockGuard lock(m_mutex);
 	m_program_cache->recording.Close();
@@ -2406,7 +2512,8 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 		return 0;
 	}
 	Common::LockGuard lock(m_mutex);
-	if (m_compute_pipelines.contains(program.id) || m_compute_prefetched.contains(program.id)) {
+	if (m_compute_pipelines.contains(program.id) || m_compute_prefetched.contains(program.id) ||
+	    m_compute_builds.contains(program.id)) {
 		return 0;
 	}
 	auto pipeline = std::make_unique<Pipeline>();
@@ -2453,6 +2560,20 @@ void PipelineCache::InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& 
 	    [device = m_graphics.device, fast_linked] { device.destroyPipeline(fast_linked, nullptr); });
 }
 
+// One line per compute pipeline a dispatch takes, so a log sums the GPU thread's stalls: where it
+// came from, how long the GPU thread waited for it and how long the driver compiled it (-1: not
+// measured, a look-ahead prefetch through the pipeline library threads).
+void PipelineCache::LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
+                                       std::chrono::steady_clock::duration waited,
+                                       int64_t                             compile_us) {
+	const char* from = origin == ComputeOrigin::Replay     ? "replay"
+	                   : origin == ComputeOrigin::Prefetch ? "prefetch"
+	                                                       : "sync";
+	PipelineCacheLog("ComputePipeline: hash={:016x} from={} wait_ms={:.1f} compile_ms={:.1f}",
+	                 shader_hash, from, std::chrono::duration<double, std::milli>(waited).count(),
+	                 compile_us < 0 ? -1.0 : static_cast<double>(compile_us) / 1000.0);
+}
+
 PipelineCache::Pipeline&
 PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
                                   const ShaderProgram&          compute_program) {
@@ -2473,11 +2594,27 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 
 	const auto create_start = std::chrono::steady_clock::now();
 	std::unique_ptr<Pipeline> cached;
-	if (const auto prefetched = m_compute_prefetched.find(compute_program.id);
+	ComputeOrigin             origin     = ComputeOrigin::Sync;
+	int64_t                   compile_us = -1;
+	if (auto build = m_compute_builds.find(compute_program.id); build != m_compute_builds.end()) {
+		// Queued by the precompile replay: wait for this pipeline only.
+		m_compute_queue->Promote(compute_program.id);
+		cached           = std::move(build->second.pipeline);
+		origin           = build->second.origin;
+		const auto taken = std::move(build->second);
+		m_compute_builds.erase(build);
+		cached->pipeline = taken.result.get();
+		compile_us       = taken.compile_us->load(std::memory_order_acquire);
+		if (cached->pipeline == nullptr) {
+			DestroyPipelineObjects(m_graphics, *cached);
+			cached = nullptr;
+		}
+	} else if (const auto prefetched = m_compute_prefetched.find(compute_program.id);
 	    prefetched != m_compute_prefetched.end()) {
 		// A look-ahead already made its layouts and compiled (or is compiling) the pipeline.
 		cached = std::move(prefetched->second);
 		m_compute_prefetched.erase(prefetched);
+		origin           = ComputeOrigin::Prefetch;
 		cached->pipeline = m_libraries->Take(ComputePrefetchKey(compute_program.id));
 		if (cached->pipeline == nullptr) {
 			DestroyPipelineObjects(m_graphics, *cached);
@@ -2486,10 +2623,17 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	}
 	const bool prefetched = cached != nullptr;
 	if (!prefetched) {
+		origin = ComputeOrigin::Sync;
 		cached = std::make_unique<Pipeline>();
+		const auto compile_start = std::chrono::steady_clock::now();
 		CreatePipelineInternal(m_graphics, *cached, input_info, compute_program.module,
 		                       m_driver_cache);
+		compile_us = std::chrono::duration_cast<std::chrono::microseconds>(
+		                 std::chrono::steady_clock::now() - compile_start)
+		                 .count();
 	}
+	LogComputePipeline(input_info.stage.program->shader_hash, origin,
+	                   std::chrono::steady_clock::now() - create_start, compile_us);
 	m_compute_pipelines_created++;
 	if (m_driver_cache != nullptr &&
 	    std::chrono::steady_clock::now() - create_start >= std::chrono::seconds(2)) {

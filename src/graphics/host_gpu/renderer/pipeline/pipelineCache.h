@@ -11,8 +11,10 @@
 #include "graphics/shader/shader.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <span>
@@ -28,6 +30,7 @@ struct RenderColorInfo;
 struct RenderDepthInfo;
 class BufferCache;
 class CommandBuffer;
+class ComputePipelineQueue;
 class PipelineLibraryCache;
 struct SpeculatedDraw;
 
@@ -146,6 +149,9 @@ public:
 	KYTY_CLASS_NO_COPY(PipelineCache);
 	void Save();
 	bool WriteDriverCache();
+	// The rest of the render context exists (the bindless table's layout, which compute pipeline
+	// layouts may use): the precompile replay may queue the journal's compute pipelines now.
+	void OnContextReady();
 
 	struct Pipeline {
 		vk::PipelineLayout      pipeline_layout       = nullptr;
@@ -278,6 +284,25 @@ private:
 	// Prefetched compute pipelines by program id: layouts made, pipeline compiling in the
 	// library cache under ComputePrefetchKey.
 	std::unordered_map<uint64_t, std::unique_ptr<Pipeline>> m_compute_prefetched;
+	// Who asked for a compute pipeline first, for the log line its first dispatch prints.
+	enum class ComputeOrigin : uint8_t { Replay, Prefetch, Sync };
+	// A compute pipeline compiling (or compiled) on m_compute_queue that no dispatch took yet.
+	struct ComputeBuild {
+		// Layouts made; the pipeline is set when a dispatch takes the build.
+		std::unique_ptr<Pipeline>             pipeline;
+		std::shared_future<vk::Pipeline>      result;
+		// The driver compile's duration in microseconds, once it ran.
+		std::shared_ptr<std::atomic<int64_t>> compile_us;
+		uint64_t                              shader_hash = 0;
+		ComputeOrigin                         origin      = ComputeOrigin::Sync;
+	};
+	// By program id, under m_mutex. The dispatch that needs one takes it into m_compute_pipelines,
+	// so each program's pipeline is compiled once.
+	std::unordered_map<uint64_t, ComputeBuild> m_compute_builds;
+	std::unique_ptr<ComputePipelineQueue>      m_compute_queue;
+	std::promise<void>                         m_context_ready;
+	std::shared_future<void>                   m_context_ready_future {m_context_ready.get_future().share()};
+	std::once_flag                             m_context_ready_once;
 	std::unordered_map<GraphicsPipelineKey, std::unique_ptr<Pipeline>, GraphicsPipelineKeyHash>
 	                                                        m_graphics_pipelines;
 	// The last pipeline GetGraphicsPipeline returned and its key, under m_mutex: consecutive draws
@@ -297,6 +322,12 @@ private:
 	void InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& command);
 	void WaitForPrecompile();
 	void ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationRecord> records);
+	// Makes the layouts of `program`'s compute pipeline and queues its compile on m_compute_queue,
+	// unless it is built or queued already. m_mutex must be held. Returns whether it queued one.
+	bool StartComputeBuild(const ShaderComputeInputInfo& input_info, const ShaderProgram& program,
+	                       ComputeOrigin origin, bool urgent);
+	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
+	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);
