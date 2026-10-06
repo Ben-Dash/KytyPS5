@@ -699,6 +699,20 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		}
 		size.size *= image_layers;
 	} else {
+		// A format and tile mode the tiler has no layout for would end the session there (seen
+		// with Yotei bindless keys, e.g. format 128 with tile 31).
+		TileTextureElementLayout element {};
+		TileSurfaceLayout        layout {};
+		if (!volume &&
+		    !(tile == Prospero::TileMode::kLinear && TileGetTextureElementLayout(format, element)) &&
+		    !TileGetTiledTextureLayout({format, tile, TileSurfaceDimension::Dim2D, width, height, 1u,
+		                                physical_levels, 1u},
+		                               layout)) {
+			KYTY_TEXTURE_FAIL("unsupported texture format for its tile mode: format=%u tile=%u "
+			                  "extent=%ux%u levels=%u\n",
+			                  static_cast<uint32_t>(format), static_cast<uint32_t>(tile), width, height,
+			                  physical_levels);
+		}
 		pitch = TileGetTexturePitch(format, width, tile);
 		TileGetTextureTotalSize(format, width, height, volume ? depth : image_layers,
 		                        physical_levels, tile, volume, size);

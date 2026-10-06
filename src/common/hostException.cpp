@@ -310,14 +310,16 @@ static LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS exception) noexcept {
 					// 'b<offset>' at rbx + offset, 'q<offset>' through the pointer at rbx + offset.
 					const char     mode   = (*dump == '@' || *dump == 'p' || *dump == 's' ||
 					                         *dump == 'b' || *dump == 'q' || *dump == 'd' ||
-					                         *dump == 'e')
+					                         *dump == 'e' || *dump == 'i')
 					                            ? *dump++
 					                            : 'r';
 					char*          end    = nullptr;
 					const uint64_t offset = std::strtoull(dump, &end, 16);
 					const uint64_t size   = *end == ':' ? std::strtoull(end + 1, &end, 16) : 16;
-					// 'd<offset>' at rdi + offset, 'e<offset>' through the pointer at rdi + offset.
-					const uint64_t base   = mode == 's'                 ? c->Rsp
+					// 'd<offset>' at rdi + offset, 'e<offset>' through the pointer at rdi + offset,
+					// 'i<offset>' at rsi + offset.
+					const uint64_t base   = mode == 'i'                 ? c->Rsi
+					                        : mode == 's'                 ? c->Rsp
 					                        : mode == 'b' || mode == 'q' ? c->Rbx
 					                        : mode == 'd' || mode == 'e' ? c->Rdi
 					                                                     : c->R15;
