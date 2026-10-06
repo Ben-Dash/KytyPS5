@@ -195,6 +195,16 @@ struct EmitterState {
 		uint32_t function   = 0;
 	};
 	std::vector<IndirectFormattedHelper>             indirect_formatted_helpers;
+	// The index-independent values of a GPU-selected V# (with its SOFFSET), computed at its first
+	// access in a block and reused by later accesses in the same block (KYTY_INDIRECT_BOUNDS_ONCE).
+	struct IndirectVsharpValues {
+		std::array<uint32_t, 5> key {}; // V# words, SOFFSET
+		uint32_t stride = 0, swizzle = 0, not_swizzle = 0, lane_add = 0, index_stride = 0, base = 0;
+		uint32_t format = 0, mode = 0, records = 0, raw_records = 0, scalar_in_bounds = 0;
+		uint32_t mode0 = 0, mode1 = 0, mode2_nonzero = 0, size = 0, base_limit = 0, raw_static = 0;
+	};
+	std::vector<IndirectVsharpValues>                indirect_vsharp_cache;
+	uint32_t                                         indirect_vsharp_label = 0;
 	std::unordered_map<const IR::Block*, uint32_t>   labels;
 	// Long select(index == constant, ...) chains (V_MOVRELS reads) become one OpSwitch at their
 	// outermost select; their inner selects emit nothing (see EmitIndexedSelect).

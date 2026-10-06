@@ -1212,6 +1212,8 @@ struct IndirectBufferAccess {
 	uint32_t scalar_in_bounds;
 	uint32_t raw_records;
 	uint32_t raw_index_in_bounds;
+	// KYTY_INDIRECT_BOUNDS_ONCE: the V#'s index-independent values (vsharp.key[0] != 0).
+	EmitterState::IndirectVsharpValues vsharp;
 };
 
 // The V# words, index, offset, SOFFSET and lane of an access through a GPU-selected V#.
@@ -1232,8 +1234,100 @@ IndirectBufferOperands IndirectOperands(ValueEmitContext& ctx, const IR::Inst& i
 	        .lane    = BufferLane(ctx.state)};
 }
 
+bool IndirectBoundsOnceEnabled() {
+	// KYTY_INDIRECT_BOUNDS_ONCE=0: every access through a GPU-selected V# decodes the V# and
+	// selects its bounds per OOB_SELECT mode on its own.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_INDIRECT_BOUNDS_ONCE");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+// The index-independent values of a V# and SOFFSET, from an earlier access in the same block when
+// there is one (the same SSA words are the same V#, and the block's earlier values dominate).
+EmitterState::IndirectVsharpValues IndirectVsharp(EmitterState& state,
+                                                  const IndirectBufferOperands& operands) {
+	if (state.indirect_vsharp_label != state.current_label) {
+		state.indirect_vsharp_cache.clear();
+		state.indirect_vsharp_label = state.current_label;
+	}
+	const std::array<uint32_t, 5> key {operands.words[0], operands.words[1], operands.words[2],
+	                                   operands.words[3], operands.soffset};
+	for (const auto& cached: state.indirect_vsharp_cache) {
+		if (cached.key == key) {
+			return cached;
+		}
+	}
+	const auto u32     = TypeU32(state);
+	const auto boolean = TypeBool(state);
+	const auto field   = [&](uint32_t word, uint32_t first, uint32_t count) {
+		return EmitBitFieldUExtract(state, word, ConstantU32(state, first), ConstantU32(state, count));
+	};
+	const auto nonzero = [&](uint32_t value) {
+		return Binary(state, spv::OpINotEqual, boolean, value, ConstantU32(state, 0));
+	};
+	const auto mode_is = [&](uint32_t mode, uint32_t value) {
+		return Binary(state, spv::OpIEqual, boolean, mode, ConstantU32(state, value));
+	};
+	EmitterState::IndirectVsharpValues v;
+	v.key            = key;
+	const auto word1 = operands.words[1];
+	const auto word3 = operands.words[3];
+	v.records        = operands.words[2];
+	v.stride         = field(word1, 16, 14);
+	v.swizzle        = AndCondition(state, nonzero(v.stride), nonzero(field(word1, 31, 1)));
+	v.not_swizzle    = Unary(state, spv::OpLogicalNot, boolean, v.swizzle);
+	v.lane_add       = Select(state, u32, nonzero(field(word3, 23, 1)), operands.lane, ConstantU32(state, 0));
+	v.index_stride   = field(word3, 21, 2);
+	v.base           = DeviceAddressFromWords(state, operands.words[0], field(word1, 0, 16));
+	v.format         = field(word3, 12, 7);
+	v.mode           = field(word3, 28, 2);
+	v.raw_records    = Binary(state, spv::OpISub, u32, v.records, operands.soffset);
+	v.scalar_in_bounds = Binary(state, spv::OpULessThanEqual, boolean, operands.soffset, v.records);
+	v.mode0          = mode_is(v.mode, 0);
+	v.mode1          = mode_is(v.mode, 1);
+	v.mode2_nonzero  = AndCondition(state, mode_is(v.mode, 2), nonzero(v.records));
+	v.size           = Select(state, u32, v.swizzle, v.stride, v.raw_records);
+	// OOB_SELECT=3 reduces NUM_RECORDS by SOFFSET before its offset/index checks.
+	v.raw_static     = AndCondition(state, mode_is(v.mode, 3), v.scalar_in_bounds);
+	// The DWORD limit (see IndirectDwordBounds): mode 0 the stride; mode 3 size - 3 when size >= 4,
+	// else 0; modes 1 and 2 do not depend on the offset (0).
+	const auto size_ok = AndCondition(state, v.raw_static,
+	                                  Binary(state, spv::OpUGreaterThanEqual, boolean, v.size, ConstantU32(state, 4)));
+	v.base_limit = Select(state, u32, v.mode0, v.stride,
+	                      Select(state, u32, size_ok, Binary(state, spv::OpISub, u32, v.size, ConstantU32(state, 3)),
+	                             ConstantU32(state, 0)));
+	state.indirect_vsharp_cache.push_back(v);
+	return v;
+}
+
 IndirectBufferAccess PrepareIndirectBuffer(EmitterState& state, const IndirectBufferOperands& operands,
                                            uint32_t memory_offset, bool formatted) {
+	if (IndirectBoundsOnceEnabled()) {
+		const auto v       = IndirectVsharp(state, operands);
+		const auto index   = Binary(state, spv::OpIAdd, TypeU32(state), operands.index, v.lane_add);
+		const auto address = CalculateBufferAddress(state, index, operands.offset, operands.soffset,
+		                                            memory_offset, v.stride, v.swizzle, v.index_stride);
+		return {
+		    .address  = Binary(state, spv::OpIAdd, TypeScalarU64(state), v.base,
+		                       Unary(state, spv::OpUConvert, TypeScalarU64(state), address.byte)),
+		    .offset   = address.offset,
+		    .stride   = v.stride,
+		    .swizzle  = v.swizzle,
+		    .format   = v.format,
+		    .selector = formatted ? EmitBitFieldUExtract(state, operands.words[3], ConstantU32(state, 0),
+		                                                 ConstantU32(state, 3))
+		                          : 0u,
+		    .mode     = v.mode,
+		    .records  = v.records,
+		    .index_in_bounds     = Binary(state, spv::OpULessThan, TypeBool(state), index, v.records),
+		    .scalar_in_bounds    = v.scalar_in_bounds,
+		    .raw_records         = v.raw_records,
+		    .raw_index_in_bounds = Binary(state, spv::OpULessThan, TypeBool(state), index, v.raw_records),
+		    .vsharp              = v,
+		};
+	}
 	const auto word1   = operands.words[1];
 	const auto records = operands.words[2];
 	const auto word3   = operands.words[3];
@@ -1269,6 +1363,7 @@ IndirectBufferAccess PrepareIndirectBuffer(EmitterState& state, const IndirectBu
 	    .scalar_in_bounds = Binary(state, spv::OpULessThanEqual, TypeBool(state), soffset, records),
 	    .raw_records = raw_records,
 	    .raw_index_in_bounds = Binary(state, spv::OpULessThan, TypeBool(state), index, raw_records),
+	    .vsharp = {},
 	};
 }
 
@@ -1292,6 +1387,20 @@ uint32_t IndirectBufferInBoundsBytes(EmitterState& state, const IndirectBufferAc
 	    state, buffer.index_in_bounds,
 	    formatted ? has_payload(buffer.stride)
 	              : Binary(state, spv::OpULessThan, TypeBool(state), offset, buffer.stride));
+	if (const auto& v = buffer.vsharp; v.key[0] != 0) {
+		// The same checks without selects: exactly one OOB_SELECT mode holds, and the size of mode 3
+		// (the stride when swizzled, else NUM_RECORDS - SOFFSET) comes with the V#.
+		const auto boolean = TypeBool(state);
+		const auto raw     = AndCondition(
+		    state,
+		    AndCondition(state, v.raw_static,
+		                 Binary(state, spv::OpLogicalOr, boolean, v.not_swizzle, buffer.raw_index_in_bounds)),
+		    has_payload(v.size));
+		return Binary(state, spv::OpLogicalOr, boolean,
+		              Binary(state, spv::OpLogicalOr, boolean, AndCondition(state, v.mode0, structured),
+		                     AndCondition(state, v.mode1, buffer.index_in_bounds)),
+		              Binary(state, spv::OpLogicalOr, boolean, v.mode2_nonzero, raw));
+	}
 	// OOB_SELECT=3 reduces NUM_RECORDS by SOFFSET before its offset/index checks.
 	const auto raw = AndCondition(
 	    state, buffer.scalar_in_bounds,
@@ -1335,6 +1444,20 @@ IndirectDwordBounds PrepareIndirectDwordBounds(EmitterState& state, const Indire
 	const auto u32     = TypeU32(state);
 	const auto boolean = TypeBool(state);
 	const auto zero    = ConstantU32(state, 0);
+	if (const auto& v = buffer.vsharp; v.key[0] != 0) {
+		// The V# gives its mode's limit; per access only whether the index passes: in mode 0 the
+		// index check, in mode 3 the swizzled index check (other modes have limit 0 anyway).
+		const auto passes = Binary(
+		    state, spv::OpLogicalOr, boolean, AndCondition(state, v.mode0, buffer.index_in_bounds),
+		    AndCondition(state, Unary(state, spv::OpLogicalNot, boolean, v.mode0),
+		                 Binary(state, spv::OpLogicalOr, boolean, v.not_swizzle, buffer.raw_index_in_bounds)));
+		const auto limit  = Select(state, u32, AndCondition(state, enabled, passes), v.base_limit, zero);
+		const auto always = AndCondition(
+		    state, enabled,
+		    Binary(state, spv::OpLogicalOr, boolean, AndCondition(state, v.mode1, buffer.index_in_bounds),
+		           v.mode2_nonzero));
+		return {buffer.offset, limit, always};
+	}
 	const auto mode_is = [&](uint32_t mode) {
 		return Binary(state, spv::OpIEqual, boolean, buffer.mode, ConstantU32(state, mode));
 	};
