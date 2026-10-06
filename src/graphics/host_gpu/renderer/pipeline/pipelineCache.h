@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <filesystem>
 #include <future>
@@ -340,7 +341,10 @@ private:
 	                       ComputeOrigin origin, bool urgent);
 	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
 	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
-	void        RequestDriverCacheWrite();
+	// A compute pipeline compile took 2 s or more, on any thread: the save thread writes the driver
+	// cache file soon, so a run ended by force keeps it.
+	void        MarkDriverCacheDirty();
+	void        SaveThread(const std::stop_token& stop);
 	void        LogComputeStats() const;
 	// A compute compile this fast came from the driver cache (a heuristic: NVIDIA reports no hits).
 	static constexpr int64_t ComputeCacheHitMicroseconds = 200'000;
@@ -352,9 +356,14 @@ private:
 	// By ComputeOrigin. Counted on the threads that compile and take the pipelines.
 	std::array<ComputeStats, 3> m_compute_stats;
 	std::atomic_bool            m_compute_stats_logged {false};
-	// One write at a time: the GPU thread's (graphics), a worker's (compute) and Save's.
-	std::mutex       m_driver_cache_write_mutex;
-	std::atomic_bool m_driver_cache_write_queued {false};
+	// One write at a time: the save thread's and Save's.
+	std::mutex                            m_driver_cache_write_mutex;
+	std::mutex                            m_save_mutex;
+	std::condition_variable_any           m_save_wake;
+	bool                                  m_driver_cache_dirty = false;
+	std::chrono::steady_clock::time_point m_last_save_request;
+	std::chrono::steady_clock::time_point m_last_save;
+	std::jthread                          m_save_thread;
 };
 
 void LogPipelineTrace(const char* phase, uint64_t vertex_program_id, uint64_t pixel_program_id);

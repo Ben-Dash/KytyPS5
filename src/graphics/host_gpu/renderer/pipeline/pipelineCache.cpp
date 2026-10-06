@@ -1261,6 +1261,10 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	InitializeDriverCache();
 	// Before the precompile replay, which queues the journal's compute pipelines on it.
 	m_compute_queue = std::make_unique<ComputePipelineQueue>(Config::PipelineCompileThreads());
+	if (m_driver_cache != nullptr) {
+		m_last_save   = std::chrono::steady_clock::now();
+		m_save_thread = std::jthread([this](const std::stop_token& stop) { SaveThread(stop); });
+	}
 	InitializeShaderPrecompile();
 	// Linking libraries without fast linking costs about as much as a full compile.
 	if (m_graphics.pipeline_library_enabled && m_graphics.pipeline_library_fast_linking) {
@@ -1610,7 +1614,7 @@ bool PipelineCache::StartComputeBuild(const ShaderComputeInputInfo& input_info,
 		    // Saved now, not when a dispatch takes it: a run ended by force keeps a slow compile even
 		    // when no dispatch needed the pipeline yet (or none ever does).
 		    if (elapsed >= 2'000'000) {
-			    RequestDriverCacheWrite();
+			    MarkDriverCacheDirty();
 		    }
 		    return pipeline;
 	    },
@@ -1629,6 +1633,11 @@ void PipelineCache::Save() {
 	// Join before acquiring the cache mutex or destroying the driver cache. This also covers
 	// the WindowRun shutdown path, which calls Save before the PipelineCache destructor.
 	WaitForPrecompile();
+	if (m_save_thread.joinable()) {
+		// Its write finishes first; the write below covers what it had pending.
+		m_save_thread.request_stop();
+		m_save_thread.join();
+	}
 	if (m_libraries != nullptr) {
 		// The link thread writes to the driver cache, which is saved and destroyed below.
 		m_libraries->Stop();
@@ -1650,9 +1659,9 @@ void PipelineCache::Save() {
 	m_driver_cache = nullptr;
 }
 
-// Writes the driver pipeline cache to disk; the caller holds m_mutex, or is a compute worker thread
-// (RequestDriverCacheWrite), which Save stops first. Also called after a slow compile, so a run
-// ended by force (or a lost device) keeps what took long to compile.
+// Writes the driver pipeline cache to disk; called by Save under m_mutex and by the save thread
+// (which Save stops first) after slow compiles, so a run ended by force (or a lost device) keeps
+// what took long to compile.
 bool PipelineCache::WriteDriverCache() {
 	std::lock_guard      write_lock(m_driver_cache_write_mutex);
 	size_t               size = 0;
@@ -2633,21 +2642,44 @@ void PipelineCache::LogComputeStats() const {
 	PipelineCacheLog("{}", line);
 }
 
-// After a slow compute compile: saves the driver cache on a worker thread, so a run ended by force
-// keeps it, without the GPU thread writing a gigabyte. Requests made while one is queued join it.
-void PipelineCache::RequestDriverCacheWrite() {
-	if (m_driver_cache == nullptr || m_driver_cache_write_queued.exchange(true)) {
-		return;
+void PipelineCache::MarkDriverCacheDirty() {
+	{
+		std::lock_guard lock(m_save_mutex);
+		m_driver_cache_dirty = true;
+		m_last_save_request  = std::chrono::steady_clock::now();
 	}
-	(void)m_compute_queue->Post(
-	    0,
-	    [this] {
-		    m_driver_cache_write_queued.store(false);
-		    // Save stops the queue before it destroys the driver cache.
-		    (void)WriteDriverCache();
-		    return vk::Pipeline {};
-	    },
-	    false);
+	m_save_wake.notify_one();
+}
+
+// Writes the driver cache file when a slow compile made it dirty, on its own thread (not behind the
+// queued compiles): at once unless it was written less than a minute ago, then a minute after that
+// write, or 30 s after the last request at the latest. A compile finishing just after a write so
+// reaches the file within 30 s without writing the gigabyte after every compile of a burst.
+void PipelineCache::SaveThread(const std::stop_token& stop) {
+	KYTY_PROFILER_THREAD("PipelineCacheSave");
+	constexpr auto MinInterval = std::chrono::seconds(60);
+	constexpr auto MaxDelay    = std::chrono::seconds(30);
+	std::unique_lock lock(m_save_mutex);
+	for (;;) {
+		if (!m_save_wake.wait(lock, stop, [this] { return m_driver_cache_dirty; })) {
+			return;
+		}
+		const auto due = std::min(m_last_save + MinInterval, m_last_save_request + MaxDelay);
+		if (std::chrono::steady_clock::now() < due) {
+			// Woken early by another request or a stop; the due time only moves later.
+			(void)m_save_wake.wait_until(lock, stop, due, [] { return false; });
+			if (stop.stop_requested()) {
+				return;
+			}
+			continue;
+		}
+		m_driver_cache_dirty = false;
+		lock.unlock();
+		// Save stops this thread before it destroys the driver cache.
+		(void)WriteDriverCache();
+		lock.lock();
+		m_last_save = std::chrono::steady_clock::now();
+	}
 }
 
 bool PipelineCache::ComputePipelineReady(const ShaderComputeInputInfo& input_info,
@@ -2733,7 +2765,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 			stats.hits.fetch_add(1, std::memory_order_relaxed);
 		}
 		if (compiled_us >= 2'000'000) {
-			RequestDriverCacheWrite();
+			MarkDriverCacheDirty();
 		}
 	} else {
 		cached->pipeline = pipeline;
