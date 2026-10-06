@@ -47,6 +47,10 @@ PermutationRecord MakeRecord(ShaderType stage) {
   r.user_data_base = 8;
   r.push_data_start_dword = 7;
   r.specialization.buffers.push_back({.packed_stride = 16u});
+  r.specialization.buffers.push_back({.packed_stride = 4u,
+                                      .indirect_root = 0u,
+                                      .indirect_mapping_offset = 24u,
+                                      .indirect_search_iterations = 3u});
   r.specialization.images.push_back({
       .numeric_class = Prospero::TextureNumericClass::Float,
       .dimension = ShaderRecompiler::Decoder::ImageDimension::Dim2D,
@@ -81,6 +85,8 @@ PermutationRecord MakeRecord(ShaderType stage) {
     i.group_id[2] = true;
     i.tg_size_en = true;
     i.dispatch_threads_num[0] = 12345;
+    i.float_mode = 0x30;
+    i.lds_storage = true;
     r.info = i;
   } else {
     ShaderVertexInputInfo i{};
@@ -112,6 +118,7 @@ PermutationRecord MakeRecord(ShaderType stage) {
     i.mesh.host_subgroup_size = 32;
     i.mesh.max_vertices = 64;
     i.mesh.max_primitives = 32;
+    i.mesh.fast_launch = true;
     i.tess = {.input_control_points = 3,
               .output_control_points = 4,
               .ls_stride = 16,
@@ -160,7 +167,7 @@ void TestAllStagesRoundTrip() {
     if (const auto *i = std::get_if<ShaderVertexInputInfo>(&result.info)) {
       Check(i->logical_stage == stage && i->mesh.host_subgroup_size == 32 &&
                 i->mesh.threads_num[2] == 1 && i->mesh.wave_size == 32 &&
-                i->mesh.max_vertices == 64 &&
+                i->mesh.max_vertices == 64 && i->mesh.fast_launch &&
                 i->tess.output_control_points == 4 && i->tess.hs_stride == 32 &&
                 i->tess.output_topology == 3,
             "mesh and tessellation compilation metadata survives");
@@ -186,7 +193,8 @@ void TestAllStagesRoundTrip() {
       Check(
           compute.host_subgroup_size == 32 && compute.threads_num[2] == 2 &&
               compute.group_id[2] && compute.lds_size_dwords == 1024 &&
-              compute.tg_size_en && compute.dispatch_threads_num[0] == 0,
+              compute.tg_size_en && compute.dispatch_threads_num[0] == 0 &&
+              compute.float_mode == 0x30 && compute.lds_storage,
           "compute module shape survives without runtime dispatch dimensions");
     }
   }
@@ -258,6 +266,9 @@ void TestInvalidRecords() {
   invalid = bytes;
   invalid.push_back(0);
   Check(!Decode(invalid, output), "unconsumed trailing bytes are rejected");
+  auto bad_root = good;
+  bad_root.specialization.buffers[1].indirect_root = 2u;
+  Check(!Encode(bad_root, bytes), "indirect buffer roots must name a buffer");
   good.info = ShaderPixelInputInfo{};
   Check(!Encode(good, bytes), "stage and input metadata must match");
   good = MakeRecord(ShaderType::Vertex);

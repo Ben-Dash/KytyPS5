@@ -12,7 +12,7 @@ namespace Libs::Graphics::ShaderPrecompile {
 namespace {
 
 constexpr std::array<uint8_t, 8> Magic {'K', 'Y', 'T', 'Y', 'S', 'H', 'D', 'R'};
-constexpr uint32_t               FormatVersion  = 7; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images; 7: pixel id_buffer_slot.
+constexpr uint32_t               FormatVersion  = 8; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images; 7: pixel id_buffer_slot; 8: compute float_mode and lds_storage, mesh fast_launch, indirect buffers.
 constexpr uint32_t               MaxCodeWords   = 256u * 1024u;
 constexpr uint32_t               MaxRecordBytes = 4u * 1024u * 1024u;
 constexpr uint64_t               MaxFileBytes   = 256u * 1024u * 1024u;
@@ -156,7 +156,7 @@ void Fields(Archive& a, ShaderVertexInputInfo& i) {
 	a(i.clip_space.scale, i.clip_space.offset, i.clip_space.half_extent, i.clip_space.enabled);
 	Fields(a, static_cast<ShaderWorkgroupInputInfo&>(i.mesh));
 	a(i.mesh.input_primitive, i.mesh.primitives_per_group, i.mesh.vertices_per_group,
-	  i.mesh.max_vertices, i.mesh.max_primitives, i.mesh.provoking_vertex);
+	  i.mesh.max_vertices, i.mesh.max_primitives, i.mesh.provoking_vertex, i.mesh.fast_launch);
 	a(i.tess.input_control_points, i.tess.output_control_points, i.tess.ls_stride, i.tess.hs_stride,
 	  i.tess.domain, i.tess.partitioning, i.tess.output_topology);
 	a(i.fetch_external, i.fetch_embedded);
@@ -179,8 +179,10 @@ template <typename Archive>
 void Fields(Archive& a, ShaderComputeInputInfo& i) {
 	Fields(a, static_cast<ShaderWorkgroupInputInfo&>(i));
 	// Dispatch sizes are runtime-only; the module uses declared threads_num.
+	// float_mode is part of the program key; lds_storage is decided by the live path from the
+	// device's shared memory limit and changes the module.
 	a(i.group_id, i.dispatch_thread_dimensions, i.thread_ids_num, i.workgroup_register,
-	  i.tg_size_en);
+	  i.tg_size_en, i.float_mode, i.lds_storage);
 }
 
 template <typename Archive>
@@ -193,7 +195,8 @@ void Specialization(Archive& a, ShaderRecompiler::IR::ResourceSpecialization& s)
 	}
 	s.buffers.resize(count);
 	for (auto& b: s.buffers)
-		a(b.packed_stride, b.descriptor_format, b.descriptor_swizzle, b.zero_stride_oob);
+		a(b.packed_stride, b.descriptor_format, b.descriptor_swizzle, b.zero_stride_oob,
+		  b.indirect_root, b.indirect_mapping_offset, b.indirect_search_iterations);
 	count = static_cast<uint32_t>(s.images.size());
 	a(count);
 	if (count > ShaderRecompiler::IR::ShaderInfo::MaxImages) {
@@ -224,7 +227,10 @@ bool Valid(const PermutationRecord& r) {
 	    r.specialization.images.size() > ShaderRecompiler::IR::ShaderInfo::MaxImages)
 		return false;
 	for (const auto& b: r.specialization.buffers) {
-		if (static_cast<uint32_t>(b.descriptor_format) > 0x1ffu || b.descriptor_swizzle > 0xfffu)
+		if (static_cast<uint32_t>(b.descriptor_format) > 0x1ffu || b.descriptor_swizzle > 0xfffu ||
+		    (b.indirect_root != ShaderRecompiler::IR::BufferResource::NoIndirectBuffer &&
+		     b.indirect_root >= r.specialization.buffers.size()) ||
+		    b.indirect_search_iterations > 32u)
 			return false;
 	}
 	for (const auto& i: r.specialization.images) {
