@@ -2005,6 +2005,12 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		                                               program.info.buffers[i], buffer_offset));
 		pack_memory_offset(i, buffer_offset);
 	}
+	// The strides of this dispatch's V#s, for buffers whose module reads them (stride-generic).
+	EXIT_IF(layout.buffer_stride_count > snapshot.buffers.size());
+	for (uint32_t i = 0; i < layout.buffer_stride_count; i++) {
+		prepared.shader_data[layout.BufferStrideDword() + i] =
+		    ShaderRecompiler::IR::CanonicalPackedStride(snapshot.buffers[i]);
+	}
 	g_draw_phases.Mark(DrawPhaseTimer::BufferViews);
 	if (ShaderRecompiler::IR::FindBinding(
 	        layout, ShaderRecompiler::IR::DescriptorBindingKind::FlattenedSrt) != nullptr) {

@@ -120,6 +120,18 @@ uint32_t BufferByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR
 	if ((packed & (1u << 20u)) != 0u) {
 		index = Binary(state, spv::OpIAdd, TypeU32(state), index, BufferLane(state));
 	}
+	if ((packed & IR::DynamicBufferStride) != 0u) {
+		// This dispatch's V# fields, from shader data (see BindingLayout::buffer_stride_count).
+		const auto word  = state.buffer_packed_strides[mem.resource];
+		const auto field = [&](uint32_t first, uint32_t count) {
+			return EmitBitFieldUExtract(state, word, ConstantU32(state, first), ConstantU32(state, count));
+		};
+		const auto swizzle_bit = Binary(state, spv::OpINotEqual, TypeBool(state), field(14, 1),
+		                                ConstantU32(state, 0));
+		return CalculateBufferAddress(state, index, ctx.Arg(inst, 2), ctx.Arg(inst, 3), mem.offset,
+		                              field(0, 14), swizzle_bit, field(16, 2))
+		    .byte;
+	}
 	const bool swizzle = stride != 0u && (packed & (1u << 14u)) != 0u;
 	return CalculateBufferAddress(state, index, ctx.Arg(inst, 2), ctx.Arg(inst, 3), mem.offset,
 	                              ConstantU32(state, stride),

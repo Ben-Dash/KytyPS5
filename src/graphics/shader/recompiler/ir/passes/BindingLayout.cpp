@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
+#include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 
 #include <algorithm>
 #include <array>
@@ -128,6 +129,12 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 	// Every buffer stays bound, at its own index: the renderer prepares and offsets buffers by
 	// their index in program.info.buffers.
 	next.memory_offset_count = static_cast<uint32_t>(program.info.buffers.size());
+	// Strides read at run time, up to the last buffer that needs one.
+	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
+		if ((program.info.buffers[i].packed_stride & DynamicBufferStride) != 0u) {
+			next.buffer_stride_count = i + 1u;
+		}
+	}
 	next.push_data_start_dword =
 	    PushData::StartFor(push_data_start_dword, next.ShaderDataDwords());
 

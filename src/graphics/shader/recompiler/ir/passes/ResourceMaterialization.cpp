@@ -599,15 +599,11 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 			descriptor_value.dwords.fill(0);
 			descriptor = {};
 		}
-		auto       packed_stride = descriptor.PackedStride();
+		const auto packed_stride = CanonicalPackedStride(descriptor_value);
 		const auto stride        = packed_stride & 0x3fffu;
-		const bool swizzle       = stride != 0u && ((packed_stride >> 14u) & 1u) != 0u;
-		if (stride == 0u) {
-			packed_stride &= ~((1u << 14u) | (3u << 16u));
-		} else if (!swizzle) {
-			packed_stride &= ~(3u << 16u);
-		}
-		buffer.packed_stride = packed_stride;
+		buffer.packed_stride = stride != 0u && !BufferStrideSpecialization()
+		                           ? DynamicBufferStride | (packed_stride & (1u << 20u))
+		                           : packed_stride;
 		buffer.descriptor_format =
 		    base.formatted ? descriptor.Format() : Prospero::BufferFormat::kInvalid;
 		buffer.descriptor_swizzle = base.formatted ? descriptor.DstSelXYZW() : DstSel(4, 5, 6, 7);
@@ -1826,6 +1822,41 @@ bool MaterializeResources(const ResourcePlan& program, const SrtRuntime& runtime
 
 void SetResourceMaterializationVerification(bool enabled) {
 	g_verify_materialization = enabled;
+}
+
+bool BufferStrideSpecialization() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BUFFER_SPECIALIZE");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+uint32_t CanonicalPackedStride(const DescriptorValue& descriptor) {
+	ShaderBufferResource buffer;
+	if (!DecodeBufferDescriptor(descriptor, buffer) || buffer.Type() != 0) {
+		return 0;
+	}
+	auto       packed_stride = buffer.PackedStride();
+	const auto stride        = packed_stride & 0x3fffu;
+	const bool swizzle       = stride != 0u && ((packed_stride >> 14u) & 1u) != 0u;
+	if (stride == 0u) {
+		packed_stride &= ~((1u << 14u) | (3u << 16u));
+	} else if (!swizzle) {
+		packed_stride &= ~(3u << 16u);
+	}
+	return packed_stride;
+}
+
+void NormalizeBufferSpecialization(ResourceSpecialization& specialization) {
+	if (BufferStrideSpecialization()) {
+		return;
+	}
+	for (auto& buffer: specialization.buffers) {
+		if ((buffer.packed_stride & 0x3fffu) != 0u) {
+			buffer.packed_stride = DynamicBufferStride | (buffer.packed_stride & (1u << 20u));
+		}
+	}
 }
 
 void ApplyResourceSpecialization(Program& program, const ResourceSpecialization& specialization) {

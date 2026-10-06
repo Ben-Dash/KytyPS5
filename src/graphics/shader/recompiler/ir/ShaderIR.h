@@ -515,11 +515,17 @@ struct BindingLayout {
 	uint32_t                       dispatch_thread_dword = PushData::NoStart;
 	uint32_t                       memory_offset_dword = 0;
 	uint32_t                       memory_offset_count = 0;
+	// One DWORD per buffer after the memory offsets, holding the packed stride (stride, swizzle bit
+	// 14, index stride bits 16-17) of a buffer with DynamicBufferStride; 0 or the buffer count.
+	uint32_t                       buffer_stride_count = 0;
 	std::vector<uint32_t>          user_data_registers;
 	std::vector<DescriptorBinding> descriptors;
 
-	[[nodiscard]] uint32_t ShaderDataDwords() const {
+	[[nodiscard]] uint32_t BufferStrideDword() const {
 		return memory_offset_dword + (memory_offset_count + 3u) / 4u;
+	}
+	[[nodiscard]] uint32_t ShaderDataDwords() const {
+		return BufferStrideDword() + buffer_stride_count;
 	}
 	[[nodiscard]] bool UsesPushData() const {
 		return push_data_start_dword != PushData::NoStart;

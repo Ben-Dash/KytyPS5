@@ -105,6 +105,23 @@ void SetResourceMaterializationVerification(bool enabled);
 // Applies an already-derived specialization to native IR before layout and emission.
 void ApplyResourceSpecialization(Program& program, const ResourceSpecialization& specialization);
 
+// A buffer's packed_stride when the shader reads its stride, swizzle and index stride from shader
+// data: a nonzero stride, with only ADD_TID (bit 20) left in the permutation key. Ghost of Yotei
+// binds buffers of different strides to the same slots, so baking the stride in compiled one
+// pipeline per combination (3e8244db54b38b0c: 7, at 20-60 s each in the driver).
+constexpr uint32_t DynamicBufferStride = 1u << 31u;
+
+// KYTY_BUFFER_SPECIALIZE=1: strides are baked into the module again (A/B runs).
+bool BufferStrideSpecialization();
+
+// The descriptor's packed stride (stride, swizzle bit 14, index stride bits 16-17, ADD_TID bit
+// 20) with the fields a zero stride or a disabled swizzle ignores cleared.
+uint32_t CanonicalPackedStride(const DescriptorValue& descriptor);
+
+// Replaces the nonzero strides of a specialization (made with KYTY_BUFFER_SPECIALIZE=1 or read
+// from an older journal record) by DynamicBufferStride. Specializations made now already are.
+void NormalizeBufferSpecialization(ResourceSpecialization& specialization);
+
 } // namespace Libs::Graphics::ShaderRecompiler::IR
 
 #endif /* EMULATOR_INCLUDE_EMULATOR_GRAPHICS_SHADER_RECOMPILER_RESOURCEMATERIALIZATION_H_ */
