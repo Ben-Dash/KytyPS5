@@ -1370,6 +1370,7 @@ void EmitProgram(EmitterState& state) {
 		                                     ConstantU32(state, LdsDwordCount(state)));
 	}
 	EmitMemoryOffsets(state);
+	EmitGenericBufferFormats(state);
 	if (UsesIdBuffer(state)) {
 		// Hardware ID buffer: object id (push dword) | primitive id, stored once at entry.
 		const auto slot   = state.input_info.pixel->id_buffer_slot;

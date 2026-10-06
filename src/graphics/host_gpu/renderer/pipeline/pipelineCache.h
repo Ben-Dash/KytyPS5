@@ -295,6 +295,8 @@ private:
 	// Compute shaders (address, and bit 63 for wave32) a compute lookup found a program for, under
 	// m_mutex: PrefetchComputePipeline passes over them.
 	std::unordered_set<uint64_t> m_compute_sources;
+	// Shader hashes whose look-ahead pipeline was left to the dispatch (logged once), under m_mutex.
+	std::unordered_set<uint64_t> m_prefetch_deferred_logged;
 	// Who asked for a compute pipeline first, for the log line its first dispatch prints.
 	enum class ComputeOrigin : uint8_t { Replay, Prefetch, Sync };
 	// A compute pipeline compiling (or compiled) on m_compute_queue that no dispatch took yet.
@@ -339,7 +341,7 @@ private:
 	// unless it is built or queued already. m_mutex must be held. Returns whether it queued one.
 	bool StartComputeBuild(const ShaderComputeInputInfo& input_info, const ShaderProgram& program,
 	                       ComputeOrigin origin, bool urgent);
-	static void LogComputePipeline(uint64_t shader_hash, ComputeOrigin origin,
+	static void LogComputePipeline(uint64_t shader_hash, uint64_t program_id, ComputeOrigin origin,
 	                               std::chrono::steady_clock::duration waited, int64_t compile_us);
 	// A compute pipeline compile took 2 s or more, on any thread: the save thread writes the driver
 	// cache file soon, so a run ended by force keeps it.

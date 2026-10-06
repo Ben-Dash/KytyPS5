@@ -322,6 +322,8 @@ bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record) {
 		return false;
 	std::visit([&](auto& i) { Fields(a, i); }, r.info);
 	if (!a.ok || a.Remaining() != 0 || !Valid(r)) return false;
+	// Records with baked strides replay as the stride-generic pipeline they now share.
+	ShaderRecompiler::IR::NormalizeBufferSpecialization(r.specialization);
 	record = std::move(r);
 	return true;
 }

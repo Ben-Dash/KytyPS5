@@ -725,6 +725,9 @@ int Run(int argc, char* argv[]) {
 		if (!records.empty()) {
 			std::printf("journal: format 7, compute records only\n");
 			if (o.lds_storage < 0) o.lds_storage = 2;
+			for (auto& r: records) {
+				ShaderRecompiler::IR::NormalizeBufferSpecialization(r.specialization);
+			}
 		}
 	}
 	if (records.empty()) {
