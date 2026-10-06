@@ -2616,6 +2616,7 @@ int KYTY_SYSV_ABI KernelSetPrtAperture(int index, void* addr, size_t len) {
 	}
 	if (old.size != 0) {
 		UnmapGpuRange(old.address, old.size);
+		g_virtual_ranges->Remove(old.address, old.size);
 	}
 	{
 		Common::LockGuard lock(g_prt_aperture_mutex);
@@ -2623,6 +2624,7 @@ int KYTY_SYSV_ABI KernelSetPrtAperture(int index, void* addr, size_t len) {
 		    len == 0 ? PrtAperture {} : PrtAperture {address, static_cast<uint64_t>(len)};
 	}
 	if (len != 0) {
+		g_virtual_ranges->Add(address, len, 0, 0, 0, VirtualRangeType::Reserved, "prt_aperture");
 		MapGpuRange(address, len);
 	}
 
@@ -3318,6 +3320,10 @@ int KYTY_SYSV_ABI KernelMapDirectMemory(void** addr, size_t len, int prot, int f
 			if (!reserved_target && ReplaceFixedRangeWithReserved(in_addr, len)) {
 				reserved_target = true;
 			}
+			if (!reserved_target && IsInPrtAperture(in_addr, len)) {
+				UnmapGpuRange(in_addr, len);
+				reserved_target = true;
+			}
 			if (!reserved_target) {
 				return KERNEL_ERROR_ENOMEM;
 			}
@@ -3390,16 +3396,21 @@ int KYTY_SYSV_ABI KernelMapDirectMemory(void** addr, size_t len, int prot, int f
 
 	PhysicalMemory::AllocatedBlock mapped_block {};
 	g_physical_memory->Find(direct_memory_start, false, &mapped_block);
-	const bool published = !replaced_mappings.empty() || reserved_target
-	                           ? g_virtual_ranges->ReplaceSpan(
-	                                 out_addr, len, replaced_mappings.empty()
-	                                                    ? VirtualRangeType::Reserved
-	                                                    : VirtualRangeType::Direct,
-	                                 direct_memory_start,
-	                                 prot, mapped_block.memory_type, VirtualRangeType::Direct, "")
-	                           : g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
-	                                                   mapped_block.memory_type,
-	                                                   VirtualRangeType::Direct, "");
+	bool published = !replaced_mappings.empty() || reserved_target
+	                     ? g_virtual_ranges->ReplaceSpan(
+	                           out_addr, len, replaced_mappings.empty()
+	                                              ? VirtualRangeType::Reserved
+	                                              : VirtualRangeType::Direct,
+	                           direct_memory_start,
+	                           prot, mapped_block.memory_type, VirtualRangeType::Direct, "")
+	                     : g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
+	                                             mapped_block.memory_type,
+	                                             VirtualRangeType::Direct, "");
+	if (!published && (reserved_target || IsInPrtAperture(out_addr, len))) {
+		published = g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
+		                                  mapped_block.memory_type,
+		                                  VirtualRangeType::Direct, "");
+	}
 	if (!published) {
 		GpuAccessMode rollback_gpu_mode = GpuAccessMode::NoAccess;
 		EXIT_IF(!g_physical_memory->Unmap(out_addr, len, &rollback_gpu_mode));
