@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstring>
+#include <string_view>
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 #include <windows.h> // IWYU pragma: keep
@@ -244,6 +246,29 @@ static LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS exception) noexcept {
 				const auto hit = exec_count.fetch_add(1, std::memory_order_relaxed);
 				if (hit < exec_skip || hit >= exec_skip + exec_limit) {
 					continue;
+				}
+				// KYTY_DEBUG_HW_EXEC_ARM=<r9|r15|rbx|rdi|rsi>:<hex offset>: the first reported hit
+				// adds a write watch on that register + offset (who writes the data read here).
+				if (const char* arm = std::getenv("KYTY_DEBUG_HW_EXEC_ARM");
+				    arm != nullptr && g_hw_watch_count < 4) {
+					static std::atomic<bool> armed {false};
+					if (!armed.exchange(true)) {
+						const auto* c      = exception->ContextRecord;
+						const char* colon  = std::strchr(arm, ':');
+						const auto  offset = colon != nullptr ? std::strtoull(colon + 1, nullptr, 16) : 0;
+						const auto  name   = std::string_view(arm, colon != nullptr ? colon - arm : 0);
+						const uint64_t reg = name == "r9"    ? c->R9
+						                     : name == "r15" ? c->R15
+						                     : name == "rbx" ? c->Rbx
+						                     : name == "rdi" ? c->Rdi
+						                                     : c->Rsi;
+						g_hw_watch_exec[g_hw_watch_count] = false;
+						g_hw_watch[g_hw_watch_count]      = reg + offset;
+						std::printf("hw-watch: armed write watch %llx\n",
+						            static_cast<unsigned long long>(reg + offset));
+						g_hw_watch_count++;
+						g_hw_watch_generation++;
+					}
 				}
 			} else if (count.fetch_add(1, std::memory_order_relaxed) >= 4000) {
 				continue;
