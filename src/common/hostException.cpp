@@ -5,6 +5,10 @@
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 #include <windows.h> // IWYU pragma: keep
+
+#include <cstdint>
+#include <cstdlib>
+#include <tlhelp32.h>
 #else
 #include <algorithm>
 #include <csignal>
@@ -82,8 +86,239 @@ bool InitializeThreadSignalStack() {
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 
+// KYTY_DEBUG_HW_WATCH=<address>[,<address>...] (hex, up to four): hardware write breakpoints on
+// those four-byte words in every thread. Each CPU write (guest code or the emulator itself, also
+// one that stores the value already there) prints the code address after the writing instruction.
+static uint64_t g_hw_watch[4] {};
+static int      g_hw_watch_count = 0;
+// Bumped when a watch is added at run time (KYTY_DEBUG_HW_WATCH_FOLLOW): re-arms every thread.
+static std::atomic<uint32_t> g_hw_watch_generation {0};
+
+// KYTY_DEBUG_HW_WATCH_PTR=<pointer address>:<offset>[:<offset>] (hex): watches the words at
+// *pointer + offset once the pointer is set, and again whenever it changes (an object that is
+// allocated at a different address in every run).
+static uint64_t g_hw_watch_ptr          = 0;
+static uint64_t g_hw_watch_ptr_value    = 0;
+static uint64_t g_hw_watch_ptr_offsets[2] {};
+static int      g_hw_watch_ptr_count    = 0;
+static int      g_hw_watch_ptr_first    = 0;
+
+static void PollHwWatchPointer() {
+	if (g_hw_watch_ptr == 0) {
+		return;
+	}
+	uint64_t value = 0;
+	SIZE_T   got   = 0;
+	if (ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(g_hw_watch_ptr), &value,
+	                      sizeof(value), &got) == 0 ||
+	    got != sizeof(value) || value == 0 || value == g_hw_watch_ptr_value) {
+		return;
+	}
+	g_hw_watch_ptr_value = value;
+	for (int i = 0; i < g_hw_watch_ptr_count; i++) {
+		g_hw_watch[g_hw_watch_ptr_first + i] = value + g_hw_watch_ptr_offsets[i];
+	}
+	g_hw_watch_count = g_hw_watch_ptr_first + g_hw_watch_ptr_count;
+	std::printf("hw-watch: pointer %llx = %llx, watching +%llx%s\n",
+	            static_cast<unsigned long long>(g_hw_watch_ptr), static_cast<unsigned long long>(value),
+	            static_cast<unsigned long long>(g_hw_watch_ptr_offsets[0]),
+	            g_hw_watch_ptr_count > 1 ? " and the second offset" : "");
+	std::fflush(stdout);
+	g_hw_watch_generation++;
+}
+
+static DWORD WINAPI HwWatchThread(void* /*unused*/) {
+	static DWORD armed[4096];
+	int          armed_count = 0;
+	const auto   self        = GetCurrentThreadId();
+	const auto   process     = GetCurrentProcessId();
+	uint32_t     generation  = 0;
+	for (;;) {
+		PollHwWatchPointer();
+		if (const auto now = g_hw_watch_generation.load(); now != generation) {
+			generation  = now;
+			armed_count = 0;
+		}
+		const auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+		if (snapshot != INVALID_HANDLE_VALUE) {
+			THREADENTRY32 entry {};
+			entry.dwSize = sizeof(entry);
+			for (BOOL more = Thread32First(snapshot, &entry); more != 0;
+			     more      = Thread32Next(snapshot, &entry)) {
+				if (entry.th32OwnerProcessID != process || entry.th32ThreadID == self) {
+					continue;
+				}
+				bool known = false;
+				for (int i = 0; i < armed_count; i++) {
+					known = known || armed[i] == entry.th32ThreadID;
+				}
+				if (known || armed_count >= 4096) {
+					continue;
+				}
+				const auto thread =
+				    OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE,
+				               entry.th32ThreadID);
+				if (thread == nullptr) {
+					continue;
+				}
+				if (SuspendThread(thread) != static_cast<DWORD>(-1)) {
+					CONTEXT context {};
+					context.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+					if (GetThreadContext(thread, &context) != 0) {
+						DWORD64 control = 0;
+						for (int i = 0; i < g_hw_watch_count; i++) {
+							(&context.Dr0)[i] = g_hw_watch[i];
+							// Local enable, break on write, four bytes.
+							control |= (DWORD64 {1} << (i * 2)) | (DWORD64 {0xd} << (16 + i * 4));
+						}
+						context.Dr7 = control;
+						context.Dr6 = 0;
+						SetThreadContext(thread, &context);
+					}
+					ResumeThread(thread);
+					armed[armed_count++] = entry.th32ThreadID;
+				}
+				CloseHandle(thread);
+			}
+			CloseHandle(snapshot);
+		}
+		Sleep(100);
+	}
+}
+
+static void StartHwWatch() {
+	const char* text = std::getenv("KYTY_DEBUG_HW_WATCH");
+	while (text != nullptr && *text != '\0' && g_hw_watch_count < 4) {
+		char* end                      = nullptr;
+		g_hw_watch[g_hw_watch_count++] = std::strtoull(text, &end, 16);
+		text                           = *end == ',' ? end + 1 : nullptr;
+	}
+	if (const char* ptr = std::getenv("KYTY_DEBUG_HW_WATCH_PTR"); ptr != nullptr) {
+		char* end      = nullptr;
+		g_hw_watch_ptr = std::strtoull(ptr, &end, 16);
+		while (*end == ':' && g_hw_watch_ptr_count < 2 && g_hw_watch_count + g_hw_watch_ptr_count < 4) {
+			g_hw_watch_ptr_offsets[g_hw_watch_ptr_count++] = std::strtoull(end + 1, &end, 16);
+		}
+		g_hw_watch_ptr_first = g_hw_watch_count;
+	}
+	if (g_hw_watch_count != 0 || g_hw_watch_ptr != 0) {
+		CloseHandle(CreateThread(nullptr, 0, HwWatchThread, nullptr, 0, nullptr));
+	}
+}
+
 static LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS exception) noexcept {
 	auto* exception_record = exception->ExceptionRecord;
+
+	if (exception_record->ExceptionCode == EXCEPTION_SINGLE_STEP && g_hw_watch_count != 0 &&
+	    (exception->ContextRecord->Dr6 & 0xfu) != 0) {
+		static std::atomic<uint32_t> count {0};
+		for (int i = 0; i < g_hw_watch_count; i++) {
+			if ((exception->ContextRecord->Dr6 & (DWORD64 {1} << i)) == 0 ||
+			    count.fetch_add(1, std::memory_order_relaxed) >= 4000) {
+				continue;
+			}
+			uint32_t value = 0;
+			SIZE_T   read  = 0;
+			ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(g_hw_watch[i]),
+			                  &value, sizeof(value), &read);
+			std::printf("hw-watch: %llx = %08x%s pc=%llx thread=%lu rsp=%llx\n",
+			            static_cast<unsigned long long>(g_hw_watch[i]), value,
+			            read == sizeof(value) ? "" : " (unreadable)",
+			            static_cast<unsigned long long>(exception->ContextRecord->Rip),
+			            GetCurrentThreadId(),
+			            static_cast<unsigned long long>(exception->ContextRecord->Rsp));
+			// KYTY_DEBUG_HW_WATCH_FOLLOW=<hex offset>: the first hit adds a watch on r15 + offset.
+			if (const char* follow = std::getenv("KYTY_DEBUG_HW_WATCH_FOLLOW");
+			    follow != nullptr && g_hw_watch_count < 4) {
+				static std::atomic<bool> followed {false};
+				if (!followed.exchange(true)) {
+					g_hw_watch[g_hw_watch_count] =
+					    exception->ContextRecord->R15 + std::strtoull(follow, nullptr, 16);
+					std::printf("hw-watch: follow %llx\n",
+					            static_cast<unsigned long long>(g_hw_watch[g_hw_watch_count]));
+					g_hw_watch_count++;
+					g_hw_watch_generation++;
+				}
+			}
+			// KYTY_DEBUG_HW_WATCH_DUMP=<hex offset>:<hex bytes>,...: also the general registers
+			// and those bytes at r15 + offset (the writer's object, read safely).
+			if (const char* dump = std::getenv("KYTY_DEBUG_HW_WATCH_DUMP"); dump != nullptr) {
+				const auto* c = exception->ContextRecord;
+				std::printf("hw-watch:   rax=%llx rbx=%llx rcx=%llx rdx=%llx rsi=%llx rdi=%llx "
+				            "r11=%llx r12=%llx r13=%llx r15=%llx\n",
+				            c->Rax, c->Rbx, c->Rcx, c->Rdx, c->Rsi, c->Rdi, c->R11, c->R12, c->R13,
+				            c->R15);
+				std::printf("hw-watch:   r8=%llx r9=%llx r10=%llx r14=%llx rbp=%llx xmm:", c->R8, c->R9,
+				            c->R10, c->R14, c->Rbp);
+				for (int x = 0; x < 8; x++) {
+					float f[4];
+					std::memcpy(f, &(&c->Xmm0)[x], sizeof(f));
+					std::printf(" (%g %g %g %g)", f[0], f[1], f[2], f[3]);
+				}
+				// Return addresses along the frame-pointer chain (guest code keeps rbp frames).
+				std::printf("\nhw-watch:   bt:");
+				uint64_t frame = c->Rbp;
+				for (int depth = 0; depth < 10 && frame != 0; depth++) {
+					uint64_t pair[2] {};
+					SIZE_T   got = 0;
+					if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(frame), pair,
+					                       sizeof(pair), &got) ||
+					    got != sizeof(pair)) {
+						break;
+					}
+					std::printf(" %llx", static_cast<unsigned long long>(pair[1]));
+					if (pair[0] <= frame) {
+						break;
+					}
+					frame = pair[0];
+				}
+				std::printf("\n");
+				while (*dump != '\0') {
+					// '@<address>' absolute, 'p<offset>' through the pointer at r15 + offset,
+					// 's<offset>' at rsp + offset.
+					// 'b<offset>' at rbx + offset, 'q<offset>' through the pointer at rbx + offset.
+					const char     mode   = (*dump == '@' || *dump == 'p' || *dump == 's' ||
+					                         *dump == 'b' || *dump == 'q' || *dump == 'd' ||
+					                         *dump == 'e')
+					                            ? *dump++
+					                            : 'r';
+					char*          end    = nullptr;
+					const uint64_t offset = std::strtoull(dump, &end, 16);
+					const uint64_t size   = *end == ':' ? std::strtoull(end + 1, &end, 16) : 16;
+					// 'd<offset>' at rdi + offset, 'e<offset>' through the pointer at rdi + offset.
+					const uint64_t base   = mode == 's'                 ? c->Rsp
+					                        : mode == 'b' || mode == 'q' ? c->Rbx
+					                        : mode == 'd' || mode == 'e' ? c->Rdi
+					                                                     : c->R15;
+					uint64_t       source = mode == '@' ? offset : base + offset;
+					SIZE_T         got    = 0;
+					if (mode == 'p' || mode == 'q' || mode == 'e') {
+						uint64_t pointer = 0;
+						ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(source),
+						                  &pointer, sizeof(pointer), &got);
+						source = pointer;
+					}
+					static uint8_t bytes[0x8000];
+					ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(source),
+					                  bytes, (size < sizeof(bytes) ? size : sizeof(bytes)), &got);
+					std::printf("hw-watch:   [%c%llx @%llx]", mode, static_cast<unsigned long long>(offset), static_cast<unsigned long long>(source));
+					for (SIZE_T b = 0; b + 4 <= got; b += 4) {
+						uint32_t word = 0;
+						std::memcpy(&word, bytes + b, 4);
+						std::printf(" %08x", word);
+					}
+					std::printf("\n");
+					if (*end != ',') {
+						break;
+					}
+					dump = end + 1;
+				}
+			}
+			std::fflush(stdout);
+		}
+		exception->ContextRecord->Dr6 = 0;
+		return EXCEPTION_CONTINUE_EXECUTION;
+	}
 
 	if (exception_record->ExceptionCode == DBG_PRINTEXCEPTION_C ||
 	    exception_record->ExceptionCode == DBG_PRINTEXCEPTION_WIDE_C) {
@@ -298,6 +533,7 @@ bool InstallHandler(Handler handler) {
 		printf("AddVectoredExceptionHandler() failed\n");
 		return false;
 	}
+	StartHwWatch();
 #elif defined(__APPLE__)
 	struct sigaction sa {};
 	sa.sa_sigaction = SignalHandler;
