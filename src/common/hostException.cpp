@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdio>
 #include <cstring>
+#include <csignal>
+#include <exception>
 #include <string_view>
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
@@ -592,6 +594,23 @@ bool InstallHandler(Handler handler) {
 		return false;
 	}
 	StartHwWatch();
+	// abort() and std::terminate end the process through __fastfail (0xc0000409, code 7), which
+	// no vectored handler sees: report the thread's stack on stderr first.
+	std::signal(SIGABRT, [](int) {
+		void*      frames[48] {};
+		const auto count = RtlCaptureStackBackTrace(0, 48, frames, nullptr);
+		std::fprintf(stderr, "--- Error ---\nabort() called\nstack:");
+		for (USHORT i = 0; i < count; i++) {
+			std::fprintf(stderr, " 0x%llx", reinterpret_cast<unsigned long long>(frames[i]));
+		}
+		std::fprintf(stderr, "\n");
+		std::fflush(stderr);
+	});
+	std::set_terminate([] {
+		std::fprintf(stderr, "--- Error ---\nstd::terminate called\n");
+		std::fflush(stderr);
+		std::abort();
+	});
 #elif defined(__APPLE__)
 	struct sigaction sa {};
 	sa.sa_sigaction = SignalHandler;
