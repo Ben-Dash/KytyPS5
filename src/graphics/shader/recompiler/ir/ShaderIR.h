@@ -175,6 +175,8 @@ struct BufferResource {
 	bool                   loaded             = false; // Plain (non-atomic) loads.
 	bool                   atomic             = false;
 	bool                   formatted          = false;
+	// Some access is not a formatted load through the descriptor's format (raw words, typed).
+	bool                   unformatted        = false;
 	bool                   scalar             = false;
 	uint32_t               indirect_root              = NoIndirectBuffer;
 	uint32_t               indirect_mapping_offset    = 0;

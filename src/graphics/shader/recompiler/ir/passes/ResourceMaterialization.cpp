@@ -760,9 +760,24 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 			    image.mip_count != image_class.mip_count ||
 			    image.conversion_format != image_class.conversion_format ||
 			    image.shader_swizzle != image_class.shader_swizzle) {
-				return SpecializationFail(
-				    fmt::format("indirect image table at pc 0x{:08x} has incompatible candidates",
-				                program.info.images[root_index].first_use_pc));
+				// A table whose other records hold unrelated data (Ghost of Yotei 01a51b1204e3be1b
+				// enumerates all 32 records of a 5-bit key): those candidates become null images,
+				// so a key that selects one reads zero or drops the write.
+				// KYTY_STRICT_INDIRECT_CANDIDATES=1 fails the specialization instead (the old way).
+				static const bool strict = std::getenv("KYTY_STRICT_INDIRECT_CANDIDATES") != nullptr;
+				if (strict) {
+					return SpecializationFail(
+					    fmt::format("indirect image table at pc 0x{:08x} has incompatible candidates",
+					                program.info.images[root_index].first_use_pc));
+				}
+				snapshot.images[candidate].dwords[0] = 0;
+				snapshot.images[candidate].dwords[1] &= ~0xffu;
+				image.numeric_class     = image_class.numeric_class;
+				image.dimension         = image_class.dimension;
+				image.mip_count         = image_class.mip_count;
+				image.conversion_format = image_class.conversion_format;
+				image.shader_swizzle    = image_class.shader_swizzle;
+				image.cube              = image_class.cube;
 			}
 		}
 	}
@@ -1974,10 +1989,12 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 				memory.sampler = sampler_plan.mapping[memory.sampler][type];
 				EXIT_IF(memory.sampler == UINT32_MAX);
 			}
-			// Enumerated candidates only sample; a bindless image is loaded per instruction and
-			// serves every image operation.
+			// Enumerated candidates sample, load and store (a switch over the candidates); a
+			// bindless image is loaded per instruction and serves every image operation.
 			EXIT_IF(image.indirect_root == memory.resource && !image.bindless &&
-			        inst.GetOpcode() != ValueOpcode::ImageSampleRaw);
+			        inst.GetOpcode() != ValueOpcode::ImageSampleRaw &&
+			        inst.GetOpcode() != ValueOpcode::ImageWrite &&
+			        inst.GetOpcode() != ValueOpcode::ImageRead);
 		}
 	}
 	for (auto* block: program.blocks) {

@@ -1056,6 +1056,38 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 // commands that read the staging memory reach the GPU. The helper reads the backing, which cannot
 // fault. KYTY_ASYNC_UPLOADS=0 copies on the GPU thread as before.
 namespace {
+// The helper thread runs outside the guest fault handling: memory the game unmapped after the
+// upload was queued (seen in Ghost of Yotei after the calligraphy scene) must not be touched.
+// Readable pages are copied, the rest of the range reads as zero.
+void CopyReadableOrZero(uint64_t address, uint8_t* destination, uint64_t size) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	uint64_t done = 0;
+	while (done < size) {
+		MEMORY_BASIC_INFORMATION info {};
+		const auto current = address + done;
+		if (VirtualQuery(reinterpret_cast<const void*>(current), &info, sizeof(info)) == 0) {
+			std::memset(destination + done, 0, static_cast<size_t>(size - done));
+			return;
+		}
+		const auto region_end = reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize;
+		const auto chunk      = std::min(size - done, region_end - current);
+		const bool readable =
+		    info.State == MEM_COMMIT && (info.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0 &&
+		    (info.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+		                     PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
+		if (readable) {
+			std::memcpy(destination + done, reinterpret_cast<const void*>(current),
+			            static_cast<size_t>(chunk));
+		} else {
+			std::memset(destination + done, 0, static_cast<size_t>(chunk));
+		}
+		done += chunk;
+	}
+#else
+	std::memcpy(destination, reinterpret_cast<const void*>(address), size);
+#endif
+}
+
 struct AsyncUploads {
 	struct Item {
 		uint64_t address;
@@ -1111,8 +1143,7 @@ struct AsyncUploads {
 			for (const auto& item: taken) {
 				if (!Libs::LibKernel::Memory::TryReadBacking(item.address, item.destination,
 				                                             item.size)) {
-					std::memcpy(item.destination, reinterpret_cast<const void*>(item.address),
-					            item.size);
+					CopyReadableOrZero(item.address, item.destination, item.size);
 				}
 				pending.fetch_sub(1, std::memory_order_acq_rel);
 			}

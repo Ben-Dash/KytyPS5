@@ -149,7 +149,13 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	// a read-only buffer the shader reads only as 8- or 16-bit formatted elements (Ghost of Yotei
 	// binds such vertex data 2 bytes off a dword) loads those elements by their byte address.
 	const auto element_bytes = [&]() -> uint64_t {
-		if (resource.written || !resource.formatted) {
+		// Every access must be a formatted load of the descriptor's 8/16-bit format: a raw word,
+		// typed or scalar load of the same buffer would need dword alignment (an earlier version
+		// relaxed those too, and Ghost of Yotei's hand mesh lost its data).
+		// KYTY_STRICT_BUFFER_ALIGN=1 binds the null buffer for these too (the old behavior).
+		static const bool strict = std::getenv("KYTY_STRICT_BUFFER_ALIGN") != nullptr;
+		if (strict || resource.written || !resource.formatted || resource.unformatted ||
+		    resource.scalar) {
 			return sizeof(uint32_t);
 		}
 		const auto info = ShaderRecompiler::Format::GetFormatInfo(resource.descriptor_format);
