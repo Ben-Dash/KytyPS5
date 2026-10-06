@@ -11,6 +11,8 @@
 #include "graphics/shader/shader.h"
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -230,8 +232,12 @@ public:
 	// Predicts the compute pipeline a dispatch with these registers and dispatch initiator will
 	// need, translating its shader (like PrefetchGraphicsPipeline), and compiles it on a worker
 	// thread; GetComputePipeline takes it over. Returns 1 when a compile was queued.
+	// `groups` are a direct dispatch's group (or, with the thread-dimensions initiator bit, thread)
+	// counts, which shaders indexing tables by workgroup count specialize on; indirect dispatches
+	// look their programs up without them, as the dispatch path does.
 	uint32_t PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
-	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending);
+	                                 uint32_t dispatch_initiator, ProgramWait wait, bool* pending,
+	                                 const std::array<uint32_t, 3>* groups = nullptr);
 	// Prints a look-ahead's result with KYTY_PERMUTATION_LOG=1.
 	void LogLookahead(uint32_t draws, uint32_t parts) const;
 	// Shader translations and module compiles queued or running on worker threads.
@@ -291,11 +297,24 @@ private:
 	std::jthread                                            m_precompile_thread;
 	std::mutex                                              m_precompile_join_mutex;
 	std::atomic_bool                                        m_precompile_done {true};
+	// Saves the driver cache after slow compute compiles, off the GPU thread (see
+	// MarkDriverCacheDirty). One write at a time: this thread's and Save's.
+	std::mutex                                              m_driver_cache_write_mutex;
+	std::mutex                                              m_save_mutex;
+	std::condition_variable_any                             m_save_wake;
+	bool                                                    m_driver_cache_dirty = false;
+	std::chrono::steady_clock::time_point                   m_last_save_request;
+	std::chrono::steady_clock::time_point                   m_last_save;
+	std::jthread                                            m_save_thread;
 
 	void InitializeDriverCache();
 	void InitializeShaderPrecompile();
 	void InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& command);
 	void WaitForPrecompile();
+	// A compute pipeline compile took 2 s or more, on any thread: the save thread writes the driver
+	// cache file soon, so a run ended by force keeps it.
+	void MarkDriverCacheDirty();
+	void SaveThread(const std::stop_token& stop);
 	void ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationRecord> records);
 };
 

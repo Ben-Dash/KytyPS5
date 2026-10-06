@@ -1243,6 +1243,50 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 		m_libraries = std::make_unique<PipelineLibraryCache>(m_graphics, m_driver_cache);
 		m_program_cache->workers = m_libraries.get();
 	}
+	if (m_driver_cache != nullptr) {
+		m_last_save  = std::chrono::steady_clock::now();
+		m_save_thread = std::jthread([this](const std::stop_token& stop) { SaveThread(stop); });
+	}
+}
+
+void PipelineCache::MarkDriverCacheDirty() {
+	{
+		std::lock_guard lock(m_save_mutex);
+		m_driver_cache_dirty = true;
+		m_last_save_request  = std::chrono::steady_clock::now();
+	}
+	m_save_wake.notify_one();
+}
+
+// Writes the driver cache file when a slow compile made it dirty: at once unless it was written
+// less than a minute ago, then a minute after that write, or 30 s after the last request at the
+// latest. A compile finishing just after a write so reaches the file within 30 s without writing
+// the gigabyte after every compile of a burst.
+void PipelineCache::SaveThread(const std::stop_token& stop) {
+	KYTY_PROFILER_THREAD("PipelineCacheSave");
+	constexpr auto MinInterval = std::chrono::seconds(60);
+	constexpr auto MaxDelay    = std::chrono::seconds(30);
+	std::unique_lock lock(m_save_mutex);
+	for (;;) {
+		if (!m_save_wake.wait(lock, stop, [this] { return m_driver_cache_dirty; })) {
+			return;
+		}
+		const auto due = std::min(m_last_save + MinInterval, m_last_save_request + MaxDelay);
+		if (std::chrono::steady_clock::now() < due) {
+			// Woken early by another request or a stop; the due time only moves later.
+			(void)m_save_wake.wait_until(lock, stop, due, [] { return false; });
+			if (stop.stop_requested()) {
+				return;
+			}
+			continue;
+		}
+		m_driver_cache_dirty = false;
+		lock.unlock();
+		// Save stops this thread before it destroys the driver cache.
+		(void)WriteDriverCache();
+		lock.lock();
+		m_last_save = std::chrono::steady_clock::now();
+	}
 }
 
 PipelineCache::~PipelineCache() {
@@ -1500,6 +1544,11 @@ void PipelineCache::Save() {
 	// Join before acquiring the cache mutex or destroying the driver cache. This also covers
 	// the WindowRun shutdown path, which calls Save before the PipelineCache destructor.
 	WaitForPrecompile();
+	if (m_save_thread.joinable()) {
+		// Its write finishes first; the write below covers what it had pending.
+		m_save_thread.request_stop();
+		m_save_thread.join();
+	}
 	if (m_libraries != nullptr) {
 		// The link thread writes to the driver cache, which is saved and destroyed below.
 		m_libraries->Stop();
@@ -1514,9 +1563,10 @@ void PipelineCache::Save() {
 	m_driver_cache = nullptr;
 }
 
-// Writes the driver pipeline cache to disk; the caller holds m_mutex. Also called after a slow
-// compile, so a run ended by force (or a lost device) keeps what took long to compile.
+// Writes the driver pipeline cache to disk; called by Save under m_mutex and by the save thread
+// after slow compiles, so a run ended by force (or a lost device) keeps what took long to compile.
 bool PipelineCache::WriteDriverCache() {
+	std::lock_guard      write_lock(m_driver_cache_write_mutex);
 	size_t               size = 0;
 	vk::Result           result;
 	std::vector<uint8_t> payload;
@@ -2382,7 +2432,7 @@ uint32_t PipelineCache::PrefetchGraphicsPipeline(const HW::Context& ctx, const H
 
 uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW::Shader& sh,
                                                 uint32_t dispatch_initiator, ProgramWait wait,
-                                                bool* pending) {
+                                                bool* pending, const std::array<uint32_t, 3>* groups) {
 	KYTY_PROFILER_FUNCTION();
 	if (m_libraries == nullptr || !Config::PipelineLibrariesEnabled()) {
 		return 0;
@@ -2401,6 +2451,17 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 	ShaderComputeInputInfo input_info {};
 	input_info.dispatch_thread_dimensions =
 	    (dispatch_initiator & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0;
+	if (groups != nullptr) {
+		const std::array<uint32_t, 3> group_sizes {cs.cs_regs.num_thread_x, cs.cs_regs.num_thread_y,
+		                                           cs.cs_regs.num_thread_z};
+		for (uint32_t axis = 0; axis < 3u; ++axis) {
+			// Thread counts become group counts, as RenderExecutor::DispatchDirect converts them.
+			const auto size  = std::max(group_sizes[axis], 1u);
+			const auto count = (*groups)[axis];
+			input_info.workgroup_counts[axis] =
+			    input_info.dispatch_thread_dimensions ? count / size + (count % size != 0u) : count;
+		}
+	}
 	const auto program = GetComputeProgram(cs, ctx.GetShaderRegisters(), input_info, wait, pending);
 	if (!program) {
 		return 0;
@@ -2410,8 +2471,18 @@ uint32_t PipelineCache::PrefetchComputePipeline(const HW::Context& ctx, const HW
 		return 0;
 	}
 	auto pipeline = std::make_unique<Pipeline>();
-	auto create   = PrepareComputePipeline(m_graphics, *pipeline, input_info, program.module,
+	auto compile  = PrepareComputePipeline(m_graphics, *pipeline, input_info, program.module,
 	                                       m_driver_cache);
+	// The file was written only when a dispatch then waited 2 s, so a compile that finished in
+	// time reached it only at a clean shutdown; a run ended by force lost it.
+	auto create = [this, compile = std::move(compile)]() mutable {
+		const auto started  = std::chrono::steady_clock::now();
+		const auto compiled = compile();
+		if (std::chrono::steady_clock::now() - started >= std::chrono::seconds(2)) {
+			MarkDriverCacheDirty();
+		}
+		return compiled;
+	};
 	if (!m_libraries->Prefetch(ComputePrefetchKey(program.id), std::move(create))) {
 		DestroyPipelineObjects(m_graphics, *pipeline);
 		return 0;
@@ -2489,12 +2560,13 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		cached = std::make_unique<Pipeline>();
 		CreatePipelineInternal(m_graphics, *cached, input_info, compute_program.module,
 		                       m_driver_cache);
+		// A prefetched compile marks the cache itself (PrefetchComputePipeline), however short
+		// the wait for it here.
+		if (std::chrono::steady_clock::now() - create_start >= std::chrono::seconds(2)) {
+			MarkDriverCacheDirty();
+		}
 	}
 	m_compute_pipelines_created++;
-	if (m_driver_cache != nullptr &&
-	    std::chrono::steady_clock::now() - create_start >= std::chrono::seconds(2)) {
-		(void)WriteDriverCache();
-	}
 	if (PermutationLogEnabled()) [[unlikely]] {
 		const auto now = std::chrono::steady_clock::now();
 		std::printf("pipeline: cs=%llu ms=%.1f%s t=%.3f\n",
