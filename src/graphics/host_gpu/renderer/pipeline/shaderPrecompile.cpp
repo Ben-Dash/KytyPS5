@@ -394,6 +394,41 @@ std::vector<PermutationRecord> Journal::Open(const std::filesystem::path& path,
 	return records;
 }
 
+std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path, std::string* key) {
+	std::vector<PermutationRecord> records;
+	std::error_code                ec;
+	const auto                     size = std::filesystem::file_size(path, ec);
+	if (ec || size > MaxFileBytes) return records;
+	std::ifstream in(path, std::ios::binary);
+	if (!in) return records;
+	std::vector<uint8_t> blob(static_cast<size_t>(size));
+	in.read(reinterpret_cast<char*>(blob.data()), static_cast<std::streamsize>(blob.size()));
+	if (!in || blob.size() < Magic.size() || !std::equal(Magic.begin(), Magic.end(), blob.begin()))
+		return records;
+	Decoder envelope {blob, Magic.size()};
+	const auto version    = envelope.Word();
+	const auto key_length = envelope.Word();
+	if (!envelope.ok || version != FormatVersion || key_length > MaxKeyBytes ||
+	    key_length > envelope.Remaining())
+		return records;
+	if (key != nullptr) {
+		key->assign(reinterpret_cast<const char*>(blob.data() + envelope.offset), key_length);
+	}
+	envelope.offset += key_length;
+	while (envelope.Remaining() != 0 && records.size() < MaxRecords) {
+		const auto bytes    = envelope.Word();
+		const auto checksum = envelope.Wide();
+		if (!envelope.ok || bytes == 0 || bytes > MaxRecordBytes || bytes > envelope.Remaining())
+			break;
+		const auto        body = std::span(blob).subspan(envelope.offset, bytes);
+		PermutationRecord record;
+		if (XXH3_64bits(body.data(), body.size()) != checksum || !Decode(body, record)) break;
+		records.push_back(std::move(record));
+		envelope.offset += bytes;
+	}
+	return records;
+}
+
 bool Journal::Append(const PermutationRecord& record) {
 	if (!IsOpen() || m_count >= MaxRecords) return false;
 	std::vector<uint8_t> body;
