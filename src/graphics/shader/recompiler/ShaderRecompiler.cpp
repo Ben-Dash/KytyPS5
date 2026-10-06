@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <fmt/format.h>
 #include <map>
 #include <span>
@@ -494,6 +495,20 @@ void SetHardwareStorageBufferBounds(bool enabled) {
 
 bool HardwareStorageBufferBounds() {
 	return g_hardware_storage_buffer_bounds.load(std::memory_order_relaxed);
+}
+
+static std::atomic<bool> g_native_float16 {false};
+
+void SetNativeFloat16(bool enabled) {
+	g_native_float16.store(enabled, std::memory_order_relaxed);
+}
+
+bool NativeFloat16() {
+	static const bool allowed = [] {
+		const char* text = KYTY_GETENV("KYTY_NATIVE_FP16");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return allowed && g_native_float16.load(std::memory_order_relaxed);
 }
 
 // KYTY_DEBUG_NO_SELECT_SINKING=1: keeps every VGPR write's EXEC select (A/B runs).

@@ -703,6 +703,15 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	device_features.shaderFloat64 =
 	    supported_features2.features.shaderFloat64 &&
 	    float_controls.shaderSignedZeroInfNanPreserveFloat64;
+	// Packed FP16 arithmetic as native 16-bit floats, which must keep FP16 denormals and signed
+	// zero, infinity and NaN like the guest (see ShaderRecompiler::NativeFloat16).
+	const bool native_float16 = supported_features12.shaderFloat16 == VK_TRUE &&
+	                            float_controls.shaderDenormPreserveFloat16 == VK_TRUE &&
+	                            float_controls.shaderSignedZeroInfNanPreserveFloat16 == VK_TRUE;
+	if (native_float16) {
+		features12.shaderFloat16 = VK_TRUE;
+	}
+	ShaderRecompiler::SetNativeFloat16(native_float16);
 	// if (device_features.shaderFloat64 && !float_controls.shaderDenormPreserveFloat64) {
 	// 	Log::WriteToConsoleAndLog(
 	// 	    "WARNING: Vulkan device does not guarantee FP64 denormal preservation; "

@@ -1,5 +1,6 @@
 #include "common/assert.h"
 #include "common/switches.h"
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/frontend/translate/Translator.h"
 #include "graphics/shader/shader.h"
 
@@ -695,6 +696,19 @@ IR::F32 Translator::ReadF16LaneAsF32(const Decoder::Operand& operand, bool high_
 	const auto half_u16 = IR::U16(ir.Emit(IR::ValueOpcode::ConvertU16U32, {bits}));
 	const auto half     = IR::F16(ir.Emit(IR::ValueOpcode::BitCastF16U16, {half_u16}));
 	return IR::F32(ir.Emit(IR::ValueOpcode::ConvertF32F16, {half}));
+}
+
+IR::U32 Translator::ReadPackedF16Bits(const Decoder::Operand& operand) {
+	// A register read as is: no lane swap, no modifiers, no SDWA selection.
+	if ((operand.kind == Decoder::OperandKind::Vgpr || operand.kind == Decoder::OperandKind::Sgpr) &&
+	    !operand.op_sel && operand.op_sel_hi && !operand.negate && !operand.negate_hi &&
+	    !operand.absolute && operand.sdwa_sel >= 6u) {
+		return ReadRawU32(operand);
+	}
+	const auto low  = Read16LaneBits(operand, false);
+	const auto high = Read16LaneBits(operand, true);
+	return IR::U32(ir.Emit(IR::ValueOpcode::BitFieldInsert,
+	                       {low, high, IR::Value(16u), IR::Value(16u)}));
 }
 
 IR::F32 Translator::ReadF16AsF32(const Decoder::Operand& operand) {
@@ -1589,9 +1603,15 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 	const bool  cs_tap      = DebugCsTap().Active(result);
 	const bool flush_f32_inputs = options.stage == ShaderType::Compute &&
 	                             (options.input_info.compute->float_mode & 0x10u) == 0;
+	// Native FP16 keeps FP16 denormals and rounds to nearest even: the default FLOAT_MODE (0xc0)
+	// only. Other stages require that mode already.
+	const bool native_float16 =
+	    NativeFloat16() && (options.stage != ShaderType::Compute ||
+	                        options.input_info.compute->float_mode == 0xc0);
 	for (const auto& cfg_block: cfg.blocks) {
 		const auto typed_index = block_indices.at(cfg_block.id);
 		Translator translator(result, result.blocks[typed_index], vector_limit, flush_f32_inputs);
+		translator.SetNativeFloat16(native_float16);
 		translator.SetEntryLiveExec(options.stage == ShaderType::Pixel && cfg_block.inst_begin == 0);
 		if (live_lanes) {
 			translator.SetLiveLanes(*live_lanes);

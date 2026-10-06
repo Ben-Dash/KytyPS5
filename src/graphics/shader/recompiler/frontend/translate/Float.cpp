@@ -7,6 +7,31 @@ namespace Libs::Graphics::ShaderRecompiler::Frontend {
 
 void Translator::PackedFloat16(const Decoder::Instruction& inst, IR::ValueOpcode opcode,
                                bool accumulator, bool quiet_snan) {
+	// Native: one 16-bit float vector operation, rounded once as the hardware does. Min/max keep
+	// the F32 path below for its NaN and signed-zero rules; OMOD has no native form.
+	const auto native = opcode == IR::ValueOpcode::FPAdd32   ? IR::ValueOpcode::FPAddF16x2
+	                    : opcode == IR::ValueOpcode::FPMul32 ? IR::ValueOpcode::FPMulF16x2
+	                    : opcode == IR::ValueOpcode::FPFma32 ? IR::ValueOpcode::FPFmaF16x2
+	                                                         : IR::ValueOpcode::Void;
+	if (native_float16 && native != IR::ValueOpcode::Void && !quiet_snan && inst.dst.omod == 0u) {
+		const auto lhs = ReadPackedF16Bits(inst.src0);
+		const auto rhs = ReadPackedF16Bits(inst.src1);
+		IR::U32    result;
+		if (native == IR::ValueOpcode::FPFmaF16x2) {
+			const auto addend = ReadPackedF16Bits(accumulator ? inst.dst : inst.src2);
+			result            = IR::U32(ir.Emit(native, {lhs, rhs, addend}));
+		} else {
+			result = IR::U32(ir.Emit(native, {lhs, rhs}));
+		}
+		if (inst.dst.clamp) {
+			result = IR::U32(ir.Emit(IR::ValueOpcode::FPSaturateF16x2, {result}));
+		}
+		auto destination  = DestinationOperand(inst);
+		destination.omod  = 0u;
+		destination.clamp = false;
+		WriteOperand(destination, result);
+		return;
+	}
 	const auto translate_lane = [&](bool high) {
 		const auto lhs = ReadF16LaneAsF32(inst.src0, high);
 		const auto rhs = ReadF16LaneAsF32(inst.src1, high);

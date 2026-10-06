@@ -83,6 +83,14 @@ uint32_t TypeF64(EmitterState& state) {
 	return state.f64_type;
 }
 
+uint32_t TypeF16x2(EmitterState& state) {
+	if (state.f16x2_type == 0) {
+		state.f16_type   = state.builder.Type(spv::OpTypeFloat, 16);
+		state.f16x2_type = state.builder.Type(spv::OpTypeVector, state.f16_type, 2);
+	}
+	return state.f16x2_type;
+}
+
 uint32_t TypeU32Vector(EmitterState& state, uint32_t components) {
 	auto& type = state.u32_vector_types[components - 2u];
 	if (type == 0) {
@@ -859,6 +867,14 @@ void DefineModule(EmitterState& state) {
 	// contract prevents host compilers from treating synthesized IEEE values as finite.
 	state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeSignedZeroInfNanPreserve,
 	                               32u);
+	if (state.requirements.float16) {
+		// GCN/RDNA keep FP16 denormals in the default FLOAT_MODE, as native FP16 then must.
+		state.builder.RequireCapability(spv::CapabilityFloat16);
+		state.builder.RequireCapability(spv::CapabilityDenormPreserve);
+		state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeDenormPreserve, 16u);
+		state.builder.AddExecutionMode(state.main_func, spv::ExecutionModeSignedZeroInfNanPreserve,
+		                               16u);
+	}
 	if (state.requirements.float64) {
 		EXIT_NOT_IMPLEMENTED(state.program.stage == ShaderType::Compute &&
 		                     state.input_info.compute->float_mode != 0xc0);

@@ -76,6 +76,8 @@ public:
 	void TranslateInstruction(const Decoder::Instruction& inst);
 	// See entry_live_exec.
 	void SetEntryLiveExec(bool value) { entry_live_exec = value; }
+	// Packed FP16 add/mul/fma as native 16-bit float vectors (see NativeFloat16).
+	void SetNativeFloat16(bool value) { native_float16 = value; }
 	// See live_lanes.
 	void SetLiveLanes(const std::array<IR::U32, 2>& lanes) {
 		live_lanes     = lanes;
@@ -116,6 +118,9 @@ private:
 	IR::U32 ReadU16LaneAsU32(const Decoder::Operand& operand, bool high_lane, bool sign_extend);
 	IR::U32 ReadU16AsU32(const Decoder::Operand& operand, bool sign_extend);
 	IR::U32 Read16LaneBits(const Decoder::Operand& operand, bool high_lane);
+	// Both FP16 halves of a packed operand (OP_SEL, OP_SEL_HI and source modifiers applied) in one
+	// U32, low half first.
+	IR::U32 ReadPackedF16Bits(const Decoder::Operand& operand);
 	std::array<IR::U32, 2> ExtractU64(IR::U64 value);
 	void    WriteU32Pair(const Decoder::Operand& operand, const std::array<IR::U32, 2>& value);
 	IR::U32 ConditionBit(const Decoder::Operand& operand);
@@ -333,6 +338,7 @@ private:
 	uint32_t        current_pc           = 0;
 	uint32_t        current_vector_limit = 1;
 	bool            flush_f32_inputs;
+	bool            native_float16 = false;
 	// A pixel shader's entry block before its first EXEC write (usually S_WQM): EXEC holds the
 	// live pixels only, so a copy of it leaves out helper invocations, which the host runs
 	// from the start.

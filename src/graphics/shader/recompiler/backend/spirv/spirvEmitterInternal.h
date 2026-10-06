@@ -80,6 +80,7 @@ struct SpirvRequirements {
 	bool shared_int64_atomics         = false;
 	bool coherent_buffers             = false;
 	bool float64                      = false;
+	bool float16                      = false;
 };
 
 SpirvRequirements AnalyzeProgramRequirements(const IR::Program& program);
@@ -107,6 +108,8 @@ struct EmitterState {
 	uint32_t                                        i32_type = 0;
 	uint32_t                                        f32_type = 0;
 	uint32_t                                        f64_type = 0;
+	uint32_t                                        f16_type = 0;
+	uint32_t                                        f16x2_type = 0;
 	uint32_t                                        u32_pair_type = 0;
 	uint32_t                                        i32_pair_type = 0;
 	uint32_t                                        function_type = 0;
@@ -230,6 +233,7 @@ uint32_t TypeU32Vector(EmitterState& state, uint32_t components);
 uint32_t TypeU32Composite(EmitterState& state, uint32_t components);
 uint32_t TypeI32Vector(EmitterState& state, uint32_t components);
 uint32_t TypeF32Vector(EmitterState& state, uint32_t components);
+uint32_t TypeF16x2(EmitterState& state);
 uint32_t TypePointer(EmitterState& state, spv::StorageClass storage_class, uint32_t pointee);
 uint32_t TypeFunction(EmitterState& state);
 uint32_t TypeStorageBufferElement(EmitterState& state, uint32_t bits);

@@ -367,6 +367,48 @@ uint32_t EmitPackFloat2x16Rtz(EmitterState& state, uint32_t arg0, uint32_t arg1)
 	return Binary(state, spv::OpBitwiseOr, TypeU32(state), low, high);
 }
 
+namespace {
+
+// A U32 holding two FP16 values as a 16-bit float vector, and back.
+uint32_t AsF16x2(EmitterState& state, uint32_t bits) {
+	return Unary(state, spv::OpBitcast, TypeF16x2(state), bits);
+}
+
+uint32_t FromF16x2(EmitterState& state, uint32_t value) {
+	return Unary(state, spv::OpBitcast, TypeU32(state), value);
+}
+
+uint32_t PackedF16Binary(EmitterState& state, spv::Op op, uint32_t lhs, uint32_t rhs) {
+	const auto result = Binary(state, op, TypeF16x2(state), AsF16x2(state, lhs), AsF16x2(state, rhs));
+	state.builder.AddAnnotation(spv::OpDecorate, result, spv::DecorationNoContraction);
+	return FromF16x2(state, result);
+}
+
+} // namespace
+
+uint32_t EmitFPAddF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return PackedF16Binary(state, spv::OpFAdd, lhs, rhs);
+}
+
+uint32_t EmitFPMulF16x2(EmitterState& state, uint32_t lhs, uint32_t rhs) {
+	return PackedF16Binary(state, spv::OpFMul, lhs, rhs);
+}
+
+uint32_t EmitFPFmaF16x2(EmitterState& state, uint32_t a, uint32_t b, uint32_t c) {
+	const auto result = EmitExt(state, TypeF16x2(state), GLSLstd450Fma,
+	                            {AsF16x2(state, a), AsF16x2(state, b), AsF16x2(state, c)});
+	state.builder.AddAnnotation(spv::OpDecorate, result, spv::DecorationNoContraction);
+	return FromF16x2(state, result);
+}
+
+uint32_t EmitFPSaturateF16x2(EmitterState& state, uint32_t value) {
+	// FP16 0.0 and 1.0 in both halves, as F32 FPSaturate clamps.
+	const auto zero = AsF16x2(state, ConstantU32(state, 0x00000000u));
+	const auto one  = AsF16x2(state, ConstantU32(state, 0x3c003c00u));
+	return FromF16x2(state,
+	                 EmitExt(state, TypeF16x2(state), GLSLstd450FClamp, {AsF16x2(state, value), zero, one}));
+}
+
 uint32_t EmitFPSaturate32(EmitterState& state, uint32_t arg0) {
 	return EmitExt(state, TypeF32(state), GLSLstd450FClamp,
 	               {arg0, ConstantF32(state, 0), ConstantF32(state, 0x3f800000u)});

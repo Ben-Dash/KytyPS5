@@ -289,6 +289,10 @@ Emitter::SpirvRequirements Emitter::AnalyzeProgramRequirements(const IR::Program
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
 			requirements.float64 |= inst.GetType() == IR::Type::F64;
+			requirements.float16 |= inst.GetOpcode() == IR::ValueOpcode::FPAddF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPMulF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPFmaF16x2 ||
+			                        inst.GetOpcode() == IR::ValueOpcode::FPSaturateF16x2;
 			if (IR::BufferAccessOf(inst.GetOpcode()) == IR::BufferAccess::Atomic &&
 			    inst.GetType() == IR::Type::U64) {
 				requirements.buffer_int64_atomics = true;
