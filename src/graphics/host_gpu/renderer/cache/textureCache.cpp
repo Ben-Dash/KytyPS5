@@ -985,6 +985,16 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 		           "TextureCache: unsupported unequal-sample depth overlap copy (%u -> %u)\n",
 		           cached.backing.samples, replacement.backing.samples);
 	}
+	// The copy carries the depth plane only. A depth image replaced by a color one keeps its
+	// stencil plane aside; a color image replaced by a depth one gets it back (Ghost of Yotei
+	// alternates its depth buffer between depth target and storage image every frame, and reads
+	// the stencil for its material masks in between).
+	if (cached.info.IsDepth() && cached.info.HasStencil() && !replacement.info.IsDepth()) {
+		KeepStencil(cached_id);
+	} else if (!cached.info.IsDepth() && replacement.info.IsDepth() &&
+	           replacement.info.HasStencil() && RestoreStencil(replacement, true)) {
+		replacement.stencil_restored = true;
+	}
 	FreeImage(cached_id);
 	return replacement_id;
 }
@@ -1816,6 +1826,97 @@ void TextureCache::RefreshImage(ImageId id) {
 	InitializeImage(id);
 }
 
+// The stencil plane of `depth_id`, which a color image is about to replace, into the keeper of
+// its stencil address (the association record says whether the GPU wrote it: an uploaded stencil
+// is still in guest memory). Nothing is kept for a stencil the GPU never wrote.
+void TextureCache::KeepStencil(ImageId depth_id) {
+	auto&      depth = m_slot_images[depth_id];
+	const auto erase = [&] { m_stencil_keepers.erase(depth.info.stencil.address); };
+	if (depth.backing.image == nullptr || depth.backing.samples != 1 || !depth.info.HasStencil()) {
+		erase();
+		return;
+	}
+	ImageId association {};
+	m_slot_images.ForEach([&](ImageId id, const Image& image) {
+		if (image.depth_id == depth_id && image.info.data == depth.info.stencil) {
+			association = id;
+		}
+	});
+	if (!association) {
+		erase();
+		return;
+	}
+	const auto& record = m_slot_images[association];
+	if (!record.IsGpuModified() || record.stencil_subresources.layer_count == 0) {
+		erase();
+		return;
+	}
+	auto info      = depth.info;
+	info.resources = {record.stencil_subresources.level_count,
+	                  record.stencil_subresources.layer_count};
+	if (info.IsTiled()) {
+		info.pitch = TileGetDepthPitch(info.extent.width, 1, 0);
+	}
+	const uint64_t slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
+	const uint64_t size  = slice * info.resources.layers;
+	if (info.pitch < info.extent.width || size == 0 ||
+	    record.stencil_subresources.base_layer + info.resources.layers > depth.info.resources.layers) {
+		erase();
+		return;
+	}
+	auto copies = BuildDepthCopies(info, slice, vk::ImageAspectFlagBits::eStencil);
+	for (auto& copy: copies) {
+		copy.imageSubresource.baseArrayLayer += record.stencil_subresources.base_layer;
+	}
+	auto& keeper = m_stencil_keepers[depth.info.stencil.address];
+	if (keeper.buffer == nullptr || keeper.size < size) {
+		if (keeper.buffer != nullptr) {
+			// Recorded commands may still read the old buffer.
+			m_scheduler.DeferOperation([old = std::move(keeper.buffer)]() mutable { old.reset(); });
+		}
+		keeper.buffer = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0,
+		                                         AllFlags, size);
+	}
+	keeper.extent = info.extent;
+	keeper.layers = info.resources.layers;
+	keeper.pitch  = info.pitch;
+	keeper.size   = size;
+	depth.Download(copies, keeper.buffer->Handle(), 0, size);
+}
+
+// The kept stencil into `image`: its stencil plane (`stencil_aspect`, a depth image replacing a
+// color one) or its color plane (the 8-bit texture a shader reads the stencil through while the
+// depth image is a color image). The keeper stays until a depth image's association consumes it.
+bool TextureCache::RestoreStencil(Image& image, bool stencil_aspect) {
+	const auto address = stencil_aspect ? image.info.stencil.address : image.info.data.address;
+	const auto found   = m_stencil_keepers.find(address);
+	if (found == m_stencil_keepers.end() || image.backing.image == nullptr ||
+	    image.backing.samples != 1) {
+		return false;
+	}
+	const auto& keeper = found->second;
+	if (keeper.extent.width != image.info.extent.width ||
+	    keeper.extent.height != image.info.extent.height ||
+	    keeper.layers > image.info.resources.layers || image.info.IsVolume()) {
+		return false;
+	}
+	if (stencil_aspect ? !image.info.IsDepth() || !image.info.HasStencil()
+	                   : image.info.IsDepth() || image.info.bytes_per_block != 1 ||
+	                         image.info.resources.levels != 1 ||
+	                         vk::blockSize(image.backing.format) != 1) {
+		return false;
+	}
+	auto info      = image.info;
+	info.pitch     = keeper.pitch;
+	info.resources = {1, keeper.layers};
+	const auto copies =
+	    BuildDepthCopies(info, static_cast<uint64_t>(keeper.pitch) * keeper.extent.height,
+	                     stencil_aspect ? vk::ImageAspectFlagBits::eStencil
+	                                    : vk::ImageAspectFlagBits::eColor);
+	image.Upload(copies, keeper.buffer->Handle(), 0, keeper.size);
+	return true;
+}
+
 ImageId TextureCache::AssociateStencil(ImageId depth_id, GuestRange stencil) {
 	if (!stencil.Valid()) {
 		EXIT("TextureCache: invalid stencil association range\n");
@@ -1843,6 +1944,17 @@ ImageId TextureCache::AssociateStencil(ImageId depth_id, GuestRange stencil) {
 	TouchImage(record);
 	record.depth_id             = depth_id;
 	record.stencil_subresources = depth.stencil_subresources;
+	if (depth.stencil_restored) {
+		// The stencil plane came from the keeper (RestoreStencil), not from guest memory: the
+		// record must not upload the stale guest copy over it.
+		depth.stencil_restored = false;
+		if (record.IsCpuDirty()) {
+			record.RefreshComplete();
+		}
+		record.ClearBufferModified();
+		MarkGpuModified(record);
+		m_stencil_keepers.erase(stencil.address);
+	}
 	BumpImageCleanEpoch();
 	return association;
 }
@@ -2010,6 +2122,15 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 				if (m_buffer_cache.HasGpuDirtyBytes(inserted.info.data.address,
 				                                    inserted.info.data.size)) {
 					inserted.MarkBufferModified();
+				}
+				if (!m_stencil_keepers.empty() && RestoreStencil(inserted, false)) {
+					// A shader reads a kept stencil through this texture: current from the keeper,
+					// not from guest memory.
+					if (inserted.IsCpuDirty()) {
+						inserted.RefreshComplete();
+					}
+					inserted.ClearBufferModified();
+					MarkGpuModified(inserted);
 				}
 			} else if (backing_matches == 1 && view_mip < 0 && view_layer < 0) {
 				// The lookup can have registered or freed images: take the range's generation now.

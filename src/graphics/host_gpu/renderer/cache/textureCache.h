@@ -289,6 +289,19 @@ private:
 
 	void               InvalidateCpuAliases(uint64_t address, uint64_t size);
 	[[nodiscard]] bool DownloadImageMemory(ImageId id);
+	// The stencil plane of a depth image that a color image is about to replace (ResolveDepthOverlap:
+	// Ghost of Yotei binds its depth buffer as a storage image every frame), kept in a buffer until
+	// the stencil's next image, so the stencil survives the replacement instead of reading stale
+	// guest memory.
+	struct StencilKeeper {
+		std::unique_ptr<Buffer> buffer;
+		vk::Extent3D            extent {};
+		uint32_t                layers = 0;
+		uint32_t                pitch  = 0;
+		uint64_t                size   = 0;
+	};
+	void               KeepStencil(ImageId depth_id);
+	[[nodiscard]] bool RestoreStencil(Image& image, bool stencil_aspect);
 	[[nodiscard]] bool CollectGarbage(bool pressure_only);
 
 	GraphicContext&                                   m_graphics;
@@ -303,6 +316,7 @@ private:
 	std::unordered_map<vk::Format, ImageId>           m_null_images;
 	Common::LeastRecentlyUsedCache<ImageId, uint64_t> m_lru_cache;
 	std::unordered_set<ImageId>                       m_download_images;
+	std::unordered_map<uint64_t, StencilKeeper>       m_stencil_keepers;
 	std::map<uint64_t, MetaDataInfo>                  m_surface_metas;
 	// Bumped when a surface's clear state changes (ClearMeta, TouchMeta). With
 	// m_surface_meta_generation it validates m_meta_clear_memo.
