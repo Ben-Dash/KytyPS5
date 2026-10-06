@@ -1307,9 +1307,12 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 		// Copying on several threads measured no faster (A/B 2026-09-28): the staging memory's
 		// write bandwidth, not one thread's latency, bounds it.
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::UploadCopy);
+		// A range the game unmapped since the tracker saw it, or a PRT aperture page that was never
+		// committed (Yotei, 0x50d3400000 on the first start): read as zero instead of faulting
+		// outside the guest fault handler.
 		for (auto& copy: copies) {
 			const auto address = buffer.CpuAddress() + copy.dstOffset;
-			std::memcpy(mapped + copy.srcOffset, reinterpret_cast<const void*>(address), copy.size);
+			CopyReadableOrZero(address, mapped + copy.srcOffset, copy.size);
 			copy.srcOffset += base_offset;
 		}
 		m_staging_buffer.Commit();
@@ -1320,8 +1323,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 	                                         vk::BufferUsageFlagBits::eTransferSrc, total_size);
 	for (const auto& copy: copies) {
 		const auto address = buffer.CpuAddress() + copy.dstOffset;
-		std::memcpy(temporary->Mapped().data() + copy.srcOffset,
-		            reinterpret_cast<const void*>(address), copy.size);
+		CopyReadableOrZero(address, temporary->Mapped().data() + copy.srcOffset, copy.size);
 	}
 	temporary->Flush(0, total_size);
 	const auto handle = temporary->Handle();
