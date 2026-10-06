@@ -1152,6 +1152,7 @@ void EmitProgram(EmitterState& state) {
 		EmitStructuredFunction(ctx);
 	}
 	state.builder.AddFunction(spv::OpFunctionEnd);
+	EmitIndirectFormattedHelpers(state);
 	if (state.program.stage == ShaderType::Mesh) {
 		EmitMeshEntryPoint(state);
 	}

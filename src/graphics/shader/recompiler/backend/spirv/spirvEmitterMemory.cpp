@@ -923,12 +923,29 @@ struct IndirectBufferAccess {
 	uint32_t raw_index_in_bounds;
 };
 
-IndirectBufferAccess PrepareIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
-	auto&       state  = ctx.state;
+// The V# words, index, offset, SOFFSET and lane of an access through a GPU-selected V#.
+struct IndirectBufferOperands {
+	std::array<uint32_t, 4> words;
+	uint32_t                index;
+	uint32_t                offset;
+	uint32_t                soffset;
+	uint32_t                lane;
+};
+
+IndirectBufferOperands IndirectOperands(ValueEmitContext& ctx, const IR::Inst& inst) {
 	const auto& handle = *inst.Arg(0).ResolveInstruction();
-	const auto word1   = ctx.Arg(handle, 1);
-	const auto records = ctx.Arg(handle, 2);
-	const auto word3   = ctx.Arg(handle, 3);
+	return {.words   = {ctx.Arg(handle, 0), ctx.Arg(handle, 1), ctx.Arg(handle, 2), ctx.Arg(handle, 3)},
+	        .index   = ctx.Arg(inst, 1),
+	        .offset  = ctx.Arg(inst, 2),
+	        .soffset = ctx.Arg(inst, 3),
+	        .lane    = BufferLane(ctx.state)};
+}
+
+IndirectBufferAccess PrepareIndirectBuffer(EmitterState& state, const IndirectBufferOperands& operands,
+                                           uint32_t memory_offset, bool formatted) {
+	const auto word1   = operands.words[1];
+	const auto records = operands.words[2];
+	const auto word3   = operands.words[3];
 	const auto field = [&](uint32_t word, uint32_t first, uint32_t count) {
 		return EmitBitFieldUExtract(state, word, ConstantU32(state, first), ConstantU32(state, count));
 	};
@@ -938,14 +955,14 @@ IndirectBufferAccess PrepareIndirectBuffer(ValueEmitContext& ctx, const IR::Inst
 	const auto stride  = field(word1, 16, 14);
 	const auto swizzle = AndCondition(state, nonzero(stride), nonzero(field(word1, 31, 1)));
 	const auto index = Binary(
-	    state, spv::OpIAdd, TypeU32(state), ctx.Arg(inst, 1),
-	    Select(state, TypeU32(state), nonzero(field(word3, 23, 1)), BufferLane(state),
+	    state, spv::OpIAdd, TypeU32(state), operands.index,
+	    Select(state, TypeU32(state), nonzero(field(word3, 23, 1)), operands.lane,
 	           ConstantU32(state, 0)));
-	const auto soffset = ctx.Arg(inst, 3);
-	const auto address = CalculateBufferAddress(state, index, ctx.Arg(inst, 2), soffset,
-	                                            ctx.Memory(inst).offset, stride, swizzle,
+	const auto soffset = operands.soffset;
+	const auto address = CalculateBufferAddress(state, index, operands.offset, soffset,
+	                                            memory_offset, stride, swizzle,
 	                                            field(word3, 21, 2));
-	const auto base = DeviceAddressFromWords(state, ctx.Arg(handle, 0), field(word1, 0, 16));
+	const auto base = DeviceAddressFromWords(state, operands.words[0], field(word1, 0, 16));
 	const auto raw_records = Binary(state, spv::OpISub, TypeU32(state), records, soffset);
 	return {
 	    .address = Binary(state, spv::OpIAdd, TypeScalarU64(state), base,
@@ -954,7 +971,7 @@ IndirectBufferAccess PrepareIndirectBuffer(ValueEmitContext& ctx, const IR::Inst
 	    .stride = stride,
 	    .swizzle = swizzle,
 	    .format = field(word3, 12, 7),
-	    .selector = ctx.Memory(inst).formatted ? field(word3, 0, 3) : 0u,
+	    .selector = formatted ? field(word3, 0, 3) : 0u,
 	    .mode = field(word3, 28, 2),
 	    .records = records,
 	    .index_in_bounds = Binary(state, spv::OpULessThan, TypeBool(state), index, records),
@@ -962,6 +979,11 @@ IndirectBufferAccess PrepareIndirectBuffer(ValueEmitContext& ctx, const IR::Inst
 	    .raw_records = raw_records,
 	    .raw_index_in_bounds = Binary(state, spv::OpULessThan, TypeBool(state), index, raw_records),
 	};
+}
+
+IndirectBufferAccess PrepareIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
+	return PrepareIndirectBuffer(ctx.state, IndirectOperands(ctx, inst), ctx.Memory(inst).offset,
+	                             ctx.Memory(inst).formatted);
 }
 
 // As IndirectBufferInBounds, with the access size as a value (a format decoded at run time).
@@ -1162,7 +1184,8 @@ DynamicBufferFormat LookupDynamicBufferFormat(EmitterState& state, uint32_t form
 			state.format_tables[table] = state.builder.DefineGlobalVariable(
 			    TypePointer(state, spv::StorageClassPrivate, array), spv::StorageClassPrivate,
 			    initializer);
-			state.interface_variables.push_back(state.format_tables[table]);
+			// Not an interface variable: SPIR-V 1.3 lists only Input/Output ones, and from 1.4 on
+			// the builder adds every global variable itself (Builder::AddEntryPoint).
 		}
 	}
 	const auto index = Binary(state, spv::OpBitwiseAnd, TypeU32(state), format, ConstantU32(state, 127));
@@ -1237,18 +1260,14 @@ uint32_t NormalizeDynamicBufferComponent(EmitterState& state, uint32_t raw, uint
 // A formatted load through a GPU-selected V#: the format comes from the descriptor at run time
 // and is decoded from tables. The element's bytes are read once, up to five DWORDs from the
 // aligned start, with one address translation (two when the element crosses a page).
-uint32_t LoadIndirectFormatted(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t components) {
-	auto&      state  = ctx.state;
+uint32_t LoadIndirectFormattedBody(EmitterState& state, const IndirectBufferOperands& operands,
+                                   uint32_t memory_offset, uint32_t components, bool d16) {
 	const auto u32    = TypeU32(state);
 	const auto u64    = TypeScalarU64(state);
-	const auto buffer = PrepareIndirectBuffer(ctx, inst);
-	const auto& handle = *inst.Arg(0).ResolveInstruction();
-	const auto word3   = ctx.Arg(handle, 3);
-	const auto field   = [&](uint32_t word, uint32_t first, uint32_t count) {
+	const auto buffer = PrepareIndirectBuffer(state, operands, memory_offset, true);
+	const auto word3  = operands.words[3];
+	const auto field  = [&](uint32_t word, uint32_t first, uint32_t count) {
 		return EmitBitFieldUExtract(state, word, ConstantU32(state, first), ConstantU32(state, count));
-	};
-	const auto nonzero = [&](uint32_t value) {
-		return Binary(state, spv::OpINotEqual, TypeBool(state), value, ConstantU32(state, 0));
 	};
 	const auto info      = LookupDynamicBufferFormat(state, buffer.format);
 	const auto count     = field(info.layout, 0, 3);
@@ -1360,7 +1379,7 @@ uint32_t LoadIndirectFormatted(ValueEmitContext& ctx, const IR::Inst& inst, uint
 		values[output] = Select(state, u32, constant_one, one,
 		                        Select(state, u32, AndCondition(state, from_memory, reading), converted,
 		                               ConstantU32(state, 0)));
-		if (ctx.Memory(inst).d16) {
+		if (d16) {
 			// As D16LoadComponent: a half for float-like formats, the low 16 bits otherwise.
 			const auto float_like = Binary(
 			    state, spv::OpLogicalOr, TypeBool(state),
@@ -1382,50 +1401,63 @@ uint32_t LoadIndirectFormatted(ValueEmitContext& ctx, const IR::Inst& inst, uint
 	return components == 1u ? values[0] : ConstructU32Composite(state, components, values);
 }
 
-uint32_t LoadIndirectFormattedX(ValueEmitContext& ctx, const IR::Inst& inst) {
-	auto& state = ctx.state;
-	return EmitValueOrZeroIfCondition(state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
-		const auto buffer = PrepareIndirectBuffer(ctx, inst);
-		return EmitIndexSwitch(
-		    state, buffer.format, static_cast<uint32_t>(Prospero::BufferFormat::k32_32_32_32Float) + 1u,
-		    TypeU32(state), [&](uint32_t format) {
-			    const auto info = Format::GetFormatInfo(static_cast<Prospero::BufferFormat>(format));
-			    if (info.type == Format::ComponentType::Unknown) return ConstantU32(state, 0);
-			    const auto constant = Select(
-			        state, TypeU32(state),
-			        Binary(state, spv::OpIEqual, TypeBool(state), buffer.selector, ConstantU32(state, 1)),
-			        FormattedConstant(ctx, info, FormattedSourceKind::One), ConstantU32(state, 0));
-			    return EmitValueOrDefaultIfCondition(
-			        state, Binary(state, spv::OpUGreaterThanEqual, TypeBool(state), buffer.selector,
-			                      ConstantU32(state, 4)),
-			        TypeU32(state), constant, [&]() {
-				        const auto in_bounds = IndirectBufferInBounds(state, buffer, 0u, info.byte_size, true);
-				        const auto base = Binary(
-				            state, spv::OpBitwiseAnd, TypeScalarU64(state), buffer.address,
-				            ConstantDeviceAddress(state, ~(uint64_t(std::min(4u, info.byte_size)) - 1u)));
-				        const auto load = [&](uint32_t component, uint32_t bits) {
-					        const auto offset = Format::GetFormatComponentByteOffset(info, component);
-					        const auto address = offset == 0u ? base : Binary(
-					            state, spv::OpIAdd, TypeScalarU64(state), base,
-					            ConstantDeviceAddress(state, offset));
-					        return LoadBda(ctx, address, in_bounds, bits);
-				        };
-				        const auto emit_component = [&](uint32_t component) {
-					        return LoadFormattedComponent(
-					            ctx, info, {FormattedSourceKind::Memory, component},
-					            [&](uint32_t source) { return load(source, 32u); }, load);
-				        };
-				        if (info.component_count == 1u) return emit_component(0u);
-				        const auto component = Binary(
-				            state, spv::OpUMod, TypeU32(state),
-				            Binary(state, spv::OpISub, TypeU32(state), buffer.selector, ConstantU32(state, 4)),
-				            ConstantU32(state, info.component_count));
-				        return EmitIndexSwitch(state, component, info.component_count, TypeU32(state),
-				                               emit_component);
-			        });
-		    });
+// A call of the helper function holding LoadIndirectFormattedBody for this load's variant,
+// created on first use and emitted after the entry function (EmitIndirectFormattedHelpers):
+// the decoder inline at each of a hundred loads was megabytes of SPIR-V for the driver.
+uint32_t LoadIndirectFormatted(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t components) {
+	auto&       state  = ctx.state;
+	const auto& memory = ctx.Memory(inst);
+	auto found = std::ranges::find_if(state.indirect_formatted_helpers, [&](const auto& helper) {
+		return helper.components == components && helper.offset == memory.offset &&
+		       helper.d16 == memory.d16;
 	});
+	if (found == state.indirect_formatted_helpers.end()) {
+		state.indirect_formatted_helpers.push_back({.components = components,
+		                                            .offset     = memory.offset,
+		                                            .d16        = memory.d16,
+		                                            .function   = state.builder.AllocateId()});
+		found = std::prev(state.indirect_formatted_helpers.end());
+	}
+	const auto operands = IndirectOperands(ctx, inst);
+	const auto result   = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpFunctionCall,
+	                          components == 1u ? TypeU32(state) : TypeU32Composite(state, components),
+	                          result, found->function, operands.words[0], operands.words[1],
+	                          operands.words[2], operands.words[3], operands.index, operands.offset,
+	                          operands.soffset, operands.lane);
+	return result;
 }
+
+} // namespace
+
+void EmitIndirectFormattedHelpers(EmitterState& state) {
+	const auto u32 = TypeU32(state);
+	for (size_t i = 0; i < state.indirect_formatted_helpers.size(); i++) {
+		const auto helper = state.indirect_formatted_helpers[i];
+		const auto ret    = helper.components == 1u ? u32 : TypeU32Composite(state, helper.components);
+		const auto type   = state.builder.Type(spv::OpTypeFunction, ret, u32, u32, u32, u32, u32, u32,
+		                                       u32, u32);
+		state.builder.AddFunction(spv::OpFunction, ret, helper.function, spv::FunctionControlMaskNone,
+		                          type);
+		std::array<uint32_t, 8> params {};
+		for (auto& param: params) {
+			param = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpFunctionParameter, u32, param);
+		}
+		EmitLabel(state, state.builder.AllocateId());
+		const IndirectBufferOperands operands {.words   = {params[0], params[1], params[2], params[3]},
+		                                       .index   = params[4],
+		                                       .offset  = params[5],
+		                                       .soffset = params[6],
+		                                       .lane    = params[7]};
+		const auto value =
+		    LoadIndirectFormattedBody(state, operands, helper.offset, helper.components, helper.d16);
+		state.builder.AddFunction(spv::OpReturnValue, value);
+		state.builder.AddFunction(spv::OpFunctionEnd);
+	}
+}
+
+namespace {
 
 uint32_t LoadBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_t components) {
 	auto& state = ctx.state;
@@ -1903,10 +1935,12 @@ void EmitLoadMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 		value = LoadBda(ctx, GuestAddress(ctx, inst, mem), ctx.Arg(inst, inst.NumArgs() - 1),
 		                address_info.data_bits);
 	else if (op == IR::ValueOpcode::LoadBufferU32 && mem.formatted)
-		value = mem.kind != IR::ResourceKind::IndirectBuffer ? FormattedLoad(ctx, inst, mem)
-		        : !mem.d16 ? LoadIndirectFormattedX(ctx, inst)
-		                   : EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1),
-		                                                [&]() { return LoadIndirectFormatted(ctx, inst, 1u); });
+		// A per-format switch at each load made shaders with many such loads (Yotei's tile
+		// lighting: 16 X loads) grow to megabytes of SPIR-V; the table decoder is shared.
+		value = mem.kind != IR::ResourceKind::IndirectBuffer
+		            ? FormattedLoad(ctx, inst, mem)
+		            : EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1),
+		                                         [&]() { return LoadIndirectFormatted(ctx, inst, 1u); });
 	else if (mem.kind == IR::ResourceKind::IndirectBuffer &&
 	         (inst.GetType() == IR::Type::U8 || inst.GetType() == IR::Type::U16))
 		value = LoadIndirectSubword(ctx, inst, inst.GetType() == IR::Type::U8 ? 8u : 16u);

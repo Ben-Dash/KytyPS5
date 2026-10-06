@@ -183,6 +183,15 @@ struct EmitterState {
 	// Private tables of the per-format layout words, indexed by the V# format
 	// (LookupDynamicBufferFormat).
 	std::array<uint32_t, 4>                          format_tables {};
+	// Formatted loads through GPU-selected V#s: one helper function per variant, emitted after
+	// the entry function (EmitIndirectFormattedHelpers).
+	struct IndirectFormattedHelper {
+		uint32_t components = 0;
+		uint32_t offset     = 0;
+		bool     d16        = false;
+		uint32_t function   = 0;
+	};
+	std::vector<IndirectFormattedHelper>             indirect_formatted_helpers;
 	std::unordered_map<const IR::Block*, uint32_t>   labels;
 	// Long select(index == constant, ...) chains (V_MOVRELS reads) become one OpSwitch at their
 	// outermost select; their inner selects emit nothing (see EmitIndexedSelect).
@@ -579,6 +588,7 @@ uint32_t EmitF16BitsToF32(EmitterState& state, uint32_t bits);
 void EmitProgram(EmitterState& state);
 
 void DefineGetBdaPointer(EmitterState& state);
+void EmitIndirectFormattedHelpers(EmitterState& state);
 void DefineBvhIntersect(EmitterState& state);
 uint32_t GetBdaPointer(EmitterState& state, uint32_t address);
 uint32_t ConstantDeviceAddress(EmitterState& state, uint64_t value);
