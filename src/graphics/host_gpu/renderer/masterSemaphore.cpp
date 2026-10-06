@@ -54,9 +54,12 @@ void ReportCheckpoints(GraphicContext& graphics) {
 		     index++) {
 			const auto& mark = GpuZones::g_checkpoints[index % GpuZones::CheckpointRing];
 			const auto  zone = static_cast<size_t>(mark.zone);
-			std::printf("gpu-checkpoint-range: checkpoint=%" PRIu64 " zone=%s key=%016" PRIx64 "\n",
+			std::printf("gpu-checkpoint-range: checkpoint=%" PRIu64 " zone=%s key=%016" PRIx64
+			            " count=%u instances=%u vs=%016" PRIx64 " indirect=%016" PRIx64 "\n",
 			            static_cast<uint64_t>(index),
-			            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key);
+			            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key,
+			            static_cast<uint32_t>(mark.detail[0] >> 32u),
+			            static_cast<uint32_t>(mark.detail[0]), mark.detail[1], mark.detail[2]);
 		}
 	}
 	std::fflush(stdout);

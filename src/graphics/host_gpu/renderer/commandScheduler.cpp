@@ -469,7 +469,8 @@ void CommandScheduler::CheckpointThunk(void* /*context*/, vk::CommandBuffer buff
                                        DrainStats::Zone zone, uint64_t key, uint64_t /*pixels*/) {
 	// Marks come from the thread recording `buffer`; the checkpoint value indexes the ring.
 	const auto index = GpuZones::g_checkpoint_next.fetch_add(1, std::memory_order_relaxed);
-	GpuZones::g_checkpoints[index % GpuZones::CheckpointRing] = {zone, key};
+	GpuZones::g_checkpoints[index % GpuZones::CheckpointRing] = {zone, key, GpuZones::t_detail};
+	GpuZones::t_detail = {};
 	buffer.setCheckpointNV(reinterpret_cast<const void*>(static_cast<uintptr_t>(index)));
 }
 

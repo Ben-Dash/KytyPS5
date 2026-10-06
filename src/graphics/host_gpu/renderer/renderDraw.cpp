@@ -2852,6 +2852,9 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	if (GpuZones::Enabled()) [[unlikely]] {
 		const auto* program =
 		    state.ps_active ? state.ps_input_info.stage.program : state.vertex_info[0].stage.program;
+		const auto* vertex = state.vertex_info[0].stage.program;
+		GpuZones::t_detail = {(uint64_t {draw.index_count} << 32u) | draw.instance_count,
+		                      vertex != nullptr ? vertex->shader_hash : 0, draw.indirect_args};
 		GpuZones::Mark(vk_buffer,
 		               DrainStats::t_predicated ? DrainStats::Zone::GameDrawPredicated
 		                                        : DrainStats::Zone::GameDraw,
