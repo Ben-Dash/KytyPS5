@@ -6,6 +6,7 @@
 #include "common/common.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
+#include "common/hostException.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/systemInfo.h"
@@ -946,6 +947,9 @@ void WindowContext::UpdateIcon() {
 
 void WindowContext::UpdateTitle(bool new_frame) {
 	DrainStats::CountFrame(new_frame);
+	if (new_frame) {
+		Common::HostException::SampleDebugMemory(frame_statistics.TotalFrames());
+	}
 	if (!frame_statistics.Record(Common::Timer::QueryPerformanceCounter(),
 	                             Common::Timer::QueryPerformanceFrequency(), new_frame)) {
 		return;
