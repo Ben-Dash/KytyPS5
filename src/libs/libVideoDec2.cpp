@@ -700,10 +700,14 @@ static int32_t KYTY_SYSV_ABI LoggedQueryDecoderMemoryInfo(const Videodec2Decoder
 	return r;
 }
 
+// Decodes since the last CreateDecoder (KYTY_DEBUG_VIDEODEC tracing).
+static std::atomic<uint32_t> g_decodes_since_create {0};
+
 static int32_t KYTY_SYSV_ABI LoggedCreateDecoder(const Videodec2DecoderConfigInfo* config,
                                                  const Videodec2DecoderMemoryInfo* memory,
                                                  Videodec2Decoder*                 decoder) {
 	const auto r = CreateDecoder(config, memory, decoder);
+	g_decodes_since_create = 0;
 	if (VideodecDebug()) {
 		std::printf("videodec: CreateDecoder codec=%u size=%dx%d -> %08x caller=%p\n",
 		            config != nullptr ? config->codec_type : 0u,
@@ -747,6 +751,12 @@ static int32_t KYTY_SYSV_ABI LoggedDecode(Videodec2Decoder decoder, const Videod
 		    output != nullptr && output->is_error_frame ? 1 : 0,
 		    output != nullptr && output->is_discarded_frame ? 1 : 0);
 		std::fflush(stdout);
+		// With KYTY_DEBUG_CALL_COUNTS: after a movie's 12th decode (where Ghost of Yotei's decode
+		// thread stops for seconds), the decoding thread's next calls and 1.5 s of every thread's.
+		if (g_decodes_since_create.fetch_add(1) == 11u) {
+			Libs::TraceCalls(300);
+			Libs::TraceAllCalls(std::chrono::milliseconds(1500));
+		}
 	}
 	return r;
 }
