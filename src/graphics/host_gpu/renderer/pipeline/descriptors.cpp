@@ -1641,6 +1641,37 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 	}
 }
 
+// The record of `key` as ResolveBindlessKey reads it (the pointer and the 32 descriptor bytes),
+// hashed; distinct values for an unreadable record, a null pointer and an unreadable target.
+static uint64_t BindlessRecordHash(const BindlessTable::Heap& heap, uint32_t key) {
+	std::array<uint64_t, 5> words {};
+	auto address = heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
+	if (heap.pointer_offset != UINT32_MAX) {
+		if (!Libs::LibKernel::Memory::TryReadBacking(
+		        heap.base + static_cast<uint64_t>(key) * heap.record_stride + heap.pointer_offset,
+		        &words[4], sizeof(uint64_t))) {
+			return 1;
+		}
+		if ((words[4] & 0x0000ffffffffffffull) == 0) {
+			return 2;
+		}
+		address = (words[4] & 0x0000ffffffffffffull) + heap.table_offset;
+	}
+	if (!Libs::LibKernel::Memory::TryReadBacking(address, words.data(), 32u)) {
+		return 3;
+	}
+	uint64_t hash = 0xcbf29ce484222325ull;
+	for (const auto word: words) {
+		hash = (hash ^ word) * 0x100000001b3ull;
+	}
+	return hash | 8u;
+}
+
+// KYTY_DEBUG_BINDLESS_STALE=1: every 300 frames, how many resolved keys were checked against
+// their records and how many had changed.
+static uint64_t g_bindless_rechecked = 0;
+static uint64_t g_bindless_changed   = 0;
+
 bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key) {
 	auto&                                 table = m_context.GetBindlessTable();
 	ShaderRecompiler::IR::DescriptorValue value {};
@@ -1648,6 +1679,11 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	auto address =
 	    heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	heap.settled[key]  = 1;
+	heap.record_hash[key] = BindlessRecordHash(heap, key);
+	if (heap.listed[key] == 0) {
+		heap.listed[key] = 1;
+		heap.settled_keys.push_back(key);
+	}
 	if (heap.pointer_offset != UINT32_MAX) {
 		// The record holds a pointer to the structure that contains the T#.
 		uint64_t pointer = 0;
@@ -1816,6 +1852,21 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		return;
 	}
 	ResolveBindlessRequests();
+	const auto frame = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
+	static const bool stale_log = KYTY_GETENV("KYTY_DEBUG_BINDLESS_STALE") != nullptr;
+	if (stale_log) [[unlikely]] {
+		static uint64_t reported = 0;
+		if (frame >= reported + 300u) {
+			reported = frame;
+			std::printf("bindless-stale: frame=%llu heaps=%zu rechecked=%llu changed=%llu\n",
+			            static_cast<unsigned long long>(frame), table.Heaps().size(),
+			            static_cast<unsigned long long>(g_bindless_rechecked),
+			            static_cast<unsigned long long>(g_bindless_changed));
+			std::fflush(stdout);
+			g_bindless_rechecked = 0;
+			g_bindless_changed   = 0;
+		}
+	}
 	for (const auto& use: snapshot.bindless_heaps) {
 		if (use.image >= program.info.images.size()) {
 			continue;
@@ -1837,6 +1888,23 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		                                    use.pointer_offset);
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
+		}
+		// A heap seen in an earlier frame: a record the guest rewrote since (a per-frame table
+		// whose address comes round again, a streamed texture replaced) is resolved again, or
+		// the key would keep showing the earlier frame's texture.
+		if (heap->checked_frame != frame) {
+			heap->checked_frame = frame;
+			for (const auto key: heap->settled_keys) {
+				if (key >= heap->entries || heap->settled[key] == 0) {
+					continue;
+				}
+				g_bindless_rechecked++;
+				if (BindlessRecordHash(*heap, key) != heap->record_hash[key]) {
+					g_bindless_changed++;
+					heap->settled[key] = 0;
+					(void)ResolveBindlessKey(*heap, key);
+				}
+			}
 		}
 		// A table of material records is rewritten at a new address every frame, so its heap
 		// is new each frame and the shader's feedback would name its keys only after the heap

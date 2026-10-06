@@ -397,6 +397,8 @@ bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries) {
 	m_next_region += capacity;
 	heap.slots.resize(capacity, 0u);
 	heap.settled.resize(capacity, 0u);
+	heap.record_hash.resize(capacity, 0u);
+	heap.listed.resize(capacity, 0u);
 	auto* translation = reinterpret_cast<uint32_t*>(m_translation->Mapped().data());
 	auto* feedback    = reinterpret_cast<uint32_t*>(m_feedback->Mapped().data());
 	for (uint32_t key = 0; key < capacity; key++) {
