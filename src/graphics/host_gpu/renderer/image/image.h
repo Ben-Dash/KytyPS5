@@ -168,6 +168,9 @@ public:
 	uint64_t         track_addr     = 0;
 	uint64_t         track_addr_end = 0;
 	ImageId          depth_id {};
+	// The stencil plane was filled from a stencil keeper (TextureCache::RestoreStencil) and its
+	// next association record is current without an upload from guest memory.
+	bool             stencil_restored = false;
 	// The current stencil plane's mapping into the depth image, also retained by its association.
 	ImageSubresourceRange stencil_subresources;
 	uint64_t         tick_accessed_last = 0;
