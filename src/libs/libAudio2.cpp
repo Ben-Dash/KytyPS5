@@ -5,6 +5,7 @@
 #include "kernel/pthread.h"
 #include "libs/audio.h"
 #include "libs/audioDiag.h"
+#include "libs/audioMix.h"
 #include "libs/audio_internal.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
@@ -14,6 +15,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <numbers>
 #include <vector>
@@ -200,6 +202,8 @@ struct AudioOut2PortStateEntry {
 	float                  position_x   = 0.0f;
 	float                  position_z   = 0.0f;
 	float                  gain         = 1.0f;
+	Mix::LevelMeter        meter;     // KYTY_AUDIO_LEVELS: PCM the guest set since the last report.
+	uint32_t               pcm_sets = 0;
 };
 
 struct AudioOut2SpeakerArrayState {
@@ -882,6 +886,82 @@ static void audioout2_report_object_attributes(const AudioOut2Attribute* attribu
 	}
 }
 
+// KYTY_AUDIO_LEVELS: every 5 s, the PCM the guest hands each AudioOut2 port class (bed ports by
+// type, and all object ports together, mixed into the main bed), and the attribute ids
+// seen per class. The output ports themselves are also metered in audio.cpp.
+static bool audioout2_level_logging() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_AUDIO_LEVELS");
+		return value != nullptr && value[0] != '\0' && value[0] != '0';
+	}();
+	return enabled;
+}
+
+static void audioout2_meter_locked(AudioOut2PortStateEntry* state, const void* pcm,
+                                   uint32_t attribute_mask) {
+	static uint64_t report_start = 0;
+	static uint32_t seen_masks[3] {};
+	const bool      object = audioout2_port_type_is_object(state->port_type);
+	const int       klass  = object ? 2 : ((state->port_type & 0xffu) == 1 ? 1 : 0);
+	if ((seen_masks[klass] | attribute_mask) != seen_masks[klass]) {
+		seen_masks[klass] |= attribute_mask;
+		std::printf("AudioLevel: AudioOut2 %s port type 0x%x attribute ids mask 0x%x\n",
+		            object ? "object" : "bed", state->port_type, seen_masks[klass]);
+	}
+	if (pcm != nullptr) {
+		const bool is_float = (state->data_format & 0x7fu) != 1;
+		state->meter.Add(pcm, state->samples_num, audioout2_data_format_channels(state->data_format),
+		                 is_float);
+		state->pcm_sets++;
+	}
+	const auto now = LibKernel::KernelGetProcessTime();
+	if (report_start == 0) {
+		report_start = now;
+	}
+	if (now - report_start < 5000000) {
+		return;
+	}
+	report_start = now;
+	// Objects: the power sum over all object ports (as if mixed incoherently), their peak and
+	// how many carried PCM.
+	double   object_power = 0.0;
+	double   object_peak  = 0.0;
+	uint32_t object_ports = 0;
+	uint64_t object_sets  = 0;
+	for (auto& entry: g_audioout2_ports) {
+		if (!entry.used || entry.pcm_sets == 0) {
+			continue;
+		}
+		if (audioout2_port_type_is_object(entry.port_type)) {
+			const double rms = entry.meter.Rms();
+			object_power += rms * rms * (static_cast<double>(entry.pcm_sets));
+			object_peak = std::max(object_peak, entry.meter.Peak());
+			object_ports++;
+			object_sets += entry.pcm_sets;
+		} else {
+			std::printf("AudioLevel: t=%.1f s AudioOut2 port %llu type 0x%x: %u PCM blocks, rms %.1f "
+			            "dBFS peak %.1f dBFS%s\n",
+			            static_cast<double>(now) / 1e6, static_cast<unsigned long long>(entry.handle),
+			            entry.port_type, entry.pcm_sets, Mix::LevelMeter::ToDb(entry.meter.Rms()),
+			            Mix::LevelMeter::ToDb(entry.meter.Peak()),
+			            entry.audio_handle > 0 ? "" : " (not played)");
+		}
+		entry.meter.Reset();
+		entry.pcm_sets = 0;
+	}
+	if (object_ports != 0) {
+		// Normalise the power by the number of blocks a single port pushes in 5 s (~469).
+		const double blocks = 5.0 * 48000.0 / 512.0;
+		std::printf("AudioLevel: t=%.1f s AudioOut2 objects: %u ports with PCM, %llu "
+		            "blocks, summed rms %.1f dBFS, max peak %.1f dBFS\n",
+		            static_cast<double>(now) / 1e6, object_ports,
+		            static_cast<unsigned long long>(object_sets),
+		            Mix::LevelMeter::ToDb(std::sqrt(object_power / blocks)),
+		            Mix::LevelMeter::ToDb(object_peak));
+	}
+	std::fflush(stdout);
+}
+
 int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
                                              const AudioOut2Attribute* attributes, uint32_t num) {
 	EXIT_NOT_IMPLEMENTED(num != 0 && attributes == nullptr);
@@ -890,7 +970,9 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 	bool                     has_pcm  = false;
 	const AudioOut2Position* position = nullptr;
 	const float*             gain     = nullptr;
+	uint32_t                 ids      = 0;
 	for (uint32_t i = 0; i < num; i++) {
+		ids |= attributes[i].attribute_id < 32 ? (1u << attributes[i].attribute_id) : 0x80000000u;
 		if (attributes[i].attribute_id == AUDIO_OUT2_PORT_ATTRIBUTE_ID_PCM &&
 		    attributes[i].value != nullptr && attributes[i].value_size >= sizeof(AudioOut2Pcm)) {
 			AudioOut2Pcm pcm {};
@@ -909,6 +991,9 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 
 	g_audioout2_port_mutex.Lock();
 	if (auto* state = audioout2_find_port_locked(port); state != nullptr) {
+		if (audioout2_level_logging()) {
+			audioout2_meter_locked(state, pcm_data, ids);
+		}
 		if (audioout2_port_type_is_object(state->port_type)) {
 			audioout2_report_object_attributes(attributes, num);
 			if (position != nullptr) {

@@ -120,10 +120,40 @@ static QString GameDirectoryKey(const QString& dir) {
 #endif
 }
 
+// The audio mix sliders (rows 1-4 of the Audio group) are global settings like the controller
+// group: shown only in the global settings dialog.
+struct AudioMixSlider {
+	QSlider* slider;
+	QLabel*  value;
+	int AudioMixSettings::*field;
+};
+
+static std::array<AudioMixSlider, 4> AudioMixSliders(Ui::ConfigurationEditDialog& ui) {
+	return {{{ui.slider_audio_master, ui.label_audio_master_value, &AudioMixSettings::master},
+	         {ui.slider_audio_main, ui.label_audio_main_value, &AudioMixSettings::main},
+	         {ui.slider_audio_music, ui.label_audio_music_value, &AudioMixSettings::music},
+	         {ui.slider_audio_pad_speaker, ui.label_audio_pad_speaker_value,
+	          &AudioMixSettings::pad_speaker}}};
+}
+
+static void SetAudioMixVisible(Ui::ConfigurationEditDialog& ui, bool visible) {
+	for (int row = 1; row <= 4; row++) {
+		ui.audioLayout->setRowVisible(row, visible);
+	}
+}
+
 ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* parent)
     : QDialog(parent, Qt::WindowCloseButtonHint), m_ui(new Ui::ConfigurationEditDialog),
       m_info(info) {
 	m_ui->setupUi(this);
+	SetAudioMixVisible(*m_ui, false);
+	for (const auto& mix: AudioMixSliders(*m_ui)) {
+		mix.slider->setMaximum(static_cast<int>(Config::MAX_AUDIO_VOLUME));
+		connect(mix.slider, &QSlider::valueChanged, this,
+		        [label = mix.value](int value) {
+			label->setText(ConfigurationEditDialog::tr("%1%").arg(value));
+		});
+	}
 	setMinimumWidth(width());
 	InitGameDirectories();
 	InitEmulatorSwitches();
@@ -226,6 +256,9 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	// Set twice so the toggled handler runs and greys out the sliders that do not apply.
 	m_ui->checkBox_dualsense_fix->setChecked(!info.controller.dualsense_fix);
 	m_ui->checkBox_dualsense_fix->setChecked(info.controller.dualsense_fix);
+	for (const auto& mix: AudioMixSliders(*m_ui)) {
+		mix.slider->setValue(info.audio_mix.*mix.field);
+	}
 	auto* microphone = m_ui->comboBox_audio_input_device;
 	microphone->clear();
 	microphone->addItem(tr("None"), QString {});
@@ -399,6 +432,7 @@ void ConfigurationEditDialog::SetGlobalSettings(const QStringList& dirs) {
 
 	m_game_dirs_group->setVisible(true);
 	m_ui->controller_group->setVisible(true);
+	SetAudioMixVisible(*m_ui, true);
 	update_game_directory_buttons();
 	layout()->activate();
 	resize(size().expandedTo(minimumSizeHint()));
@@ -455,6 +489,9 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 		info.controller.vibration_intensity = ui.slider_controller_vibration->value();
 		info.controller.speaker_volume      = ui.slider_controller_volume->value();
 		info.controller.dualsense_fix       = ui.checkBox_dualsense_fix->isChecked();
+		for (const auto& mix: AudioMixSliders(ui)) {
+			info.audio_mix.*mix.field = mix.slider->value();
+		}
 	}
 	info.screen_resolution =
 	    TextToEnum<Configuration::Resolution>(ui.comboBox_screen_resolution->currentText());
