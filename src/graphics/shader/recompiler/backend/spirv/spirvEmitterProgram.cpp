@@ -730,9 +730,12 @@ HalfInvariance HalfInvarianceOf(IR::ValueOpcode opcode) {
 	}
 }
 
-// KYTY_DEBUG_NO_HALF_UNIFORM=1: emits every value in both wave halves (A/B runs).
+// KYTY_HALF_UNIFORM=1: half-invariant values are emitted once (opt-in; off by default).
 bool HalfUniformDedupEnabled() {
-	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_NO_HALF_UNIFORM") == nullptr;
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_HALF_UNIFORM");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
 	return enabled;
 }
 
