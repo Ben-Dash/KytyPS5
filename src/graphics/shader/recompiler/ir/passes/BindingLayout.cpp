@@ -57,6 +57,12 @@ void AddBinding(BindingLayout& layout, DescriptorBindingKind kind,
 
 } // namespace
 
+uint32_t ShaderDataBaseDwords(const Program& program) {
+	BindingLayout layout;
+	CollectShaderData(program, layout);
+	return layout.memory_offset_dword;
+}
+
 SharedMemoryResources CollectMemoryResources(const Program& program, std::vector<uint32_t>& buffers) {
 	std::array<bool, ShaderInfo::MaxBuffers> live_buffers {};
 	SharedMemoryResources shared;
@@ -129,17 +135,17 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 	// Every buffer stays bound, at its own index: the renderer prepares and offsets buffers by
 	// their index in program.info.buffers.
 	next.memory_offset_count = static_cast<uint32_t>(program.info.buffers.size());
-	// Strides and formats read at run time, up to the last buffer that needs one.
+	// Strides and formats read at run time, only for the buffers that need them: a generic
+	// format's word holds its stride too.
 	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
-		if ((program.info.buffers[i].packed_stride & DynamicBufferStride) != 0u) {
-			next.buffer_stride_count = i + 1u;
-		}
 		if (program.info.buffers[i].descriptor_format == GenericBufferFormat) {
-			next.buffer_format_count = i + 1u;
+			next.buffer_formats.push_back(i);
+		} else if ((program.info.buffers[i].packed_stride & DynamicBufferStride) != 0u) {
+			next.buffer_strides.push_back(i);
 		}
 	}
-	next.push_data_start_dword =
-	    PushData::StartFor(push_data_start_dword, next.ShaderDataDwords());
+	next.reserve_object_id     = program.stage != ShaderType::Compute;
+	next.push_data_start_dword = next.PushStartFor(push_data_start_dword);
 
 	if (!program.info.buffers.empty()) {
 		// Draw binding accesses this first group directly when memory_offset_count is nonzero.
