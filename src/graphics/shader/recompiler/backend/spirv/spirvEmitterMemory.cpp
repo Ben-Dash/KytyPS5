@@ -248,8 +248,49 @@ uint32_t LoadBdaDword(ValueEmitContext& ctx, uint32_t address, uint32_t active =
 std::array<uint32_t, 2> LoadElementWordPair(EmitterState& state, uint32_t address, uint32_t bytes,
                                             uint32_t active);
 
+// usable[i]: the DWORD belongs to the element, is mapped, and `active` holds. With the zero page
+// (`zero_page`) every pointer is readable and usable[i] does not test the mapping: an unmapped
+// page reads zeros.
+struct ElementWords {
+	uint32_t                misalign;
+	uint32_t                first_page;
+	uint32_t                second_page;
+	uint32_t                count;
+	bool                    zero_page;
+	std::array<uint32_t, 5> pointer;
+	std::array<uint32_t, 5> usable;
+};
+
+ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t bytes, uint32_t active,
+                             uint32_t count, bool load, bool dword_aligned, bool masks);
+std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
+                                         const std::array<uint32_t, 5>& usable);
+
 uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint32_t bits) {
 	auto& state = ctx.state;
+	if (state.bda_load_pointer_function != 0 && BdaNoWordMasksEnabled()) {
+		// KYTY_BDA_NO_WORD_MASKS: the two DWORDs unmasked (both readable with the zero page), shifted
+		// as one 64-bit value so the second only contributes above the first's remaining bytes,
+		// and one select for `active` on the result.
+		const auto u32    = TypeU32(state);
+		const auto u64    = TypeScalarU64(state);
+		const auto window = MapElementWords(state, address, ConstantU32(state, bits / 8u), active, 2u,
+		                                    true, false, false);
+		const auto words  = LoadElementWords(state, window, {});
+		const auto pair   = Binary(state, spv::OpBitwiseOr, u64, Unary(state, spv::OpUConvert, u64, words[0]),
+		                           Binary(state, spv::OpShiftLeftLogical, u64,
+		                                  Unary(state, spv::OpUConvert, u64, words[1]),
+		                                  ConstantDeviceAddress(state, 32)));
+		const auto shift  = Binary(state, spv::OpShiftLeftLogical, u64,
+		                           Unary(state, spv::OpUConvert, u64, window.misalign),
+		                           ConstantDeviceAddress(state, 3));
+		auto value = Unary(state, spv::OpUConvert, u32, Binary(state, spv::OpShiftRightLogical, u64, pair, shift));
+		if (bits != 32u) {
+			value = Binary(state, spv::OpBitwiseAnd, u32, value, ConstantU32(state, bits == 8u ? 0xffu : 0xffffu));
+		}
+		return active == ConstantBool(state, true) ? value
+		                                           : Select(state, u32, active, value, ConstantU32(state, 0));
+	}
 	// The one or two DWORDs the bytes cover, through one page lookup (two when they cross a page)
 	// under one branch. Zero when `active` is false.
 	const auto [first, second] =
@@ -988,24 +1029,14 @@ uint32_t LoadIndirectScalarBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 // aligned start, with one address translation (two when the element crosses a page).
 // The DWORDs an element of `bytes` bytes at a guest address covers: up to five from the aligned
 // start, through one address translation (two when the element crosses a buffer-cache page).
-// usable[i]: the DWORD belongs to the element, is mapped, and `active` holds. With the zero page
-// (`zero_page`) every pointer is readable and usable[i] does not test the mapping: an unmapped
-// page reads zeros.
-struct ElementWords {
-	uint32_t                misalign;
-	uint32_t                first_page;
-	uint32_t                second_page;
-	uint32_t                count;
-	bool                    zero_page;
-	std::array<uint32_t, 5> pointer;
-	std::array<uint32_t, 5> usable;
-};
 
 // `load`: the words are only read, so the lookups may go through the zero page. `dword_aligned`:
 // the address is known to be a multiple of 4; a single aligned DWORD never crosses a page and
-// needs no second lookup.
+// needs no second lookup. `masks` false (zero page only): the caller masks the final value itself
+// and usable[] is left unset.
 ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t bytes, uint32_t active,
-                             uint32_t count = 5, bool load = false, bool dword_aligned = false) {
+                             uint32_t count = 5, bool load = false, bool dword_aligned = false,
+                             bool masks = true) {
 	const auto u32 = TypeU32(state);
 	const auto u64 = TypeScalarU64(state);
 	ElementWords result {};
@@ -1024,7 +1055,7 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 		result.second_page = result.first_page;
 		if (single) {
 			result.pointer[0] = result.first_page;
-			result.usable[0]  = active;
+			result.usable[0]  = masks ? active : 0u;
 			return result;
 		}
 		const auto need = Binary(state, spv::OpIAdd, u32, result.misalign, bytes);
@@ -1052,11 +1083,13 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 				    Binary(state, spv::OpIAdd, u64, result.second_page,
 				           Unary(state, spv::OpUConvert, u64, Binary(state, spv::OpISub, u32, offset, first_room))));
 			}
-			result.usable[word] = word == 0u || all_wanted
-			                          ? active
-			                          : AndCondition(state, active,
-			                                         Binary(state, spv::OpULessThan, TypeBool(state),
-			                                                offset, need));
+			if (masks) {
+				result.usable[word] = word == 0u || all_wanted
+				                          ? active
+				                          : AndCondition(state, active,
+				                                         Binary(state, spv::OpULessThan, TypeBool(state),
+				                                                offset, need));
+			}
 		}
 		return result;
 	}
@@ -1104,7 +1137,7 @@ ElementWords MapElementWords(EmitterState& state, uint32_t address, uint32_t byt
 // DWORD, a valid address, and gives zero. A branch and a page lookup per DWORD made Yotei's
 // buffer-heavy compute shaders take minutes in NVIDIA's compiler (cs bc8eaa9cea77f9c3).
 // With the zero page every pointer is readable and there is no branch at all; words past
-// window.count are zero then.
+// window.count are zero then, and a word whose usable[] is 0 is returned unmasked.
 std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords& window,
                                          const std::array<uint32_t, 5>& usable) {
 	const auto u32    = TypeU32(state);
@@ -1119,7 +1152,7 @@ std::array<uint32_t, 5> LoadElementWords(EmitterState& state, const ElementWords
 			const auto value = state.builder.AllocateId();
 			state.builder.AddFunction(spv::OpLoad, u32, value, physical, spv::MemoryAccessAlignedMask,
 			                          uint32_t {4});
-			result[word] = usable[word] == ConstantBool(state, true)
+			result[word] = usable[word] == 0u || usable[word] == ConstantBool(state, true)
 			                   ? value
 			                   : Select(state, u32, usable[word], value, ConstantU32(state, 0));
 		}
@@ -1356,7 +1389,11 @@ uint32_t LoadIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_
 	    MapElementWords(state, base, ConstantU32(state, components * 4u), any, components, true, true);
 	std::array<uint32_t, 5> usable {};
 	for (uint32_t component = 0; component < components; ++component) {
-		usable[component] = AndCondition(state, window.usable[component], in_bounds[component]);
+		// KYTY_BDA_NO_WORD_MASKS: with the zero page every DWORD of the aligned window is wanted
+		// and in_bounds implies `any`, so the DWORD's bounds alone select its value.
+		usable[component] = window.zero_page && BdaNoWordMasksEnabled()
+		                        ? in_bounds[component]
+		                        : AndCondition(state, window.usable[component], in_bounds[component]);
 	}
 	const auto words = LoadElementWords(state, window, usable);
 	std::array<uint32_t, 4> values {};
@@ -1617,9 +1654,14 @@ uint32_t LoadIndirectFormattedBody(EmitterState& state, const IndirectBufferOper
 	const auto reading = AndCondition(
 	    state, AndCondition(state, info.valid, any_read),
 	    IndirectBufferInBoundsBytes(state, buffer, 0u, byte_size, true));
-	const auto window   = MapElementWords(state, buffer.address, byte_size, reading, 5u, true);
+	// KYTY_BDA_NO_WORD_MASKS: with the zero page the words need no mask: every value below is
+	// selected by `reading`, and the bits a component takes from a DWORD past the element lie
+	// above its width, which the extraction drops.
+	const bool unmasked = state.bda_load_pointer_function != 0 && BdaNoWordMasksEnabled();
+	const auto window   = MapElementWords(state, buffer.address, byte_size, reading, 5u, true, false,
+	                                      !unmasked);
 	const auto misalign = window.misalign;
-	const auto element  = LoadElementWords(state, window, window.usable);
+	const auto element  = LoadElementWords(state, window, unmasked ? std::array<uint32_t, 5> {} : window.usable);
 	const auto pick = [&](uint32_t index) {
 		auto result = element[element.size() - 1u];
 		for (uint32_t word = element.size() - 1u; word-- > 0;) {
@@ -2139,6 +2181,15 @@ bool BdaFastDwordEnabled() {
 	// KYTY_BDA_FAST_DWORD=0: element windows test every DWORD's page and size at run time.
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_BDA_FAST_DWORD");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+bool BdaNoWordMasksEnabled() {
+	// KYTY_BDA_NO_WORD_MASKS=0: with the zero page, element words are still masked one by one.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_NO_WORD_MASKS");
 		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
