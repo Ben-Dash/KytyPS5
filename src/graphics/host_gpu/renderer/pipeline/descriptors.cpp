@@ -11,7 +11,6 @@
 #include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/gpu_format.h"
-#include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/guest_gpu/tile.h"
@@ -145,32 +144,15 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	const auto aligned_offset = Common::AlignDown(offset, alignment);
 	const auto adjustment     = offset - aligned_offset;
 	const auto max_range      = graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange;
-	// The shader adds the adjustment to its byte addresses. Word accesses need it dword-aligned;
-	// a read-only buffer the shader reads only as 8- or 16-bit formatted elements (Ghost of Yotei
-	// binds such vertex data 2 bytes off a dword) loads those elements by their byte address.
-	const auto element_bytes = [&]() -> uint64_t {
-		if (resource.written || !resource.formatted) {
-			return sizeof(uint32_t);
-		}
-		const auto info = ShaderRecompiler::Format::GetFormatInfo(resource.descriptor_format);
-		if (info.type == ShaderRecompiler::Format::ComponentType::Unknown || info.packed_bitfield ||
-		    (info.component_bits[0] != 8u && info.component_bits[0] != 16u)) {
-			return sizeof(uint32_t);
-		}
-		return info.component_bits[0] / 8u;
-	}();
-	if (adjustment % element_bytes != 0 || adjustment >= 256 || size > max_range - adjustment) {
+	if (adjustment % sizeof(uint32_t) != 0 || adjustment >= 256 || size > max_range - adjustment) {
 		// The shader takes the adjustment in whole dwords. Bind the null buffer instead of ending
 		// the session (Ghost of Yotei binds byte-aligned buffers); its accesses then read zero.
-		static std::atomic<uint32_t> warned {0};
-		if (warned.fetch_add(1, std::memory_order_relaxed) < 24u) {
+		static std::atomic_flag warned = ATOMIC_FLAG_INIT;
+		if (!warned.test_and_set(std::memory_order_relaxed)) {
 			std::printf("Warning: unsupported storage buffer offset adjustment (address=0x%016" PRIx64
-			            " size=0x%" PRIx64 " adjustment=%" PRIu64 " written=%d formatted=%d "
-			            "format=%u); binding a null buffer\n",
+			            " size=0x%" PRIx64 " adjustment=%" PRIu64 "); binding a null buffer\n",
 			            static_cast<uint64_t>(address), static_cast<uint64_t>(size),
-			            static_cast<uint64_t>(adjustment), resource.written ? 1 : 0,
-			            resource.formatted ? 1 : 0,
-			            static_cast<uint32_t>(resource.descriptor_format));
+			            static_cast<uint64_t>(adjustment));
 		}
 		return {context.GetBufferCache().GetBuffer(NULL_BUFFER_ID).Handle(), 0, 16};
 	}
