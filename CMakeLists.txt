@@ -162,6 +162,15 @@ configure_file(
 
 find_package(Git)
 
+# See generate_version.cmake: only for builds that leave the generated SPIR-V unchanged.
+set(KYTY_SHADER_CACHE_KEY "" CACHE STRING
+	"Shader cache key used instead of the hash of the recompiler and pipeline sources")
+if(KYTY_SHADER_CACHE_KEY)
+	message(STATUS "Shader cache key: pinned ${KYTY_SHADER_CACHE_KEY}")
+else()
+	message(STATUS "Shader cache key: computed from the recompiler and pipeline sources")
+endif()
+
 add_custom_target(KytyGitVersion
 	COMMAND ${CMAKE_COMMAND}
 		-D INPUT_FILE=${KYTY_SOURCE_DIR}/kytyGitVersion.h.in
@@ -169,6 +178,7 @@ add_custom_target(KytyGitVersion
 		-D GIT_EXECUTABLE=${GIT_EXECUTABLE}
 		-D GIT_WORKING_DIRECTORY=${CMAKE_CURRENT_SOURCE_DIR}
 		-D SOURCE_DIRECTORY=${KYTY_SOURCE_DIR}
+		-D KYTY_SHADER_CACHE_KEY_PINNED=${KYTY_SHADER_CACHE_KEY}
 		-P ${KYTY_SOURCE_DIR}/generate_version.cmake
 	BYPRODUCTS ${PROJECT_BINARY_DIR}/kytyGitVersion.h
 	COMMENT "Generate kytyGitVersion.h"
