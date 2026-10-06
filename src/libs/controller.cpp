@@ -1015,8 +1015,12 @@ void GameController::GetConnectionInfo(bool* flag, int* count) {
 // as the host controller does not hand over that part of its input report.
 static int32_t trigger_effect_state(const PadTriggerEffectCommand& command, int value) {
 	const int zone = std::clamp(value, 0, 255) * 10 / 256;
+	// A feedback effect pushes back only once the trigger moves into it: one starting at position 0
+	// stays idle while the trigger rests (ASTRO's PLAYROOM crushes the gacha capsules on idle ->
+	// pushing).
+	const bool pressed = value > 0;
 	switch (command.mode) {
-		case 1: return zone >= command.data[0] ? 2 : 1;
+		case 1: return pressed && zone >= command.data[0] ? 2 : 1;
 		case 2: return zone >= command.data[1] ? 5 : (zone >= command.data[0] ? 4 : 3);
 		case 3: return zone >= command.data[0] ? 7 : 6;
 		case 4: {
@@ -1024,9 +1028,9 @@ static int32_t trigger_effect_state(const PadTriggerEffectCommand& command, int 
 			while (first < 10 && command.data[first] == 0) {
 				first++;
 			}
-			return zone >= first ? 2 : 1;
+			return pressed && zone >= first ? 2 : 1;
 		}
-		case 5: return zone >= command.data[0] ? 2 : 1;
+		case 5: return pressed && zone >= command.data[0] ? 2 : 1;
 		case 6: return command.data[1 + zone] != 0 ? 7 : 6;
 		default: return 0;
 	}
