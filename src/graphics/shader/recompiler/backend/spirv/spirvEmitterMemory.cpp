@@ -309,7 +309,34 @@ uint32_t LoadWordPrepared(ValueEmitContext& ctx, const IR::Inst& inst, const IR:
 	    [&]() { return LoadWordInBounds(ctx, resource, index); });
 }
 
+// LDS and scratch always hold element 0 (they are arrays of a known nonzero size).
+bool HasElementZero(const EmitterState& state, IR::ResourceKind kind) {
+	return (kind == IR::ResourceKind::Lds && LdsDwordCount(state) != 0u) ||
+	       (kind == IR::ResourceKind::Scratch && state.program.scratch_dwords != 0u);
+}
+
+// A DWORD of LDS or scratch without a branch: where `valid` is false the read goes to element 0
+// and gives zero. Two nested branches (EXEC, then bounds) around every DS read gave Yotei's
+// LDS-heavy compute shaders thousands of blocks for NVIDIA's compiler to work through.
+uint32_t LoadLocalWordOrZero(ValueEmitContext& ctx, const MemoryResourceAccess& resource,
+                             uint32_t index, uint32_t valid) {
+	auto&      state = ctx.state;
+	const auto safe  = Select(state, TypeU32(state), valid, index, ConstantU32(state, 0));
+	return Select(state, TypeU32(state), valid, LoadWordInBounds(ctx, resource, safe),
+	              ConstantU32(state, 0));
+}
+
 uint32_t LoadWord(ValueEmitContext& ctx, const IR::Inst& inst, IR::MemoryInfo mem) {
+	if (HasElementZero(ctx.state, mem.kind)) {
+		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
+		if (resource.element_bits == 32u) {
+			const auto index = DwordIndex(ctx, inst, mem);
+			return LoadLocalWordOrZero(
+			    ctx, resource, index,
+			    AndCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1),
+			                 EmitMemoryElementInBounds(ctx.state, resource, index)));
+		}
+	}
 	return EmitValueOrZeroIfCondition(ctx.state, ctx.Arg(inst, inst.NumArgs() - 1), [&]() {
 		const auto resource = PrepareMemoryResourceAccess(ctx.state, mem);
 		return LoadWordPrepared(ctx, inst, mem, resource);
