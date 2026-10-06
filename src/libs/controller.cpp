@@ -187,8 +187,14 @@ static void pad_fill_data(PadData* data, const ControllerState& state, bool conn
 		static const auto start = std::chrono::steady_clock::now();
 		const double seconds =
 		    std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+		// KYTY_DEBUG_PAD_AUTOPRESS_BUTTON=<hex pad button mask> presses that instead of Cross.
+		static const uint32_t auto_button = [] {
+			const char* text = KYTY_GETENV("KYTY_DEBUG_PAD_AUTOPRESS_BUTTON");
+			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 16))
+			                       : PAD_BUTTON_CROSS;
+		}();
 		if (seconds > 15.0 && std::fmod(seconds, auto_period) < 0.15) {
-			data->buttons |= PAD_BUTTON_CROSS;
+			data->buttons |= auto_button;
 		}
 	}
 	data->left_stick_x      = state.axes[static_cast<int>(Axis::LeftX)];
