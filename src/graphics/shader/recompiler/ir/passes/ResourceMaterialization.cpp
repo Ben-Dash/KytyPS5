@@ -8,6 +8,7 @@
 #include "graphics/shader/shaderBindings.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <atomic>
 #include <array>
@@ -806,6 +807,12 @@ static std::vector<ResourceBlock> ResourceControlFlow(const Program& program) {
 	if (program.blocks.size() != program.block_info.size() || HasShaderMemoryWrites(program)) {
 		return {};
 	}
+	if (program.blocks.size() > (1u << 20u)) {
+		std::printf("ResourceControlFlow: hash=0x%016llx implausible block count %zu\n",
+		            static_cast<unsigned long long>(program.shader_hash), program.blocks.size());
+		std::fflush(stdout);
+		return {};
+	}
 	std::unordered_map<uint32_t, uint32_t> indices;
 	for (uint32_t i = 0; i < program.block_info.size(); i++) {
 		if (!indices.emplace(program.block_info[i].id, i).second) {
@@ -846,16 +853,35 @@ static std::vector<ResourceBlock> ResourceControlFlow(const Program& program) {
 			if (buffer == BufferAccess::None && image.access == ImageAccess::None) {
 				continue;
 			}
-			const auto& memory = program.memory_info.at(inst.Flags<MemoryFlags>().index);
+			// A resource this plan cannot name (seen: a sampler index past the sampler list in a
+			// Ghost of Yotei shader after the calligraphy scene) gives up the control-flow plan,
+			// which only refines materialization, instead of throwing out of the session.
+			const auto memory_index = inst.Flags<MemoryFlags>().index;
+			if (memory_index >= program.memory_info.size()) {
+				return {};
+			}
+			const auto& memory = program.memory_info[memory_index];
 			if (memory.planning_only) {
 				continue;
 			}
 			if (buffer != BufferAccess::None) {
-				block.sources.push_back(program.info.buffers.at(memory.resource).source);
+				if (memory.resource >= program.info.buffers.size()) {
+					return {};
+				}
+				block.sources.push_back(program.info.buffers[memory.resource].source);
 			} else {
-				block.sources.push_back(program.info.images.at(memory.resource).source);
+				if (memory.resource >= program.info.images.size() ||
+				    (image.needs_sampler && memory.sampler >= program.info.samplers.size())) {
+					std::printf("ResourceControlFlow: hash=0x%016llx image %u/%zu sampler %u/%zu out of "
+					            "range; no control-flow plan\n",
+					            static_cast<unsigned long long>(program.shader_hash), memory.resource,
+					            program.info.images.size(), memory.sampler,
+					            program.info.samplers.size());
+					return {};
+				}
+				block.sources.push_back(program.info.images[memory.resource].source);
 				if (image.needs_sampler) {
-					block.sources.push_back(program.info.samplers.at(memory.sampler).source);
+					block.sources.push_back(program.info.samplers[memory.sampler].source);
 				}
 			}
 		}
