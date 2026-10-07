@@ -1542,10 +1542,16 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 	{
 		// Pipeline layouts of bindless shaders need the bindless table, made after this cache.
 		m_context_ready_future.wait();
+		// KYTY_DEBUG_REPLAY_PIPELINES=0: the replay still adds the journal's modules, but builds
+		// no pipelines from them; each dispatch compiles its own, as before the compute queue.
+		static const bool build_pipelines = [] {
+			const char* value = KYTY_GETENV("KYTY_DEBUG_REPLAY_PIPELINES");
+			return value == nullptr || std::strcmp(value, "0") != 0;
+		}();
 		Common::LockGuard lock(m_mutex);
 		for (auto index = order.begin(); index != compute_end; ++index) {
 			const auto* permutation = insert(*index);
-			if (permutation == nullptr) {
+			if (permutation == nullptr || !build_pipelines) {
 				continue;
 			}
 			// The layouts read only the program; the dispatch that needs the pipeline takes it.
