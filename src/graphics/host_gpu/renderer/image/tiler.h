@@ -45,9 +45,10 @@ public:
 	enum class D16Direction { Promote, Demote };
 
 	struct Result {
-		vk::Buffer buffer = nullptr;
-		uint64_t   offset = 0;
-		uint64_t   size   = 0;
+		vk::Buffer buffer   = nullptr;
+		uint64_t   offset   = 0;
+		uint64_t   size     = 0;
+		uint64_t   capacity = 0; // The whole VkBuffer's size; 0: offset + size.
 	};
 	struct D16Layout {
 		uint32_t width               = 0;
