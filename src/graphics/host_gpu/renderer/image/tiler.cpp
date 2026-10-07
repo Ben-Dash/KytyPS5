@@ -195,16 +195,30 @@ TileManager::Scratch TileManager::AllocateScratch(uint64_t size) {
 	return {buffer, memory, size, create.size};
 }
 
+// A scratch buffer is released when it is handed out, before the commands that use it are
+// recorded. Recording them can wrap the stream or staging ring, which submits and waits for the
+// current tick (CommandScheduler::Wait), so the tick the release was deferred under can complete
+// while the copy or dispatch that reads the buffer is still to be recorded into the next one; the
+// buffer then went back to the pool (and was reused) or was destroyed before the record thread
+// replayed those commands ("deferred-call: stale buffer source ... vkCmdCopyBufferToImage").
+// The release is therefore deferred twice: once the GPU passed the hand-out tick, it waits for
+// the tick then being recorded, which holds every use recorded after a wrap.
 void TileManager::DeferRelease(Scratch scratch) {
+	auto* scheduler = &m_scheduler;
 	if (!ScratchPoolEnabled()) {
 		auto allocator = m_graphics.allocator;
-		m_scheduler.DeferOperation([allocator, scratch] {
-			HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkBuffer>(scratch.buffer)));
-			vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation);
+		m_scheduler.DeferOperation([scheduler, allocator, scratch] {
+			scheduler->DeferOperation([allocator, scratch] {
+				HandleRegistry::Unregister(
+				    reinterpret_cast<uint64_t>(static_cast<VkBuffer>(scratch.buffer)));
+				vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation);
+			});
 		});
 		return;
 	}
-	m_scheduler.DeferOperation([pool = m_scratch_pool, scratch] { pool->Return(scratch); });
+	m_scheduler.DeferOperation([scheduler, pool = m_scratch_pool, scratch] {
+		scheduler->DeferOperation([pool, scratch] { pool->Return(scratch); });
+	});
 }
 
 void TileManager::Prepare(bool tile, uint64_t tiled_capacity, uint64_t linear_capacity,
