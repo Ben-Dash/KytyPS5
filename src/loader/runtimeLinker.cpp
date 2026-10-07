@@ -708,6 +708,33 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		}
 		std::printf("--- Guest fault context ---\n");
 		std::printf("thread: %s\n", thread_name);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		// The host module (DLL) the faulting pc and the code addresses on the stack belong to:
+		// a fault inside a driver, a Vulkan layer or a capture tool names it here.
+		const auto describe_module = [](const char* what, uint64_t address) {
+			HMODULE module = nullptr;
+			if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+			                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			                       reinterpret_cast<LPCSTR>(address), &module) == 0 ||
+			    module == nullptr) {
+				return false;
+			}
+			char path[MAX_PATH] = {};
+			(void)GetModuleFileNameA(module, path, MAX_PATH);
+			std::printf("%s 0x%016" PRIx64 " = %s+0x%" PRIx64 "\n", what, address, path,
+			            address - reinterpret_cast<uint64_t>(module));
+			return true;
+		};
+		(void)describe_module("pc module:", info->exception_address);
+		if (IsReadableRange(info->rsp, 64 * sizeof(uint64_t))) {
+			const auto* stack = reinterpret_cast<const uint64_t*>(info->rsp);
+			for (int i = 0; i < 64; i++) {
+				if (stack[i] >= 0x10000u && stack[i] < 0x00007fffffff0000ull) {
+					(void)describe_module("stack module:", stack[i]);
+				}
+			}
+		}
+#endif
 		std::printf("rax=%016" PRIx64 " rbx=%016" PRIx64 " rcx=%016" PRIx64 " rdx=%016" PRIx64 "\n"
 		            "rsi=%016" PRIx64 " rdi=%016" PRIx64 " rbp=%016" PRIx64 " rsp=%016" PRIx64 "\n"
 		            "r8 =%016" PRIx64 " r9 =%016" PRIx64 " r10=%016" PRIx64 " r11=%016" PRIx64 "\n"
