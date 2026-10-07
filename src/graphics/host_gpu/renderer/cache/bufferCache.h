@@ -93,7 +93,7 @@ public:
 	[[nodiscard]] StreamBuffer& GetDrawRecordBuffer() noexcept { return m_draw_record_buffer; }
 	[[nodiscard]] const Buffer* GetGdsBuffer() const noexcept { return &m_gds_buffer; }
 	[[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept { return &m_bda_pagetable_buffer; }
-	// KYTY_DEBUG_DEVICE_FAULT: prints which buffer (live, or freed within the last 256 deletes)
+	// KYTY_DEBUG_DEVICE_FAULT: prints which buffer (live, or freed within the last 4096 deletes)
 	// holds a device address the driver reported faulting on.
 	void DescribeDeviceAddress(uint64_t address) const;
 	// Debugging aid: prints the cache buffer owning that guest page and its page-table entry.
@@ -214,7 +214,7 @@ private:
 		uint64_t cpu  = 0;
 		uint64_t tick = 0;
 	};
-	std::array<FreedBuffer, 256> m_freed_buffers {};
+	std::array<FreedBuffer, 4096> m_freed_buffers {};
 	size_t                       m_freed_next = 0;
 	Common::SlotVector<Buffer>                        m_slot_buffers;
 	Common::LeastRecentlyUsedCache<BufferId, uint64_t> m_lru_cache;
