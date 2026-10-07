@@ -4,6 +4,7 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
@@ -100,22 +101,22 @@ void ReportOpRing(uint64_t completed) {
 
 // KYTY_DEBUG_DEVICE_FAULT: the address binding events (VK_EXT_device_address_binding_report)
 // covering a faulting address, oldest first, and whether its range is still bound.
-void ReportAddressBindings(uint64_t address) {
+void ReportAddressBindings(uint64_t address, uint64_t span = 1) {
 	if (!GpuZones::g_binding_report) {
 		return;
 	}
 	std::lock_guard lock(GpuZones::g_binding_mutex);
 	const auto      next = GpuZones::g_binding_next.load(std::memory_order_relaxed);
 	const auto first = next > GpuZones::AddressBindingRing ? next - GpuZones::AddressBindingRing : 0;
-	std::printf("device-fault-bindings: address=0x%016" PRIx64 ", %" PRIu64 " events recorded (%" PRIu64
-	            " kept)\n",
-	            address, next, next - first);
+	std::printf("device-fault-bindings: address=0x%016" PRIx64 " span=0x%" PRIx64 ", %" PRIu64
+	            " events recorded (%" PRIu64 " kept)\n",
+	            address, span, next, next - first);
 	uint32_t matches     = 0;
 	bool     still_bound = false;
 	uint64_t last_base   = 0;
 	for (uint64_t index = first; index < next; index++) {
 		const auto& e = GpuZones::g_bindings[index % GpuZones::AddressBindingRing];
-		if (e.size == 0 || address < e.base || address >= e.base + e.size) {
+		if (e.size == 0 || address + span <= e.base || address >= e.base + e.size) {
 			continue;
 		}
 		matches++;
@@ -125,7 +126,7 @@ void ReportAddressBindings(uint64_t address) {
 		            " offset=0x%" PRIx64 " object=%s handle=0x%016" PRIx64 "%s %s mark=%" PRIu64
 		            " tick=%" PRIu64 "\n",
 		            index, (e.flags & 1u) != 0 ? "BIND  " : "UNBIND", e.base, e.size,
-		            address - e.base, vk::to_string(static_cast<vk::ObjectType>(e.object_type)).c_str(),
+		            address >= e.base ? address - e.base : 0, vk::to_string(static_cast<vk::ObjectType>(e.object_type)).c_str(),
 		            e.handle, (e.flags & 2u) != 0 ? " (driver-internal)" : "", name, e.mark, e.tick);
 		if ((e.flags & 1u) != 0) {
 			still_bound = true;
@@ -215,6 +216,22 @@ void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t com
 		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerInvalid &&
 		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerFault) {
 			ReportAddressBindings(static_cast<uint64_t>(addresses[i].reportedAddress));
+			// A 32-bit byte offset of 0xFFFFFFFC (the ByteAddress sentinel of an out-of-bounds
+			// storage buffer access, which the hardware bounds check lets through when offset + 4
+			// wraps to 0) puts the access 4 GiB minus 4 above the buffer's base: name the buffers
+			// whose base lies in the window the faulting page allows for.
+			const auto reported  = static_cast<uint64_t>(addresses[i].reportedAddress);
+			const auto precision = std::max<uint64_t>(static_cast<uint64_t>(addresses[i].addressPrecision), 1);
+			if (reported >= 0xFFFFFFFCull) {
+				const auto base = reported - 0xFFFFFFFCull;
+				std::printf("device-fault-wrap: if the access was base + 0xFFFFFFFC, base is in [0x%016" PRIx64
+				            ", 0x%016" PRIx64 ")\n",
+				            base, base + precision);
+				if (GpuZones::g_describe_device_address != nullptr) {
+					GpuZones::g_describe_device_address(base);
+				}
+				ReportAddressBindings(base, precision);
+			}
 		}
 	}
 	for (uint32_t i = 0; i < counts.vendorInfoCount; i++) {
