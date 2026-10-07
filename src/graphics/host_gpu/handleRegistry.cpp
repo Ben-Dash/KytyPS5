@@ -26,7 +26,7 @@ std::atomic<uint64_t>                     g_stale {0};
 std::atomic<uint32_t>                     g_logged {0};
 
 const char* KindName(Kind kind) {
-	return kind == Kind::Image ? "image" : "buffer";
+	return kind == Kind::Image ? "image" : kind == Kind::ImageView ? "image view" : "buffer";
 }
 
 } // namespace

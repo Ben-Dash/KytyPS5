@@ -757,11 +757,69 @@ void VKAPI_PTR HookUpdateDescriptorSets(VkDevice device, uint32_t write_count,
 	    t_home->owner.load(std::memory_order_relaxed) == &t_owner_token) {
 		// While this thread's stream records: in order with the binds recorded around it.
 		t_stream = t_home->stream.load(std::memory_order_relaxed);
+		// Debugging aid (HandleRegistry::CheckEnabled): the image views and buffers a deferred
+		// descriptor write names are stamped now and checked when it runs; one destroyed or
+		// recreated in between is written as a null descriptor ("deferred-call: stale ...")
+		// instead of handing the driver a dead handle.
+		const bool check   = HandleRegistry::CheckEnabled();
+		uint32_t   handles = 0;
+		if (check) {
+			for (uint32_t i = 0; i < write_count; i++) {
+				const auto array = WriteArrayOf(writes[i].descriptorType);
+				if (array == WriteArray::Image || array == WriteArray::Buffer) {
+					handles += writes[i].descriptorCount;
+				}
+			}
+		}
 		Packet packet(*t_stream, WritesBytes(write_count, writes) +
-		                             Bytes<VkCopyDescriptorSet>(copy_count));
-		const auto* write_copies = CopyWrites(packet, write_count, writes);
+		                             Bytes<VkCopyDescriptorSet>(copy_count) +
+		                             (handles != 0 ? Bytes<uint64_t>(handles) : 0));
+		auto*       write_copies = CopyWrites(packet, write_count, writes);
 		const auto* copy_copies  = packet.Copy(copies, copy_count);
+		uint64_t*   stamps       = nullptr;
+		if (handles != 0) {
+			std::vector<uint64_t> recorded;
+			recorded.reserve(handles);
+			for (uint32_t i = 0; i < write_count; i++) {
+				const auto array = WriteArrayOf(writes[i].descriptorType);
+				for (uint32_t d = 0; d < writes[i].descriptorCount; d++) {
+					if (array == WriteArray::Image) {
+						recorded.push_back(HandleRegistry::Stamp(
+						    reinterpret_cast<uint64_t>(writes[i].pImageInfo[d].imageView)));
+					} else if (array == WriteArray::Buffer) {
+						recorded.push_back(HandleRegistry::Stamp(
+						    reinterpret_cast<uint64_t>(writes[i].pBufferInfo[d].buffer)));
+					}
+				}
+			}
+			stamps = packet.Copy(recorded.data(), handles);
+		}
 		packet.Commit([=] {
+			if (stamps != nullptr) {
+				uint32_t next = 0;
+				for (uint32_t i = 0; i < write_count; i++) {
+					const auto array = WriteArrayOf(write_copies[i].descriptorType);
+					for (uint32_t d = 0; d < write_copies[i].descriptorCount; d++) {
+						if (array == WriteArray::Image) {
+							auto& info = const_cast<VkDescriptorImageInfo&>(write_copies[i].pImageInfo[d]);
+							if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(info.imageView),
+							                          stamps[next++], "vkUpdateDescriptorSets",
+							                          "descriptor")) {
+								info.imageView = VK_NULL_HANDLE;
+							}
+						} else if (array == WriteArray::Buffer) {
+							auto& info = const_cast<VkDescriptorBufferInfo&>(write_copies[i].pBufferInfo[d]);
+							if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(info.buffer),
+							                          stamps[next++], "vkUpdateDescriptorSets",
+							                          "descriptor")) {
+								info.buffer = VK_NULL_HANDLE;
+								info.offset = 0;
+								info.range  = VK_WHOLE_SIZE;
+							}
+						}
+					}
+				}
+			}
 			g_real.vkUpdateDescriptorSets(device, write_count, write_copies, copy_count, copy_copies);
 		});
 		return;

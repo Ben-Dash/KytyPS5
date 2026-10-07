@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "graphics/host_gpu/renderer/image/image.h"
 
 namespace Libs::Graphics {
@@ -382,6 +383,10 @@ vk::ImageView Image::FindView(const ImageViewInfo& view_info) {
 
 	vk::ImageView view   = nullptr;
 	const auto    result = m_graphics.device.createImageView(&create, nullptr, &view);
+	if (result == vk::Result::eSuccess && view != nullptr) {
+		HandleRegistry::Register(reinterpret_cast<uint64_t>(static_cast<VkImageView>(view)),
+		                         HandleRegistry::Kind::ImageView);
+	}
 	if (result != vk::Result::eSuccess || view == nullptr) {
 		EXIT("failed to create image view: result=%d image_format=%d view_format=%d type=%d "
 		     "aspect=0x%x mip=%u+%u layer=%u+%u usage=0x%x\n",

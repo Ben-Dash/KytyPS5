@@ -9,7 +9,7 @@
 // the driver would copy into freed or reused memory; RenderDoc's layer crashes on it.
 namespace Libs::Graphics::HandleRegistry {
 
-enum class Kind : uint8_t { Buffer, Image };
+enum class Kind : uint8_t { Buffer, Image, ImageView };
 
 void Register(uint64_t handle, Kind kind);
 void Unregister(uint64_t handle);

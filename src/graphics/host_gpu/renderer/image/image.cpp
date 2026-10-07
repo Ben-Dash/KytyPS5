@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/debug.h"
@@ -958,6 +959,7 @@ Image::~Image() {
 	g_allocation_counters.images_destroyed.fetch_add(1, std::memory_order_relaxed);
 	for (const auto& cached: views) {
 		if (cached.view != nullptr) {
+			HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkImageView>(cached.view)));
 			m_graphics.device.destroyImageView(cached.view, nullptr);
 		}
 	}
