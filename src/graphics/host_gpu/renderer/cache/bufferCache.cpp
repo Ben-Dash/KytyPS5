@@ -161,9 +161,55 @@ void BufferCache::TouchBuffer(const Buffer& buffer) {
 	}
 }
 
+static const BufferCache* g_describe_cache = nullptr;
+
+void BufferCache::DescribeDeviceAddress(uint64_t address) const {
+	const auto within = [address](uint64_t base, uint64_t size) {
+		return address >= base && address < base + size;
+	};
+	bool found = false;
+	m_slot_buffers.ForEach([&](BufferId id, const Buffer& buffer) {
+		if (buffer.Handle() != nullptr && within(buffer.BufferDeviceAddress(), buffer.Size())) {
+			std::printf("device-fault-owner: live buffer id=%u guest=0x%016llx size=0x%llx deleted=%d "
+			            "offset=0x%llx\n",
+			            static_cast<uint32_t>(id.index),
+			            static_cast<unsigned long long>(buffer.CpuAddress()),
+			            static_cast<unsigned long long>(buffer.Size()), buffer.is_deleted ? 1 : 0,
+			            static_cast<unsigned long long>(address - buffer.BufferDeviceAddress()));
+			found = true;
+		}
+	});
+	for (const auto& freed: m_freed_buffers) {
+		if (freed.size != 0 && within(freed.bda, freed.size)) {
+			std::printf("device-fault-owner: freed buffer guest=0x%016llx size=0x%llx deleted at tick %llu "
+			            "(completed %llu) offset=0x%llx\n",
+			            static_cast<unsigned long long>(freed.cpu),
+			            static_cast<unsigned long long>(freed.size),
+			            static_cast<unsigned long long>(freed.tick),
+			            static_cast<unsigned long long>(m_scheduler.GetMasterSemaphore().KnownGpuTick()),
+			            static_cast<unsigned long long>(address - freed.bda));
+			found = true;
+		}
+	}
+	if (within(m_bda_pagetable_buffer.BufferDeviceAddress(), m_bda_pagetable_buffer.Size())) {
+		std::printf("device-fault-owner: BDA page table\n");
+		found = true;
+	}
+	if (!found) {
+		std::printf("device-fault-owner: no game buffer (page table, stream or image memory)\n");
+	}
+	std::fflush(stdout);
+}
+
 void BufferCache::DeleteBuffer(BufferId id) {
 	if (IsBufferInvalid(id)) {
 		return;
+	}
+	{
+		const auto& buffer = m_slot_buffers[id];
+		auto&       freed  = m_freed_buffers[m_freed_next++ % m_freed_buffers.size()];
+		freed = {buffer.BufferDeviceAddress(), buffer.Size(), buffer.CpuAddress(),
+		         m_scheduler.Active() ? m_scheduler.CurrentTick() : 0};
 	}
 	Unregister(id);
 	if (m_scheduler.Active()) {
@@ -319,6 +365,12 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	m_gds_buffer.Flush(0, m_gds_buffer.Size());
 	SetVulkanObjectNameF(m_graphics.device, m_bda_pagetable_buffer.Handle(),
 	                     "BDA Page Table Buffer");
+	g_describe_cache                     = this;
+	GpuZones::g_describe_device_address = [](uint64_t address) {
+		if (g_describe_cache != nullptr) {
+			g_describe_cache->DescribeDeviceAddress(address);
+		}
+	};
 	const auto null_id =
 	    m_slot_buffers.insert(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0, AllFlags, 16);
 	EXIT_IF(null_id != NULL_BUFFER_ID);
@@ -349,6 +401,8 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 }
 
 BufferCache::~BufferCache() {
+	GpuZones::g_describe_device_address = nullptr;
+	g_describe_cache                     = nullptr;
 	m_readback_queue.reset();
 	if (!m_gpu_modified_ranges.Empty()) {
 		EXIT("BufferCache: destroyed with pending GPU-modified ranges\n");

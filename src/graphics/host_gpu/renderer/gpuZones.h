@@ -58,6 +58,9 @@ inline std::atomic<uint64_t>               g_checkpoint_next {1};
 // prints the marks of the submissions the GPU had not completed (see ReportDeviceFault).
 inline std::array<uint64_t, CheckpointRing> g_checkpoint_ticks {};
 inline bool                                 g_op_ring = false;
+// KYTY_DEBUG_DEVICE_FAULT: names what a faulting device address belongs to (a live or recently
+// freed game buffer, the page table, the zero page); set by the buffer cache.
+inline void (*g_describe_device_address)(uint64_t address) = nullptr;
 
 // `pixels` is a draw's render area; per-pixel costs stay comparable when the game's dynamic
 // resolution changes between runs.

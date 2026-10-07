@@ -129,6 +129,13 @@ void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t com
 		            vk::to_string(addresses[i].addressType).c_str(),
 		            static_cast<uint64_t>(addresses[i].reportedAddress),
 		            static_cast<uint64_t>(addresses[i].addressPrecision));
+		if (GpuZones::g_describe_device_address != nullptr &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eExecuteInvalid &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerUnknown &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerInvalid &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerFault) {
+			GpuZones::g_describe_device_address(static_cast<uint64_t>(addresses[i].reportedAddress));
+		}
 	}
 	for (uint32_t i = 0; i < counts.vendorInfoCount; i++) {
 		std::printf("device-fault-vendor: code=0x%" PRIx64 " data=0x%" PRIx64 " %s\n",
