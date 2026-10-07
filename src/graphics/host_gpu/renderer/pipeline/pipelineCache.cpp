@@ -1498,6 +1498,8 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 	size_t compiled = 0;
 	size_t skipped  = 0;
 	size_t queued   = 0;
+	// The program id each record's permutation got (0: skipped or known already).
+	std::vector<uint64_t> record_ids(records.size(), 0);
 	// Adds a replayed record's permutation; null when the record failed or is known already.
 	const auto insert = [&](size_t index) -> const ProgramCache::Permutation* {
 		auto& record = records[index];
@@ -1532,6 +1534,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		entry->second.permutations.push_back(m_program_cache->MakePermutation(
 		    options, record.specialization, std::move(result.compiled)));
 		++compiled;
+		record_ids[index] = entry->second.permutations.back().handle.id;
 		return &entry->second.permutations.back();
 	};
 
@@ -1561,6 +1564,69 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		for (auto index = compute_end; index != order.end(); ++index) {
 			(void)insert(*index);
 		}
+	}
+	// KYTY_DEBUG_REPLAY_DETERMINISM=1: translates every record twice more, the two copies on
+	// different threads at the same time, and names each shader whose SPIR-V differs between
+	// them: the translator must give one result for one input on any thread.
+	static const bool determinism = [] {
+		const char* value = KYTY_GETENV("KYTY_DEBUG_REPLAY_DETERMINISM");
+		return value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	if (determinism) {
+		struct Copy {
+			uint64_t        hash   = 0;
+			std::thread::id thread = {};
+			bool            valid  = false;
+		};
+		std::vector<std::array<Copy, 2>> copies(records.size());
+		std::atomic_size_t               item {0};
+		// Items 2i and 2i+1 are the two copies of record i: taken one after the other by
+		// different threads, so they mostly run at the same time. Each copy translates its own
+		// record copy, as translation may write to the record's input info.
+		const auto check = [&] {
+			for (size_t at = item.fetch_add(1); at < records.size() * 2u; at = item.fetch_add(1)) {
+				auto         record = records[at / 2u];
+				ShaderParams params;
+				const auto   options    = options_for(record, params);
+				auto         translated = ShaderRecompiler::TranslateProgram(params.code, options);
+				auto&        copy       = copies[at / 2u][at % 2u];
+				copy.thread             = std::this_thread::get_id();
+				if (translated.skip_dispatch || !translated.program.resource_tracking_complete ||
+				    translated.program.info.buffers.size() != record.specialization.buffers.size() ||
+				    translated.program.info.images.size() > record.specialization.images.size()) {
+					continue;
+				}
+				const auto result = ShaderRecompiler::CompileProgram(
+				    std::move(translated), options, record.specialization, record.push_data_start_dword);
+				copy.hash  = XXH3_64bits(result.spirv.data(), result.spirv.size() * sizeof(uint32_t));
+				copy.valid = true;
+			}
+		};
+		{
+			std::vector<std::jthread> helpers;
+			for (uint32_t i = 1; i < std::max(threads, 2u); i++) {
+				helpers.emplace_back(check);
+			}
+			check();
+		}
+		size_t differing = 0;
+		size_t same_thread = 0;
+		for (size_t index = 0; index < records.size(); index++) {
+			const auto& [first, second] = copies[index];
+			same_thread += first.thread == second.thread;
+			if (first.valid != second.valid || first.hash != second.hash) {
+				differing++;
+				PipelineCacheLog("Shader precompile determinism: hash={:016x} id={} stage={} record={} "
+				                 "spirv {:016x} vs {:016x}{}",
+				                 records[index].hash, record_ids[index],
+				                 static_cast<uint32_t>(records[index].stage), index, first.hash,
+				                 second.hash,
+				                 first.thread == second.thread ? " (same thread)" : "");
+			}
+		}
+		PipelineCacheLog("Shader precompile determinism: {} of {} records differ ({} pairs ran on "
+		                 "one thread)",
+		                 differing, records.size(), same_thread);
 	}
 	const auto ms = [](auto duration) {
 		return std::chrono::duration<double, std::milli>(duration).count();
