@@ -1405,7 +1405,8 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	g_bindless_images = graphics.bindless_enabled && Config::BindlessImagesEnabled();
 	InitializeDriverCache();
 	// Before the precompile replay, which queues the journal's compute pipelines on it.
-	m_compute_queue = std::make_unique<ComputePipelineQueue>(Config::PipelineCompileThreads());
+	m_compute_queue = std::make_unique<ComputePipelineQueue>(Config::PipelineCompileThreads(),
+	                                                         Config::PipelineCompileReplayThreads());
 	if (m_driver_cache != nullptr) {
 		m_last_save   = std::chrono::steady_clock::now();
 		m_save_thread = std::jthread([this](const std::stop_token& stop) { SaveThread(stop); });
@@ -1812,7 +1813,7 @@ bool PipelineCache::StartComputeBuild(const ShaderComputeInputInfo& input_info,
 		    }
 		    return pipeline;
 	    },
-	    urgent);
+	    urgent, origin == ComputeOrigin::Replay);
 	m_compute_builds.emplace(program.id, std::move(build));
 	return true;
 }
@@ -2923,6 +2924,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	const auto                            wait_start = std::chrono::steady_clock::now();
 	std::shared_future<vk::Pipeline>      result;
 	std::shared_ptr<std::atomic<int64_t>> compile_us;
+	ComputeOrigin                         origin_waited = ComputeOrigin::Sync;
 	{
 		Common::LockGuard lock(m_mutex);
 		if (auto iter = m_compute_pipelines.find(compute_program.id);
@@ -2938,6 +2940,7 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		const auto& build = m_compute_builds.at(compute_program.id);
 		result            = build.result;
 		compile_us        = build.compile_us;
+		origin_waited     = build.origin;
 	}
 	// Without m_mutex: other lookups (draws, the look-ahead, the replay) go on meanwhile. The build
 	// stays in m_compute_builds, so nothing queues this program again.
@@ -2946,7 +2949,15 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		KYTY_PROFILER_BLOCK("PipelineCache::WaitForCompute");
 		// Not started yet (the workers busy with other compiles, such as the replay's long ones):
 		// this thread would only wait, so it compiles the pipeline itself.
-		(void)m_compute_queue->RunHere(compute_program.id);
+		if (!m_compute_queue->RunHere(compute_program.id) &&
+		    result.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+			// Already compiling on a worker: this dispatch waits for that compile.
+			PipelineCacheLog("ComputePipeline: id={} waits for a running {} build",
+			                 compute_program.id,
+			                 origin_waited == ComputeOrigin::Replay     ? "replay"
+			                 : origin_waited == ComputeOrigin::Prefetch ? "prefetch"
+			                                                            : "sync");
+		}
 		pipeline = result.get();
 	}
 	const auto waited = std::chrono::steady_clock::now() - wait_start;

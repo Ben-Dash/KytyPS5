@@ -247,6 +247,13 @@ uint32_t PipelineCompileThreads() {
 	return hardware > 4 ? hardware - 2 : 2;
 }
 
+uint32_t PipelineCompileReplayThreads() {
+	if (g_config->pipeline_compile_threads_replay != 0) {
+		return std::min(g_config->pipeline_compile_threads_replay, PipelineCompileThreads());
+	}
+	return std::max(PipelineCompileThreads() / 2u, 1u);
+}
+
 bool DispatchLookaheadEnabled() {
 	return g_config->dispatch_lookahead_enabled;
 }

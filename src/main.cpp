@@ -124,6 +124,8 @@ static void PrintUsage() {
 	         "compiling instead of stalling; they appear a few frames late. Default: false.\n");
 	::printf("  --pipeline-compile-threads <n>       Threads that build compute pipelines in the "
 	         "background. Default: 0 (all hardware threads but two, at least two).\n");
+	::printf("  --pipeline-compile-threads-replay <n>  Of those, how many may build the shader "
+	         "journal's pipelines at startup, at the lowest priority. Default: 0 (half, at least one).\n");
 	::printf("  --dispatch-lookahead <true|false>    Walk each submission ahead for new compute "
 	         "shaders and start compiling their pipelines early. Default: true.\n");
 	::printf("  --defer-dispatches <true|false>      Suspend a queue whose dispatch waits for a "
@@ -628,6 +630,12 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			if (!ParseUint32(value, options.config.pipeline_compile_threads) ||
 			    options.config.pipeline_compile_threads > 256) {
 				::printf("invalid pipeline-compile-threads (0-256): %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--pipeline-compile-threads-replay") {
+			if (!ParseUint32(value, options.config.pipeline_compile_threads_replay) ||
+			    options.config.pipeline_compile_threads_replay > 256) {
+				::printf("invalid pipeline-compile-threads-replay (0-256): %s\n", value.c_str());
 				return false;
 			}
 		} else if (arg == "--defer-dispatches") {

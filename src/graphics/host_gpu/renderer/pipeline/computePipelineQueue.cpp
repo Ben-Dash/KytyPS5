@@ -13,7 +13,8 @@
 
 namespace Libs::Graphics {
 
-ComputePipelineQueue::ComputePipelineQueue(uint32_t threads) {
+ComputePipelineQueue::ComputePipelineQueue(uint32_t threads, uint32_t background_threads)
+    : m_background_max(std::clamp(background_threads, 1u, std::max(threads, 1u))) {
 	m_threads.reserve(std::max(threads, 1u));
 	for (uint32_t i = 0; i < std::max(threads, 1u); i++) {
 		m_threads.emplace_back([this](const std::stop_token& stop) { Work(stop); });
@@ -26,10 +27,11 @@ ComputePipelineQueue::~ComputePipelineQueue() {
 
 std::shared_future<vk::Pipeline> ComputePipelineQueue::Post(uint64_t id,
                                                             Common::UniqueFunction<vk::Pipeline>&& compile,
-                                                            bool urgent) {
+                                                            bool urgent, bool background) {
 	Job job;
-	job.id      = id;
-	job.urgent  = urgent;
+	job.id         = id;
+	job.urgent     = urgent;
+	job.background = background && !urgent;
 	job.compile = std::move(compile);
 	auto result = job.result.get_future().share();
 	{
@@ -59,9 +61,18 @@ void ComputePipelineQueue::Promote(uint64_t id) {
 	if (queued != m_jobs.end() && !queued->urgent) {
 		auto job = std::move(*queued);
 		m_jobs.erase(queued);
-		job.urgent = true;
+		job.urgent     = true;
+		job.background = false;
 		Enqueue(std::move(job));
+		m_available.notify_one();
 	}
+}
+
+std::deque<ComputePipelineQueue::Job>::iterator ComputePipelineQueue::NextRunnable() {
+	// Background jobs past their worker limit wait; the jobs behind them may run.
+	return std::ranges::find_if(m_jobs, [this](const Job& job) {
+		return !job.background || m_background_running < m_background_max;
+	});
 }
 
 void ComputePipelineQueue::Stop() {
@@ -96,13 +107,32 @@ void ComputePipelineQueue::Work(const std::stop_token& stop) {
 		Job job;
 		{
 			std::unique_lock lock(m_mutex);
-			if (!m_available.wait(lock, stop, [this] { return !m_jobs.empty(); })) {
+			if (!m_available.wait(lock, stop, [this] { return NextRunnable() != m_jobs.end(); })) {
 				return;
 			}
-			job = std::move(m_jobs.front());
-			m_jobs.pop_front();
+			const auto next = NextRunnable();
+			job             = std::move(*next);
+			m_jobs.erase(next);
+			m_background_running += job.background ? 1u : 0u;
 		}
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		// Background jobs (the replay's) yield even to the other compiles.
+		if (job.background) {
+			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+		}
+#endif
 		Run(job);
+		if (job.background) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+			SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#endif
+			{
+				std::lock_guard lock(m_mutex);
+				m_background_running--;
+			}
+			// A background job waiting for this worker slot may run now.
+			m_available.notify_all();
+		}
 	}
 }
 

@@ -91,6 +91,7 @@ struct ConfigOptions {
 	bool                   pipeline_libraries_enabled  = true;
 	bool                   async_pipelines_enabled     = false;
 	uint32_t               pipeline_compile_threads    = 0;
+	uint32_t               pipeline_compile_threads_replay = 0;
 	bool                   dispatch_lookahead_enabled  = true;
 	bool                   defer_dispatches_enabled    = false;
 	bool                   relaxed_readback_enabled    = false;
@@ -183,6 +184,10 @@ void SetAsyncPipelinesEnabled(bool enabled);
 // Worker threads that build compute pipelines (the journal replay's, look-ahead prefetches and
 // dispatches'): the configured count, or by default all hardware threads but two, at least two.
 uint32_t PipelineCompileThreads();
+// How many of those may build the shader journal's replayed pipelines at a time, at the lowest
+// thread priority, so a dispatch's compile always finds a free worker: the configured count, or by
+// default half of PipelineCompileThreads, at least one.
+uint32_t PipelineCompileReplayThreads();
 // Each submission is walked ahead for dispatches of shaders not dispatched yet, so their compute
 // pipelines start compiling before the dispatch needs them.
 bool DispatchLookaheadEnabled();
