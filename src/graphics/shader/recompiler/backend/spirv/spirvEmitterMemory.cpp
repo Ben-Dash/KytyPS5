@@ -354,6 +354,10 @@ uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint3
 	                            ConstantU32(state, bits == 8u ? 0xffu : 0xffffu));
 }
 
+// With hardware storage buffer bounds, byte offsets at or past this are out of bounds whatever
+// the access size: 256 bytes below 4 GiB, so offset + size never wraps the 32-bit check.
+constexpr uint32_t HardwareBoundsByteCap = 0xffffff00u;
+
 uint32_t ByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem) {
 	if (mem.kind == IR::ResourceKind::Buffer) {
 		const auto resource = ResourceForDescriptor(ctx.state, IR::DescriptorBindingKind::Buffers,
@@ -362,9 +366,18 @@ uint32_t ByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR::Memo
 		const auto address = Binary(ctx.state, spv::OpIAdd, TypeU32(ctx.state),
 		                            BufferByteAddress(ctx, inst, mem), prefix);
 		// The host binding prefix must not wrap an out-of-range guest address into the buffer.
-		return Select(ctx.state, TypeU32(ctx.state),
-		              Binary(ctx.state, spv::OpUGreaterThanEqual, TypeBool(ctx.state), address, prefix),
-		              address, ConstantU32(ctx.state, UINT32_MAX));
+		const auto wrapped =
+		    Binary(ctx.state, spv::OpUGreaterThanEqual, TypeBool(ctx.state), address, prefix);
+		if (!HardwareStorageBufferBounds()) {
+			return Select(ctx.state, TypeU32(ctx.state), wrapped, address,
+			              ConstantU32(ctx.state, UINT32_MAX));
+		}
+		// Hardware bounds check offset + size in 32 bits: an access in the last bytes below 4 GiB
+		// wraps to a small end and passes, and the GPU reads 4 GiB past the binding. Capped, the
+		// largest access (an element window of at most 256 bytes) stays below 4 GiB.
+		const auto cap = ConstantU32(ctx.state, HardwareBoundsByteCap);
+		return EmitGlsl<GLSLstd450UMin, IR::Type::U32>(
+		    ctx.state, Select(ctx.state, TypeU32(ctx.state), wrapped, address, cap), cap);
 	}
 	if (mem.kind == IR::ResourceKind::Lds || mem.kind == IR::ResourceKind::Gds) {
 		if (mem.offset == 0u) {
@@ -2919,9 +2932,10 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 	if (HardwareStorageBufferBounds()) {
 		// SOFFSET and the immediate are aligned and added without wrapping, so an offset carry
 		// past 4 GiB gives an element of 2^30 or more. Hardware bounds check the element's byte
-		// offset in 32 bits, which would wrap back into the buffer: reject those here.
+		// offset plus size in 32 bits, which would wrap back into the buffer: reject those here,
+		// and the last elements below 4 GiB, whose end wraps.
 		const auto below = Binary(state, spv::OpULessThan, TypeBool(state), element,
-		                          ConstantU32(state, 0x40000000u));
+		                          ConstantU32(state, HardwareBoundsByteCap / 4u));
 		condition = condition == ConstantBool(state, true) ? below
 		                                                   : AndCondition(state, condition, below);
 	}
