@@ -590,6 +590,13 @@ void BuildGraphicsPipelineState(GraphicsPipelineState& state, GraphicContext& gr
 	if (graphics.attachment_feedback_loop_dynamic_enabled) {
 		dynamic_states.push_back(vk::DynamicState::eAttachmentFeedbackLoopEnableEXT);
 	}
+	if (DynamicDepthBoundsEnabled()) {
+		depth_stencil_info.depthBoundsTestEnable = VK_FALSE;
+		depth_stencil_info.minDepthBounds        = 0.0f;
+		depth_stencil_info.maxDepthBounds        = 0.0f;
+		dynamic_states.push_back(vk::DynamicState::eDepthBoundsTestEnable);
+		dynamic_states.push_back(vk::DynamicState::eDepthBounds);
+	}
 	state.shared_dynamic_state_count = static_cast<uint32_t>(dynamic_states.size());
 #if !defined(__APPLE__)
 	if (rendering.color_count != 0) {
@@ -792,6 +799,11 @@ LibraryPartKeys BuildLibraryPartKeys(const GraphicsPipelineState&           stat
 	AppendKey(fragment_key, keys.depth_stencil.depthBoundsTestEnable);
 	AppendKey(fragment_key, keys.depth_stencil.minDepthBounds);
 	AppendKey(fragment_key, keys.depth_stencil.maxDepthBounds);
+	if (DynamicDepthBoundsEnabled()) {
+		// The shared dynamic states differ from parts built without the switch.
+		AppendKey(fragment_key, state.shared_dynamic_state_count);
+		AppendKey(pre_raster_key, state.shared_dynamic_state_count);
+	}
 	fragment_key += layout_key;
 
 	auto& output_key = keys.output;

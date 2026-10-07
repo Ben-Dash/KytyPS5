@@ -685,6 +685,12 @@ static void SetGraphicsDynamicParams(const CommandBuffer& buffer, vk::CommandBuf
 	if (!fixed_valid || known.stencil_test != stencil_test) {
 		vk_buffer.setStencilTestEnable(stencil_test);
 	}
+	if (DynamicDepthBoundsEnabled()) {
+		vk_buffer.setDepthBoundsTestEnable(depth.depth_bounds_test_enable ? VK_TRUE : VK_FALSE);
+		if (depth.depth_bounds_test_enable) {
+			vk_buffer.setDepthBounds(depth.depth_min_bounds, depth.depth_max_bounds);
+		}
+	}
 	known.fixed_valid     = true;
 	known.line_width      = line_width;
 	known.blend_constants = blend_constants;

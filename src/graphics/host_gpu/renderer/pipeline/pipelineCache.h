@@ -64,6 +64,11 @@ AttachmentFeedbackPipelineFlags(vk::ImageAspectFlags aspects, bool dynamic_enabl
 	return flags;
 }
 
+// KYTY_DYNAMIC_DEPTH_BOUNDS=1: depth-bounds test and range are dynamic state (upstream 98401022), so
+// pipelines that differ only in them are shared. Off by default: every graphics pipeline gets two
+// more dynamic states, so the driver cache misses once.
+[[nodiscard]] bool DynamicDepthBoundsEnabled();
+
 #pragma pack(push, 1)
 
 struct PipelineStaticParameters {
