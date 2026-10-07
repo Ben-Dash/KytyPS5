@@ -53,6 +53,11 @@ inline thread_local std::array<uint64_t, 3> t_detail {};
 constexpr uint64_t                         CheckpointRing = uint64_t {1} << 16u;
 inline std::array<Checkpoint, CheckpointRing> g_checkpoints {};
 inline std::atomic<uint64_t>               g_checkpoint_next {1};
+// KYTY_DEBUG_OP_RING=1: the same ring filled on the host only (no GPU command, so the timing of
+// a race stays as it is), with the scheduler tick each mark was recorded under. A lost device
+// prints the marks of the submissions the GPU had not completed (see ReportDeviceFault).
+inline std::array<uint64_t, CheckpointRing> g_checkpoint_ticks {};
+inline bool                                 g_op_ring = false;
 
 // `pixels` is a draw's render area; per-pixel costs stay comparable when the game's dynamic
 // resolution changes between runs.

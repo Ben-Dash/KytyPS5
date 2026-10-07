@@ -470,13 +470,24 @@ void CommandScheduler::MarkZoneThunk(void* context, vk::CommandBuffer buffer,
 	}
 }
 
-void CommandScheduler::CheckpointThunk(void* /*context*/, vk::CommandBuffer buffer,
+void CommandScheduler::CheckpointThunk(void* context, vk::CommandBuffer buffer,
                                        DrainStats::Zone zone, uint64_t key, uint64_t /*pixels*/) {
 	// Marks come from the thread recording `buffer`; the checkpoint value indexes the ring.
 	const auto index = GpuZones::g_checkpoint_next.fetch_add(1, std::memory_order_relaxed);
 	GpuZones::g_checkpoints[index % GpuZones::CheckpointRing] = {zone, key, GpuZones::t_detail};
+	GpuZones::g_checkpoint_ticks[index % GpuZones::CheckpointRing] =
+	    static_cast<CommandScheduler*>(context)->CurrentTick();
 	GpuZones::t_detail = {};
 	buffer.setCheckpointNV(reinterpret_cast<const void*>(static_cast<uintptr_t>(index)));
+}
+
+void CommandScheduler::OpRingThunk(void* context, vk::CommandBuffer /*buffer*/,
+                                   DrainStats::Zone zone, uint64_t key, uint64_t /*pixels*/) {
+	const auto index = GpuZones::g_checkpoint_next.fetch_add(1, std::memory_order_relaxed);
+	GpuZones::g_checkpoints[index % GpuZones::CheckpointRing] = {zone, key, GpuZones::t_detail};
+	GpuZones::g_checkpoint_ticks[index % GpuZones::CheckpointRing] =
+	    static_cast<CommandScheduler*>(context)->CurrentTick();
+	GpuZones::t_detail = {};
 }
 
 void CommandScheduler::BeginZones() {
@@ -709,6 +720,11 @@ void CommandScheduler::EnableAsyncSubmit() {
 		GpuZones::g_context = this;
 		GpuZones::g_marker  = &CheckpointThunk;
 		std::printf("GPU checkpoints: on (each draw, dispatch and copy)\n");
+	} else if (KYTY_GETENV("KYTY_DEBUG_OP_RING") != nullptr && GpuZones::g_marker == nullptr) {
+		GpuZones::g_context = this;
+		GpuZones::g_marker  = &OpRingThunk;
+		GpuZones::g_op_ring = true;
+		std::printf("GPU op ring: on (host-side record of each draw, dispatch and copy)\n");
 	}
 	m_submit_thread = std::jthread([this](std::stop_token stop) { SubmitThread(stop); });
 }

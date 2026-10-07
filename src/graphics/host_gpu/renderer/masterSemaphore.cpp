@@ -65,10 +65,44 @@ void ReportCheckpoints(GraphicContext& graphics) {
 	std::fflush(stdout);
 }
 
+// KYTY_DEBUG_OP_RING: the marks of the submissions the GPU had not completed when the device
+// was lost (ticks above `completed`), newest last; the hung command is among them.
+void ReportOpRing(uint64_t completed) {
+	const auto next  = GpuZones::g_checkpoint_next.load(std::memory_order_relaxed);
+	const auto first = next > GpuZones::CheckpointRing ? next - GpuZones::CheckpointRing : 1;
+	uint64_t   begin = next;
+	for (uint64_t index = next; index > first; index--) {
+		if (GpuZones::g_checkpoint_ticks[(index - 1) % GpuZones::CheckpointRing] <= completed) {
+			break;
+		}
+		begin = index - 1;
+	}
+	std::printf("gpu-op-ring: completed tick %" PRIu64 ", %" PRIu64 " marks in flight\n", completed,
+	            next - begin);
+	static constexpr const char* ZoneNames[] = {"unmarked",  "draw",     "draw-predicated",
+	                                            "dispatch",  "mesh-args", "tiler",
+	                                            "dcc-clear", "fault-buffer", "blit",
+	                                            "image-copy", "buffer-copy"};
+	for (uint64_t index = begin; index < next; index++) {
+		const auto& mark = GpuZones::g_checkpoints[index % GpuZones::CheckpointRing];
+		const auto  zone = static_cast<size_t>(mark.zone);
+		std::printf("gpu-op: tick=%" PRIu64 " zone=%s key=%016" PRIx64 " count=%u instances=%u vs=%016" PRIx64
+		            " indirect=%016" PRIx64 "\n",
+		            GpuZones::g_checkpoint_ticks[index % GpuZones::CheckpointRing],
+		            zone < std::size(ZoneNames) ? ZoneNames[zone] : "?", mark.key,
+		            static_cast<uint32_t>(mark.detail[0] >> 32u), static_cast<uint32_t>(mark.detail[0]),
+		            mark.detail[1], mark.detail[2]);
+	}
+	std::fflush(stdout);
+}
+
 // KYTY_DEBUG_DEVICE_FAULT: what the driver recorded for the lost device.
-void ReportDeviceFault(GraphicContext& graphics, vk::Result result) {
+void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t completed_tick) {
 	if (graphics.checkpoints_enabled && result == vk::Result::eErrorDeviceLost) {
 		ReportCheckpoints(graphics);
+	}
+	if (GpuZones::g_op_ring && result == vk::Result::eErrorDeviceLost) {
+		ReportOpRing(completed_tick);
 	}
 	if (!graphics.device_fault_enabled || result != vk::Result::eErrorDeviceLost) {
 		return;
@@ -128,7 +162,7 @@ MasterSemaphore::~MasterSemaphore() {
 void MasterSemaphore::Refresh() {
 	uint64_t   counter = 0;
 	const auto result  = m_graphics.device.getSemaphoreCounterValue(m_semaphore, &counter);
-	ReportDeviceFault(m_graphics, result);
+	ReportDeviceFault(m_graphics, result, m_gpu_tick.load(std::memory_order_acquire));
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	auto known = m_gpu_tick.load(std::memory_order_acquire);
@@ -153,7 +187,7 @@ void MasterSemaphore::Wait(uint64_t tick) {
 	wait_info.pValues        = &tick;
 
 	const auto result = m_graphics.device.waitSemaphores(&wait_info, UINT64_MAX);
-	ReportDeviceFault(m_graphics, result);
+	ReportDeviceFault(m_graphics, result, m_gpu_tick.load(std::memory_order_acquire));
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();
 }
