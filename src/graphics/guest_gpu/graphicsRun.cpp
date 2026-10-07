@@ -1288,13 +1288,45 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 			case Pm4::IT_SET_CONTEXT_REG:
 			case Pm4::IT_SET_SH_REG:
 			case Pm4::IT_SET_UCONFIG_REG:
-			case Pm4::IT_SET_UCONFIG_REG_INDEX:
-			case Pm4::IT_SET_CONTEXT_REG_INDIRECT:
-			case Pm4::IT_SET_SH_REG_INDIRECT:
-			case Pm4::IT_SET_UCONFIG_REG_INDIRECT: {
+			case Pm4::IT_SET_UCONFIG_REG_INDEX: {
 				// The packets the real walk will execute next, through the same handlers.
 				const auto handled =
 				    g_cp_op_func[opcode](*shadow, header & ~1u, packet + 1, remaining, total_dw) + 1;
+				if (handled != packet_dw) {
+					stack.clear();
+					continue;
+				}
+				break;
+			}
+			case Pm4::IT_SET_CONTEXT_REG_INDIRECT:
+			case Pm4::IT_SET_SH_REG_INDIRECT:
+			case Pm4::IT_SET_UCONFIG_REG_INDIRECT: {
+				// Their (register, value) pairs live in guest memory, which the handlers read
+				// directly: the GPU may still own it this early, and that read would fault and
+				// wait. The walk reads the pairs without faulting into a copy and hands the
+				// handler that, or stops here when they are not readable yet.
+				if (packet_dw != 5u) {
+					stack.clear();
+					continue;
+				}
+				const uint64_t address =
+				    (static_cast<uint64_t>(packet[1]) & 0xfffffffcu) | (static_cast<uint64_t>(packet[2]) << 32u);
+				const uint32_t pairs = packet[4] & 0x3fffu;
+				thread_local std::vector<uint32_t> values;
+				values.resize(std::max(pairs, 1u) * 2u);
+				if (pairs != 0 &&
+				    (address == 0 || !LibKernel::Memory::TryReadGpuCleanBacking(
+				                         address, values.data(), uint64_t {pairs} * 8u))) {
+					stack.clear();
+					continue;
+				}
+				const auto copy = reinterpret_cast<uint64_t>(values.data());
+				const std::array<uint32_t, 5> local {packet[0], static_cast<uint32_t>(copy),
+				                                     static_cast<uint32_t>(copy >> 32u), packet[3],
+				                                     packet[4]};
+				const auto handled = g_cp_op_func[opcode](*shadow, header & ~1u, local.data() + 1,
+				                                          remaining, total_dw) +
+				                     1;
 				if (handled != packet_dw) {
 					stack.clear();
 					continue;
