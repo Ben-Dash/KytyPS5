@@ -2616,10 +2616,15 @@ uint32_t DefineBdaLookup(EmitterState& state, bool load) {
 	                                  ConstantDeviceAddress(state, BufferCache::CACHING_PAGEBITS));
 	const auto page          = Unary(state, spv::OpUConvert, TypeU32(state), page64);
 	// An address outside guest memory (a load whose address the GPU computes can produce one)
-	// must not index past the page table or the fault bitmap: that faults the device.
-	const auto in_range =
+	// must not index past the page table or the fault bitmap: that faults the device. One between
+	// the lower range and the extended base must not take an extended page's entry either.
+	const auto in_range = Binary(
+	    state, spv::OpLogicalAnd, TypeBool(state),
+	    Binary(state, spv::OpLogicalOr, TypeBool(state), extended,
+	           Binary(state, spv::OpULessThan, TypeBool(state), address,
+	                  ConstantDeviceAddress(state, LOWER_ADDRESS_SIZE))),
 	    Binary(state, spv::OpULessThan, TypeBool(state), page64,
-	           ConstantDeviceAddress(state, BufferCache::CACHING_NUMPAGES));
+	           ConstantDeviceAddress(state, BufferCache::CACHING_NUMPAGES)));
 	// The driver inlines this at every access, so it branches only to record a fault: a page out
 	// of range reads the table's first entry instead and gives zero (the zero page's entry for a
 	// load).
