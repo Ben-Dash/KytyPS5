@@ -948,6 +948,15 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanAddressBindingCallback(
 	std::lock_guard lock(GpuZones::g_binding_mutex);
 	const auto      index = GpuZones::g_binding_next.fetch_add(1, std::memory_order_relaxed);
 	GpuZones::g_bindings[index % GpuZones::AddressBindingRing] = event;
+	// The first few events show the report is working; every 4096th keeps a rough count in the log.
+	if (index < 4 || (index % 4096) == 0) {
+		std::printf("address-binding: #%llu %s base=0x%016llx size=0x%llx object=%s%s\n",
+		            static_cast<unsigned long long>(index), (event.flags & 1u) != 0 ? "BIND" : "UNBIND",
+		            static_cast<unsigned long long>(event.base),
+		            static_cast<unsigned long long>(event.size),
+		            vk::to_string(static_cast<vk::ObjectType>(event.object_type)).c_str(),
+		            (event.flags & 2u) != 0 ? " (driver-internal)" : "");
+	}
 	return VK_FALSE;
 }
 
@@ -1168,8 +1177,7 @@ void WindowContext::CreateVulkan() {
 		if (VulkanCreateDebugUtilsMessengerEXT(graphic_ctx.instance, &binding_info, nullptr,
 		                                       &graphic_ctx.binding_messenger) !=
 		    vk::Result::eSuccess) {
-			LOGF("Vulkan: could not create the address binding messenger
-");
+			LOGF("Vulkan: could not create the address binding messenger\n");
 			graphic_ctx.binding_messenger = nullptr;
 		}
 	}

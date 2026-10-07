@@ -20,6 +20,7 @@ public:
 	KYTY_CLASS_NO_COPY(FaultManager);
 
 	[[nodiscard]] Buffer* GetFaultBuffer() noexcept { return &m_fault_buffer; }
+	[[nodiscard]] const Buffer* GetFaultBuffer() const noexcept { return &m_fault_buffer; }
 	void                  ProcessFaultBuffer();
 
 private:
