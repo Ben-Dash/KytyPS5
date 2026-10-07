@@ -1727,8 +1727,12 @@ void BufferCache::RunGarbageCollector() {
 		}
 		m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());
 		g_allocation_counters.game_buffers_collected.fetch_add(1, std::memory_order_relaxed);
-		Unregister(id);
-		m_slot_buffers.erase(id);
+		// As DeleteBuffer: the page-table clear Unregister records runs with the open command
+		// buffer, and a draw or dispatch prepared around this collection may already hold the
+		// buffer's device address, so the buffer itself goes once that buffer's tick completes.
+		// Erasing it here freed memory a recorded shader still read (Ghost of Yotei: device lost
+		// with ReadInvalid at a freed buffer's address, the same instruction in every run).
+		DeleteBuffer(id);
 	}
 }
 
