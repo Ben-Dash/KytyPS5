@@ -11,6 +11,7 @@
 #include "common/threads.h"
 #include "common/timer.h"
 #include "common/switches.h"
+#include "graphics/host_gpu/aftermath.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
@@ -824,6 +825,17 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		executable_properties.pNext = const_cast<void*>(create_info.pNext);
 		create_info.pNext           = &executable_properties;
 	}
+	// Nsight Aftermath (KYTY_AFTERMATH=1): what the driver records for a crash dump.
+	vk::DeviceDiagnosticsConfigCreateInfoNV diagnostics_config {};
+	if (graphics.aftermath_enabled) {
+		diagnostics_config.flags =
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableAutomaticCheckpoints |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableResourceTracking |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableShaderDebugInfo |
+		    vk::DeviceDiagnosticsConfigFlagBitsNV::eEnableShaderErrorReporting;
+		diagnostics_config.pNext = const_cast<void*>(create_info.pNext);
+		create_info.pNext        = &diagnostics_config;
+	}
 	create_info.pQueueCreateInfos       = queue_create_infos.data();
 	create_info.queueCreateInfoCount    = queue_create_count;
 	create_info.enabledExtensionCount   = static_cast<uint32_t>(device_extensions.size());
@@ -1077,6 +1089,8 @@ void WindowContext::CreateVulkan() {
 	EXIT_IF(graphic_ctx.physical_device != nullptr);
 	EXIT_IF(graphic_ctx.device != nullptr);
 	EXIT_IF(surface != nullptr);
+	// KYTY_AFTERMATH=1: Nsight Aftermath watches the device created below (see aftermath.h).
+	Aftermath::EnableCrashDumps();
 
 	auto get_instance_proc_addr =
 	    reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
@@ -1304,6 +1318,24 @@ void WindowContext::CreateVulkan() {
 		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
 			graphic_ctx.checkpoints_enabled = true;
+		}
+		// Debugging aid: Nsight Aftermath crash dumps with automatic checkpoints, resource
+		// tracking and shader debug information (KYTY_AFTERMATH=1, see aftermath.h). The
+		// emulator's own checkpoints go into the dump as markers.
+		if (Aftermath::Enabled() &&
+		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME) &&
+		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTICS_CONFIG_EXTENSION_NAME);
+			if (!graphic_ctx.checkpoints_enabled) {
+				device_extensions.push_back(VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME);
+				graphic_ctx.checkpoints_enabled = true;
+			}
+			graphic_ctx.aftermath_enabled = true;
+			std::printf("aftermath: VK_NV_device_diagnostics_config on (checkpoints, resource "
+			            "tracking, shader debug info, shader error reporting)\n");
+		} else if (Aftermath::Enabled()) {
+			std::printf("aftermath: VK_NV_device_diagnostics_config not available on this device; "
+			            "crash dumps come without shader debug info\n");
 		}
 		if (HasExtension(available_extensions,
 		                 VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME)) {
