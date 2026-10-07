@@ -19,6 +19,7 @@
 #include "common/profiler.h"
 #include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "graphics/host_gpu/renderer/debug.h"
 
 #include <algorithm>
@@ -361,6 +362,9 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 			image.flags      = image_info.flags;
 			image.state      = {.layout = image_info.initialLayout};
 			image.subresource_states.clear();
+			// A new generation: a call recorded for the handle's previous life is stale.
+			HandleRegistry::Register(reinterpret_cast<uint64_t>(static_cast<VkImage>(image.image)),
+			                         HandleRegistry::Kind::Image);
 			return true;
 		}
 	}
@@ -406,6 +410,8 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 	image.flags      = image_info.flags;
 	image.state      = {.layout = image_info.initialLayout};
 	image.subresource_states.clear();
+	HandleRegistry::Register(reinterpret_cast<uint64_t>(static_cast<VkImage>(image.image)),
+	                         HandleRegistry::Kind::Image);
 
 	return true;
 }
@@ -416,6 +422,7 @@ void GraphicContext::DeleteImage(VulkanImage& image) {
 
 	vk::Image     destroy_image      = image.image;
 	VmaAllocation destroy_allocation = image.allocation;
+	HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkImage>(image.image)));
 	if (image.recyclable) {
 		std::scoped_lock lock {g_recycled_mutex};
 		g_recycled.push_back({image.image, image.allocation, image.format, image.image_type,

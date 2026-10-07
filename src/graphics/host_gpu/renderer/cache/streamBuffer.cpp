@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
@@ -113,6 +114,7 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	m_buffer = native_buffer;
+	HandleRegistry::Register(reinterpret_cast<uint64_t>(native_buffer), HandleRegistry::Kind::Buffer);
 	if (with_bda) {
 		vk::BufferDeviceAddressInfo address_info {};
 		address_info.buffer = m_buffer;
@@ -132,6 +134,7 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 Buffer::~Buffer() {
 	g_allocation_counters.buffers_destroyed.fetch_add(1, std::memory_order_relaxed);
 	if (m_buffer != nullptr) {
+		HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkBuffer>(m_buffer)));
 		vmaDestroyBuffer(m_graphics->allocator, m_buffer, m_allocation);
 	}
 }

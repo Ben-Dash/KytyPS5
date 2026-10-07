@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 
 #include <algorithm>
@@ -196,6 +197,9 @@ void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t com
 	info.pAddressInfos = addresses.data();
 	info.pVendorInfos  = vendors.data();
 	const auto fetched = graphics.device.getFaultInfoEXT(&counts, &info);
+	std::printf("deferred-call: %llu stale handles seen so far (check %s)\n",
+	            static_cast<unsigned long long>(HandleRegistry::StaleCount()),
+	            HandleRegistry::CheckEnabled() ? "on" : "off");
 	std::printf("device-fault: result=%d addresses=%u vendors=%u description=%s\n",
 	            static_cast<int>(fetched), counts.addressInfoCount, counts.vendorInfoCount,
 	            info.description.data());

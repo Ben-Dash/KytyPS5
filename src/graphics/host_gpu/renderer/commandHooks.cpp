@@ -4,6 +4,7 @@
 #include "common/emulatorConfig.h"
 #include "common/profiler.h"
 #include "common/switches.h"
+#include "graphics/host_gpu/handleRegistry.h"
 
 #include <array>
 #include <atomic>
@@ -1011,7 +1012,15 @@ void VKAPI_PTR HookCmdCopyBuffer(VkCommandBuffer buffer, VkBuffer source, VkBuff
 	if (Routed(buffer)) {
 		Packet      packet(*t_stream, Bytes<VkBufferCopy>(count));
 		const auto* r = packet.Copy(regions, count);
-		packet.Commit([=] { g_real.vkCmdCopyBuffer(buffer, source, target, count, r); });
+		const auto s_source = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(source));
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
+		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(source), s_source, "vkCmdCopyBuffer", "source") ||
+			    !HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdCopyBuffer", "target")) {
+				return;
+			}
+			g_real.vkCmdCopyBuffer(buffer, source, target, count, r);
+		});
 		return;
 	}
 	BeforeDirect();
@@ -1024,7 +1033,13 @@ void VKAPI_PTR HookCmdCopyImage(VkCommandBuffer buffer, VkImage source, VkImageL
 	if (Routed(buffer)) {
 		Packet      packet(*t_stream, Bytes<VkImageCopy>(count));
 		const auto* r = packet.Copy(regions, count);
+		const auto s_source = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(source));
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
 		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(source), s_source, "vkCmdCopyImage", "source") ||
+			    !HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdCopyImage", "target")) {
+				return;
+			}
 			g_real.vkCmdCopyImage(buffer, source, source_layout, target, target_layout, count, r);
 		});
 		return;
@@ -1039,7 +1054,15 @@ void VKAPI_PTR HookCmdCopyBufferToImage(VkCommandBuffer buffer, VkBuffer source,
 	if (Routed(buffer)) {
 		Packet      packet(*t_stream, Bytes<VkBufferImageCopy>(count));
 		const auto* r = packet.Copy(regions, count);
-		packet.Commit([=] { g_real.vkCmdCopyBufferToImage(buffer, source, target, layout, count, r); });
+		const auto s_source = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(source));
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
+		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(source), s_source, "vkCmdCopyBufferToImage", "source") ||
+			    !HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdCopyBufferToImage", "target")) {
+				return;
+			}
+			g_real.vkCmdCopyBufferToImage(buffer, source, target, layout, count, r);
+		});
 		return;
 	}
 	BeforeDirect();
@@ -1052,7 +1075,15 @@ void VKAPI_PTR HookCmdCopyImageToBuffer(VkCommandBuffer buffer, VkImage source,
 	if (Routed(buffer)) {
 		Packet      packet(*t_stream, Bytes<VkBufferImageCopy>(count));
 		const auto* r = packet.Copy(regions, count);
-		packet.Commit([=] { g_real.vkCmdCopyImageToBuffer(buffer, source, layout, target, count, r); });
+		const auto s_source = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(source));
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
+		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(source), s_source, "vkCmdCopyImageToBuffer", "source") ||
+			    !HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdCopyImageToBuffer", "target")) {
+				return;
+			}
+			g_real.vkCmdCopyImageToBuffer(buffer, source, layout, target, count, r);
+		});
 		return;
 	}
 	BeforeDirect();
@@ -1066,7 +1097,13 @@ void VKAPI_PTR HookCmdResolveImage(VkCommandBuffer buffer, VkImage source,
 	if (Routed(buffer)) {
 		Packet      packet(*t_stream, Bytes<VkImageResolve>(count));
 		const auto* r = packet.Copy(regions, count);
+		const auto s_source = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(source));
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
 		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(source), s_source, "vkCmdResolveImage", "source") ||
+			    !HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdResolveImage", "target")) {
+				return;
+			}
 			g_real.vkCmdResolveImage(buffer, source, source_layout, target, target_layout, count, r);
 		});
 		return;
@@ -1078,7 +1115,13 @@ void VKAPI_PTR HookCmdResolveImage(VkCommandBuffer buffer, VkImage source,
 void VKAPI_PTR HookCmdFillBuffer(VkCommandBuffer buffer, VkBuffer target, VkDeviceSize offset,
                                  VkDeviceSize size, uint32_t data) {
 	if (Routed(buffer)) {
-		Emit([=] { g_real.vkCmdFillBuffer(buffer, target, offset, size, data); });
+		const auto s_target = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(target));
+		Emit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(target), s_target, "vkCmdFillBuffer", "target")) {
+				return;
+			}
+			g_real.vkCmdFillBuffer(buffer, target, offset, size, data);
+		});
 		return;
 	}
 	BeforeDirect();
@@ -1093,7 +1136,13 @@ void VKAPI_PTR HookCmdClearColorImage(VkCommandBuffer buffer, VkImage image, VkI
 		                   Bytes<VkClearColorValue>(1) + Bytes<VkImageSubresourceRange>(count));
 		const auto* c = packet.Copy(color, 1);
 		const auto* r = packet.Copy(ranges, count);
-		packet.Commit([=] { g_real.vkCmdClearColorImage(buffer, image, layout, c, count, r); });
+		const auto s_image = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(image));
+		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(image), s_image, "vkCmdClearColorImage", "image")) {
+				return;
+			}
+			g_real.vkCmdClearColorImage(buffer, image, layout, c, count, r);
+		});
 		return;
 	}
 	BeforeDirect();
@@ -1109,7 +1158,13 @@ void VKAPI_PTR HookCmdClearDepthStencilImage(VkCommandBuffer buffer, VkImage ima
 		                   Bytes<VkClearDepthStencilValue>(1) + Bytes<VkImageSubresourceRange>(count));
 		const auto* v = packet.Copy(value, 1);
 		const auto* r = packet.Copy(ranges, count);
-		packet.Commit([=] { g_real.vkCmdClearDepthStencilImage(buffer, image, layout, v, count, r); });
+		const auto s_image = HandleRegistry::Stamp(reinterpret_cast<uint64_t>(image));
+		packet.Commit([=] {
+			if (!HandleRegistry::Same(reinterpret_cast<uint64_t>(image), s_image, "vkCmdClearDepthStencilImage", "image")) {
+				return;
+			}
+			g_real.vkCmdClearDepthStencilImage(buffer, image, layout, v, count, r);
+		});
 		return;
 	}
 	BeforeDirect();

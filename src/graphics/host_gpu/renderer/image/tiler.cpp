@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/switches.h"
 #include "gpu_tiler_shaders/gpu_tiler_demote_d16_spv.h"
+#include "graphics/host_gpu/handleRegistry.h"
 #include "gpu_tiler_shaders/gpu_tiler_depth_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_promote_d16_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_prt_3d_spv.h"
@@ -52,6 +53,7 @@ struct TileManager::ScratchPool {
 	explicit ScratchPool(VmaAllocator allocator): allocator(allocator) {}
 	~ScratchPool() {
 		for (const auto& scratch: idle) {
+			HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkBuffer>(scratch.buffer)));
 			vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation);
 		}
 	}
@@ -90,6 +92,7 @@ struct TileManager::ScratchPool {
 			}
 		}
 		for (const auto& old: evicted) {
+			HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkBuffer>(old.buffer)));
 			vmaDestroyBuffer(allocator, old.buffer, old.allocation);
 		}
 	}
@@ -188,14 +191,17 @@ TileManager::Scratch TileManager::AllocateScratch(uint64_t size) {
 	RequireVulkanSuccess(static_cast<vk::Result>(vmaCreateBuffer(
 	                         m_graphics.allocator, &raw, &allocate, &buffer, &memory, nullptr)),
 	                     "allocate TileManager scratch buffer");
+	HandleRegistry::Register(reinterpret_cast<uint64_t>(buffer), HandleRegistry::Kind::Buffer);
 	return {buffer, memory, size, create.size};
 }
 
 void TileManager::DeferRelease(Scratch scratch) {
 	if (!ScratchPoolEnabled()) {
 		auto allocator = m_graphics.allocator;
-		m_scheduler.DeferOperation(
-		    [allocator, scratch] { vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation); });
+		m_scheduler.DeferOperation([allocator, scratch] {
+			HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkBuffer>(scratch.buffer)));
+			vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation);
+		});
 		return;
 	}
 	m_scheduler.DeferOperation([pool = m_scratch_pool, scratch] { pool->Return(scratch); });
