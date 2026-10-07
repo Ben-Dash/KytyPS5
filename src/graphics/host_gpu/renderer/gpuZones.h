@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <mutex>
 #include <cstdint>
 
 // Sites that record GPU work name its zone (see DrainStats::Zone). With zones off a mark costs
@@ -61,6 +62,28 @@ inline bool                                 g_op_ring = false;
 // KYTY_DEBUG_DEVICE_FAULT: names what a faulting device address belongs to (a live or recently
 // freed game buffer, the page table, the zero page); set by the buffer cache.
 inline void (*g_describe_device_address)(uint64_t address) = nullptr;
+
+// KYTY_DEBUG_DEVICE_FAULT: VK_EXT_device_address_binding_report events (the driver reports every
+// bind and unbind of a GPU virtual address range: buffers, images, driver-internal allocations),
+// kept in a host ring; a lost device prints the events covering each faulting address (see
+// ReportDeviceFault) to tell a live binding from one already unbound.
+struct AddressBinding {
+	uint64_t base        = 0;
+	uint64_t size        = 0;
+	uint64_t handle      = 0; // the first reported Vulkan object (VkDeviceMemory, VkBuffer, ...)
+	uint64_t mark        = 0; // g_checkpoint_next at the event (relates it to the op ring)
+	uint64_t tick        = 0; // g_binding_tick at the event (scheduler tick, when set)
+	uint32_t object_type = 0; // VkObjectType of `handle`
+	uint32_t flags       = 0; // bit 0: bind (else unbind), bit 1: driver-internal, bit 2: sparse
+	uint64_t object_name = 0; // first 8 chars of the object's debug name, if any
+};
+constexpr uint64_t                               AddressBindingRing = uint64_t {1} << 17u;
+inline std::array<AddressBinding, AddressBindingRing> g_bindings {};
+inline std::atomic<uint64_t>                     g_binding_next {0};
+inline std::mutex                                g_binding_mutex;
+// The master semaphore's current tick, read for the binding events (set by MasterSemaphore).
+inline const std::atomic<uint64_t>*              g_binding_tick = nullptr;
+inline bool                                      g_binding_report = false;
 
 // `pixels` is a draw's render area; per-pixel costs stay comparable when the game's dynamic
 // resolution changes between runs.

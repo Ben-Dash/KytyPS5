@@ -16,6 +16,8 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <cinttypes>
+#include <cstdio>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -3449,6 +3451,17 @@ int MapAutomaticMemory(uint64_t vaddr, size_t size, int type, int prot) {
 		return KERNEL_ERROR_EINVAL;
 	}
 
+	// Diagnostic for the 1 TiB page-table hole (see BufferCache::ChangeRegister): every extended
+	// memory mapping the game makes, logged for the first few.
+	{
+		static std::atomic<uint64_t> s_extended_maps {0};
+		const auto count = s_extended_maps.fetch_add(1, std::memory_order_relaxed) + 1;
+		if (count <= 16 || (count % 1024) == 0) {
+			std::printf("extended-memory-map: #%" PRIu64 " vaddr=0x%016" PRIx64 " size=0x%" PRIx64 "\n",
+			            count, vaddr, static_cast<uint64_t>(size));
+			std::fflush(stdout);
+		}
+	}
 	PhysicalMemory::PhysicalRanges ranges;
 	if (!g_physical_memory->ReserveAutomatic(size, &ranges)) {
 		return KERNEL_ERROR_EAGAIN;

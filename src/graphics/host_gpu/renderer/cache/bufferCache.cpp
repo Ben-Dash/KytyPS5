@@ -48,6 +48,8 @@ namespace {
 
 constexpr uint64_t MiB           = 1024 * 1024;
 constexpr uint64_t GdsBufferSize = 64 * 1024;
+// Buffers registered in extended memory (1 TiB page-table hole diagnostic, see ChangeRegister).
+std::atomic<uint64_t> g_extended_registers {0};
 
 } // namespace
 
@@ -127,6 +129,16 @@ void BufferCache::ChangeRegister(BufferId id) {
 		(void)it;
 		EXIT_IF(!inserted);
 		m_total_used_memory += buffer.Size();
+		// Diagnostic for the 1 TiB page-table hole: buffers in extended memory (their page-table
+		// slots alias guest addresses in [1 TiB, 1.5 TiB)); logged for the first few.
+		if (buffer.CpuAddress() >= LibKernel::Memory::kExtendedMemoryBase) {
+			const auto count = g_extended_registers.fetch_add(1, std::memory_order_relaxed) + 1;
+			if (count <= 16 || (count % 1024) == 0) {
+				std::printf("bda-extended-buffer: #%" PRIu64 " guest=0x%016" PRIx64 " size=0x%" PRIx64
+				            "\n",
+				            count, buffer.CpuAddress(), buffer.Size());
+			}
+		}
 		buffer.lru_id   = m_lru_cache.Insert(id, m_gc_tick);
 		buffer.lru_tick = m_gc_tick;
 		std::vector<vk::DeviceAddress> addresses;
@@ -200,6 +212,8 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 	    {"device buffer", &m_device_buffer},     {"stream buffer", &m_stream_buffer},
 	    {"staging buffer", &m_staging_buffer},   {"download buffer", &m_download_buffer},
 	    {"draw record buffer", &m_draw_record_buffer}, {"GDS buffer", &m_gds_buffer},
+	    {"fault buffer", m_fault_manager.GetFaultBuffer()},
+	    {"BDA zero page", &m_bda_zero_page},
 	};
 	for (const auto& [name, buffer]: internal) {
 		if (buffer->HasDeviceAddress() && within(buffer->BufferDeviceAddress(), buffer->Size())) {
@@ -218,6 +232,9 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 	if (!found) {
 		std::printf("device-fault-owner: no game buffer (page table, stream or image memory)\n");
 	}
+	std::printf("device-fault-owner: %" PRIu64
+	            " buffers registered at or above the extended memory base\n",
+	            g_extended_registers.load(std::memory_order_relaxed));
 	std::fflush(stdout);
 	m_texture_cache.DescribeRecentImages();
 }
