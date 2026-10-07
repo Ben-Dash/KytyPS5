@@ -195,6 +195,21 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 			found = true;
 		}
 	}
+	// The cache's own buffers: a store past the end of a ring lands just behind one of these.
+	const std::pair<const char*, const Buffer*> internal[] = {
+	    {"device buffer", &m_device_buffer},     {"stream buffer", &m_stream_buffer},
+	    {"staging buffer", &m_staging_buffer},   {"download buffer", &m_download_buffer},
+	    {"draw record buffer", &m_draw_record_buffer}, {"GDS buffer", &m_gds_buffer},
+	};
+	for (const auto& [name, buffer]: internal) {
+		if (buffer->HasDeviceAddress() && within(buffer->BufferDeviceAddress(), buffer->Size())) {
+			std::printf("device-fault-owner: %s size=0x%llx offset=0x%llx%s\n", name,
+			            static_cast<unsigned long long>(buffer->Size()),
+			            static_cast<unsigned long long>(address - buffer->BufferDeviceAddress()),
+			            address >= buffer->BufferDeviceAddress() + buffer->Size() ? " (PAST THE END)" : "");
+			found = true;
+		}
+	}
 	if (m_bda_pagetable_buffer.HasDeviceAddress() &&
 	    within(m_bda_pagetable_buffer.BufferDeviceAddress(), m_bda_pagetable_buffer.Size())) {
 		std::printf("device-fault-owner: BDA page table\n");
