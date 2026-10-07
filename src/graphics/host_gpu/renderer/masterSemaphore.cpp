@@ -136,6 +136,34 @@ void ReportAddressBindings(uint64_t address) {
 	}
 	if (matches == 0) {
 		std::printf("device-fault-bindings: no recorded binding covers the address\n");
+		// The nearest bound ranges below and above the address place it: just past the end of an
+		// allocation, in a gap between two, or far from anything the driver ever mapped.
+		const GpuZones::AddressBinding* below = nullptr;
+		const GpuZones::AddressBinding* above = nullptr;
+		for (uint64_t index = first; index < next; index++) {
+			const auto& e = GpuZones::g_bindings[index % GpuZones::AddressBindingRing];
+			if (e.size == 0 || (e.flags & 1u) == 0) {
+				continue;
+			}
+			if (e.base + e.size <= address && (below == nullptr || e.base + e.size > below->base + below->size)) {
+				below = &e;
+			}
+			if (e.base > address && (above == nullptr || e.base < above->base)) {
+				above = &e;
+			}
+		}
+		for (const auto& [where, e]: {std::pair {"below", below}, std::pair {"above", above}}) {
+			if (e != nullptr) {
+				std::printf("device-fault-bindings: nearest bind %s: base=0x%016" PRIx64 " size=0x%" PRIx64
+				            " object=%s handle=0x%016" PRIx64 "%s gap=0x%" PRIx64 " mark=%" PRIu64
+				            " tick=%" PRIu64 "\n",
+				            where, e->base, e->size,
+				            vk::to_string(static_cast<vk::ObjectType>(e->object_type)).c_str(), e->handle,
+				            (e->flags & 2u) != 0 ? " (driver-internal)" : "",
+				            e->base > address ? e->base - address : address - (e->base + e->size), e->mark,
+				            e->tick);
+			}
+		}
 	} else {
 		std::printf("device-fault-bindings: %u events, range %s at the fault\n", matches,
 		            still_bound ? "STILL BOUND" : "ALREADY UNBOUND");
