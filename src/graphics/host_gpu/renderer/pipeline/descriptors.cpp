@@ -824,6 +824,23 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		desc.info.metadata.kind          = ImageMetadataKind::Dcc;
 		desc.info.metadata.range         = {descriptor.MetaAddr() << 8u, metadata_size.size};
 		desc.info.metadata.dcc_alpha_msb = descriptor.DccAlphaPos();
+		// A T# with compression on but its DCC address outside guest memory (most often 0): a
+		// stale or not yet written bindless slot, or one the host cannot represent. ImageOps::
+		// Validate would end the session; a bindless key samples the placeholder instead.
+		if (!GuestRange {desc.info.metadata.range.address,
+		                 std::max<uint64_t>(desc.info.metadata.range.size, 1)}
+		         .Valid()) {
+			KYTY_TEXTURE_FAIL("texture DCC metadata outside guest memory: meta=0x%016llx size=0x%llx "
+			                  "base=0x%016llx %ux%u format=%u tile=%u levels=%u layers=%u "
+			                  "dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
+			                  static_cast<unsigned long long>(desc.info.metadata.range.address),
+			                  static_cast<unsigned long long>(desc.info.metadata.range.size),
+			                  static_cast<unsigned long long>(address), width, height,
+			                  static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
+			                  levels, image_layers, descriptor.fields[0], descriptor.fields[1],
+			                  descriptor.fields[2], descriptor.fields[3], descriptor.fields[4],
+			                  descriptor.fields[5], descriptor.fields[6], descriptor.fields[7]);
+		}
 	}
 	if (samples > 1) {
 		desc.info.mip_layout[0] = {0, size.size, pitch, height};
