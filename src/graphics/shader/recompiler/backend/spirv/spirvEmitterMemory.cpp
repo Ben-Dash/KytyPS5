@@ -355,8 +355,10 @@ uint32_t LoadBda(ValueEmitContext& ctx, uint32_t address, uint32_t active, uint3
 }
 
 // With hardware storage buffer bounds, byte offsets at or past this are out of bounds whatever
-// the access size: 256 bytes below 4 GiB, so offset + size never wraps the 32-bit check.
-constexpr uint32_t HardwareBoundsByteCap = 0xffffff00u;
+// the access size (no binding is 2 GiB long): offset + size never wraps the 32-bit check, and as
+// an access chain index (signed) even a byte view's index stays positive, so it cannot address
+// below the binding.
+constexpr uint32_t HardwareBoundsByteCap = 0x7fffff00u;
 
 uint32_t ByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem) {
 	if (mem.kind == IR::ResourceKind::Buffer) {
@@ -2925,7 +2927,7 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 	}
 	const auto access    = PrepareMemoryResourceAccess(state, mem);
 	// Scalar buffer addressing aligns the base and each offset independently.
-	const auto element = Binary(
+	auto element = Binary(
 	    state, spv::OpIAdd, TypeU32(state), index,
 	    Binary(state, spv::OpShiftRightLogical, TypeU32(state), access.byte_offset, ConstantU32(state, 2)));
 	auto condition = EmitWordAccessInBounds(state, access, element);
@@ -2938,6 +2940,10 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 		                          ConstantU32(state, HardwareBoundsByteCap / 4u));
 		condition = condition == ConstantBool(state, true) ? below
 		                                                   : AndCondition(state, condition, below);
+		// A storage buffer load runs unconditionally and only its value is selected (see
+		// LoadElementOrZero): the rejected element must not reach the access either.
+		element = EmitGlsl<GLSLstd450UMin, IR::Type::U32>(
+		    state, element, ConstantU32(state, HardwareBoundsByteCap / 4u));
 	}
 	ctx.Define(inst, LoadElementOrZero(state, access, condition, element, [&](uint32_t target) {
 		           return EmitNative<spv::OpLoad, IR::Type::U32>(
