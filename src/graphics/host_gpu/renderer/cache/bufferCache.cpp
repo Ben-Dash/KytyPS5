@@ -219,6 +219,7 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 		std::printf("device-fault-owner: no game buffer (page table, stream or image memory)\n");
 	}
 	std::fflush(stdout);
+	m_texture_cache.DescribeRecentImages();
 }
 
 void BufferCache::DeleteBuffer(BufferId id) {

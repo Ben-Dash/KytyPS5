@@ -1901,9 +1901,18 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		// A heap seen in an earlier frame: a record the guest rewrote since (a per-frame table
 		// whose address comes round again, a streamed texture replaced) is resolved again, or
 		// the key would keep showing the earlier frame's texture.
+		// KYTY_BINDLESS_RECHECK=0 keeps every key as first resolved (A/B for the device losses);
+		// checked_frame still marks the heap as used, which CompactHeaps relies on.
+		static const bool recheck = [] {
+			const char* text = KYTY_GETENV("KYTY_BINDLESS_RECHECK");
+			return text == nullptr || std::strcmp(text, "0") != 0;
+		}();
 		if (heap->checked_frame != frame) {
 			heap->checked_frame = frame;
 			for (const auto key: heap->settled_keys) {
+				if (!recheck) {
+					break;
+				}
 				if (key >= heap->entries || heap->settled[key] == 0) {
 					continue;
 				}
