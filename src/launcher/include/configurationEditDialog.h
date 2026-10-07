@@ -2,9 +2,11 @@
 #define CONFIGURATION_EDIT_DIALOG_H
 
 #include <QDialog>
+#include <QList>
 #include <QString>
 #include <QStringList>
 class QByteArray;
+class QCheckBox;
 class QGroupBox;
 class QListWidget;
 class QMoveEvent;
@@ -41,10 +43,13 @@ private:
 	QListWidget*                 m_game_dirs_list         = nullptr;
 	QToolButton*                 m_remove_game_dir_button = nullptr;
 	bool                         m_global_settings        = false;
+	// One check box per entry of EMULATOR_SWITCHES, in table order.
+	QList<QCheckBox*>            m_switch_boxes;
 
 protected:
 	void Init(const Configuration& info);
 	void InitGameDirectories();
+	void InitEmulatorSwitches();
 	void AddGameDirectoryItem(const QString& dir);
 
 	void moveEvent(QMoveEvent* event) override;

@@ -4,6 +4,7 @@
 #include "configurationItem.h"
 #include "configurationListWidget.h"
 #include "controllerLightbar.h"
+#include "emulatorSwitches.h"
 #include "gameContent.h"
 #include "patchesDialog.h"
 #include "updateChecker.h"
@@ -21,6 +22,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QSettings>
@@ -308,6 +310,20 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	return args;
 }
 
+// The launcher's environment plus "1" for each switch the profile turns on (emulatorSwitches.h).
+// A switch already set in the environment keeps its value; one the profile leaves off is not
+// removed, so a .bat or system variable still works.
+static QProcessEnvironment CreateEmulatorEnvironment(const Configuration& info) {
+	auto env = QProcessEnvironment::systemEnvironment();
+	for (const auto& entry: EMULATOR_SWITCHES) {
+		const auto name = QString::fromLatin1(entry.name);
+		if (info.emulator_switches.contains(name) && !env.contains(name)) {
+			env.insert(name, QStringLiteral("1"));
+		}
+	}
+	return env;
+}
+
 #ifdef __linux__
 static QString BashQuote(QString value) {
 	value.replace('\'', "'\\''");
@@ -461,6 +477,7 @@ void MainDialog::RunInterpreter(QProcess* process, const Configuration& info) {
 	process->setArguments(args);
 #endif
 	process->setWorkingDirectory(dir.path());
+	process->setProcessEnvironment(CreateEmulatorEnvironment(info));
 #if defined(_WIN32)
 	process->setCreateProcessArgumentsModifier([](QProcess::CreateProcessArguments* args) {
 		args->flags |= static_cast<uint32_t>(CREATE_NEW_CONSOLE);

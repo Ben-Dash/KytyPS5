@@ -148,6 +148,8 @@ public:
 	bool red_zone_protection_enabled = false;
 #endif
 	QStringList host_input_mapping;
+	// Names of the switches from EMULATOR_SWITCHES this profile turns on (emulatorSwitches.h).
+	QStringList emulator_switches;
 
 	QString elf = QStringLiteral("eboot.bin");
 
@@ -181,6 +183,7 @@ public:
 		red_zone_protection_enabled = other.red_zone_protection_enabled;
 #endif
 		host_input_mapping = other.host_input_mapping;
+		emulator_switches  = other.emulator_switches;
 	}
 
 	void CopyGameInfoFrom(const Configuration& other) {
@@ -229,6 +232,7 @@ public:
 		KYTY_CFG_SET(red_zone_protection_enabled);
 #endif
 		s->setValue("host_input_mapping", host_input_mapping);
+		s->setValue("emulator_switches", emulator_switches);
 		KYTY_CFG_SET(elf);
 	}
 
@@ -277,6 +281,7 @@ public:
 		    s->value("red_zone_protection_enabled", red_zone_protection_enabled).toBool();
 #endif
 		host_input_mapping = s->value("host_input_mapping", host_input_mapping).toStringList();
+		emulator_switches  = s->value("emulator_switches", emulator_switches).toStringList();
 		elf                = s->value("elf", elf).toString();
 	}
 };

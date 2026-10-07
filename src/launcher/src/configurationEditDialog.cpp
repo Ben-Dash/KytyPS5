@@ -2,6 +2,7 @@
 
 #include "common/emulatorConfig.h"
 #include "configuration.h"
+#include "emulatorSwitches.h"
 #include "mandatoryLineEdit.h"
 #include <SDL3/SDL.h>
 
@@ -125,6 +126,7 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	m_ui->setupUi(this);
 	setMinimumWidth(width());
 	InitGameDirectories();
+	InitEmulatorSwitches();
 	m_ui->controller_group->setVisible(false);
 
 	connect(m_ui->ok_button, &QPushButton::clicked, this, &ConfigurationEditDialog::save);
@@ -321,6 +323,23 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	m_ui->lineEdit_printf_file->setEnabled(info.printf_direction ==
 	                                       Configuration::LogDirection::File);
 	m_ui->checkBox_profiler->setChecked(info.profiler_enabled);
+	for (auto* box: m_switch_boxes) {
+		box->setChecked(info.emulator_switches.contains(box->property("switchName").toString()));
+	}
+}
+
+// The default-off emulator switches (emulatorSwitches.h) as check boxes below the compatibility
+// options; a game profile stores the names of the ones it turns on.
+void ConfigurationEditDialog::InitEmulatorSwitches() {
+	auto* layout = m_ui->compatibility_group->layout();
+	for (const auto& entry: EMULATOR_SWITCHES) {
+		const auto name = QString::fromLatin1(entry.name);
+		auto*      box  = new QCheckBox(tr(entry.label), m_ui->compatibility_group);
+		box->setToolTip(tr(entry.tooltip) + QStringLiteral("\n") + name + QStringLiteral("=1"));
+		box->setProperty("switchName", name);
+		layout->addWidget(box);
+		m_switch_boxes.append(box);
+	}
 }
 
 void ConfigurationEditDialog::InitGameDirectories() {
@@ -486,6 +505,12 @@ void ConfigurationEditDialog::save() {
 	}
 
 	UpdateInfo(m_info, *m_ui, m_global_settings);
+	m_info.emulator_switches.clear();
+	for (const auto* box: m_switch_boxes) {
+		if (box->isChecked()) {
+			m_info.emulator_switches.append(box->property("switchName").toString());
+		}
+	}
 
 	emit accept();
 }
