@@ -166,7 +166,7 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	obtain_probe.emplace(g_draw_phases, resource.written ? DrawPhaseTimer::BufferWritten
 	                                                     : DrawPhaseTimer::BufferRead);
 	auto [buffer, offset] = context.GetBufferCache().ObtainBuffer(address, size, resource.written,
-	                                                              resource.formatted, id);
+	                                                              resource.read || resource.formatted, id);
 	obtain_probe.reset();
 	const auto aligned_offset = Common::AlignDown(offset, alignment);
 	const auto adjustment     = offset - aligned_offset;
