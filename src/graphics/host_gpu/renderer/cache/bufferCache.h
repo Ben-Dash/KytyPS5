@@ -15,6 +15,7 @@
 #include <chrono>
 #include <deque>
 #include <map>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -97,6 +98,10 @@ public:
 	[[nodiscard]] StreamBuffer& GetDrawRecordBuffer() noexcept { return m_draw_record_buffer; }
 	[[nodiscard]] const Buffer* GetGdsBuffer() const noexcept { return &m_gds_buffer; }
 	[[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept { return &m_bda_pagetable_buffer; }
+	// KYTY_DEBUG_DEVICE_FAULT: once per frame an 8-byte readback of one page-table entry, compared
+	// with the value written there (the combined build probes its zero-page entry). For tests,
+	// KYTY_DEBUG_PAGETABLE_PROBE=<entry>:<hex value> sets it.
+	void SetPageTableProbe(uint64_t entry, uint64_t expected);
 	// KYTY_DEBUG_DEVICE_FAULT: prints which buffer (live, or freed within the last 4096 deletes)
 	// holds a device address the driver reported faulting on.
 	void DescribeDeviceAddress(uint64_t address) const;
@@ -242,6 +247,14 @@ private:
 	uint64_t m_trigger_gc_memory  = 1ull * 1024 * 1024 * 1024;
 	uint64_t m_critical_gc_memory = 2ull * 1024 * 1024 * 1024;
 	uint64_t m_gc_tick            = 0;
+	void     ProbePageTable();
+	std::unique_ptr<Buffer>  m_probe_buffer;
+	uint64_t                 m_probe_entry      = UINT64_MAX;
+	uint64_t                 m_probe_expected   = 0;
+	std::array<uint64_t, 4>  m_probe_ticks      {};
+	uint64_t                 m_probe_frames     = 0;
+	uint64_t                 m_probe_checked    = 0;
+	uint64_t                 m_probe_mismatches = 0;
 	uint64_t m_readback_token     = 0;
 	// Tracker pages hit by CPU read faults, with the tick of their latest fault.
 	static constexpr size_t HotReadbackPages = 64;

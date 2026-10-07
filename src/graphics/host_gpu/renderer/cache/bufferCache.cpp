@@ -418,6 +418,25 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 			g_describe_cache->DescribeDeviceAddress(address);
 		}
 	};
+	{
+		// Storage buffer bounds facts for the device-loss hunt: whether range checks are left to
+		// the hardware, the device limit, and the range the page table is bound with.
+		const auto limit = m_graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange;
+		std::printf("storage-bounds: hardware_storage_buffer_bounds=%d maxStorageBufferRange=0x%llx "
+		            "pagetable-descriptor-range=0x%llx%s\n",
+		            m_graphics.hardware_storage_buffer_bounds ? 1 : 0,
+		            static_cast<unsigned long long>(limit),
+		            static_cast<unsigned long long>(m_bda_pagetable_buffer.Size()),
+		            m_bda_pagetable_buffer.Size() > limit ? " (EXCEEDS THE LIMIT)" : "");
+		std::fflush(stdout);
+		if (const char* probe = KYTY_GETENV("KYTY_DEBUG_PAGETABLE_PROBE"); probe != nullptr) {
+			unsigned long long entry = 0;
+			unsigned long long value = 0;
+			if (std::sscanf(probe, "%llu:%llx", &entry, &value) == 2) {
+				SetPageTableProbe(entry, value);
+			}
+		}
+	}
 	const auto null_id =
 	    m_slot_buffers.insert(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0, AllFlags, 16);
 	EXIT_IF(null_id != NULL_BUFFER_ID);
@@ -1771,6 +1790,72 @@ bool BufferCache::IsRegionCpuModified(uint64_t vaddr, uint64_t size) {
 
 void BufferCache::TickFrame() {
 	++m_gc_tick;
+	ProbePageTable();
+}
+
+void BufferCache::SetPageTableProbe(uint64_t entry, uint64_t expected) {
+	if (KYTY_GETENV("KYTY_DEBUG_DEVICE_FAULT") == nullptr ||
+	    (entry + 1) * sizeof(vk::DeviceAddress) > m_bda_pagetable_buffer.Size()) {
+		return;
+	}
+	m_probe_entry    = entry;
+	m_probe_expected = expected;
+	std::printf("pagetable-probe: entry %llu expected 0x%016llx, read back once per frame\n",
+	            static_cast<unsigned long long>(entry), static_cast<unsigned long long>(expected));
+	std::fflush(stdout);
+}
+
+void BufferCache::ProbePageTable() {
+	if (m_probe_entry == UINT64_MAX) [[likely]] {
+		return;
+	}
+	if (m_probe_buffer == nullptr) {
+		m_probe_buffer = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Download, 0,
+		                                          AllFlags,
+		                                          sizeof(uint64_t) * m_probe_ticks.size());
+	}
+	for (size_t slot = 0; slot < m_probe_ticks.size(); slot++) {
+		auto& tick = m_probe_ticks[slot];
+		if (tick == 0 || !m_scheduler.IsFree(tick)) {
+			continue;
+		}
+		m_probe_buffer->Invalidate(slot * sizeof(uint64_t), sizeof(uint64_t));
+		uint64_t value = 0;
+		std::memcpy(&value, m_probe_buffer->Mapped().data() + slot * sizeof(uint64_t), sizeof(value));
+		m_probe_checked++;
+		if (value != m_probe_expected) {
+			m_probe_mismatches++;
+			if (m_probe_mismatches <= 64) {
+				std::printf("pagetable-probe: MISMATCH entry %llu = 0x%016llx, expected 0x%016llx "
+				            "(written at tick %llu, frame %llu)\n",
+				            static_cast<unsigned long long>(m_probe_entry),
+				            static_cast<unsigned long long>(value),
+				            static_cast<unsigned long long>(m_probe_expected),
+				            static_cast<unsigned long long>(tick),
+				            static_cast<unsigned long long>(m_probe_frames));
+				std::fflush(stdout);
+			}
+		}
+		tick = 0;
+	}
+	const auto slot = m_probe_frames % m_probe_ticks.size();
+	if (m_probe_ticks[slot] == 0) {
+		m_probe_buffer->CopyFrom(m_scheduler.Current(), m_bda_pagetable_buffer,
+		                         m_probe_entry * sizeof(vk::DeviceAddress), slot * sizeof(uint64_t),
+		                         sizeof(uint64_t), vk::AccessFlagBits::eMemoryWrite,
+		                         vk::AccessFlagBits::eHostRead,
+		                         vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
+		                         vk::AccessFlagBits::eHostRead);
+		m_probe_ticks[slot] = m_scheduler.CurrentTick();
+	}
+	m_probe_frames++;
+	if ((m_probe_frames % 600) == 0) {
+		std::printf("pagetable-probe: %llu frames, %llu readbacks checked, %llu mismatches\n",
+		            static_cast<unsigned long long>(m_probe_frames),
+		            static_cast<unsigned long long>(m_probe_checked),
+		            static_cast<unsigned long long>(m_probe_mismatches));
+		std::fflush(stdout);
+	}
 }
 
 void BufferCache::RunGarbageCollector() {

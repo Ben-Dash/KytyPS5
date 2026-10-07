@@ -218,6 +218,7 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 
 void Image::Transit(vk::ImageLayout destination_layout, vk::AccessFlags2 destination_access,
                     std::optional<ImageSubresourceRange> range, vk::CommandBuffer command_buffer) {
+	NoteNullImage(*this, "transit");
 	const auto transfer_access =
 	    vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
 	vk::PipelineStageFlags2 destination_stage {};
@@ -258,6 +259,7 @@ void Image::Transit(vk::ImageLayout destination_layout, vk::AccessFlags2 destina
 
 void Image::Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer, uint64_t offset,
                    uint64_t size) {
+	NoteNullImage(*this, "upload");
 	EXIT_IF(copies.empty() || buffer == nullptr || size == 0);
 	m_scheduler.EndRendering();
 	vk::BufferMemoryBarrier2 buffer_barrier {};
@@ -298,6 +300,7 @@ void Image::Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffe
 
 void Image::Download(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer,
                      uint64_t offset, uint64_t size) {
+	NoteNullImage(*this, "download");
 	EXIT_IF(copies.empty() || buffer == nullptr || size == 0);
 	m_scheduler.EndRendering();
 	vk::BufferMemoryBarrier2 buffer_barrier {};
@@ -358,6 +361,8 @@ std::pair<uint32_t, uint32_t> Image::SanitizeCopyLayers(const Image& source,
 }
 
 void Image::CopyImage(Image& source) {
+	NoteNullImage(source, "copy-image source");
+	NoteNullImage(*this, "copy-image target");
 	EXIT_IF(source.backing.samples != backing.samples);
 	m_scheduler.EndRendering();
 	const uint32_t levels     = std::min(source.backing.mip_levels, backing.mip_levels);
@@ -414,6 +419,8 @@ void Image::CopyImage(Image& source) {
 
 void Image::Resolve(Image& source, const ImageSubresourceRange& source_range,
                     const ImageSubresourceRange& destination_range) {
+	NoteNullImage(source, "resolve source");
+	NoteNullImage(*this, "resolve target");
 	EXIT_IF(backing.samples != 1 || source.backing.image_type != vk::ImageType::e2D ||
 	        backing.image_type != vk::ImageType::e2D || source_range.level_count != 1 ||
 	        destination_range.level_count != 1 ||
@@ -480,6 +487,8 @@ uint32_t Image::CopyRows(uint64_t row_size, uint32_t rows, uint64_t capacity) no
 }
 
 void Image::CopyImageWithBuffer(Image& source, Buffer& buffer, TileManager& tiler) {
+	NoteNullImage(source, "copy-via-buffer source");
+	NoteNullImage(*this, "copy-via-buffer target");
 	EXIT_IF(buffer.Handle() == nullptr || source.backing.samples != 1 || backing.samples != 1);
 	m_scheduler.EndRendering();
 	const uint32_t levels = std::min(source.backing.mip_levels, backing.mip_levels);
@@ -584,6 +593,8 @@ void Image::CopyImageWithBuffer(Image& source, Buffer& buffer, TileManager& tile
 }
 
 void Image::CopyMip(Image& source, uint32_t mip, uint32_t layer) {
+	NoteNullImage(source, "copy-mip source");
+	NoteNullImage(*this, "copy-mip target");
 	EXIT_IF(source.backing.samples != backing.samples || mip >= backing.mip_levels ||
 	        layer >= backing.layers);
 	m_scheduler.EndRendering();
@@ -615,6 +626,23 @@ void Image::CopyMip(Image& source, uint32_t mip, uint32_t layer) {
 	                  vk::ImageLayout::eTransferDstOptimal, copy_count, copies.data());
 	Transit(vk::ImageLayout::eGeneral,
 	        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {}, command);
+}
+
+void NoteNullImage(const Image& image, const char* what) {
+	if (image.backing.image != nullptr) [[likely]] {
+		return;
+	}
+	static std::atomic<uint64_t> s_count {0};
+	const auto count = s_count.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (count <= 64 || (count % 1024) == 0) {
+		std::printf("null-image: #%llu %s on guest=0x%016llx size=0x%llx %ux%u vkformat=%u key=%016llx\n",
+		            static_cast<unsigned long long>(count), what,
+		            static_cast<unsigned long long>(image.info.data.address),
+		            static_cast<unsigned long long>(image.info.data.size), image.info.extent.width,
+		            image.info.extent.height, static_cast<uint32_t>(image.info.pixel_format),
+		            static_cast<unsigned long long>(GpuZones::t_key));
+		std::fflush(stdout);
+	}
 }
 
 namespace ImageOps {

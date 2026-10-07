@@ -225,6 +225,10 @@ private:
 	bool              m_buffer_modified  = false;
 };
 
+// Debugging aid: GPU work recorded on an image without a VkImage (a stencil association image has
+// none) would hand the driver a null handle; logs the guest range, the operation and the zone key.
+void NoteNullImage(const Image& image, const char* what);
+
 namespace ImageOps {
 
 void                                 Validate(const ImageInfo& info);
