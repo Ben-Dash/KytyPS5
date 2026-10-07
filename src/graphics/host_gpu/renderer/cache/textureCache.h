@@ -172,6 +172,10 @@ public:
 	// KYTY_DEBUG_DUMP_IMAGES (see textureCache.cpp): writes the listed images to files at a frame's
 	// end while the trigger file exists.
 	void DebugDumpImages();
+	// On a device fault: the last images created and freed (guest range, extent, format, the
+	// VkImage handle and its memory block), to see whether a dispatch or a bindless slot still
+	// pointed at an image that was retired or recreated.
+	void DescribeRecentImages() const;
 	void TickFrame();
 	void RunGarbageCollector();
 

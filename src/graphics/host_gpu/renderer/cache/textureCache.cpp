@@ -332,9 +332,83 @@ void LogImageChurn(const char* what, const Image& image) {
 }
 } // namespace
 
+
+// The last images created and freed, for the device-fault report (DescribeRecentImages). The
+// memory block comes from VMA: an image's device address is not known, but a fault at a block
+// offset can be matched against the block handle and the sizes.
+struct RecentImageEvent {
+	bool        freed        = false;
+	uint64_t    tick         = 0;
+	uint64_t    address      = 0;
+	uint64_t    size         = 0;
+	uint32_t    width        = 0;
+	uint32_t    height       = 0;
+	uint32_t    layers       = 0;
+	uint32_t    levels       = 0;
+	uint32_t    format       = 0;
+	uint64_t    image        = 0;
+	uint64_t    memory       = 0;
+	uint64_t    memory_offset = 0;
+	uint64_t    memory_size  = 0;
+	uint32_t    usage        = 0;
+};
+constexpr size_t RecentImageRing = 96;
+static std::mutex                                  g_recent_images_mutex;
+static std::array<RecentImageEvent, RecentImageRing> g_recent_images {};
+static uint64_t                                    g_recent_images_count = 0;
+
+void NoteRecentImage(const GraphicContext& graphics, const Image& image, bool freed, uint64_t tick) {
+	RecentImageEvent event {};
+	event.freed   = freed;
+	event.tick    = tick;
+	event.address = image.info.data.address;
+	event.size    = image.info.data.size;
+	event.width   = image.info.extent.width;
+	event.height  = image.info.extent.height;
+	event.layers  = image.info.resources.layers;
+	event.levels  = image.info.resources.levels;
+	event.format  = static_cast<uint32_t>(image.info.pixel_format);
+	event.image   = reinterpret_cast<uint64_t>(static_cast<VkImage>(image.backing.image));
+	event.usage   = (image.usage.texture ? 1u : 0u) | (image.usage.render_target ? 2u : 0u) |
+	              (image.usage.depth_target ? 4u : 0u) | (image.usage.storage ? 8u : 0u);
+	if (image.backing.allocation != nullptr && graphics.allocator != nullptr) {
+		VmaAllocationInfo info {};
+		vmaGetAllocationInfo(graphics.allocator, image.backing.allocation, &info);
+		event.memory        = reinterpret_cast<uint64_t>(info.deviceMemory);
+		event.memory_offset = info.offset;
+		event.memory_size   = info.size;
+	}
+	std::scoped_lock lock {g_recent_images_mutex};
+	g_recent_images[g_recent_images_count % RecentImageRing] = event;
+	g_recent_images_count++;
+}
+
+void TextureCache::DescribeRecentImages() const {
+	std::scoped_lock lock {g_recent_images_mutex};
+	const auto count = std::min<uint64_t>(g_recent_images_count, RecentImageRing);
+	std::printf("device-fault-images: last %llu of %llu image events (oldest first), gpu tick %llu\n",
+	            static_cast<unsigned long long>(count),
+	            static_cast<unsigned long long>(g_recent_images_count),
+	            static_cast<unsigned long long>(m_scheduler.GetMasterSemaphore().KnownGpuTick()));
+	for (uint64_t n = g_recent_images_count - count; n < g_recent_images_count; n++) {
+		const auto& e = g_recent_images[n % RecentImageRing];
+		std::printf("device-fault-image: %s tick=%llu guest=0x%016llx size=0x%llx %ux%u layers=%u levels=%u "
+		            "vkformat=%u usage=%c%c%c%c image=0x%llx memory=0x%llx+0x%llx (block 0x%llx)\n",
+		            e.freed ? "free" : "new ", static_cast<unsigned long long>(e.tick),
+		            static_cast<unsigned long long>(e.address), static_cast<unsigned long long>(e.size),
+		            e.width, e.height, e.layers, e.levels, e.format, (e.usage & 1u) ? 'T' : '-',
+		            (e.usage & 2u) ? 'R' : '-', (e.usage & 4u) ? 'D' : '-', (e.usage & 8u) ? 'S' : '-',
+		            static_cast<unsigned long long>(e.image), static_cast<unsigned long long>(e.memory),
+		            static_cast<unsigned long long>(e.memory_offset),
+		            static_cast<unsigned long long>(e.memory_size));
+	}
+	std::fflush(stdout);
+}
+
 ImageId TextureCache::InsertImage(const ImageInfo& info) {
 	const auto id = m_slot_images.insert(m_graphics, m_scheduler, info);
 	LogImageChurn("new", m_slot_images[id]);
+	NoteRecentImage(m_graphics, m_slot_images[id], false, m_scheduler.CurrentTick());
 	if (!info.data.Empty()) {
 		RegisterImage(id);
 	}
@@ -450,6 +524,7 @@ void TextureCache::DeleteImage(ImageId id, std::vector<ImageId>* retired) {
 	if (image == nullptr || !image->registered) {
 		return;
 	}
+	NoteRecentImage(m_graphics, *image, true, m_scheduler.CurrentTick());
 	if (!image->depth_id) {
 		std::vector<ImageId> associations;
 		m_slot_images.ForEach([&](ImageId candidate, const Image& associated) {
