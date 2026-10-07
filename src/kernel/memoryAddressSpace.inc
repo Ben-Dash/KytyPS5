@@ -864,7 +864,7 @@ public:
 		                           : VirtualMemory::Mode::ReadWrite;
 		if (m_backing->MapFixed(vaddr, size, backing_offset, host_mode, failure_reason)) {
 			if (!replacing) {
-				EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Backing));
+				EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Backing, VirtualMemory::IsExecute(mode)));
 			}
 			return true;
 		}
@@ -957,11 +957,11 @@ public:
 			AddFreeUnlocked(vaddr, size);
 			return false;
 		}
-		EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Private));
+		EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Private, VirtualMemory::IsExecute(mode)));
 		return true;
 #else
 		if (VirtualMemory::Protect(vaddr, size, host_mode)) {
-			EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Private));
+			EXIT_IF(!AddMappedUnlocked(vaddr, size, MappingType::Private, VirtualMemory::IsExecute(mode)));
 			return true;
 		}
 		AddFreeUnlocked(vaddr, size);
@@ -1035,6 +1035,8 @@ private:
 		uint64_t    vaddr = 0;
 		uint64_t    size  = 0;
 		MappingType type  = MappingType::Private;
+		// Mapped executable (ExecuteReadWrite): watches keep execute on these pages.
+		bool        executable = false;
 	};
 
 	static constexpr uint64_t PageSize() { return 0x4000; }
@@ -1060,6 +1062,16 @@ private:
 		return (value & (m_granularity - 1u)) == 0;
 	}
 
+	// KYTY_PROTECT_EXEC_QUERY=1: watches ask Windows (VirtualQuery) whether a page belongs to an
+	// executable allocation, as e232e6b4 did, instead of using the mapping's own mode.
+	static bool ExecuteQueryEnabled() {
+		static const bool enabled = [] {
+			const char* text = KYTY_GETENV("KYTY_PROTECT_EXEC_QUERY");
+			return text != nullptr && text[0] == '1';
+		}();
+		return enabled;
+	}
+
 	bool ProtectMappedUnlocked(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode,
 	                           bool preserve_execute = false) {
 		const auto end = vaddr + size;
@@ -1071,11 +1083,26 @@ private:
 			const auto& region      = it->second;
 			const auto  range_start = std::max(vaddr, region.vaddr);
 			const auto  range_end   = std::min(end, region.vaddr + region.size);
-			if (range_start < range_end &&
-			    !(preserve_execute
-			          ? VirtualMemory::ProtectPreservingExecute(range_start, range_end - range_start,
-			                                                    mode)
-			          : VirtualMemory::Protect(range_start, range_end - range_start, mode))) {
+			if (range_start >= range_end) {
+				continue;
+			}
+			bool done = false;
+			if (preserve_execute && ExecuteQueryEnabled()) {
+				done = VirtualMemory::ProtectPreservingExecute(range_start, range_end - range_start,
+				                                               mode);
+			} else {
+				// The region knows whether it was mapped executable, so no VirtualQuery is
+				// needed: the queries ran under the page manager's region lock on every watch
+				// change and halved ASTRO BOT's frame rate.
+				auto host_mode = mode;
+				if (preserve_execute && region.executable) {
+					host_mode = mode == VirtualMemory::Mode::Read        ? VirtualMemory::Mode::ExecuteRead
+					            : mode == VirtualMemory::Mode::ReadWrite ? VirtualMemory::Mode::ExecuteReadWrite
+					                                                     : mode;
+				}
+				done = VirtualMemory::Protect(range_start, range_end - range_start, host_mode);
+			}
+			if (!done) {
 				return false;
 			}
 		}
@@ -1120,7 +1147,7 @@ private:
 		return true;
 	}
 
-	bool AddMappedUnlocked(uint64_t vaddr, uint64_t size, MappingType type) {
+	bool AddMappedUnlocked(uint64_t vaddr, uint64_t size, MappingType type, bool executable = false) {
 		if (size == 0 || UINT64_MAX - vaddr < size) {
 			return false;
 		}
@@ -1135,7 +1162,7 @@ private:
 				return false;
 			}
 		}
-		return m_mapped.emplace(vaddr, MappedRegion {vaddr, size, type}).second;
+		return m_mapped.emplace(vaddr, MappedRegion {vaddr, size, type, executable}).second;
 	}
 
 	bool RemoveMappedUnlocked(uint64_t vaddr, uint64_t size, MappingType type) {
@@ -1151,11 +1178,11 @@ private:
 			m_mapped.erase(it);
 			if (original.vaddr < current) {
 				const auto left_size = current - original.vaddr;
-				EXIT_IF(!AddMappedUnlocked(original.vaddr, left_size, original.type));
+				EXIT_IF(!AddMappedUnlocked(original.vaddr, left_size, original.type, original.executable));
 			}
 			if (part_end < original.vaddr + original.size) {
 				const auto right_size = original.vaddr + original.size - part_end;
-				EXIT_IF(!AddMappedUnlocked(part_end, right_size, original.type));
+				EXIT_IF(!AddMappedUnlocked(part_end, right_size, original.type, original.executable));
 			}
 			current = part_end;
 		}
