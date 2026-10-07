@@ -39,9 +39,12 @@
 #include <atomic>
 #include <bit>
 #include <cstdlib>
+#include <cinttypes>
+#include <cstdio>
 #include <cstring>
 #include <fmt/format.h>
 #include <limits>
+#include <mutex>
 #include <new>
 #include <optional>
 #include <span>
@@ -2057,6 +2060,66 @@ void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
 	}
 }
 
+// KYTY_DEBUG_DEVICE_FAULT=1: each compute shader's buffer V#s, once per shader, slot and V# words
+// (256 lines at most). For Ghost of Yotei's deferred lighting shader d108b276bb7c5f0f, which writes
+// zeros (blocky roofs), the material buffer (slot 1) also gets the guest bytes the PS5 reads for
+// material 0 (+0x0) and material 6 (+0x480) and the buffer cache's state of that range at bind
+// time: registered in a cache buffer, CPU-written since its upload, GPU-written; a read-only range
+// of at most one cache page may be served from the stream ring instead (BufferCache::ObtainBuffer).
+static void NoteComputeBufferVsharp(BufferCache& cache, const ShaderRecompiler::IR::CompiledShaderInfo& program,
+                                    uint32_t slot, const ShaderBufferResource& descriptor,
+                                    uint64_t address, uint64_t size) {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_DEVICE_FAULT") != nullptr;
+	if (!enabled || program.stage != ShaderType::Compute) {
+		return;
+	}
+	static std::mutex                   mutex;
+	static std::unordered_set<uint64_t> logged;
+	const uint64_t key = program.shader_hash ^ (uint64_t {slot} << 59u) ^ address ^
+	                     (uint64_t {descriptor.fields[1]} << 7u) ^ (uint64_t {descriptor.fields[2]} << 19u) ^
+	                     (uint64_t {descriptor.fields[3]} << 31u);
+	std::scoped_lock lock {mutex};
+	if (logged.size() >= 256u || !logged.insert(key).second) {
+		return;
+	}
+	const auto& resource = program.info.buffers[slot];
+	std::printf("cs-buffer-vsharp: shader=%016" PRIx64 " slot=%u written=%d address=0x%016" PRIx64
+	            " stride=%u num_records=%u size=0x%" PRIx64 " bound=0x%" PRIx64
+	            " fields3=0x%08x oob=%u swizzle=%d\n",
+	            program.shader_hash, slot, resource.written ? 1 : 0, address,
+	            static_cast<uint32_t>(descriptor.Stride()), descriptor.NumRecords(), descriptor.GetSize(),
+	            size, descriptor.fields[3], (descriptor.fields[3] >> 28u) & 3u,
+	            descriptor.SwizzleEnabled() ? 1 : 0);
+	if (program.shader_hash == 0xd108b276bb7c5f0full && slot == 1u) {
+		std::printf("cs-buffer-vsharp:   host: registered=%d cpu_modified=%d gpu_modified=%d "
+		            "stream_eligible=%d (read-only, <= 0x%" PRIx64 " bytes)\n",
+		            cache.IsRegionRegistered(address, size) ? 1 : 0,
+		            cache.IsRegionCpuModified(address, size) ? 1 : 0,
+		            cache.IsRegionGpuModified(address, size) ? 1 : 0,
+		            !resource.written && size <= BufferCache::CACHING_PAGESIZE ? 1 : 0,
+		            BufferCache::CACHING_PAGESIZE);
+		const auto dump = [&](uint64_t offset, uint64_t bytes_wanted) {
+			std::array<uint8_t, 192> bytes {};
+			if (!Libs::LibKernel::Memory::TryReadBacking(address + offset, bytes.data(), bytes_wanted)) {
+				std::printf("cs-buffer-vsharp:   +0x%03" PRIx64 " unreadable\n", offset);
+				return;
+			}
+			for (uint64_t row = 0; row < bytes_wanted; row += 32u) {
+				std::printf("cs-buffer-vsharp:   +0x%03" PRIx64 ":", offset + row);
+				for (uint64_t i = row; i < row + 32u && i < bytes_wanted; i += 4u) {
+					uint32_t word = 0;
+					std::memcpy(&word, bytes.data() + i, sizeof(word));
+					std::printf(" %08x", word);
+				}
+				std::printf("\n");
+			}
+		};
+		dump(0, 64);
+		dump(1152, 192);
+	}
+	std::fflush(stdout);
+}
+
 void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
@@ -2078,6 +2141,7 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 			continue;
 		}
 		const auto size = Libs::LibKernel::Memory::ClampRangeSize(address, requested_size);
+		NoteComputeBufferVsharp(cache, program, i, descriptor, address, size);
 		const auto id   = i < previous_count && sources[i].id ? sources[i].id : BufferId {};
 		sources[i]      = {address, size,
 		                   id ? cache.RefindBuffer(id, address, size) : cache.FindBuffer(address, size)};
