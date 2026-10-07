@@ -566,7 +566,13 @@ void TextureCache::DeleteImage(ImageId id, std::vector<ImageId>* retired) {
 	if (retired != nullptr) {
 		retired->push_back(id);
 	} else if (m_scheduler.Active()) {
-		m_scheduler.DeferOperation([this, id] { m_slot_images.erase(id); });
+		// Deferred twice, like the tiler's scratch buffers: a descriptor write or copy for this
+		// image resolved before the deletion can still be recorded after a ring wrap submitted
+		// and completed the current tick; its views must outlive that recording too
+		// ("deferred-call: stale image view descriptor").
+		m_scheduler.DeferOperation([this, id] {
+			m_scheduler.DeferOperation([this, id] { m_slot_images.erase(id); });
+		});
 	} else {
 		m_slot_images.erase(id);
 	}
@@ -3480,8 +3486,11 @@ bool TextureCache::CollectGarbage(bool pressure_only) {
 		for (const auto id: pending_retirement) {
 			FreeImage(id, &retired);
 		}
+		// The Vulkan objects outlive the tick now being recorded: this collection can run while
+		// a draw is assembled, after it resolved textures whose descriptor writes and copies are
+		// recorded later in this tick.
 		for (const auto id: retired) {
-			m_slot_images.erase(id);
+			m_scheduler.DeferOperation([this, id] { m_slot_images.erase(id); });
 		}
 	}
 	return reclaimed;
