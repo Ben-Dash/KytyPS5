@@ -278,6 +278,48 @@ bool ValidateShaderSpirv(const char* label, uint64_t shader_hash,
 	return false;
 }
 
+// A journal record's compile options; `params` and the options point into the record.
+ShaderRecompiler::CompileOptions ReplayOptions(ShaderPrecompile::PermutationRecord& record,
+                                               ShaderParams&                       params) {
+	params.code            = record.code;
+	params.back_code       = record.back_code;
+	params.hash            = record.hash;
+	params.user_data_count = record.user_data_count;
+	ShaderRecompiler::CompileOptions options;
+	options.stage          = record.stage;
+	options.shader_hash    = record.hash;
+	options.user_data      = std::span(params.user_data).first(params.user_data_count);
+	options.back_code      = params.back_code;
+	options.user_data_base = record.user_data_base;
+	options.wave_size      = record.wave_size;
+	options.dump_ir        = false;
+	options.early_dump     = false;
+	options.dump_label     = "ShaderPrecompile";
+	options.bindless_images = g_bindless_images;
+	std::visit(
+	    [&](auto& info) {
+		    using Info = std::decay_t<decltype(info)>;
+		    if constexpr (std::is_same_v<Info, ShaderVertexInputInfo>)
+			    options.input_info.vertex = &info;
+		    else if constexpr (std::is_same_v<Info, ShaderPixelInputInfo>)
+			    options.input_info.pixel = &info;
+		    else
+			    options.input_info.compute = &info;
+	    },
+	    record.info);
+	return options;
+}
+
+// KYTY_DEBUG_REPLAY_VERIFY=1 (diagnostic): the first live use of each replayed permutation also
+// compiles it from the live inputs and reports a SPIR-V difference (see VerifyReplayed).
+bool ReplayVerifyEnabled() {
+	static const bool enabled = [] {
+		const char* value = KYTY_GETENV("KYTY_DEBUG_REPLAY_VERIFY");
+		return value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	return enabled;
+}
+
 } // namespace
 
 // KYTY_PERMUTATION_LOG=1 (diagnostic): describe why each runtime-compiled permutation is new.
@@ -379,6 +421,10 @@ struct PipelineCache::ProgramCache {
 		// Compiled by a speculative lookup (a look-ahead): its journal record, appended when a
 		// draw or dispatch first uses the permutation, so mispredictions stay out of the journal.
 		std::optional<ShaderPrecompile::PermutationRecord> unrecorded;
+		// KYTY_DEBUG_REPLAY_VERIFY=1: the journal record a replayed permutation was compiled from,
+		// until its first live use checks it (VerifyReplayed).
+		std::shared_ptr<const ShaderPrecompile::PermutationRecord> replay_source;
+		size_t                                                     replay_record = 0;
 	};
 
 	// A permutation's shader module and info, compiled on any thread.
@@ -504,6 +550,104 @@ struct PipelineCache::ProgramCache {
 		auto compiled = CompileModule(device, params.code, options, std::move(translated),
 		                              specialization, push_data_start_dword);
 		return MakePermutation(options, std::move(specialization), std::move(compiled));
+	}
+
+	// KYTY_DEBUG_REPLAY_VERIFY=1, on the first live use of a replayed permutation: compiles it again
+	// from its journal record and from the live inputs, as Get would compile it now, and reports
+	// different SPIR-V with every journaled input that differs. The replayed module stays in use.
+	template <typename InputInfo>
+	void VerifyReplayed(const ShaderParams& params, const InputInfo& input_info, ShaderType stage,
+	                    uint32_t push_data_cursor, const Permutation& permutation) {
+		const auto spirv_hash = [](ShaderRecompiler::TranslateResult translated,
+		                           const ShaderRecompiler::CompileOptions&             options,
+		                           const ShaderRecompiler::IR::ResourceSpecialization& specialization,
+		                           uint32_t push_data_start) -> uint64_t {
+			if (translated.skip_dispatch) {
+				return 0;
+			}
+			const auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
+			                                                     specialization, push_data_start);
+			return XXH3_64bits(result.spirv.data(), result.spirv.size() * sizeof(uint32_t));
+		};
+		auto         record = *permutation.replay_source;
+		ShaderParams replay_params;
+		const auto   replay_options = ReplayOptions(record, replay_params);
+		const auto   replay_hash =
+		    spirv_hash(ShaderRecompiler::TranslateProgram(replay_params.code, replay_options),
+		               replay_options, record.specialization, record.push_data_start_dword);
+
+		auto live_input  = input_info;
+		live_input.stage = {};
+		const auto user_data = std::span(params.user_data).first(params.user_data_count);
+		auto live_options = MakeOptions(stage, params.hash, user_data, params.back_code, live_input);
+		live_options.dump_ir    = false;
+		live_options.early_dump = false;
+		const auto live_hash =
+		    spirv_hash(ShaderRecompiler::TranslateProgram(params.code, live_options), live_options,
+		               permutation.specialization, push_data_cursor);
+		if (live_hash == replay_hash) {
+			return;
+		}
+
+		// What the journal would hold for the live compile, against the replayed record.
+		const auto live = ShaderPrecompile::Capture(params, live_options, permutation.specialization,
+		                                            push_data_cursor, live_input);
+		std::string differences;
+		const auto  differ = [&](const char* name, auto a, auto b) {
+			if (a != b) {
+				differences += fmt::format(" {}:{}->{}", name, a, b);
+			}
+		};
+		differ("push_start", record.push_data_start_dword, live.push_data_start_dword);
+		differ("user_data_base", record.user_data_base, live.user_data_base);
+		differ("user_data_count", record.user_data_count, live.user_data_count);
+		differ("wave", record.wave_size, live.wave_size);
+		differ("code_words", record.code.size(), live.code.size());
+		differ("back_code_words", record.back_code.size(), live.back_code.size());
+		const auto& replayed_spec = record.specialization;
+		const auto& live_spec     = live.specialization;
+		differ("buffers", replayed_spec.buffers.size(), live_spec.buffers.size());
+		for (size_t i = 0; i < std::min(replayed_spec.buffers.size(), live_spec.buffers.size()); i++) {
+			if (!(replayed_spec.buffers[i] == live_spec.buffers[i])) {
+				differences += fmt::format(" buffer[{}]", i);
+			}
+		}
+		differ("images", replayed_spec.images.size(), live_spec.images.size());
+		for (size_t i = 0; i < std::min(replayed_spec.images.size(), live_spec.images.size()); i++) {
+			if (!(replayed_spec.images[i] == live_spec.images[i])) {
+				differences += fmt::format(" image[{}]", i);
+			}
+		}
+		if (const auto* r = std::get_if<ShaderComputeInputInfo>(&record.info)) {
+			const auto& l = std::get<ShaderComputeInputInfo>(live.info);
+			differ("float_mode", uint32_t {r->float_mode}, uint32_t {l.float_mode});
+			differ("lds_storage", r->lds_storage, l.lds_storage);
+			differ("lds_dwords", r->lds_size_dwords, l.lds_size_dwords);
+			differ("scratch_dwords", r->scratch_size_dwords, l.scratch_size_dwords);
+			differ("host_subgroup", r->host_subgroup_size, l.host_subgroup_size);
+			differ("info_wave", r->wave_size, l.wave_size);
+			differ("thread_ids", r->thread_ids_num, l.thread_ids_num);
+			differ("workgroup_register", r->workgroup_register, l.workgroup_register);
+			differ("tg_size_en", r->tg_size_en, l.tg_size_en);
+			differ("thread_dimensions", r->dispatch_thread_dimensions, l.dispatch_thread_dimensions);
+			for (int i = 0; i < 3; i++) {
+				differ("threads", r->threads_num[i], l.threads_num[i]);
+				differ("group_id", r->group_id[i], l.group_id[i]);
+			}
+		}
+		// Equal encodings mean the difference comes from an input the journal does not hold.
+		std::vector<uint8_t> record_bytes;
+		std::vector<uint8_t> live_bytes;
+		const bool           encoded = ShaderPrecompile::Encode(record, record_bytes) &&
+		                     ShaderPrecompile::Encode(live, live_bytes);
+		PipelineCacheLog("Shader replay verify: hash={:016x} id={} record={} stage={} spirv "
+		                 "replay={:016x} live={:016x} journal_inputs={}{}",
+		                 params.hash, permutation.handle.id, permutation.replay_record,
+		                 static_cast<uint32_t>(stage), replay_hash, live_hash,
+		                 !encoded                      ? "unencodable"
+		                 : record_bytes == live_bytes ? "equal"
+		                                              : "differ",
+		                 differences);
 	}
 
 	template <typename InputInfo>
@@ -750,6 +894,10 @@ struct PipelineCache::ProgramCache {
 			}
 			if (index < source.permutations.size()) {
 				auto& permutation       = source.permutations[index];
+				if (permutation.replay_source && !t_speculative_lookup) [[unlikely]] {
+					VerifyReplayed(params, input_info, stage, push_data_cursor, permutation);
+					permutation.replay_source.reset();
+				}
 				if (permutation.unrecorded && !t_speculative_lookup) [[unlikely]] {
 					(void)recording.Append(*permutation.unrecorded);
 					permutation.unrecorded.reset();
@@ -1418,35 +1566,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		ProgramCache::CompiledModule                     compiled;
 		bool                                             valid = false;
 	};
-	const auto options_for = [](ShaderPrecompile::PermutationRecord& record, ShaderParams& params) {
-		params.code            = record.code;
-		params.back_code       = record.back_code;
-		params.hash            = record.hash;
-		params.user_data_count = record.user_data_count;
-		ShaderRecompiler::CompileOptions options;
-		options.stage          = record.stage;
-		options.shader_hash    = record.hash;
-		options.user_data      = std::span(params.user_data).first(params.user_data_count);
-		options.back_code      = params.back_code;
-		options.user_data_base = record.user_data_base;
-		options.wave_size      = record.wave_size;
-		options.dump_ir        = false;
-		options.early_dump     = false;
-		options.dump_label     = "ShaderPrecompile";
-		options.bindless_images = g_bindless_images;
-		std::visit(
-		    [&](auto& info) {
-			    using Info = std::decay_t<decltype(info)>;
-			    if constexpr (std::is_same_v<Info, ShaderVertexInputInfo>)
-				    options.input_info.vertex = &info;
-			    else if constexpr (std::is_same_v<Info, ShaderPixelInputInfo>)
-				    options.input_info.pixel = &info;
-			    else
-				    options.input_info.compute = &info;
-		    },
-		    record.info);
-		return options;
-	};
+	const auto options_for = ReplayOptions;
 
 	const auto            started = std::chrono::steady_clock::now();
 	std::vector<Replayed> replayed(records.size());
@@ -1534,6 +1654,11 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		entry->second.permutations.push_back(m_program_cache->MakePermutation(
 		    options, record.specialization, std::move(result.compiled)));
 		++compiled;
+		if (ReplayVerifyEnabled()) [[unlikely]] {
+			auto& added         = entry->second.permutations.back();
+			added.replay_source = std::make_shared<const ShaderPrecompile::PermutationRecord>(record);
+			added.replay_record = index;
+		}
 		record_ids[index] = entry->second.permutations.back().handle.id;
 		return &entry->second.permutations.back();
 	};
