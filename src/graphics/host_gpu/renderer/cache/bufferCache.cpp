@@ -164,30 +164,34 @@ void BufferCache::TouchBuffer(const Buffer& buffer) {
 static const BufferCache* g_describe_cache = nullptr;
 
 void BufferCache::DescribeDeviceAddress(uint64_t address) const {
+	// Also the 64 KiB past a buffer: a window or element run that walks off its last page lands
+	// there (the next guest page is not necessarily the next device page).
 	const auto within = [address](uint64_t base, uint64_t size) {
-		return address >= base && address < base + size;
+		return address >= base && address < base + size + 0x10000;
 	};
 	bool found = false;
 	m_slot_buffers.ForEach([&](BufferId id, const Buffer& buffer) {
 		if (buffer.Handle() != nullptr && within(buffer.BufferDeviceAddress(), buffer.Size())) {
 			std::printf("device-fault-owner: live buffer id=%u guest=0x%016llx size=0x%llx deleted=%d "
-			            "offset=0x%llx\n",
+			            "offset=0x%llx%s\n",
 			            static_cast<uint32_t>(id.index),
 			            static_cast<unsigned long long>(buffer.CpuAddress()),
 			            static_cast<unsigned long long>(buffer.Size()), buffer.is_deleted ? 1 : 0,
-			            static_cast<unsigned long long>(address - buffer.BufferDeviceAddress()));
+			            static_cast<unsigned long long>(address - buffer.BufferDeviceAddress()),
+			            address >= buffer.BufferDeviceAddress() + buffer.Size() ? " (PAST THE END)" : "");
 			found = true;
 		}
 	});
 	for (const auto& freed: m_freed_buffers) {
 		if (freed.size != 0 && within(freed.bda, freed.size)) {
 			std::printf("device-fault-owner: freed buffer guest=0x%016llx size=0x%llx deleted at tick %llu "
-			            "(completed %llu) offset=0x%llx\n",
+			            "(completed %llu) offset=0x%llx%s\n",
 			            static_cast<unsigned long long>(freed.cpu),
 			            static_cast<unsigned long long>(freed.size),
 			            static_cast<unsigned long long>(freed.tick),
 			            static_cast<unsigned long long>(m_scheduler.GetMasterSemaphore().KnownGpuTick()),
-			            static_cast<unsigned long long>(address - freed.bda));
+			            static_cast<unsigned long long>(address - freed.bda),
+			            address >= freed.bda + freed.size ? " (PAST THE END)" : "");
 			found = true;
 		}
 	}
