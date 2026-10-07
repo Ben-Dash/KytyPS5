@@ -6,6 +6,8 @@
 
 #include <cinttypes>
 #include <cstdio>
+#include <cstring>
+#include <mutex>
 #include <iterator>
 #include <utility>
 #include <vector>
@@ -96,6 +98,51 @@ void ReportOpRing(uint64_t completed) {
 	std::fflush(stdout);
 }
 
+// KYTY_DEBUG_DEVICE_FAULT: the address binding events (VK_EXT_device_address_binding_report)
+// covering a faulting address, oldest first, and whether its range is still bound.
+void ReportAddressBindings(uint64_t address) {
+	if (!GpuZones::g_binding_report) {
+		return;
+	}
+	std::lock_guard lock(GpuZones::g_binding_mutex);
+	const auto      next = GpuZones::g_binding_next.load(std::memory_order_relaxed);
+	const auto first = next > GpuZones::AddressBindingRing ? next - GpuZones::AddressBindingRing : 0;
+	std::printf("device-fault-bindings: address=0x%016" PRIx64 ", %" PRIu64 " events recorded (%" PRIu64
+	            " kept)\n",
+	            address, next, next - first);
+	uint32_t matches     = 0;
+	bool     still_bound = false;
+	uint64_t last_base   = 0;
+	for (uint64_t index = first; index < next; index++) {
+		const auto& e = GpuZones::g_bindings[index % GpuZones::AddressBindingRing];
+		if (e.size == 0 || address < e.base || address >= e.base + e.size) {
+			continue;
+		}
+		matches++;
+		char name[9] = {};
+		std::memcpy(name, &e.object_name, 8);
+		std::printf("device-fault-binding: #%" PRIu64 " %s base=0x%016" PRIx64 " size=0x%" PRIx64
+		            " offset=0x%" PRIx64 " object=%s handle=0x%016" PRIx64 "%s %s mark=%" PRIu64
+		            " tick=%" PRIu64 "\n",
+		            index, (e.flags & 1u) != 0 ? "BIND  " : "UNBIND", e.base, e.size,
+		            address - e.base, vk::to_string(static_cast<vk::ObjectType>(e.object_type)).c_str(),
+		            e.handle, (e.flags & 2u) != 0 ? " (driver-internal)" : "", name, e.mark, e.tick);
+		if ((e.flags & 1u) != 0) {
+			still_bound = true;
+			last_base   = e.base;
+		} else if (e.base == last_base || last_base == 0) {
+			still_bound = false;
+		}
+	}
+	if (matches == 0) {
+		std::printf("device-fault-bindings: no recorded binding covers the address\n");
+	} else {
+		std::printf("device-fault-bindings: %u events, range %s at the fault\n", matches,
+		            still_bound ? "STILL BOUND" : "ALREADY UNBOUND");
+	}
+	std::fflush(stdout);
+}
+
 // KYTY_DEBUG_DEVICE_FAULT: what the driver recorded for the lost device.
 void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t completed_tick) {
 	if (graphics.checkpoints_enabled && result == vk::Result::eErrorDeviceLost) {
@@ -136,6 +183,11 @@ void ReportDeviceFault(GraphicContext& graphics, vk::Result result, uint64_t com
 		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerFault) {
 			GpuZones::g_describe_device_address(static_cast<uint64_t>(addresses[i].reportedAddress));
 		}
+		if (addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerUnknown &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerInvalid &&
+		    addresses[i].addressType != vk::DeviceFaultAddressTypeEXT::eInstructionPointerFault) {
+			ReportAddressBindings(static_cast<uint64_t>(addresses[i].reportedAddress));
+		}
 	}
 	for (uint32_t i = 0; i < counts.vendorInfoCount; i++) {
 		std::printf("device-fault-vendor: code=0x%" PRIx64 " data=0x%" PRIx64 " %s\n",
@@ -158,9 +210,11 @@ MasterSemaphore::MasterSemaphore(GraphicContext& graphics): m_graphics(graphics)
 
 	const auto result = m_graphics.device.createSemaphore(&create_info, nullptr, &m_semaphore);
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess || m_semaphore == nullptr);
+	GpuZones::g_binding_tick = &m_current_tick;
 }
 
 MasterSemaphore::~MasterSemaphore() {
+	GpuZones::g_binding_tick = nullptr;
 	if (m_semaphore != nullptr) {
 		m_graphics.device.destroySemaphore(m_semaphore, nullptr);
 	}

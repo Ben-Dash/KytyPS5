@@ -46,6 +46,10 @@ struct GraphicContext {
 	bool                               pipeline_executable_info_enabled      = false;
 	// KYTY_DEBUG_DEVICE_FAULT=1: VK_EXT_device_fault is on, a lost device reports what faulted.
 	bool                               device_fault_enabled                  = false;
+	// KYTY_DEBUG_DEVICE_FAULT=1: VK_EXT_device_address_binding_report is on, every bind and
+	// unbind of a GPU address range is kept in GpuZones::g_bindings (see vulkanWindow.cpp).
+	bool                               address_binding_enabled               = false;
+	vk::DebugUtilsMessengerEXT         binding_messenger                     = nullptr;
 	// KYTY_DEBUG_GPU_CHECKPOINTS=1: VK_NV_device_diagnostic_checkpoints is on (see GpuZones).
 	bool                               checkpoints_enabled                   = false;
 	bool                               supports_block_texel_view              = false;

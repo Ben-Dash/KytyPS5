@@ -11,6 +11,7 @@
 #include "common/threads.h"
 #include "common/timer.h"
 #include "common/switches.h"
+#include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -799,6 +800,15 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 		device_fault.pNext       = const_cast<void*>(create_info.pNext);
 		create_info.pNext        = &device_fault;
 	}
+	vk::PhysicalDeviceAddressBindingReportFeaturesEXT address_binding {};
+	graphics.address_binding_enabled =
+	    HasExtension(device_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+	if (graphics.address_binding_enabled) {
+		address_binding.reportAddressBinding = VK_TRUE;
+		address_binding.pNext                = const_cast<void*>(create_info.pNext);
+		create_info.pNext                    = &address_binding;
+		GpuZones::g_binding_report           = true;
+	}
 	graphics.pipeline_executable_info_enabled =
 	    executable_properties_extension && executable_properties.pipelineExecutableInfo;
 	if (graphics.pipeline_executable_info_enabled) {
@@ -895,6 +905,50 @@ static void VulkanGetExtensions(VulkanExtensions& r) {
 			r.enable_validation_layers = false;
 		}
 	}
+}
+
+// KYTY_DEBUG_DEVICE_FAULT: VK_EXT_device_address_binding_report delivers every bind and unbind of
+// a GPU virtual address range through a debug-utils messenger; the events go to a host ring that
+// a lost device reads back (see GpuZones::g_bindings, ReportDeviceFault).
+static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanAddressBindingCallback(
+    vk::DebugUtilsMessageSeverityFlagBitsEXT /*message_severity*/,
+    vk::DebugUtilsMessageTypeFlagsEXT message_types,
+    const vk::DebugUtilsMessengerCallbackDataEXT* callback_data, void* /*user_data*/) {
+	if (callback_data == nullptr ||
+	    !(message_types & vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding)) {
+		return VK_FALSE;
+	}
+	const vk::DeviceAddressBindingCallbackDataEXT* binding = nullptr;
+	for (const auto* next = static_cast<const vk::BaseInStructure*>(callback_data->pNext);
+	     next != nullptr; next = next->pNext) {
+		if (next->sType == vk::StructureType::eDeviceAddressBindingCallbackDataEXT) {
+			binding = reinterpret_cast<const vk::DeviceAddressBindingCallbackDataEXT*>(next);
+			break;
+		}
+	}
+	if (binding == nullptr) {
+		return VK_FALSE;
+	}
+	GpuZones::AddressBinding event {};
+	event.base = static_cast<uint64_t>(binding->baseAddress);
+	event.size = static_cast<uint64_t>(binding->size);
+	event.mark = GpuZones::g_checkpoint_next.load(std::memory_order_relaxed);
+	event.tick = GpuZones::g_binding_tick != nullptr
+	                 ? GpuZones::g_binding_tick->load(std::memory_order_relaxed)
+	                 : 0;
+	event.flags = (binding->bindingType == vk::DeviceAddressBindingTypeEXT::eBind ? 1u : 0u) |
+	              ((binding->flags & vk::DeviceAddressBindingFlagBitsEXT::eInternalObject) ? 2u : 0u);
+	if (callback_data->objectCount > 0 && callback_data->pObjects != nullptr) {
+		event.handle      = callback_data->pObjects[0].objectHandle;
+		event.object_type = static_cast<uint32_t>(callback_data->pObjects[0].objectType);
+		if (const char* name = callback_data->pObjects[0].pObjectName; name != nullptr) {
+			std::memcpy(&event.object_name, name, std::min<size_t>(8, std::strlen(name)));
+		}
+	}
+	std::lock_guard lock(GpuZones::g_binding_mutex);
+	const auto      index = GpuZones::g_binding_next.fetch_add(1, std::memory_order_relaxed);
+	GpuZones::g_bindings[index % GpuZones::AddressBindingRing] = event;
+	return VK_FALSE;
 }
 
 static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanDebugMessengerCallback(
@@ -1102,6 +1156,24 @@ void WindowContext::CreateVulkan() {
 		}
 	}
 
+	if (KYTY_GETENV("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
+	    HasExtension(r.required_extensions, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
+		vk::DebugUtilsMessengerCreateInfoEXT binding_info {};
+		binding_info.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
+		                               vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo |
+		                               vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
+		                               vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
+		binding_info.messageType     = vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding;
+		binding_info.pfnUserCallback = VulkanAddressBindingCallback;
+		if (VulkanCreateDebugUtilsMessengerEXT(graphic_ctx.instance, &binding_info, nullptr,
+		                                       &graphic_ctx.binding_messenger) !=
+		    vk::Result::eSuccess) {
+			LOGF("Vulkan: could not create the address binding messenger
+");
+			graphic_ctx.binding_messenger = nullptr;
+		}
+	}
+
 	vk::SurfaceKHR::CType native_surface = VK_NULL_HANDLE;
 	if (!SDL_Vulkan_CreateSurface(window, static_cast<vk::Instance::CType>(graphic_ctx.instance),
 	                              nullptr, &native_surface)) {
@@ -1204,6 +1276,12 @@ void WindowContext::CreateVulkan() {
 		    HasExtension(available_extensions, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
+		// Debugging aid: every bind/unbind of a GPU address range is recorded (see GpuZones).
+		if (KYTY_GETENV("KYTY_DEBUG_DEVICE_FAULT") != nullptr &&
+		    graphic_ctx.binding_messenger != nullptr &&
+		    HasExtension(available_extensions, VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME)) {
+			device_extensions.push_back(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
+		}
 		// Debugging aid: a lost device names the draw or dispatch the GPU was in (see GpuZones).
 		if (KYTY_GETENV("KYTY_DEBUG_GPU_CHECKPOINTS") != nullptr &&
 		    HasExtension(available_extensions, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME)) {
@@ -1282,6 +1360,10 @@ WindowContext::~WindowContext() {
 	if (graphic_ctx.debug_messenger != nullptr) {
 		graphic_ctx.instance.destroyDebugUtilsMessengerEXT(graphic_ctx.debug_messenger, nullptr);
 		graphic_ctx.debug_messenger = nullptr;
+	}
+	if (graphic_ctx.binding_messenger != nullptr) {
+		graphic_ctx.instance.destroyDebugUtilsMessengerEXT(graphic_ctx.binding_messenger, nullptr);
+		graphic_ctx.binding_messenger = nullptr;
 	}
 	if (graphic_ctx.instance != nullptr) {
 		graphic_ctx.instance.destroy(nullptr);
