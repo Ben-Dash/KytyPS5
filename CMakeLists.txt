@@ -207,6 +207,24 @@ config_compiler_and_linker()
 add_subdirectory("${KYTY_THIRD_PARTY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/3rdparty")
 # A build given to other people: no switch names, no fatal error texts, no class names.
 option(KYTY_SHARE_BUILD "Hide switch names, error texts and class names (build for sharing)" OFF)
+# NVIDIA Nsight Aftermath GPU crash dumps (debug builds; KYTY_AFTERMATH=1 at run time, see
+# src/graphics/host_gpu/aftermath.h). The SDK ships with Nsight Graphics; a project-local copy
+# lives in G:/dev/_tools/aftermath.
+option(KYTY_AFTERMATH "Link the Nsight Aftermath SDK for GPU crash dumps" OFF)
+set(KYTY_AFTERMATH_SDK "" CACHE PATH "Nsight Aftermath SDK root (include/, lib/x64/)")
+if(KYTY_AFTERMATH AND NOT KYTY_AFTERMATH_SDK)
+	foreach(candidate
+		"G:/dev/_tools/aftermath"
+		"C:/Program Files/NVIDIA Corporation/Nsight Graphics 2026.3.1/SDKs/NsightAftermathSDK/2026.3.26197.2318")
+		if(EXISTS "${candidate}/include/GFSDK_Aftermath.h")
+			set(KYTY_AFTERMATH_SDK "${candidate}")
+			break()
+		endif()
+	endforeach()
+endif()
+if(KYTY_AFTERMATH AND NOT EXISTS "${KYTY_AFTERMATH_SDK}/include/GFSDK_Aftermath.h")
+	message(FATAL_ERROR "KYTY_AFTERMATH: Nsight Aftermath SDK not found (set KYTY_AFTERMATH_SDK)")
+endif()
 if(KYTY_SHARE_BUILD)
 	add_compile_definitions(KYTY_SHARE_BUILD=1)
 endif()
@@ -838,6 +856,16 @@ add_dependencies(kyty_emulator kyty_trophy_sound)
 install(FILES "${KYTY_TROPHY_UNLOCK_SOUND}" DESTINATION assets/sounds)
 
 target_link_libraries(kyty_emulator ${kyty_emulator_link_libraries})
+if(KYTY_AFTERMATH)
+	message(STATUS "Nsight Aftermath: ${KYTY_AFTERMATH_SDK}")
+	target_compile_definitions(kyty_emulator PRIVATE KYTY_AFTERMATH=1)
+	target_include_directories(kyty_emulator PRIVATE "${KYTY_AFTERMATH_SDK}/include")
+	target_link_libraries(kyty_emulator "${KYTY_AFTERMATH_SDK}/lib/x64/GFSDK_Aftermath_Lib.x64.lib")
+	add_custom_command(TARGET kyty_emulator POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		"${KYTY_AFTERMATH_SDK}/lib/x64/GFSDK_Aftermath_Lib.x64.dll"
+		$<TARGET_FILE_DIR:kyty_emulator>/GFSDK_Aftermath_Lib.x64.dll)
+	install(FILES "${KYTY_AFTERMATH_SDK}/lib/x64/GFSDK_Aftermath_Lib.x64.dll" DESTINATION .)
+endif()
 if (WIN32)
 	target_link_libraries(kyty_emulator opengl32)
 	target_link_libraries(kyty_emulator iphlpapi)

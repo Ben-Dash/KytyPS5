@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "graphics/guest_gpu/gpu_defs.h"
+#include "graphics/host_gpu/aftermath.h"
 
 #include <array>
 
@@ -129,6 +130,7 @@ void RequireVulkanSuccess(vk::Result result, const char* operation) {
 }
 
 vk::ShaderModule CompileSPV(std::span<const uint32_t> code, vk::Device device) {
+	Aftermath::NoteShaderModule(code);
 	vk::ShaderModuleCreateInfo create_info {};
 	create_info.codeSize    = code.size_bytes();
 	create_info.pCode       = code.data();

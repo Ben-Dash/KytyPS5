@@ -52,6 +52,9 @@ struct GraphicContext {
 	vk::DebugUtilsMessengerEXT         binding_messenger                     = nullptr;
 	// KYTY_DEBUG_GPU_CHECKPOINTS=1: VK_NV_device_diagnostic_checkpoints is on (see GpuZones).
 	bool                               checkpoints_enabled                   = false;
+	// KYTY_AFTERMATH=1 (build with KYTY_AFTERMATH): VK_NV_device_diagnostics_config is on, Nsight
+	// Aftermath collects a GPU crash dump when the device is lost (see aftermath.h).
+	bool                               aftermath_enabled                     = false;
 	bool                               supports_block_texel_view              = false;
 	// Storage buffer word accesses leave their range check to robustBufferAccess2, and storage
 	// buffer ranges are rounded down to whole dwords (see
