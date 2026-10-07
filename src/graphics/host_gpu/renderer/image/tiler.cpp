@@ -374,6 +374,16 @@ void TileManager::Record(vk::Buffer source, uint64_t source_offset,
                          uint64_t source_capacity, vk::Buffer target, uint64_t target_offset,
                          uint64_t target_capacity, std::span<Dispatch> dispatches,
                          bool clear_target) {
+	if (source == nullptr || target == nullptr) {
+		static std::atomic<uint64_t> s_null {0};
+		if (s_null.fetch_add(1, std::memory_order_relaxed) < 64) {
+			std::printf("bad-copy: tiler with a null buffer (source %s, target %s) key=%016llx, skipped\n",
+			            source == nullptr ? "null" : "set", target == nullptr ? "null" : "set",
+			            static_cast<unsigned long long>(GpuZones::t_key));
+			std::fflush(stdout);
+		}
+		return;
+	}
 	const auto&    limits = m_graphics.GetPhysicalDeviceProperties().limits;
 	const uint64_t descriptor_alignment =
 	    std::max<uint64_t>(limits.minStorageBufferOffsetAlignment, 4);
