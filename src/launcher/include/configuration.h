@@ -158,6 +158,7 @@ public:
 	bool                   fullscreen_enabled          = false;
 	bool                   hide_cursor_enabled         = false;
 	bool                   readback_linear_images      = false;
+	bool                   sync_raw_image_buffers      = false;
 	bool                   tessellation_enabled        = false;
 	bool                   trophy_enabled              = true;
 	int                    vblank_frequency            = 60;
@@ -193,6 +194,7 @@ public:
 		fullscreen_enabled          = other.fullscreen_enabled;
 		hide_cursor_enabled         = other.hide_cursor_enabled;
 		readback_linear_images      = other.readback_linear_images;
+		sync_raw_image_buffers      = other.sync_raw_image_buffers;
 		tessellation_enabled        = other.tessellation_enabled;
 		trophy_enabled              = other.trophy_enabled;
 		vblank_frequency            = other.vblank_frequency;
@@ -242,6 +244,7 @@ public:
 		KYTY_CFG_SET(fullscreen_enabled);
 		KYTY_CFG_SET(hide_cursor_enabled);
 		KYTY_CFG_SET(readback_linear_images);
+		KYTY_CFG_SET(sync_raw_image_buffers);
 		KYTY_CFG_SET(tessellation_enabled);
 		KYTY_CFG_SET(trophy_enabled);
 		KYTY_CFG_SET(vblank_frequency);
@@ -287,6 +290,7 @@ public:
 		KYTY_CFG_GET(fullscreen_enabled);
 		KYTY_CFG_GET(hide_cursor_enabled);
 		KYTY_CFG_GET(readback_linear_images);
+		KYTY_CFG_GET(sync_raw_image_buffers);
 		KYTY_CFG_GET(tessellation_enabled);
 		trophy_enabled = s->value("trophy_enabled", trophy_enabled).toBool();
 		vblank_frequency = s->value("vblank_frequency", vblank_frequency).toInt();
