@@ -307,6 +307,10 @@ private:
 		uint64_t                size   = 0;
 	};
 	void               KeepStencil(ImageId depth_id);
+	// Drops the keeper of `address`; its buffer lives on until the GPU and the record thread are
+	// done with the copies recorded from or into it (see RetireStencilBuffer).
+	void               EraseStencilKeeper(uint64_t address);
+	void               RetireStencilBuffer(std::unique_ptr<Buffer> buffer);
 	[[nodiscard]] bool RestoreStencil(Image& image, bool stencil_aspect);
 	[[nodiscard]] bool CollectGarbage(bool pressure_only);
 

@@ -1954,7 +1954,7 @@ void TextureCache::RefreshImage(ImageId id) {
 // is still in guest memory). Nothing is kept for a stencil the GPU never wrote.
 void TextureCache::KeepStencil(ImageId depth_id) {
 	auto&      depth = m_slot_images[depth_id];
-	const auto erase = [&] { m_stencil_keepers.erase(depth.info.stencil.address); };
+	const auto erase = [&] { EraseStencilKeeper(depth.info.stencil.address); };
 	if (depth.backing.image == nullptr || depth.backing.samples != 1 || !depth.info.HasStencil()) {
 		erase();
 		return;
@@ -1995,7 +1995,7 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	if (keeper.buffer == nullptr || keeper.size < size) {
 		if (keeper.buffer != nullptr) {
 			// Recorded commands may still read the old buffer.
-			m_scheduler.DeferOperation([old = std::move(keeper.buffer)]() mutable { old.reset(); });
+			RetireStencilBuffer(std::move(keeper.buffer));
 		}
 		keeper.buffer = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0,
 		                                         AllFlags, size);
@@ -2005,6 +2005,34 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	keeper.pitch  = info.pitch;
 	keeper.size   = size;
 	depth.Download(copies, keeper.buffer->Handle(), 0, size, keeper.buffer->Size());
+}
+
+// A keeper's buffer is the source of RestoreStencil's upload and the target of KeepStencil's
+// download, both recorded as deferred copies that the record thread replays later. Destroying it
+// with the keeper made those copies read a destroyed VkBuffer ("deferred-call: stale buffer
+// source ... vkCmdCopyBufferToImage", guest=0x0, the size of a stencil plane). It is released
+// only after the tick then being recorded completes, deferred twice like the tiler's scratch
+// buffers so a ring wrap between the copy and the erase cannot shorten its life.
+void TextureCache::RetireStencilBuffer(std::unique_ptr<Buffer> buffer) {
+	if (buffer == nullptr) {
+		return;
+	}
+	if (!m_scheduler.Active()) {
+		buffer.reset();
+		return;
+	}
+	m_scheduler.DeferOperation([this, old = std::move(buffer)]() mutable {
+		m_scheduler.DeferOperation([last = std::move(old)]() mutable { last.reset(); });
+	});
+}
+
+void TextureCache::EraseStencilKeeper(uint64_t address) {
+	const auto found = m_stencil_keepers.find(address);
+	if (found == m_stencil_keepers.end()) {
+		return;
+	}
+	RetireStencilBuffer(std::move(found->second.buffer));
+	m_stencil_keepers.erase(found);
 }
 
 // The kept stencil into `image`: its stencil plane (`stencil_aspect`, a depth image replacing a
@@ -2076,7 +2104,7 @@ ImageId TextureCache::AssociateStencil(ImageId depth_id, GuestRange stencil) {
 		}
 		record.ClearBufferModified();
 		MarkGpuModified(record);
-		m_stencil_keepers.erase(stencil.address);
+		EraseStencilKeeper(stencil.address);
 	}
 	BumpImageCleanEpoch();
 	return association;
