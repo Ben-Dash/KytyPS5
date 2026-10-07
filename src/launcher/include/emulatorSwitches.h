@@ -16,7 +16,7 @@ struct EmulatorSwitch {
 	const char* measured; // What it did in a measurement, or what it is for
 };
 
-inline constexpr std::array<EmulatorSwitch, 4> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 5> EMULATOR_SWITCHES = {{
     {"KYTY_TRACKING_LOCK_BACKOFF", "Calmer waiting on memory checks (not recommended)",
      "When many game threads touch the same memory at once, they queue up and keep asking whether "
      "it is their turn, which keeps the processor busy with waiting. With this on, waiting threads "
@@ -40,6 +40,11 @@ inline constexpr std::array<EmulatorSwitch, 4> EMULATOR_SWITCHES = {{
      "help in this game.",
      "Gain: none, it only measures. In ASTRO BOT no draw repeated exactly, because the game moves "
      "its data every frame."},
+    {"KYTY_PROTECT_EXEC_QUERY", "Old memory protection check (not recommended)",
+     "Brings back the old, slower way of checking whether game code may run from a piece of "
+     "memory: the emulator asks Windows each time instead of remembering it. Only there to "
+     "compare against the new way if a game misbehaves.",
+     "Measured in ASTRO BOT (Sky Garden): about 23 fps instead of 37, much slower. Leave it off."},
 }};
 
 #endif /* LAUNCHER_INCLUDE_EMULATORSWITCHES_H_ */
