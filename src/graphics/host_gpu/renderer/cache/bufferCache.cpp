@@ -1965,6 +1965,7 @@ void BufferCache::EnsureBdaZeroPage() {
 	            static_cast<unsigned>(BDA_ZERO_PAGE_ENTRY));
 	WriteDataBuffer(m_bda_pagetable_buffer, BDA_ZERO_PAGE_ENTRY * sizeof(vk::DeviceAddress), &address,
 	                sizeof(address));
+	SetPageTableProbe(BDA_ZERO_PAGE_ENTRY, address);
 }
 
 void BufferCache::SynchronizeBdaLegacy(const RangeSet& mapped) {
