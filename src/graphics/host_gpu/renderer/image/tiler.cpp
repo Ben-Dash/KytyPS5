@@ -203,7 +203,54 @@ TileManager::Scratch TileManager::AllocateScratch(uint64_t size) {
 // replayed those commands ("deferred-call: stale buffer source ... vkCmdCopyBufferToImage").
 // The release is therefore deferred twice: once the GPU passed the hand-out tick, it waits for
 // the tick then being recorded, which holds every use recorded after a wrap.
+// Per thread: TextureCache uploads and downloads run on the GPU thread, priority operations on
+// their own thread.
+thread_local uint32_t                           TileManager::t_scratch_scope_depth = 0;
+thread_local std::vector<TileManager::Scratch>* TileManager::t_scratch_held        = nullptr;
+
+TileManager::ScratchScope::ScratchScope(TileManager& tiler): m_tiler(tiler) {
+	if (t_scratch_scope_depth++ == 0) {
+		static thread_local std::vector<Scratch> held;
+		held.clear();
+		t_scratch_held = &held;
+	}
+}
+
+TileManager::ScratchScope::~ScratchScope() {
+	if (--t_scratch_scope_depth != 0) {
+		return;
+	}
+	auto* held     = t_scratch_held;
+	t_scratch_held = nullptr;
+	if (held == nullptr || held->empty()) {
+		return;
+	}
+	// Every use is recorded now: one deferral under the current tick suffices.
+	auto& scheduler = m_tiler.m_scheduler;
+	if (!ScratchPoolEnabled()) {
+		auto allocator = m_tiler.m_graphics.allocator;
+		scheduler.DeferOperation([allocator, scratches = *held] {
+			for (const auto& scratch: scratches) {
+				HandleRegistry::Unregister(
+				    reinterpret_cast<uint64_t>(static_cast<VkBuffer>(scratch.buffer)));
+				vmaDestroyBuffer(allocator, scratch.buffer, scratch.allocation);
+			}
+		});
+	} else {
+		scheduler.DeferOperation([pool = m_tiler.m_scratch_pool, scratches = *held] {
+			for (const auto& scratch: scratches) {
+				pool->Return(scratch);
+			}
+		});
+	}
+	held->clear();
+}
+
 void TileManager::DeferRelease(Scratch scratch) {
+	if (t_scratch_scope_depth != 0 && t_scratch_held != nullptr) {
+		t_scratch_held->push_back(scratch);
+		return;
+	}
 	auto* scheduler = &m_scheduler;
 	if (!ScratchPoolEnabled()) {
 		auto allocator = m_graphics.allocator;

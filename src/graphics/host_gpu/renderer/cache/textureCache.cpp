@@ -828,6 +828,7 @@ void TextureCache::RefreshCopySource(ImageId id) {
 }
 
 bool TextureCache::CopyD16(Image& destination, Image& source) {
+	TileManager::ScratchScope scratch_scope(m_tiler);
 	const bool source_depth      = source.info.IsDepth();
 	const bool destination_depth = destination.info.IsDepth();
 	if (source_depth == destination_depth) {
@@ -1317,6 +1318,7 @@ TextureCache::ImageDownload TextureCache::BuildDownload(const Image& image) cons
 }
 
 void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_offset) {
+	TileManager::ScratchScope scratch_scope(m_tiler);
 	GpuZones::KeyScope zone_key(image.info.data.address);
 	auto& destination = image.depth_id ? m_slot_images[image.depth_id] : image;
 	const auto binding = image.depth_id ? BindingType::DepthTarget : UploadBinding(image);
@@ -2805,6 +2807,7 @@ void TextureCache::InvalidateMemory(uint64_t address, uint64_t size) {
 }
 
 void TextureCache::DownloadDepth(Image& image, Buffer& destination, uint64_t destination_offset) {
+	TileManager::ScratchScope scratch_scope(m_tiler);
 	const auto&    info             = image.info;
 	const auto     layers           = info.resources.layers;
 	const auto     full_slice_size  = info.data.size / layers;
@@ -2863,6 +2866,7 @@ void TextureCache::DownloadDepth(Image& image, Buffer& destination, uint64_t des
 
 void TextureCache::DownloadImage(Image& image, Buffer& destination, uint64_t destination_offset,
                                      uint64_t destination_size, ImageDownload transfer) {
+	TileManager::ScratchScope scratch_scope(m_tiler);
 	GpuZones::KeyScope zone_key(image.info.data.address | GpuZones::DownloadKey);
 	if (!transfer.valid) {
 		EXIT("TextureCache: invalid image download transfer\n");

@@ -64,6 +64,21 @@ public:
 	~TileManager();
 	KYTY_CLASS_NO_COPY(TileManager);
 
+	// Scratch buffers handed out while a scope is open on this thread (Detile, TransformColor,
+	// GetScratchBuffer, ...) are released when the outermost scope closes, under the tick then
+	// being recorded: after every copy or dispatch the caller recorded with them, however many
+	// ring wraps submitted ticks in between. Outside a scope the release is deferred twice (see
+	// DeferRelease).
+	class ScratchScope {
+	public:
+		explicit ScratchScope(TileManager& tiler);
+		~ScratchScope();
+		KYTY_CLASS_NO_COPY(ScratchScope);
+
+	private:
+		TileManager& m_tiler;
+	};
+
 	// The returned device-local buffer remains alive through the current scheduler tick.
 	[[nodiscard]] Result Detile(vk::Buffer tiled, uint64_t tiled_offset, uint64_t tiled_capacity,
 	                            uint64_t linear_capacity, std::span<const GpuTileInfo> infos,
@@ -118,6 +133,8 @@ private:
 	};
 	// Scratch buffers the GPU is done with, for reuse (see AllocateScratch).
 	struct ScratchPool;
+	static thread_local uint32_t              t_scratch_scope_depth;
+	static thread_local std::vector<Scratch>* t_scratch_held;
 	struct StorageBinding {
 		vk::DescriptorBufferInfo info;
 		uint32_t                 base = 0;
