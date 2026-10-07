@@ -171,7 +171,7 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 	};
 	bool found = false;
 	m_slot_buffers.ForEach([&](BufferId id, const Buffer& buffer) {
-		if (buffer.Handle() != nullptr && within(buffer.BufferDeviceAddress(), buffer.Size())) {
+		if (buffer.HasDeviceAddress() && within(buffer.BufferDeviceAddress(), buffer.Size())) {
 			std::printf("device-fault-owner: live buffer id=%u guest=0x%016llx size=0x%llx deleted=%d "
 			            "offset=0x%llx%s\n",
 			            static_cast<uint32_t>(id.index),
@@ -183,7 +183,7 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 		}
 	});
 	for (const auto& freed: m_freed_buffers) {
-		if (freed.size != 0 && within(freed.bda, freed.size)) {
+		if (freed.bda != 0 && freed.size != 0 && within(freed.bda, freed.size)) {
 			std::printf("device-fault-owner: freed buffer guest=0x%016llx size=0x%llx deleted at tick %llu "
 			            "(completed %llu) offset=0x%llx%s\n",
 			            static_cast<unsigned long long>(freed.cpu),
@@ -195,7 +195,8 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 			found = true;
 		}
 	}
-	if (within(m_bda_pagetable_buffer.BufferDeviceAddress(), m_bda_pagetable_buffer.Size())) {
+	if (m_bda_pagetable_buffer.HasDeviceAddress() &&
+	    within(m_bda_pagetable_buffer.BufferDeviceAddress(), m_bda_pagetable_buffer.Size())) {
 		std::printf("device-fault-owner: BDA page table\n");
 		found = true;
 	}
@@ -212,8 +213,8 @@ void BufferCache::DeleteBuffer(BufferId id) {
 	{
 		const auto& buffer = m_slot_buffers[id];
 		auto&       freed  = m_freed_buffers[m_freed_next++ % m_freed_buffers.size()];
-		freed = {buffer.BufferDeviceAddress(), buffer.Size(), buffer.CpuAddress(),
-		         m_scheduler.Active() ? m_scheduler.CurrentTick() : 0};
+		freed = {buffer.HasDeviceAddress() ? buffer.BufferDeviceAddress() : 0, buffer.Size(),
+		         buffer.CpuAddress(), m_scheduler.Active() ? m_scheduler.CurrentTick() : 0};
 	}
 	Unregister(id);
 	if (m_scheduler.Active()) {
