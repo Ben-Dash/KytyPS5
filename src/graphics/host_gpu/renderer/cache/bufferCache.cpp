@@ -388,6 +388,12 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	SetVulkanObjectNameF(m_graphics.device, m_bda_pagetable_buffer.Handle(),
 	                     "BDA Page Table Buffer");
 	SetVulkanObjectNameF(m_graphics.device, m_bda_zero_page.Handle(), "BDA Zero Page");
+	// Both live for the whole session; their addresses place device faults (DescribeDeviceAddress).
+	std::printf("bda-page-table: device=0x%016llx size=0x%llx\n",
+	            static_cast<unsigned long long>(m_bda_pagetable_buffer.HasDeviceAddress()
+	                                                ? m_bda_pagetable_buffer.BufferDeviceAddress()
+	                                                : 0),
+	            static_cast<unsigned long long>(m_bda_pagetable_buffer.Size()));
 	g_describe_cache                     = this;
 	GpuZones::g_describe_device_address = [](uint64_t address) {
 		if (g_describe_cache != nullptr) {
@@ -1850,6 +1856,10 @@ void BufferCache::EnsureBdaZeroPage() {
 	m_bda_zero_page.Fill(0, m_bda_zero_page.Size(), 0);
 	const vk::DeviceAddress address = m_bda_zero_page.BufferDeviceAddress();
 	EXIT_IF(address == 0);
+	std::printf("bda-zero-page: device=0x%016llx size=0x%llx (table entry %u)\n",
+	            static_cast<unsigned long long>(address),
+	            static_cast<unsigned long long>(m_bda_zero_page.Size()),
+	            static_cast<unsigned>(BDA_ZERO_PAGE_ENTRY));
 	WriteDataBuffer(m_bda_pagetable_buffer, BDA_ZERO_PAGE_ENTRY * sizeof(vk::DeviceAddress), &address,
 	                sizeof(address));
 }
