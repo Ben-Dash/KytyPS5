@@ -2962,7 +2962,10 @@ void EmitLoadMemory(ValueEmitContext& ctx, const IR::Inst& inst) {
 	if (mem.kind == IR::ResourceKind::FlatLocal)
 		value = LoadLocalFlat(ctx, inst);
 	else if (buffer_components > 1u ||
-	         (buffer_components == 1u && mem.kind == IR::ResourceKind::IndirectBuffer && !mem.formatted))
+	         (buffer_components == 1u && mem.kind == IR::ResourceKind::IndirectBuffer && !mem.formatted &&
+	          inst.GetType() != IR::Type::U8 && inst.GetType() != IR::Type::U16))
+		// U8/U16 indirect loads take LoadIndirectSubword below: the dword path read whole words
+		// for byte/short loads (blocky Yotei roofs).
 		value = LoadBuffer(ctx, inst, buffer_components);
 	else if (shared_components > 1u)
 		value = LoadWideShared(ctx, inst, shared_components);
