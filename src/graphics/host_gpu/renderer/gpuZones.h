@@ -77,7 +77,7 @@ struct AddressBinding {
 	uint32_t flags       = 0; // bit 0: bind (else unbind), bit 1: driver-internal, bit 2: sparse
 	uint64_t object_name = 0; // first 8 chars of the object's debug name, if any
 };
-constexpr uint64_t                               AddressBindingRing = uint64_t {1} << 15u;
+constexpr uint64_t                               AddressBindingRing = uint64_t {1} << 17u;
 inline std::array<AddressBinding, AddressBindingRing> g_bindings {};
 inline std::atomic<uint64_t>                     g_binding_next {0};
 inline std::mutex                                g_binding_mutex;
