@@ -226,6 +226,8 @@ struct Result {
 	uint32_t              ir_selects   = 0;
 	// The shader-data block: push start (NoStart: storage), DWORDs, stride and format words.
 	uint32_t              data_start = 0, data_dwords = 0, data_strides = 0, data_formats = 0;
+	// Per dynamic-stride (s) / generic-format (f) buffer: R read, W stored, A atomic, F formatted, U raw.
+	std::string           slot_flags;
 	SpirvStats            stats;
 	std::string           validation;
 	double                driver_s      = -1;
@@ -294,6 +296,16 @@ void Translate(const Options& o, PermutationRecord record, uint32_t max_lds_byte
 			out.data_dwords  = compiled.program.bindings.ShaderDataDwords();
 			out.data_strides = static_cast<uint32_t>(compiled.program.bindings.buffer_strides.size());
 			out.data_formats = static_cast<uint32_t>(compiled.program.bindings.buffer_formats.size());
+			for (uint32_t i = 0; i < compiled.program.info.buffers.size(); i++) {
+				const auto& buf = compiled.program.info.buffers[i];
+				const bool dyn = (buf.packed_stride & ShaderRecompiler::IR::DynamicBufferStride) != 0u;
+				const bool gen = buf.descriptor_format == ShaderRecompiler::IR::GenericBufferFormat;
+				if (dyn || gen) {
+					out.slot_flags += fmt::format(" b{}{}{}:{}{}{}{}{}", i, dyn ? "s" : "", gen ? "f" : "",
+					                             buf.read ? "R" : "", buf.stored ? "W" : "", buf.atomic ? "A" : "",
+					                             buf.formatted ? "F" : "", buf.unformatted ? "U" : "");
+				}
+			}
 			for (const auto* block: compiled.program.blocks) {
 				for (const auto& inst: *block) {
 					const auto op = inst.GetOpcode();
@@ -804,6 +816,7 @@ int Run(int argc, char* argv[]) {
 		                         ? std::string("storage")
 		                         : std::to_string(r.data_start),
 		                     r.data_dwords, r.data_strides, r.data_formats);
+		extra += r.slot_flags;
 		if (r.repeat_diffs != 0) extra += fmt::format(" NONDETERMINISTIC({}/{})", r.repeat_diffs, o.repeat - 1);
 		if (!r.validation.empty()) extra += " val=" + r.validation;
 		if (r.driver_result != 0) extra += fmt::format(" vkresult={}", r.driver_result);
