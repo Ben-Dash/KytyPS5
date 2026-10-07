@@ -9,6 +9,8 @@
 #endif
 #include <windows.h> // IWYU pragma: keep
 
+#include <algorithm>
+
 #include "common/assert.h"
 #include "common/virtualMemory.h"
 
@@ -322,6 +324,75 @@ bool Protect(uint64_t address, uint64_t size, Mode mode) {
 		return false;
 	}
 	return true;
+}
+
+static bool IsExecutableProtection(DWORD protect) {
+	return (protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+	                   PAGE_EXECUTE_WRITECOPY)) != 0;
+}
+
+static bool IsExecutableAllocation(uint64_t address) {
+	MEMORY_BASIC_INFORMATION info {};
+	return VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(address)), &info,
+	                    sizeof(info)) != 0 &&
+	       info.State == MEM_COMMIT && IsExecutableProtection(info.AllocationProtect);
+}
+
+bool ProtectPreservingExecute(uint64_t address, uint64_t size, Mode mode) {
+	if (size == 0 || IsExecute(mode) || (mode != Mode::Read && mode != Mode::ReadWrite)) {
+		return Protect(address, size, mode);
+	}
+	const Mode executable_mode = mode == Mode::Read ? Mode::ExecuteRead : Mode::ExecuteReadWrite;
+	// Most watched memory is heap: one query at each end decides. A range that touches an
+	// executable allocation is walked region by region.
+	if (!IsExecutableAllocation(address) && !IsExecutableAllocation(address + size - 1)) {
+		return Protect(address, size, mode);
+	}
+	const uint64_t end     = address + size;
+	uint64_t       current = address;
+	while (current < end) {
+		MEMORY_BASIC_INFORMATION info {};
+		if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(current)), &info,
+		                 sizeof(info)) == 0) {
+			return Protect(current, end - current, mode);
+		}
+		const auto region_end = std::min<uint64_t>(
+		    end, reinterpret_cast<uint64_t>(info.BaseAddress) + info.RegionSize);
+		if (region_end <= current) {
+			return false;
+		}
+		const bool executable =
+		    info.State == MEM_COMMIT && IsExecutableProtection(info.AllocationProtect);
+		if (!Protect(current, region_end - current, executable ? executable_mode : mode)) {
+			return false;
+		}
+		current = region_end;
+	}
+	return true;
+}
+
+bool RestoreExecute(uint64_t address) {
+	constexpr uint64_t HostPage = 0x1000;
+	const uint64_t     page     = address & ~(HostPage - 1);
+	MEMORY_BASIC_INFORMATION info {};
+	if (VirtualQuery(reinterpret_cast<LPCVOID>(static_cast<uintptr_t>(page)), &info,
+	                 sizeof(info)) == 0 ||
+	    info.State != MEM_COMMIT || !IsExecutableProtection(info.AllocationProtect)) {
+		return false;
+	}
+	DWORD target = 0;
+	switch (info.Protect & 0xffu) {
+		case PAGE_EXECUTE:
+		case PAGE_EXECUTE_READ:
+		case PAGE_EXECUTE_READWRITE:
+		case PAGE_EXECUTE_WRITECOPY: return true; // changed back meanwhile
+		case PAGE_READONLY: target = PAGE_EXECUTE_READ; break;
+		case PAGE_READWRITE: target = PAGE_EXECUTE_READWRITE; break;
+		default: return false;
+	}
+	DWORD old_protect = 0;
+	return VirtualProtect(reinterpret_cast<LPVOID>(static_cast<uintptr_t>(page)), HostPage, target,
+	                      &old_protect) != 0;
 }
 
 bool FlushInstructionCache(uint64_t address, uint64_t size) {

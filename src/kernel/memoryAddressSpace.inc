@@ -834,13 +834,14 @@ public:
 		return ProtectMappedUnlocked(vaddr, size, mode);
 	}
 
+	// Write and access watches (PageManager): pages of executable allocations keep execute.
 	bool ProtectTransient(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
 		if (size == 0 || UINT64_MAX - vaddr < size) {
 			return false;
 		}
 
 		std::lock_guard lock(m_mutex);
-		return ProtectMappedUnlocked(vaddr, size, mode);
+		return ProtectMappedUnlocked(vaddr, size, mode, true);
 	}
 
 	bool MapBacking(uint64_t vaddr, uint64_t size, uint64_t backing_offset,
@@ -1059,7 +1060,8 @@ private:
 		return (value & (m_granularity - 1u)) == 0;
 	}
 
-	bool ProtectMappedUnlocked(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode) {
+	bool ProtectMappedUnlocked(uint64_t vaddr, uint64_t size, VirtualMemory::Mode mode,
+	                           bool preserve_execute = false) {
 		const auto end = vaddr + size;
 		auto       it  = m_mapped.upper_bound(vaddr);
 		if (it != m_mapped.begin()) {
@@ -1070,7 +1072,10 @@ private:
 			const auto  range_start = std::max(vaddr, region.vaddr);
 			const auto  range_end   = std::min(end, region.vaddr + region.size);
 			if (range_start < range_end &&
-			    !VirtualMemory::Protect(range_start, range_end - range_start, mode)) {
+			    !(preserve_execute
+			          ? VirtualMemory::ProtectPreservingExecute(range_start, range_end - range_start,
+			                                                    mode)
+			          : VirtualMemory::Protect(range_start, range_end - range_start, mode))) {
 				return false;
 			}
 		}

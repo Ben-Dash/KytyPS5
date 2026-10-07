@@ -549,6 +549,14 @@ bool Protect(uint64_t address, uint64_t size, Mode mode) {
 	                get_protection_flag(mode)) == 0;
 }
 
+bool ProtectPreservingExecute(uint64_t address, uint64_t size, Mode mode) {
+	return Protect(address, size, mode);
+}
+
+bool RestoreExecute(uint64_t /*address*/) {
+	return false;
+}
+
 bool FlushInstructionCache(uint64_t /*address*/, uint64_t /*size*/) {
 	return true;
 }

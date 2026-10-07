@@ -676,7 +676,24 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 			case CoreAccess::Unknown: return false;
 		}
 		Libs::Graphics::DrainStats::t_fault_pc = info->exception_address;
-		if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
+		if (access == GpuAccess::Execute) {
+			// Code that shares a page with watched data: make the page readable for the CPU
+			// first (an access watch hides GPU-written data), then give it execute back. A page
+			// of a non-executable allocation is a real fault and gets the report below; before,
+			// treating this as a read retried it forever.
+			(void)Libs::LibKernel::Memory::HandleGpuFault(GpuAccess::Read, info->access_violation_vaddr);
+			if (Common::VirtualMemory::RestoreExecute(info->access_violation_vaddr)) {
+				static std::atomic<uint64_t> s_restored {0};
+				const auto count = s_restored.fetch_add(1, std::memory_order_relaxed) + 1;
+				if (count <= 16 || (count % 1024) == 0) {
+					std::printf("execute-fault: restored execute on the page of 0x%016" PRIx64
+					            " (pc 0x%016" PRIx64 ", #%" PRIu64 ")\n",
+					            info->access_violation_vaddr, info->exception_address, count);
+					std::fflush(stdout);
+				}
+				return true;
+			}
+		} else if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
 			return true;
 		}
 	}
