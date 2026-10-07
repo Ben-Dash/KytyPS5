@@ -536,6 +536,82 @@ static void BindSharedMemory(RenderContext& context, ShaderComputeInputInfo& inp
 	bindings.shared_memory = {storage.Handle(), 0, size};
 }
 
+// KYTY_DEBUG_DISPATCH_BINDINGS=1: for the dispatches of the shaders at the early device losses in
+// Ghost of Yotei, one line per image binding element as the dispatch records it: the image, its
+// view, its tracked layout and memory, and the tick the recent-image ring saw it created.
+static bool DispatchBindingsEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_DEBUG_DISPATCH_BINDINGS");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+static void LogDispatchBindings(RenderContext& context,
+                                const ShaderRecompiler::IR::CompiledShaderInfo& program,
+                                const PreparedBindings& bindings) {
+	static constexpr std::array<uint64_t, 4> Watched {0xc427e96d8e8678cdull, 0x6b264377af50d025ull,
+	                                                   0x79b9dff52896199dull, 0x8561056a850df874ull};
+	if (std::find(Watched.begin(), Watched.end(), program.shader_hash) == Watched.end()) {
+		return;
+	}
+	static uint64_t tick_seen  = 0;
+	static uint32_t tick_index = 0;
+	const auto      tick       = context.GetCommandScheduler().CurrentTick();
+	tick_index                 = tick == tick_seen ? tick_index + 1u : 0u;
+	tick_seen                  = tick;
+	auto& cache = context.GetTextureCache();
+	for (const auto& binding: program.bindings.descriptors) {
+		const auto number = static_cast<uint32_t>(binding.kind);
+		if (number < ShaderRecompiler::IR::FirstImageBinding ||
+		    number >= ShaderRecompiler::IR::FirstImageBinding + ShaderRecompiler::IR::ImageBindingCount) {
+			continue;
+		}
+		for (size_t element = 0; element < binding.resources.size(); ++element) {
+			const auto resource = binding.resources[element];
+			if (resource >= bindings.images.size()) {
+				std::printf("dispatch-binding: tick=%" PRIu64 " index=%u shader=%016" PRIx64
+				            " binding=%u[%zu] resource=%u not prepared\n",
+				            tick, tick_index, program.shader_hash, number, element, resource);
+				continue;
+			}
+			const auto& texture = bindings.images[resource];
+			const auto* image   = cache.PeekImage(texture.image_id);
+			if (image == nullptr) {
+				std::printf("dispatch-binding: tick=%" PRIu64 " index=%u shader=%016" PRIx64
+				            " binding=%u[%zu] image_id=%u NOT IN CACHE view=0x%" PRIx64 "\n",
+				            tick, tick_index, program.shader_hash, number, element,
+				            static_cast<uint32_t>(texture.image_id.index),
+				            reinterpret_cast<uint64_t>(static_cast<VkImageView>(texture.image_view)));
+				continue;
+			}
+			const auto vk_image = reinterpret_cast<uint64_t>(static_cast<VkImage>(image->backing.image));
+			const char* memory  = image->backing.image == nullptr ? "no-image"
+			                      : image->backing.allocation != nullptr ? "bound"
+			                                                              : "not-bound";
+			const auto created = RecentImageCreatedTick(vk_image);
+			std::printf("dispatch-binding: tick=%" PRIu64 " index=%u shader=%016" PRIx64
+			            " binding=%u[%zu] %s guest=0x%016" PRIx64 " size=0x%" PRIx64
+			            " extent=%ux%ux%u layers=%u mips=%u guest_format=%u vkformat=%u image=0x%" PRIx64
+			            " view=0x%" PRIx64 " bound_layout=%d tracked_layout=%d memory=%s registered=%d"
+			            " created_tick=%s%" PRIu64 " last_access_tick=%" PRIu64
+			            " barrier_this_tick=unknown\n",
+			            tick, tick_index, program.shader_hash, number, element,
+			            texture.desc.type == TextureCache::BindingType::Storage ? "storage" : "sampled",
+			            image->info.data.address, image->info.data.size, image->info.extent.width,
+			            image->info.extent.height, image->info.extent.depth,
+			            image->info.resources.layers, image->info.resources.levels,
+			            static_cast<uint32_t>(image->info.guest_format),
+			            static_cast<uint32_t>(image->backing.format), vk_image,
+			            reinterpret_cast<uint64_t>(static_cast<VkImageView>(texture.image_view)),
+			            static_cast<int>(texture.layout), static_cast<int>(image->backing.state.layout),
+			            memory, image->registered ? 1 : 0, created == 0 ? "unknown/" : "", created,
+			            image->tick_accessed_last);
+		}
+	}
+	std::fflush(stdout);
+}
+
 bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
                                     uint32_t thread_group_x, uint32_t thread_group_y,
                                     uint32_t thread_group_z, uint32_t mode, bool may_defer) {
@@ -774,6 +850,9 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	PreparedBindings* descriptor_stage = &bindings;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
 	               std::span {&descriptor_stage, 1u}, chain);
+	if (DispatchBindingsEnabled()) [[unlikely]] {
+		LogDispatchBindings(m_context, program, bindings);
+	}
 	// Still pending: nothing but dispatches since the previous one, and no guest synchronization.
 	const bool continues_chain = chain && buffer.ComputeChainPending();
 	if (chain) {
@@ -893,6 +972,9 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
 	               std::span {&descriptor_stage, 1u}, chain);
+	if (DispatchBindingsEnabled()) [[unlikely]] {
+		LogDispatchBindings(m_context, program, bindings);
+	}
 	const bool continues_chain = chain && buffer.ComputeChainPending();
 	if (chain) {
 		NoteComputeChain(continues_chain);

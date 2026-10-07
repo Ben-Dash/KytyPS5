@@ -138,6 +138,8 @@ public:
 	[[nodiscard]] vk::ImageView FindTexture(ImageId id, const ImageDesc& desc);
 	[[nodiscard]] vk::ImageView FindRenderTarget(ImageId id, const ImageDesc& desc);
 	[[nodiscard]] vk::ImageView FindDepthTarget(ImageId id, const ImageDesc& desc);
+	// Read-only, without touching the LRU (diagnostics); nullptr for a free slot.
+	[[nodiscard]] const Image* PeekImage(ImageId id) const { return m_slot_images.try_get(id); }
 	[[nodiscard]] Image&        GetImage(ImageId id) {
 		auto& image = m_slot_images[id];
 		TouchImage(image);
@@ -439,6 +441,10 @@ private:
 	friend class BufferCache;
 	friend class RenderExecutor;
 };
+
+// The tick the recent-image ring (device-fault report) saw `vk_image` created at; 0 if the ring no
+// longer holds that event (it keeps the last 96 creations and frees).
+[[nodiscard]] uint64_t RecentImageCreatedTick(uint64_t vk_image);
 
 } // namespace Libs::Graphics
 

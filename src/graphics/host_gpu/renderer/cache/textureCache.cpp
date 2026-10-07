@@ -357,6 +357,18 @@ static std::mutex                                  g_recent_images_mutex;
 static std::array<RecentImageEvent, RecentImageRing> g_recent_images {};
 static uint64_t                                    g_recent_images_count = 0;
 
+uint64_t RecentImageCreatedTick(uint64_t vk_image) {
+	std::scoped_lock lock {g_recent_images_mutex};
+	const auto       kept = std::min<uint64_t>(g_recent_images_count, RecentImageRing);
+	for (uint64_t back = 1; back <= kept; ++back) {
+		const auto& event = g_recent_images[(g_recent_images_count - back) % RecentImageRing];
+		if (event.image == vk_image && !event.freed) {
+			return event.tick;
+		}
+	}
+	return 0;
+}
+
 void NoteRecentImage(const GraphicContext& graphics, const Image& image, bool freed, uint64_t tick) {
 	RecentImageEvent event {};
 	event.freed   = freed;
