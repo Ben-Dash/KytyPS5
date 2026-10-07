@@ -191,7 +191,8 @@ TileManager::Scratch TileManager::AllocateScratch(uint64_t size) {
 	RequireVulkanSuccess(static_cast<vk::Result>(vmaCreateBuffer(
 	                         m_graphics.allocator, &raw, &allocate, &buffer, &memory, nullptr)),
 	                     "allocate TileManager scratch buffer");
-	HandleRegistry::Register(reinterpret_cast<uint64_t>(buffer), HandleRegistry::Kind::Buffer);
+	HandleRegistry::Register(reinterpret_cast<uint64_t>(buffer), HandleRegistry::Kind::Buffer,
+	                         "TileManager scratch");
 	return {buffer, memory, size, create.size};
 }
 

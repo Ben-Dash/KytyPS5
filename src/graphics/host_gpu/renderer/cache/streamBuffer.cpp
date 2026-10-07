@@ -5,6 +5,8 @@
 #include "common/profiler.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/handleRegistry.h"
+
+#include <cstdio>
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
@@ -114,7 +116,15 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
 	m_buffer = native_buffer;
-	HandleRegistry::Register(reinterpret_cast<uint64_t>(native_buffer), HandleRegistry::Kind::Buffer);
+	if (HandleRegistry::CheckEnabled()) {
+		static constexpr const char* UsageNames[] = {"device-local", "upload", "download", "stream"};
+		char origin[96] = {};
+		std::snprintf(origin, sizeof(origin), "Buffer %s guest=0x%llx size=0x%llx",
+		              UsageNames[static_cast<uint32_t>(usage) % 4u],
+		              static_cast<unsigned long long>(cpu_address), static_cast<unsigned long long>(size));
+		HandleRegistry::Register(reinterpret_cast<uint64_t>(native_buffer), HandleRegistry::Kind::Buffer,
+		                         origin);
+	}
 	if (with_bda) {
 		vk::BufferDeviceAddressInfo address_info {};
 		address_info.buffer = m_buffer;

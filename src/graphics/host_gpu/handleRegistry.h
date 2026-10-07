@@ -11,7 +11,10 @@ namespace Libs::Graphics::HandleRegistry {
 
 enum class Kind : uint8_t { Buffer, Image, ImageView };
 
-void Register(uint64_t handle, Kind kind);
+// `origin` describes the object (kind of buffer, guest address, size; extent and format), kept
+// for the stale report.
+void Register(uint64_t handle, Kind kind, const char* origin = nullptr);
+// Remembers the destroying call stack (module offsets) for the stale report.
 void Unregister(uint64_t handle);
 
 // The generation the handle was registered under: 0 for a handle never registered (not checked
