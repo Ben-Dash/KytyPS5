@@ -51,6 +51,35 @@ constexpr uint64_t GdsBufferSize = 64 * 1024;
 // Buffers registered in extended memory (1 TiB page-table hole diagnostic, see ChangeRegister).
 std::atomic<uint64_t> g_extended_registers {0};
 
+// copyBuffer is not bounds-checked by the device: a region past either VkBuffer reads or writes
+// past its allocation. Such regions are shortened to end inside both (dropped when nothing is
+// left) and logged. A size of 0 for `source_size` skips the source check (unknown buffer).
+void ClampBufferCopies(std::vector<vk::BufferCopy>& copies, uint64_t source_size,
+                       uint64_t destination_size, const char* operation, uint64_t guest) {
+	bool dropped = false;
+	for (auto& copy: copies) {
+		uint64_t limit = destination_size > copy.dstOffset ? destination_size - copy.dstOffset : 0;
+		if (source_size != 0) {
+			limit = std::min(limit, source_size > copy.srcOffset ? source_size - copy.srcOffset : 0);
+		}
+		if (copy.size <= limit) {
+			continue;
+		}
+		std::printf("copy-overrun-clamped: %s guest=0x%016" PRIx64 " src_offset=0x%" PRIx64
+		            " dst_offset=0x%" PRIx64 " size=0x%" PRIx64 " source_size=0x%" PRIx64
+		            " destination_size=0x%" PRIx64 " kept=0x%" PRIx64 "\n",
+		            operation, guest, static_cast<uint64_t>(copy.srcOffset),
+		            static_cast<uint64_t>(copy.dstOffset), static_cast<uint64_t>(copy.size),
+		            source_size, destination_size, limit);
+		std::fflush(stdout);
+		copy.size = limit;
+		dropped |= limit == 0;
+	}
+	if (dropped) {
+		std::erase_if(copies, [](const vk::BufferCopy& copy) { return copy.size == 0; });
+	}
+}
+
 } // namespace
 
 // KYTY_DEBUG_BDA_STATS=1: every 5 s, how the GPU thread's buffer synchronization spends its time,
@@ -334,8 +363,11 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
 	                       vk::PipelineStageFlagBits::eTransfer, {}, 0, nullptr, 1, &before, 0,
 	                       nullptr);
-	native.copyBuffer(buffer.Handle(), download->Handle(), static_cast<uint32_t>(copies.size()),
-	                  copies.data());
+	ClampBufferCopies(copies, buffer.Size(), download->Size(), "download", buffer.CpuAddress());
+	if (!copies.empty()) {
+		native.copyBuffer(buffer.Handle(), download->Handle(), static_cast<uint32_t>(copies.size()),
+		                  copies.data());
+	}
 
 	auto after          = before;
 	after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
@@ -1152,8 +1184,12 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 		native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
 		                       vk::PipelineStageFlagBits::eTransfer,
 		                       vk::DependencyFlagBits::eByRegion, 0, nullptr, 1, &before, 0, nullptr);
-		native.copyBuffer(source, buffer.Handle(), static_cast<uint32_t>(copies.size()),
-		                  copies.data());
+		ClampBufferCopies(copies, source == m_staging_buffer.Handle() ? m_staging_buffer.Size() : 0,
+		                  buffer.Size(), "upload", buffer.CpuAddress());
+		if (!copies.empty()) {
+			native.copyBuffer(source, buffer.Handle(), static_cast<uint32_t>(copies.size()),
+			                  copies.data());
+		}
 		auto after          = before;
 		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
 		after.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;

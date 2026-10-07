@@ -70,10 +70,12 @@ public:
 	                                   std::optional<ImageSubresourceRange> range);
 	void Transit(vk::ImageLayout destination_layout, vk::AccessFlags2 destination_access,
 	             std::optional<ImageSubresourceRange> range, vk::CommandBuffer command_buffer);
+	// [offset, offset + size) is the guest data's range in `buffer`; `capacity` is the whole
+	// VkBuffer's size. Regions that would run past `capacity` are clamped (see ClampCopyRegions).
 	void Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer, uint64_t offset,
-	            uint64_t size);
+	            uint64_t size, uint64_t capacity);
 	void Download(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer, uint64_t offset,
-	              uint64_t size);
+	              uint64_t size, uint64_t capacity);
 	void CopyImage(Image& source);
 	void Resolve(Image& source, const ImageSubresourceRange& source_range,
 	             const ImageSubresourceRange& destination_range);

@@ -17,12 +17,150 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <cinttypes>
 #include <fmt/format.h>
+#include <mutex>
+#include <span>
+#include <unordered_set>
+#include <vector>
+#include <vulkan/vulkan_format_traits.hpp>
 #include <xxhash.h>
 
 namespace Libs::Graphics {
 
 namespace {
+
+// The bytes and texel block a buffer<->image copy of `aspect` takes per block (depth and stencil
+// planes have their own buffer layouts).
+struct CopyBlock {
+	uint32_t bytes;
+	uint32_t width;
+	uint32_t height;
+};
+
+[[nodiscard]] CopyBlock CopyBlockOf(vk::Format format, vk::ImageAspectFlags aspect) {
+	if (aspect & vk::ImageAspectFlagBits::eStencil) {
+		return {1u, 1u, 1u};
+	}
+	if (aspect & vk::ImageAspectFlagBits::eDepth) {
+		const bool d16 = format == vk::Format::eD16Unorm || format == vk::Format::eD16UnormS8Uint;
+		return {d16 ? 2u : 4u, 1u, 1u};
+	}
+	const auto extent = vk::blockExtent(format);
+	return {vk::blockSize(format), std::max<uint32_t>(extent[0], 1u), std::max<uint32_t>(extent[1], 1u)};
+}
+
+// The buffer bytes a region reaches: its offset plus every layer's rows up to the last block.
+[[nodiscard]] uint64_t CopyRegionEnd(const vk::BufferImageCopy& region, const CopyBlock& block,
+                                     uint32_t layers) {
+	const auto blocks = [](uint32_t texels, uint32_t size) {
+		return static_cast<uint64_t>((texels + size - 1u) / size);
+	};
+	const auto width        = blocks(region.imageExtent.width, block.width);
+	const auto rows         = blocks(region.imageExtent.height, block.height);
+	const auto row_length   = blocks(region.bufferRowLength != 0 ? region.bufferRowLength
+	                                                             : region.imageExtent.width,
+	                                 block.width);
+	const auto image_height = blocks(region.bufferImageHeight != 0 ? region.bufferImageHeight
+	                                                               : region.imageExtent.height,
+	                                 block.height);
+	if (width == 0 || rows == 0 || layers == 0) {
+		return region.bufferOffset;
+	}
+	return region.bufferOffset +
+	       ((layers - 1u) * image_height * row_length + (rows - 1u) * row_length + width) *
+	           block.bytes;
+}
+
+[[nodiscard]] uint32_t CopyRegionLayers(const vk::BufferImageCopy& region) {
+	return std::max(region.imageSubresource.layerCount, 1u) * std::max(region.imageExtent.depth, 1u);
+}
+
+// Logs a message once per guest address (the first 256 addresses).
+[[nodiscard]] bool FirstCopyNote(uint64_t address) {
+	static std::mutex                   mutex;
+	static std::unordered_set<uint64_t> seen;
+	std::lock_guard                     lock(mutex);
+	return seen.size() < 256u && seen.insert(address).second;
+}
+
+// Buffer<->image copies are not bounds-checked by the device: a region that runs past the
+// VkBuffer reads or writes past its allocation (a lost device at the end of the memory block).
+// Regions are clamped to whole layers, then whole block rows, that end inside `capacity`; one
+// without a single row inside is dropped. A region past only the guest data range is logged.
+// Returns the regions to copy (`copies` itself when nothing changes).
+std::span<const vk::BufferImageCopy> ClampCopyRegions(const ImageInfo& info, vk::Format format,
+                                                      const char* operation,
+                                                      std::span<const vk::BufferImageCopy> copies,
+                                                      uint64_t offset, uint64_t size,
+                                                      uint64_t capacity,
+                                                      std::vector<vk::BufferImageCopy>& clamped) {
+	if (capacity == 0) {
+		capacity = offset + size;
+	}
+	const auto describe = [&](const char* prefix, uint64_t end) {
+		std::printf("%s %s guest=0x%016" PRIx64 " guest_size=0x%" PRIx64 " format=%u vkformat=%u "
+		            "tile=%u extent=%ux%ux%u levels=%u layers=%u buffer_offset=0x%" PRIx64
+		            " buffer_size=0x%" PRIx64 " capacity=0x%" PRIx64 " needed_end=0x%" PRIx64 "\n",
+		            prefix, operation, info.data.address, info.data.size,
+		            static_cast<uint32_t>(info.guest_format), static_cast<uint32_t>(format),
+		            static_cast<uint32_t>(info.tile_mode), info.extent.width, info.extent.height,
+		            info.extent.depth, info.resources.levels, info.resources.layers, offset, size,
+		            capacity, end);
+		std::fflush(stdout);
+	};
+	bool changed = false;
+	for (size_t index = 0; index < copies.size(); ++index) {
+		const auto& region = copies[index];
+		const auto  block  = CopyBlockOf(format, region.imageSubresource.aspectMask);
+		const auto  layers = CopyRegionLayers(region);
+		const auto  end    = CopyRegionEnd(region, block, layers);
+		if (end <= capacity) {
+			if (end > offset + size && FirstCopyNote(info.data.address)) {
+				describe("copy-footprint-exceeds-guest:", end);
+			}
+			if (changed) {
+				clamped.push_back(region);
+			}
+			continue;
+		}
+		if (!changed) {
+			clamped.assign(copies.begin(), copies.begin() + static_cast<std::ptrdiff_t>(index));
+			changed = true;
+		}
+		describe("copy-overrun-clamped:", end);
+		auto fitted      = region;
+		auto fit_layers  = layers;
+		while (fit_layers > 1u && CopyRegionEnd(region, block, fit_layers) > capacity) {
+			fit_layers--;
+		}
+		if (fit_layers < layers) {
+			if (region.imageExtent.depth > 1u) {
+				fitted.imageExtent.depth = fit_layers;
+			} else {
+				fitted.imageSubresource.layerCount = fit_layers;
+			}
+		}
+		if (CopyRegionEnd(fitted, block, fit_layers) > capacity) {
+			// One layer left: keep the block rows that fit.
+			auto rows = (fitted.imageExtent.height + block.height - 1u) / block.height;
+			while (rows > 0u) {
+				fitted.imageExtent.height = std::min(rows * block.height, region.imageExtent.height);
+				if (CopyRegionEnd(fitted, block, 1u) <= capacity) {
+					break;
+				}
+				rows--;
+			}
+			if (rows == 0u) {
+				std::printf("copy-overrun-clamped: %s guest=0x%016" PRIx64 " region %zu dropped\n",
+				            operation, info.data.address, index);
+				continue;
+			}
+		}
+		clamped.push_back(fitted);
+	}
+	return changed ? std::span<const vk::BufferImageCopy>(clamped) : copies;
+}
 
 [[nodiscard]] vk::ImageType HostImageType(Prospero::ImageType type) {
 	switch (type) {
@@ -258,9 +396,11 @@ void Image::Transit(vk::ImageLayout destination_layout, vk::AccessFlags2 destina
 }
 
 void Image::Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer, uint64_t offset,
-                   uint64_t size) {
+                   uint64_t size, uint64_t capacity) {
 	NoteNullImage(*this, "upload");
 	EXIT_IF(copies.empty() || buffer == nullptr || size == 0);
+	std::vector<vk::BufferImageCopy> clamped;
+	copies = ClampCopyRegions(info, backing.format, "upload", copies, offset, size, capacity, clamped);
 	m_scheduler.EndRendering();
 	vk::BufferMemoryBarrier2 buffer_barrier {};
 	buffer_barrier.srcStageMask        = vk::PipelineStageFlagBits2::eAllCommands;
@@ -284,8 +424,10 @@ void Image::Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffe
 	auto command                        = m_scheduler.Current().Handle();
 	GpuZones::Mark(command, DrainStats::Zone::ImageCopy);
 	command.pipelineBarrier2(dependency);
-	command.copyBufferToImage(buffer, backing.image, vk::ImageLayout::eTransferDstOptimal,
-	                          static_cast<uint32_t>(copies.size()), copies.data());
+	if (!copies.empty()) {
+		command.copyBufferToImage(buffer, backing.image, vk::ImageLayout::eTransferDstOptimal,
+		                          static_cast<uint32_t>(copies.size()), copies.data());
+	}
 	buffer_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
 	buffer_barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
 	buffer_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
@@ -299,9 +441,12 @@ void Image::Upload(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffe
 }
 
 void Image::Download(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer,
-                     uint64_t offset, uint64_t size) {
+                     uint64_t offset, uint64_t size, uint64_t capacity) {
 	NoteNullImage(*this, "download");
 	EXIT_IF(copies.empty() || buffer == nullptr || size == 0);
+	std::vector<vk::BufferImageCopy> clamped;
+	copies = ClampCopyRegions(info, backing.format, "download", copies, offset, size, capacity,
+	                          clamped);
 	m_scheduler.EndRendering();
 	vk::BufferMemoryBarrier2 buffer_barrier {};
 	buffer_barrier.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
@@ -326,8 +471,10 @@ void Image::Download(std::span<const vk::BufferImageCopy> copies, vk::Buffer buf
 	auto command                        = m_scheduler.Current().Handle();
 	GpuZones::Mark(command, DrainStats::Zone::ImageCopy);
 	command.pipelineBarrier2(dependency);
-	command.copyImageToBuffer(backing.image, vk::ImageLayout::eTransferSrcOptimal, buffer,
-	                          static_cast<uint32_t>(copies.size()), copies.data());
+	if (!copies.empty()) {
+		command.copyImageToBuffer(backing.image, vk::ImageLayout::eTransferSrcOptimal, buffer,
+		                          static_cast<uint32_t>(copies.size()), copies.data());
+	}
 	buffer_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eCopy;
 	buffer_barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
 	buffer_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAllCommands;

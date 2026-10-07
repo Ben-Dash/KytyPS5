@@ -468,7 +468,7 @@ TileManager::Result TileManager::Detile(vk::Buffer tiled, uint64_t tiled_offset,
 	DeferRelease(scratch);
 	Record(tiled, tiled_offset, tiled_capacity, scratch.buffer, 0, scratch.size, dispatches,
 	       true);
-	return {scratch.buffer, 0, linear_capacity};
+	return {scratch.buffer, 0, linear_capacity, scratch.capacity};
 }
 
 void TileManager::Tile(vk::Buffer linear, uint64_t linear_offset, uint64_t linear_capacity,
@@ -500,7 +500,7 @@ void TileManager::TileImage(Image& image, std::span<const vk::BufferImageCopy> r
 	Prepare(true, tiled_capacity, linear_capacity, infos, 0, target_base, dispatches, transform);
 	auto linear = AllocateScratch(Common::AlignUp(linear_capacity, 4));
 	DeferRelease(linear);
-	image.Download(regions, linear.buffer, 0, linear.size);
+	image.Download(regions, linear.buffer, 0, linear.size, linear.capacity);
 	Record(linear.buffer, 0, linear_capacity, tiled, tiled_offset, tiled_capacity,
 	       dispatches, false);
 }
@@ -508,7 +508,7 @@ void TileManager::TileImage(Image& image, std::span<const vk::BufferImageCopy> r
 TileManager::Result TileManager::GetScratchBuffer(uint64_t size) {
 	auto scratch = AllocateScratch(Common::AlignUp(size, 4));
 	DeferRelease(scratch);
-	return {scratch.buffer, 0, scratch.size};
+	return {scratch.buffer, 0, scratch.size, scratch.capacity};
 }
 
 TileManager::StorageBinding TileManager::BindStorage(Result buffer, uint64_t size) const {
@@ -774,7 +774,7 @@ TileManager::Result TileManager::TransformColor(Result input, ColorTransform tra
                                                 bool to_host) {
 	auto output = AllocateScratch(input.size);
 	DeferRelease(output);
-	Result result {output.buffer, 0, output.size};
+	Result result {output.buffer, 0, output.size, output.capacity};
 	TransformColor(input, result, transform, to_host);
 	return result;
 }

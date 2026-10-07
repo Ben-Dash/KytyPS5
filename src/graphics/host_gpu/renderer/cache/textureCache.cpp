@@ -881,7 +881,8 @@ bool TextureCache::CopyD16(Image& destination, Image& source) {
 	};
 	const bool d32 = DepthAspectTransferFormat(depth.backing.format) == vk::Format::eD32Sfloat;
 	if (source_depth) {
-		source.Download(depth_copies, depth_buffer.buffer, depth_buffer.offset, depth_buffer.size);
+		source.Download(depth_copies, depth_buffer.buffer, depth_buffer.offset, depth_buffer.size,
+		                depth_buffer.capacity);
 		m_tiler.ConvertD16(depth_buffer, color_buffer, TileManager::D16Direction::Demote, d32,
 		                   {.width               = promote_layout.width,
 		                    .height              = promote_layout.height,
@@ -891,13 +892,14 @@ bool TextureCache::CopyD16(Image& destination, Image& source) {
 		                    .source_slice_stride = promote_layout.target_slice_stride,
 		                    .target_slice_stride = promote_layout.source_slice_stride});
 		destination.Upload(color_copies, color_buffer.buffer, color_buffer.offset,
-		                   color_buffer.size);
+		                   color_buffer.size, color_buffer.capacity);
 	} else {
-		source.Download(color_copies, color_buffer.buffer, color_buffer.offset, color_buffer.size);
+		source.Download(color_copies, color_buffer.buffer, color_buffer.offset, color_buffer.size,
+		                color_buffer.capacity);
 		m_tiler.ConvertD16(color_buffer, depth_buffer, TileManager::D16Direction::Promote, d32,
 		                   promote_layout);
 		destination.Upload(depth_copies, depth_buffer.buffer, depth_buffer.offset,
-		                   depth_buffer.size);
+		                   depth_buffer.size, depth_buffer.capacity);
 	}
 	return true;
 }
@@ -1322,11 +1324,25 @@ void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_off
 		for (auto& copy: copies) {
 			copy.bufferOffset += linear.offset;
 		}
-		destination.Upload(copies, linear.buffer, linear.offset, linear.size);
+		destination.Upload(copies, linear.buffer, linear.offset, linear.size, linear.capacity);
 	};
 
 	if (binding != BindingType::DepthTarget) {
 		const auto& info = image.info;
+		// Ghost of Yotei's terrain images (513x513 R32F/R8) are created where the early device
+		// losses happen: note any with more than one level or layer (a larger upload footprint).
+		if (info.extent.width == 513u && info.extent.height == 513u &&
+		    (info.resources.levels > 1u || info.resources.layers > 1u)) {
+			static std::atomic<uint32_t> noted {0};
+			if (noted.fetch_add(1, std::memory_order_relaxed) < 16u) {
+				std::printf("copy-terrain-upload: guest=0x%016" PRIx64 " size=0x%" PRIx64
+				            " format=%u tile=%u levels=%u layers=%u\n",
+				            info.data.address, info.data.size,
+				            static_cast<uint32_t>(info.guest_format),
+				            static_cast<uint32_t>(info.tile_mode), info.resources.levels,
+				            info.resources.layers);
+			}
+		}
 		auto transfer = BuildTextureTransfer(image, binding, TransferDirection::Upload);
 		if (!transfer.valid) {
 			EXIT("TextureCache: invalid texture upload: binding=%u addr=0x%016" PRIx64
@@ -1338,7 +1354,7 @@ void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_off
 			     info.extent.height, info.extent.depth, info.pitch, info.resources.levels,
 			     info.resources.layers, info.samples);
 		}
-		TileManager::Result linear {source.Handle(), source_offset, info.data.size};
+		TileManager::Result linear {source.Handle(), source_offset, info.data.size, source.Size()};
 		if (!transfer.tiles.empty()) {
 			linear = m_tiler.Detile(source.Handle(), source_offset, info.data.size,
 			                        transfer.LinearSize(), transfer.tiles, transfer.color_transform);
@@ -1968,7 +1984,7 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	keeper.layers = info.resources.layers;
 	keeper.pitch  = info.pitch;
 	keeper.size   = size;
-	depth.Download(copies, keeper.buffer->Handle(), 0, size);
+	depth.Download(copies, keeper.buffer->Handle(), 0, size, keeper.buffer->Size());
 }
 
 // The kept stencil into `image`: its stencil plane (`stencil_aspect`, a depth image replacing a
@@ -2000,7 +2016,7 @@ bool TextureCache::RestoreStencil(Image& image, bool stencil_aspect) {
 	    BuildDepthCopies(info, static_cast<uint64_t>(keeper.pitch) * keeper.extent.height,
 	                     stencil_aspect ? vk::ImageAspectFlagBits::eStencil
 	                                    : vk::ImageAspectFlagBits::eColor);
-	image.Upload(copies, keeper.buffer->Handle(), 0, keeper.size);
+	image.Upload(copies, keeper.buffer->Handle(), 0, keeper.size, keeper.buffer->Size());
 	return true;
 }
 
@@ -2808,7 +2824,8 @@ void TextureCache::DownloadDepth(Image& image, Buffer& destination, uint64_t des
 			for (auto& copy: copies) {
 				copy.bufferOffset += destination_offset;
 			}
-			image.Download(copies, destination.Handle(), destination_offset, info.data.size);
+			image.Download(copies, destination.Handle(), destination_offset, info.data.size,
+			               destination.Size());
 			return;
 		}
 		const auto tiles = BuildDepthTiles(info);
@@ -2822,7 +2839,7 @@ void TextureCache::DownloadDepth(Image& image, Buffer& destination, uint64_t des
 		copies[layer].bufferOffset = transfer_slice * layer;
 	}
 	auto host_linear = m_tiler.GetScratchBuffer(transfer_size);
-	image.Download(copies, host_linear.buffer, 0, host_linear.size);
+	image.Download(copies, host_linear.buffer, 0, host_linear.size, host_linear.capacity);
 	const bool tiled        = info.IsTiled();
 	auto       guest_linear = tiled ? m_tiler.GetScratchBuffer(info.data.size)
 	                                : TileManager::Result {destination.Handle(), destination_offset,
@@ -2863,7 +2880,7 @@ void TextureCache::DownloadImage(Image& image, Buffer& destination, uint64_t des
 	if (texture.tiles.empty()) {
 		if (transform != ColorTransform::None) {
 			auto linear = m_tiler.GetScratchBuffer(destination_size);
-			image.Download(texture.regions, linear.buffer, 0, linear.size);
+			image.Download(texture.regions, linear.buffer, 0, linear.size, linear.capacity);
 			m_tiler.TransformColor(linear,
 			                       {destination.Handle(), destination_offset, destination_size},
 			                       transform, false);
@@ -2872,7 +2889,8 @@ void TextureCache::DownloadImage(Image& image, Buffer& destination, uint64_t des
 		for (auto& copy: texture.regions) {
 			copy.bufferOffset += destination_offset;
 		}
-		image.Download(texture.regions, destination.Handle(), destination_offset, destination_size);
+		image.Download(texture.regions, destination.Handle(), destination_offset, destination_size,
+		               destination.Size());
 		return;
 	}
 
@@ -3311,7 +3329,7 @@ void TextureCache::DebugDumpImages() {
 		vk::BufferImageCopy copy {};
 		copy.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
 		copy.imageExtent      = vk::Extent3D {width, height, 1};
-		image.Download(std::span(&copy, 1), buffer.Handle(), 0, size);
+		image.Download(std::span(&copy, 1), buffer.Handle(), 0, size, buffer.Size());
 		m_scheduler.FlushAndWait();
 		buffer.Invalidate(0, size);
 		const auto path = fmt::format("_ImageDump/{:x}_{}_{}x{}_{}.raw", image.info.data.address, frame,
