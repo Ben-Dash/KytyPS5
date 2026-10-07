@@ -1482,7 +1482,9 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 			result.valid = true;
 		}
 	};
-	const auto threads = std::max(Config::PipelineCompileThreads(), 2u);
+	// As before the compute pipeline queue (whose thread count is configured): translating with
+	// more threads gained little and widens any race in the translator.
+	const auto threads   = std::clamp(std::thread::hardware_concurrency(), 2u, 8u) - 1u;
 	const auto translate = [&](std::span<const size_t> group) {
 		indices = group;
 		next.store(0);
