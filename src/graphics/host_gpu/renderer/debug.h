@@ -328,6 +328,8 @@ void DebugFrameRepeatFlip();
 // anti-aliasing. KYTY_DEBUG_FRAME_PASSES_COUNT=<n> frames (default 2). GPU thread only.
 [[nodiscard]] bool FramePassesRecording() noexcept;
 void               FramePassesFlip() noexcept;
+// KYTY_DEBUG_DRAW_REPEAT=1: see NoteDrawRepeat (renderDraw.cpp). Called once per flip.
+void DrawRepeatFlip();
 // KYTY_DEBUG_WATCH (see debugWatch.cpp). Called once per flip.
 void DebugWatchTick();
 

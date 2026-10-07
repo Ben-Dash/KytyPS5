@@ -57,6 +57,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -761,6 +762,94 @@ static bool DrawHasValidVertexShader(const HW::Shader& sh_ctx) {
 
 	const auto& vs = sh_ctx.GetVs();
 	return vs.es_regs.data_addr != 0;
+}
+
+// KYTY_DEBUG_DRAW_REPEAT=1 prints, every 120 flips, how many draws a record kept across frames
+// could replay (the Demon's Souls fork's draw records, keyed by the shader addresses and the user
+// data registers): the share whose key the previous frame drew, one of the last four frames drew,
+// and two of them drew (a record stored on the second sighting), and as an upper bound the share
+// whose shader addresses alone the previous frame drew. Unlike KYTY_DEBUG_FRAME_REPEAT it counts
+// draws, not stages, and needs no KYTY_DEBUG_DRAW_PHASES.
+static bool DrawRepeatEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_DRAW_REPEAT") != nullptr;
+	return enabled;
+}
+
+struct DrawRepeat {
+	static constexpr size_t Frames = 4;
+
+	std::mutex                                       mutex;
+	std::array<std::unordered_set<uint64_t>, Frames> keys;
+	std::array<std::unordered_set<uint64_t>, Frames> shaders;
+	size_t                                           current         = 0;
+	uint64_t                                         draws           = 0;
+	uint64_t                                         previous        = 0;
+	uint64_t                                         recent          = 0;
+	uint64_t                                         second_sighting = 0;
+	uint64_t                                         shaders_only    = 0;
+	uint64_t                                         flips           = 0;
+};
+static DrawRepeat g_draw_repeat;
+
+static uint64_t HashUserSgprs(const HW::UserSgprInfo& sgprs, uint64_t hash) {
+	for (uint32_t i = 0; i < sgprs.count && i < static_cast<uint32_t>(HW::UserSgprInfo::SGPRS_MAX);
+	     i++) {
+		hash = (hash ^ sgprs.value[i]) * 0x100000001b3ull;
+	}
+	return (hash ^ sgprs.count) * 0x100000001b3ull;
+}
+
+static void NoteDrawRepeat(const HW::Shader& sh_ctx) {
+	const auto& vs = sh_ctx.GetVs();
+	const auto& ps = sh_ctx.GetPs();
+	uint64_t    shader_key = 0xcbf29ce484222325ull;
+	for (const uint64_t addr: {vs.es_regs.data_addr, vs.gs_regs.data_addr, vs.hs_regs.data_addr,
+	                           ps.ps_regs.data_addr}) {
+		shader_key = (shader_key ^ addr) * 0x100000001b3ull;
+	}
+	uint64_t key = HashUserSgprs(vs.hs_user_sgpr, shader_key);
+	key          = HashUserSgprs(vs.gs_user_sgpr, key);
+	key          = HashUserSgprs(ps.ps_user_sgpr, key);
+
+	auto&           state = g_draw_repeat;
+	std::lock_guard lock(state.mutex);
+	const size_t    last  = (state.current + DrawRepeat::Frames - 1) % DrawRepeat::Frames;
+	uint32_t        seen  = 0;
+	for (size_t i = 0; i < DrawRepeat::Frames; i++) {
+		if (i != state.current && state.keys[i].contains(key)) {
+			seen++;
+		}
+	}
+	state.draws++;
+	state.previous += state.keys[last].contains(key) ? 1 : 0;
+	state.recent += seen != 0 ? 1 : 0;
+	state.second_sighting += seen >= 2 ? 1 : 0;
+	state.shaders_only += state.shaders[last].contains(shader_key) ? 1 : 0;
+	state.keys[state.current].insert(key);
+	state.shaders[state.current].insert(shader_key);
+}
+
+void DrawRepeatFlip() {
+	if (!DrawRepeatEnabled()) {
+		return;
+	}
+	auto&           state = g_draw_repeat;
+	std::lock_guard lock(state.mutex);
+	if (++state.flips % 120 == 0 && state.draws != 0) {
+		const auto percent = [&](uint64_t count) {
+			return 100.0 * static_cast<double>(count) / static_cast<double>(state.draws);
+		};
+		std::printf("draw-repeat: draws/frame=%llu key in previous frame=%.1f%% in last 4 frames=%.1f%% "
+		            "in 2 of them=%.1f%% shaders only, previous frame=%.1f%%\n",
+		            static_cast<unsigned long long>(state.draws / 120), percent(state.previous),
+		            percent(state.recent), percent(state.second_sighting),
+		            percent(state.shaders_only));
+		std::fflush(stdout);
+		state.draws = state.previous = state.recent = state.second_sighting = state.shaders_only = 0;
+	}
+	state.current = (state.current + 1) % DrawRepeat::Frames;
+	state.keys[state.current].clear();
+	state.shaders[state.current].clear();
 }
 
 static bool PixelShaderHasDepthOrCoverageSideEffects(const HW::ShaderRegisters& sh_regs) {
@@ -3067,6 +3156,9 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 		g_pm4_ops.outcome = Pm4OpTimer::NoShader;
 		return;
 	}
+	if (DrawRepeatEnabled()) [[unlikely]] {
+		NoteDrawRepeat(sh_ctx);
+	}
 
 	if (graphics_debug_dump_enabled()) {
 		LOGF("GraphicsRenderDrawIndex():Shader:\n");
@@ -3226,6 +3318,9 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 	if (!DrawHasValidVertexShader(sh_ctx)) {
 		g_pm4_ops.outcome = Pm4OpTimer::NoShader;
 		return;
+	}
+	if (DrawRepeatEnabled()) [[unlikely]] {
+		NoteDrawRepeat(sh_ctx);
 	}
 
 	if (graphics_debug_dump_enabled()) {
