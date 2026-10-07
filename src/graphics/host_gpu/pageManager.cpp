@@ -14,6 +14,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -115,6 +116,21 @@ struct DeferredProtect {
 std::mutex                   g_deferred_mutex;
 std::vector<DeferredProtect> g_deferred;
 std::atomic<uint64_t>        g_deferred_count {0};
+// Split mode: g_deferred_mutex only guards the queue and is never held during a protection
+// change, so the GPU thread queueing a change no longer waits for the upload helper's
+// VirtualProtect calls. Whoever runs queued changes holds g_run_mutex (taken before
+// g_deferred_mutex) from taking them off the queue until they are made, which keeps a page's
+// changes in order; g_deferred_count then counts the queued and the running changes.
+// KYTY_DEFER_PROTECTS_SPLIT=0 runs them under g_deferred_mutex as before.
+std::mutex g_run_mutex;
+
+bool SplitEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_DEFER_PROTECTS_SPLIT");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
 thread_local bool            t_defer_protects = false;
 thread_local uint64_t        t_deferred_pushes = 0;
 
@@ -143,6 +159,35 @@ void RunDeferredOverlappingLocked(uint64_t vaddr, uint64_t size) noexcept {
 	g_deferred_count.store(kept, std::memory_order_release);
 }
 
+// Split mode: runs the queued changes (all, or those overlapping the range) outside
+// g_deferred_mutex.
+void RunDeferredSplit(bool all, uint64_t vaddr = 0, uint64_t size = 0) noexcept {
+	thread_local std::vector<DeferredProtect> batch;
+	std::scoped_lock                          run(g_run_mutex);
+	{
+		std::scoped_lock lock(g_deferred_mutex);
+		if (all) {
+			batch.swap(g_deferred);
+		} else {
+			size_t kept = 0;
+			for (size_t i = 0; i < g_deferred.size(); i++) {
+				const auto& item = g_deferred[i];
+				if (item.vaddr < vaddr + size && vaddr < item.vaddr + item.size) {
+					batch.push_back(item);
+				} else {
+					g_deferred[kept++] = item;
+				}
+			}
+			g_deferred.resize(kept);
+		}
+	}
+	for (const auto& item: batch) {
+		ProtectNow(item.vaddr, item.size, item.mode);
+	}
+	g_deferred_count.fetch_sub(batch.size(), std::memory_order_release);
+	batch.clear();
+}
+
 } // namespace
 
 uint64_t PageManager::DeferredPushes() noexcept {
@@ -155,6 +200,10 @@ void PageManager::DeferProtects(bool defer) noexcept {
 
 void PageManager::RunDeferredProtects() noexcept {
 	if (g_deferred_count.load(std::memory_order_acquire) == 0) {
+		return;
+	}
+	if (SplitEnabled()) {
+		RunDeferredSplit(true);
 		return;
 	}
 	std::scoped_lock lock(g_deferred_mutex);
@@ -284,8 +333,13 @@ struct PageManager::Impl {
 			return;
 		}
 		if (g_deferred_count.load(std::memory_order_acquire) != 0) {
-			std::scoped_lock lock(g_deferred_mutex);
-			RunDeferredOverlappingLocked(vaddr, size);
+			if (SplitEnabled()) {
+				// Changes queued later for these pages wait for this region's lock, held here.
+				RunDeferredSplit(false, vaddr, size);
+			} else {
+				std::scoped_lock lock(g_deferred_mutex);
+				RunDeferredOverlappingLocked(vaddr, size);
+			}
 		}
 		ProtectNow(vaddr, size, mode);
 	}
