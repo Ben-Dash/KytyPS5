@@ -10,10 +10,10 @@
 // row here; the profile dialog and the launch pick it up from this table. Rows are sorted by the
 // expected gain, largest first, and the texts are written for players, not developers.
 struct EmulatorSwitch {
-	const char* name;     // Environment variable, also the key stored in the profile
-	const char* label;    // Check box text in the profile dialog
-	const char* tooltip;  // What it does, in plain words
-	const char* measured; // What it did in a measurement, or what it is for
+	const char* name;    // Environment variable, also the key stored in the profile
+	const char* label;   // Check box text in the profile dialog
+	const char* tooltip; // What it does, in plain words
+	const char* verdict; // How it did in our tests, kept general: games react differently
 };
 
 inline constexpr std::array<EmulatorSwitch, 5> EMULATOR_SWITCHES = {{
@@ -21,30 +21,27 @@ inline constexpr std::array<EmulatorSwitch, 5> EMULATOR_SWITCHES = {{
      "When many game threads touch the same memory at once, they queue up and keep asking whether "
      "it is their turn, which keeps the processor busy with waiting. With this on, waiting threads "
      "pause between questions and let other work run. In theory the largest gain of these "
-     "switches, because the waiting used up almost half of the processor time in one test.",
-     "Measured in ASTRO BOT (Sky Garden): about 14 fps instead of 25, much slower. Leave it off."},
+     "switches.",
+     "In our tests this was much slower. May help some games."},
     {"KYTY_UNMAP_SKIP_DRAIN", "Skip needless waits when memory is freed",
      "When a game frees memory, the emulator normally waits until the graphics card has finished "
      "all its work. With this on, it skips that wait when the graphics card never used that "
      "memory. Can remove short hitches.",
-     "Measured in ASTRO BOT (Sky Garden): 25.7 fps instead of 25, within normal variation. At most "
-     "fewer hitches."},
+     "In our tests no clear difference. May reduce hitches in some games."},
     {"KYTY_DYNAMIC_DEPTH_BOUNDS", "Fewer graphics setups (depth range)",
      "Draws that differ only in one depth setting share one prepared graphics setup instead of "
      "each getting its own. That means fewer setups to prepare while playing. The first start "
      "with this on prepares the setups again once, so expect a slow first start.",
-     "Measured in ASTRO BOT (Sky Garden): about 9 % slower. Leave it off for now."},
+     "In our tests this was slightly slower. May help some games."},
     {"KYTY_DEBUG_DRAW_REPEAT", "Count repeating draws (diagnostics)",
-     "Does not make anything faster. Every 120 frames the console window shows how many drawing "
-     "steps look exactly like one from the last frames. That tells whether reusing them would "
-     "help in this game.",
-     "Gain: none, it only measures. In ASTRO BOT no draw repeated exactly, because the game moves "
-     "its data every frame."},
+     "Every 120 frames the console window shows how many drawing steps look exactly like one "
+     "from the last frames. That tells whether reusing them would help in this game.",
+     "Diagnostics only, no speed gain."},
     {"KYTY_PROTECT_EXEC_QUERY", "Old memory protection check (not recommended)",
-     "Brings back the old, slower way of checking whether game code may run from a piece of "
-     "memory: the emulator asks Windows each time instead of remembering it. Only there to "
-     "compare against the new way if a game misbehaves.",
-     "Measured in ASTRO BOT (Sky Garden): about 23 fps instead of 37, much slower. Leave it off."},
+     "Brings back the old way of checking whether game code may run from a piece of memory: the "
+     "emulator asks Windows each time instead of remembering it. Only there to compare against "
+     "the new way if a game misbehaves.",
+     "For comparison only, usually much slower."},
 }};
 
 #endif /* LAUNCHER_INCLUDE_EMULATORSWITCHES_H_ */

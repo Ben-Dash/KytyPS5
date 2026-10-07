@@ -338,7 +338,7 @@ void ConfigurationEditDialog::InitEmulatorSwitches() {
 		// Rich text, so Qt wraps the longer explanations instead of drawing one wide line
 		box->setToolTip(QStringLiteral("<p>%1</p><p><b>%2</b></p><p><i>%3=1</i></p>")
 		                    .arg(tr(entry.tooltip).toHtmlEscaped(),
-		                         tr(entry.measured).toHtmlEscaped(), name));
+		                         tr(entry.verdict).toHtmlEscaped(), name));
 		box->setProperty("switchName", name);
 		layout->addWidget(box);
 		m_switch_boxes.append(box);
