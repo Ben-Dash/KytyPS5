@@ -170,6 +170,7 @@ struct ShaderPixelInputInfo {
 	uint32_t                                       ps_perspective_sample_vgpr   = UINT32_MAX;
 	uint32_t                                       ps_perspective_centroid_vgpr = UINT32_MAX;
 	uint8_t                                        target_output_mode[8]        = {};
+	uint32_t                                       target_shader_mask           = UINT32_MAX;
 	std::array<Prospero::ColorComponentMapping, 8> target_export_mapping        = {};
 	uint32_t                                       scratch_size_dwords          = 0;
 	bool                                           ps_pos_x                     = false;
@@ -344,6 +345,7 @@ void CopyVertexInputInfo(ShaderVertexInputInfo& target, const ShaderVertexInputI
 [[nodiscard]] bool SameVertexInputInfo(const ShaderVertexInputInfo& a,
                                        const ShaderVertexInputInfo& b);
 [[nodiscard]] bool SamePixelInputInfo(const ShaderPixelInputInfo& a, const ShaderPixelInputInfo& b);
+uint32_t ShaderPixelExportTarget(uint32_t shader_mask, uint32_t export_index);
 
 void     ShaderDbgDumpInputInfo(const ShaderVertexInputInfo& info);
 void     ShaderDbgDumpInputInfo(const ShaderPixelInputInfo& info);
