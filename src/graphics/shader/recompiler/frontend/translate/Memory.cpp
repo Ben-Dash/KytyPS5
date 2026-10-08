@@ -185,7 +185,12 @@ Decoder::Operand MemorySourceAt(const Decoder::Instruction& decoded, uint32_t in
 		return decoded.src1;
 	}
 	if (decoded.family == Decoder::Family::MUBUF || decoded.family == Decoder::Family::MTBUF) {
+		// The D16 format stores and BYTE/SHORT_D16_HI sit between the D16 loads in the opcode
+		// enum; without their range they took the load order (data = vindex, index = soffset),
+		// and Ghost of Yotei's terrain index buffer (0041b6a03db7472d) got all stores at offset 0.
 		const bool store_or_atomic =
+		    (decoded.opcode >= Decoder::Opcode::BUFFER_STORE_FORMAT_D16_X &&
+		     decoded.opcode <= Decoder::Opcode::BUFFER_STORE_SHORT_D16_HI) ||
 		    (decoded.opcode >= Decoder::Opcode::BUFFER_STORE_FORMAT_X &&
 		     decoded.opcode <= Decoder::Opcode::BUFFER_STORE_FORMAT_XYZW) ||
 		    (decoded.opcode >= Decoder::Opcode::BUFFER_STORE_BYTE &&
