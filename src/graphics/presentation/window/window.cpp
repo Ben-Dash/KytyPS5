@@ -958,12 +958,9 @@ void WindowContext::UpdateTitle(bool new_frame) {
 	                         std::memory_order_relaxed);
 	static char title[128];
 	static char title_id[12];
-	static char app_ver[12];
 	static bool has_title = Loader::SystemContentParamSfoGetString("TITLE", title, sizeof(title));
 	static bool has_title_id =
 	    Loader::SystemContentParamSfoGetString("TITLE_ID", title_id, sizeof(title_id));
-	static bool has_app_ver =
-	    Loader::SystemContentParamSfoGetString("APP_VER", app_ver, sizeof(app_ver));
 	static const std::string processor_name = Common::GetSystemInfo().ProcessorName;
 
 #if KYTY_BUILD == KYTY_BUILD_DEBUG
@@ -976,11 +973,10 @@ void WindowContext::UpdateTitle(bool new_frame) {
 
 	const auto* device_name = graphic_ctx.GetPhysicalDeviceProperties().deviceName.data();
 	auto        text        = fmt::format(
-	    "[{} | {}] {}{}{}{}{}{}[{}] [{}], frame: {}, game fps: {:.1f}, presents/s: {:.1f}",
+	    "[{} | {}] {}{}{}{}[{}] [{}], frame: {}, game fps: {:.1f}",
 	    KYTY_BUILD_LABEL, build_type, (has_title ? title : ""), (has_title ? ", " : ""),
-	    (has_title_id ? title_id : ""), (has_title_id ? ", " : ""), (has_app_ver ? app_ver : ""),
-	    (has_app_ver ? " " : ""), device_name, processor_name, frame_statistics.TotalFrames(),
-	    frame_statistics.FrameRate(), frame_statistics.PresentRate());
+	    (has_title_id ? title_id : ""), (has_title_id ? " " : ""), device_name, processor_name,
+	    frame_statistics.TotalFrames(), frame_statistics.FrameRate());
 
 	struct TitleUpdate {
 		SDL_Window*  window;

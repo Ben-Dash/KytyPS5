@@ -63,8 +63,20 @@ static KYTY_SYSV_ABI int VideoOutVrrStatus_kP2L8t3j_aM() {
 	return OK;
 }
 
+// gWT7X8H0bYs (Yotei 02.002 polls it after flips): VRR status query (handle, int32_t* status).
+// Kyty presents at a fixed refresh rate, so VRR is reported as off. Same semantics as upstream
+// KytyPS5 836deab9 (VideoOutGetVrrStatus).
+static KYTY_SYSV_ABI int VideoOutVrrStatus_gWT7X8H0bYs(int /*handle*/, int32_t* status) {
+	if (status == nullptr) {
+		return VIDEO_OUT_ERROR_INVALID_ADDRESS;
+	}
+	*status = 0;
+	return OK;
+}
+
 LIB_DEFINE(InitVideoOutVrrStatus_1) {
 	LIB_FUNC("kP2L8t3j-aM", VideoOutVrrStatus_kP2L8t3j_aM);
+	LIB_FUNC("gWT7X8H0bYs", VideoOutVrrStatus_gWT7X8H0bYs);
 }
 
 } // namespace LibGen5::VrrStatus
