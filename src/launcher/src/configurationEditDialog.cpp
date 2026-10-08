@@ -136,10 +136,13 @@ static std::array<AudioMixSlider, 4> AudioMixSliders(Ui::ConfigurationEditDialog
 	          &AudioMixSettings::pad_speaker}}};
 }
 
+// Only two sliders are shown: game sound and the controller speaker on the PC. Master and music
+// stay hidden; music follows the game-sound slider (most games mix music into the main ports).
 static void SetAudioMixVisible(Ui::ConfigurationEditDialog& ui, bool visible) {
-	for (int row = 1; row <= 4; row++) {
-		ui.audioLayout->setRowVisible(row, visible);
-	}
+	ui.audioLayout->setRowVisible(1, false);
+	ui.audioLayout->setRowVisible(2, visible);
+	ui.audioLayout->setRowVisible(3, false);
+	ui.audioLayout->setRowVisible(4, visible);
 }
 
 ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* parent)
@@ -492,6 +495,7 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 		for (const auto& mix: AudioMixSliders(ui)) {
 			info.audio_mix.*mix.field = mix.slider->value();
 		}
+		info.audio_mix.music = info.audio_mix.main;
 	}
 	info.screen_resolution =
 	    TextToEnum<Configuration::Resolution>(ui.comboBox_screen_resolution->currentText());

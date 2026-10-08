@@ -124,7 +124,7 @@
          <layout class="QHBoxLayout" name="audio_main_layout">
           <item>
            <widget class="QSlider" name="slider_audio_main">
-            <property name="toolTip"><string>Game audio on the main output ports (most effects, and music in games that mix it there). 100% is unchanged.</string></property>
+            <property name="toolTip"><string>Everything the game plays on this PC except the controller-speaker sounds: effects, music, voices. 100% is unchanged; above 100% amplifies and can clip.</string></property>
             <property name="maximum"><number>200</number></property>
             <property name="singleStep"><number>5</number></property>
             <property name="pageStep"><number>10</number></property>
