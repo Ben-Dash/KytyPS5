@@ -151,7 +151,8 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	m_ui->setupUi(this);
 	SetAudioMixVisible(*m_ui, false);
 	for (const auto& mix: AudioMixSliders(*m_ui)) {
-		mix.slider->setMaximum(static_cast<int>(Config::MAX_AUDIO_VOLUME));
+		// The emulator accepts up to MAX_AUDIO_VOLUME; the launcher offers 150%, which is enough.
+		mix.slider->setMaximum(150);
 		connect(mix.slider, &QSlider::valueChanged, this,
 		        [label = mix.value](int value) {
 			label->setText(ConfigurationEditDialog::tr("%1%").arg(value));

@@ -99,8 +99,8 @@
          <layout class="QHBoxLayout" name="audio_master_layout">
           <item>
            <widget class="QSlider" name="slider_audio_master">
-            <property name="toolTip"><string>Everything the game plays on this PC (not the DualSense). 100% is unchanged; above 100% amplifies and can clip.</string></property>
-            <property name="maximum"><number>200</number></property>
+            <property name="toolTip"><string>Everything the game plays on this PC (not the DualSense). 100% is unchanged; up to 150%; above 100% amplifies and can clip.</string></property>
+            <property name="maximum"><number>150</number></property>
             <property name="singleStep"><number>5</number></property>
             <property name="pageStep"><number>10</number></property>
             <property name="value"><number>100</number></property>
@@ -124,8 +124,8 @@
          <layout class="QHBoxLayout" name="audio_main_layout">
           <item>
            <widget class="QSlider" name="slider_audio_main">
-            <property name="toolTip"><string>Everything the game plays on this PC except the controller-speaker sounds: effects, music, voices. 100% is unchanged; above 100% amplifies and can clip.</string></property>
-            <property name="maximum"><number>200</number></property>
+            <property name="toolTip"><string>Everything the game plays on this PC except the controller-speaker sounds: effects, music, voices. 100% is unchanged; up to 150%; above 100% amplifies and can clip.</string></property>
+            <property name="maximum"><number>150</number></property>
             <property name="singleStep"><number>5</number></property>
             <property name="pageStep"><number>10</number></property>
             <property name="value"><number>100</number></property>
@@ -150,7 +150,7 @@
           <item>
            <widget class="QSlider" name="slider_audio_music">
             <property name="toolTip"><string>Music the game plays on its own background-music ports. Has no effect on games that mix music into the main output.</string></property>
-            <property name="maximum"><number>200</number></property>
+            <property name="maximum"><number>150</number></property>
             <property name="singleStep"><number>5</number></property>
             <property name="pageStep"><number>10</number></property>
             <property name="value"><number>100</number></property>
@@ -175,7 +175,7 @@
           <item>
            <widget class="QSlider" name="slider_audio_pad_speaker">
             <property name="toolTip"><string>Sounds meant for the DualSense speaker when no DualSense plays them (no controller, or not wired/Bluetooth). The console speaker is small, so these are turned down by default.</string></property>
-            <property name="maximum"><number>200</number></property>
+            <property name="maximum"><number>150</number></property>
             <property name="singleStep"><number>5</number></property>
             <property name="pageStep"><number>10</number></property>
             <property name="value"><number>30</number></property>
