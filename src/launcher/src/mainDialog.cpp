@@ -314,15 +314,20 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	return args;
 }
 
-// The launcher's environment plus "1" for each switch the profile turns on (emulatorSwitches.h).
-// A switch already set in the environment keeps its value; one the profile leaves off is not
-// removed, so a .bat or system variable still works.
+// The launcher's environment plus "1" for each switch the profile turns on (emulatorSwitches.h),
+// and "0" for a title default it turns off (the emulator's title profile would turn it on). A
+// switch already set in the environment keeps its value, so a .bat or system variable still works.
 static QProcessEnvironment CreateEmulatorEnvironment(const Configuration& info) {
 	auto env = QProcessEnvironment::systemEnvironment();
 	for (const auto& entry: EMULATOR_SWITCHES) {
 		const auto name = QString::fromLatin1(entry.name);
-		if (info.emulator_switches.contains(name) && !env.contains(name)) {
+		if (env.contains(name)) {
+			continue;
+		}
+		if (IsSwitchOn(entry, info.emulator_switches, info.title_id)) {
 			env.insert(name, QStringLiteral("1"));
+		} else if (IsSwitchDefaultOn(entry, info.title_id)) {
+			env.insert(name, QStringLiteral("0"));
 		}
 	}
 	return env;

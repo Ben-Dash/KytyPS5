@@ -312,7 +312,10 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		options.config.bindless_images_enabled = true;
 		KYTY_SET_DEFAULT_SWITCH("KYTY_DEBUG_SKIP_SHADERS",
 		                        "964747887d898821,f0a524a3bcc360f1,e374a8dfad01be72,f08cf07763b51d49");
-		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, GPU-hang shaders skipped\n", title_id.c_str());
+		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
+		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
+		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, GPU-hang shaders skipped, compute chain\n",
+		                     title_id.c_str());
 	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger
 	// resistance, and controller speaker sounds play on the PC output.

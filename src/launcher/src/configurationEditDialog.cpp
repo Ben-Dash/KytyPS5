@@ -361,12 +361,13 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	                                       Configuration::LogDirection::File);
 	m_ui->checkBox_profiler->setChecked(info.profiler_enabled);
 	for (auto* box: m_switch_boxes) {
-		box->setChecked(info.emulator_switches.contains(box->property("switchName").toString()));
+		const auto& entry = EMULATOR_SWITCHES[box->property("switchIndex").toUInt()];
+		box->setChecked(IsSwitchOn(entry, info.emulator_switches, info.title_id));
 	}
 }
 
-// The default-off emulator switches (emulatorSwitches.h) as check boxes below the compatibility
-// options; a game profile stores the names of the ones it turns on.
+// The emulator switches (emulatorSwitches.h) as check boxes below the compatibility options; a game
+// profile stores the names of the ones it turns on, and "-NAME" for a title default it turns off.
 void ConfigurationEditDialog::InitEmulatorSwitches() {
 	auto* layout = m_ui->compatibility_group->layout();
 	for (const auto& entry: EMULATOR_SWITCHES) {
@@ -377,6 +378,7 @@ void ConfigurationEditDialog::InitEmulatorSwitches() {
 		                    .arg(tr(entry.tooltip).toHtmlEscaped(),
 		                         tr(entry.verdict).toHtmlEscaped(), name));
 		box->setProperty("switchName", name);
+		box->setProperty("switchIndex", static_cast<uint>(&entry - EMULATOR_SWITCHES.data()));
 		layout->addWidget(box);
 		m_switch_boxes.append(box);
 	}
@@ -552,8 +554,12 @@ void ConfigurationEditDialog::save() {
 	UpdateInfo(m_info, *m_ui, m_global_settings);
 	m_info.emulator_switches.clear();
 	for (const auto* box: m_switch_boxes) {
+		const auto& entry = EMULATOR_SWITCHES[box->property("switchIndex").toUInt()];
+		const auto  name  = box->property("switchName").toString();
 		if (box->isChecked()) {
-			m_info.emulator_switches.append(box->property("switchName").toString());
+			m_info.emulator_switches.append(name);
+		} else if (IsSwitchDefaultOn(entry, m_info.title_id)) {
+			m_info.emulator_switches.append(QLatin1Char('-') + name);
 		}
 	}
 
