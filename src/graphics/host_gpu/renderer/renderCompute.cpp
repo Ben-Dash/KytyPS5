@@ -837,10 +837,20 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	// without it the depth target was never cleared and every caster failed the depth test.
 	// KYTY_HTILE_RMW_CLEAR=0 turns this off.
 	RecordHtileRewriteClear(input_info);
-	if (resources.specialization_reads.empty() &&
-	    (TryConsumeComputeMetaClear(input_info, buffer) ||
-	     TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
-	                                 thread_group_z, mode))) {
+	// A fill consumed as a metadata clear may also cover color images over exactly its memory:
+	// Ghost of Yotei's 8-bit shadow mask lives at an address a depth target used once as its HTile
+	// base, so every later "Clear G-Buffer" fill of the mask became an HTile clear only and the
+	// mask kept stale contents. The fill writes the same bytes under both, so both get the clear.
+	const auto consume_fill = [&] {
+		if (TryConsumeComputeMetaClear(input_info, buffer)) {
+			(void)TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
+			                                  thread_group_z, mode);
+			return true;
+		}
+		return TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
+		                                   thread_group_z, mode);
+	};
+	if (resources.specialization_reads.empty() && consume_fill()) {
 		ResetBindings();
 		return true;
 	}
