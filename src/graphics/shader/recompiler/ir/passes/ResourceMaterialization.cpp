@@ -493,9 +493,17 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
                                                      uint64_t heap_size, uint32_t record_stride,
                                                      const DescriptorSource::IndirectDescriptor& indirect) {
 	constexpr uint32_t ProbedRecords = 32;
-	if (runtime.read_memory == nullptr || record_stride == 0u) {
+	// Every read goes through the strict reader, which fails on unbacked (and GPU-written)
+	// memory: the probed records lie past what the heap's descriptor bounds (a bare address has
+	// none) and a followed pointer can be garbage. The ordinary reader reads the guest address
+	// and faulted on one (a fresh Ghost of Yotei start crashed here).
+	if (runtime.read_specialization_memory == nullptr || record_stride == 0u) {
 		return Prospero::TextureNumericClass::Float;
 	}
+	const auto read = [&](uint64_t address, std::span<uint32_t> values) {
+		return address >= 0x100000u &&
+		       runtime.read_specialization_memory(SpecializationUserdata(runtime), address, values);
+	};
 	auto     integer_class = Prospero::TextureNumericClass::Float;
 	uint32_t integers = 0, floats = 0, others = 0, nulls = 0, probed = 0;
 	for (uint32_t key = 0; key < ProbedRecords; key++) {
@@ -508,7 +516,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		auto       address = record + indirect.table_offset;
 		if (indirect.pointer_offset != UINT32_MAX) {
 			std::array<uint32_t, 2> pointer {};
-			if (!runtime.read_memory(runtime.userdata, record + indirect.pointer_offset, pointer)) {
+			if (!read(record + indirect.pointer_offset, pointer)) {
 				break;
 			}
 			const auto target =
@@ -520,7 +528,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 			address = target + indirect.table_offset;
 		}
 		std::array<uint32_t, 4> dwords {};
-		if (!runtime.read_memory(runtime.userdata, address, dwords)) {
+		if (!read(address, dwords)) {
 			break;
 		}
 		probed++;
