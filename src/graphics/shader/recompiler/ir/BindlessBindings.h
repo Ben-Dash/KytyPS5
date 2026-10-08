@@ -17,6 +17,28 @@ inline constexpr uint32_t BindlessTranslation    = 4;
 inline constexpr uint32_t BindlessFeedback       = 5;
 // Samplers mirrored from guest sampler heaps (16-byte S# records); slot 0 is the default sampler.
 inline constexpr uint32_t BindlessSamplers       = 6;
+// 2D and 2D-array images of an integer format (Ghost of Yotei: R8_UINT terrain maps): a shader
+// whose heap holds them reads them through these arrays with an integer result type.
+inline constexpr uint32_t BindlessImages2DUint      = 7;
+inline constexpr uint32_t BindlessImages2DArrayUint = 8;
+inline constexpr uint32_t BindlessImages2DSint      = 9;
+inline constexpr uint32_t BindlessImages2DArraySint = 10;
+// The image arrays, in placeholder order: the four float arrays, then the four integer arrays.
+inline constexpr uint32_t BindlessImageArrayCount   = 8;
+inline constexpr std::array<uint32_t, BindlessImageArrayCount> BindlessImageArrayBindings {
+    BindlessImages2D,         BindlessImages2DArray,     BindlessImagesCube,
+    BindlessImages3D,         BindlessImages2DUint,      BindlessImages2DArrayUint,
+    BindlessImages2DSint,     BindlessImages2DArraySint};
+// The index of an image array's binding in BindlessImageArrayBindings (UINT32_MAX: none).
+constexpr uint32_t BindlessImageArrayIndex(uint32_t binding) {
+	if (binding <= BindlessImages3D) {
+		return binding;
+	}
+	if (binding >= BindlessImages2DUint && binding <= BindlessImages2DArraySint) {
+		return binding - BindlessImages2DUint + 4u;
+	}
+	return UINT32_MAX;
+}
 // A translation entry for a key whose texture is not resident yet; the shader samples slot 0.
 inline constexpr uint32_t BindlessPending        = 0xffffffffu;
 // The S# a sampler without a usable heap entry gets: wrap on every axis, trilinear, full LOD range.

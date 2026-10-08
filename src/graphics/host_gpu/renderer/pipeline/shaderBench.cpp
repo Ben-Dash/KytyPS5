@@ -65,6 +65,9 @@ struct Options {
 	uint32_t                 repeat        = 1;
 	uint32_t                 jobs          = 1;
 	uint32_t                 limit         = UINT32_MAX;
+	// Every bindless 2D / 2D-array image specialized as this integer class, as a heap of integer
+	// T#s specializes it (Float: as recorded).
+	Prospero::TextureNumericClass bindless_class = Prospero::TextureNumericClass::Float;
 };
 
 void PrintUsage() {
@@ -79,6 +82,7 @@ void PrintUsage() {
 	    "  --jobs <n>              translation threads (default 1; >1 skews translate ms)\n"
 	    "  --limit <n>             stop after n matching records\n"
 	    "  --bindless 0|1          bindless images option (default 1, as for PPSA26344)\n"
+	    "  --bindless-class uint|sint  specialize every bindless 2D image as an integer image\n"
 	    "  --hw-bounds 0|1         hardware storage buffer bounds (default: from the device)\n"
 	    "  --lds-storage 0|1|live  LDS in a storage buffer (default: as recorded; live: LDS above\n"
 	    "                          the device limit, as GetComputeProgram decides)\n"
@@ -152,6 +156,10 @@ bool ParseArgs(int argc, char* argv[], Options& o) {
 			 : arg == "--jobs" ? o.jobs
 			 : arg == "--limit" ? o.limit
 			                    : o.max_lds_bytes) = number;
+			i++;
+		} else if (arg == "--bindless-class" && (value == "uint" || value == "sint")) {
+			o.bindless_class = value == "uint" ? Prospero::TextureNumericClass::Uint
+			                                   : Prospero::TextureNumericClass::Sint;
 			i++;
 		} else if (arg == "--lds-storage" && value == "live") {
 			o.lds_storage = 2;
@@ -232,6 +240,7 @@ struct Result {
 	std::string           validation;
 	double                driver_s      = -1;
 	int                   driver_result = 0;
+	uint32_t              forced_images = 0; // --bindless-class
 };
 
 // Mirrors ReplayPrecompiled's options_for.
@@ -282,8 +291,29 @@ void Translate(const Options& o, PermutationRecord record, uint32_t max_lds_byte
 			out.done    = true;
 			return;
 		}
+		auto specialization = record.specialization;
+		if (o.bindless_class != Prospero::TextureNumericClass::Float) {
+			// As materialization: integer arrays for sampled 2D and 2D-array images only.
+			using ShaderRecompiler::Decoder::ImageDimension;
+			const auto& base = translated.program.info.images;
+			uint32_t    forced = 0;
+			for (uint32_t i = 0; i < specialization.images.size(); i++) {
+				auto&       image = specialization.images[i];
+				const auto* info  = i < base.size() ? &base[i] : nullptr;
+				if (image.bindless && !image.cube &&
+				    (image.dimension == ImageDimension::Dim2D ||
+				     image.dimension == ImageDimension::Dim2DArray) &&
+				    (info == nullptr ||
+				     (!info->depth_compare && !info->atomic &&
+				      info->resource_class == ShaderRecompiler::IR::ImageResourceClass::Sampled))) {
+					image.numeric_class = o.bindless_class;
+					forced++;
+				}
+			}
+			out.forced_images = forced;
+		}
 		auto       compiled = ShaderRecompiler::CompileProgram(std::move(translated), options,
-		                                                       record.specialization,
+		                                                       specialization,
 		                                                       record.push_data_start_dword);
 		const auto t2       = std::chrono::steady_clock::now();
 		const auto hash     = XXH3_64bits(compiled.spirv.data(), compiled.spirv.size() * 4u);
@@ -819,6 +849,7 @@ int Run(int argc, char* argv[]) {
 		                         : std::to_string(r.data_start),
 		                     r.data_dwords, r.data_strides, r.data_formats);
 		extra += r.slot_flags;
+		if (r.forced_images != 0) extra += fmt::format(" bindless_int={}", r.forced_images);
 		if (r.repeat_diffs != 0) extra += fmt::format(" NONDETERMINISTIC({}/{})", r.repeat_diffs, o.repeat - 1);
 		if (!r.validation.empty()) extra += " val=" + r.validation;
 		if (r.driver_result != 0) extra += fmt::format(" vkresult={}", r.driver_result);

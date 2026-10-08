@@ -29,13 +29,17 @@ class SamplerCache;
 class BindlessTable {
 public:
 	enum Binding : uint32_t {
-		Images2D      = 0,
-		Images2DArray = 1,
-		ImagesCube    = 2,
-		Images3D      = 3,
-		Translation   = 4,
-		Feedback      = 5,
-		Samplers      = 6,
+		Images2D          = 0,
+		Images2DArray     = 1,
+		ImagesCube        = 2,
+		Images3D          = 3,
+		Translation       = 4,
+		Feedback          = 5,
+		Samplers          = 6,
+		Images2DUint      = 7,
+		Images2DArrayUint = 8,
+		Images2DSint      = 9,
+		Images2DArraySint = 10,
 	};
 	static_assert(Images2D == ShaderRecompiler::IR::BindlessImages2D &&
 	              Images2DArray == ShaderRecompiler::IR::BindlessImages2DArray &&
@@ -43,8 +47,12 @@ public:
 	              Images3D == ShaderRecompiler::IR::BindlessImages3D &&
 	              Translation == ShaderRecompiler::IR::BindlessTranslation &&
 	              Feedback == ShaderRecompiler::IR::BindlessFeedback &&
-	              Samplers == ShaderRecompiler::IR::BindlessSamplers);
-	static constexpr uint32_t ImageArrays        = 4;
+	              Samplers == ShaderRecompiler::IR::BindlessSamplers &&
+	              Images2DUint == ShaderRecompiler::IR::BindlessImages2DUint &&
+	              Images2DArrayUint == ShaderRecompiler::IR::BindlessImages2DArrayUint &&
+	              Images2DSint == ShaderRecompiler::IR::BindlessImages2DSint &&
+	              Images2DArraySint == ShaderRecompiler::IR::BindlessImages2DArraySint);
+	static constexpr uint32_t ImageArrays        = ShaderRecompiler::IR::BindlessImageArrayCount;
 	static constexpr uint32_t PlaceholderColors  = 3;
 	static constexpr uint32_t Placeholders       = ImageArrays * PlaceholderColors;
 	static constexpr uint32_t MaxImagesPerArray  = 16384;
@@ -155,7 +163,8 @@ public:
 
 private:
 	// Slot 0 of every image array: a 1x1 grey texture of that view type, sampled for keys
-	// outside a heap and while a texture is pending. Created, cleared and made read-only once.
+	// outside a heap and while a texture is pending (zero in the integer arrays). Created,
+	// cleared and made read-only once.
 	void CreatePlaceholders(CommandScheduler& scheduler);
 
 	[[nodiscard]] static uint64_t ImageKey(ImageId id) {
@@ -172,8 +181,9 @@ private:
 	// create a heap per base address, and the regions are never freed one by one.
 	void ResetHeaps();
 	uint32_t                m_next_region = 1; // translation[0] is the out-of-range entry
-	std::array<uint32_t, ImageArrays> m_next_slot {PlaceholderColors, PlaceholderColors,
-	                                               PlaceholderColors, PlaceholderColors};
+	std::array<uint32_t, ImageArrays> m_next_slot {
+	    PlaceholderColors, PlaceholderColors, PlaceholderColors, PlaceholderColors,
+	    PlaceholderColors, PlaceholderColors, PlaceholderColors, PlaceholderColors};
 	std::array<VulkanImage, Placeholders>   m_placeholders;
 	std::array<vk::ImageView, Placeholders> m_placeholder_views {};
 	vk::DescriptorPool      m_pool   = nullptr;

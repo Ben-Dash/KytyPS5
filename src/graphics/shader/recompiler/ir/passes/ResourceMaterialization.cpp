@@ -482,13 +482,65 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 	return true;
 }
 
+// The numeric class of the first T#s of a bindless heap: integer only when every non-null one of
+// the first few records is a 2D or 2D-array texture of the same integer class (Ghost of Yotei:
+// heaps of R8_UINT terrain maps), so the shader reads them with an integer result type. Float
+// otherwise, or when the records cannot be read; the first float T# ends the probe.
+Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, uint64_t heap_base,
+                                                     const DescriptorSource::IndirectDescriptor& indirect) {
+	constexpr uint32_t ProbedRecords = 4;
+	auto               result        = Prospero::TextureNumericClass::Float;
+	if (runtime.read_memory == nullptr) {
+		return result;
+	}
+	bool integer = false;
+	for (uint32_t key = 0; key < ProbedRecords; key++) {
+		const auto record  = heap_base + static_cast<uint64_t>(key) * indirect.table_stride;
+		auto       address = record + indirect.table_offset;
+		if (indirect.pointer_offset != UINT32_MAX) {
+			std::array<uint32_t, 2> pointer {};
+			if (!runtime.read_memory(runtime.userdata, record + indirect.pointer_offset, pointer)) {
+				break;
+			}
+			const auto target =
+			    ((static_cast<uint64_t>(pointer[1]) << 32u) | pointer[0]) & AddressMask;
+			if (target == 0u) {
+				continue;
+			}
+			address = target + indirect.table_offset;
+		}
+		std::array<uint32_t, 4> dwords {};
+		if (!runtime.read_memory(runtime.userdata, address, dwords)) {
+			break;
+		}
+		const auto format = static_cast<Prospero::BufferFormat>((dwords[1] >> 20u) & 0x1ffu);
+		if (format == Prospero::BufferFormat::kInvalid) {
+			continue; // a null record
+		}
+		const auto type = static_cast<Prospero::ImageType>((dwords[3] >> 28u) & 0xfu);
+		const auto numeric_class = Prospero::SampledTextureNumericClass(format);
+		if (numeric_class != Prospero::TextureNumericClass::Uint &&
+		    numeric_class != Prospero::TextureNumericClass::Sint) {
+			return Prospero::TextureNumericClass::Float;
+		}
+		if ((type != Prospero::ImageType::kColor2D && type != Prospero::ImageType::kColor2DArray) ||
+		    (integer && numeric_class != result)) {
+			return Prospero::TextureNumericClass::Float;
+		}
+		integer = true;
+		result  = numeric_class;
+	}
+	return integer ? result : Prospero::TextureNumericClass::Float;
+}
+
 // The shader looks the key up in the bindless translation table: nothing to enumerate. Record
 // the heap for the host and reserve the two words it patches (region base, entry count); zeros
 // resolve every key to the placeholder in slot 0.
 template <typename Specialization>
 bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indirect,
                               const DescriptorValue& table_value, uint32_t image_index,
-                              ResourceSnapshot& snapshot, std::vector<Specialization>& specializations) {
+                              const SrtRuntime& runtime, ResourceSnapshot& snapshot,
+                              std::vector<Specialization>& specializations) {
 	uint64_t heap_base = 0;
 	uint64_t heap_size = 0;
 	if (table_value.dword_count == 2u) {
@@ -524,6 +576,7 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 	root.indirect_mapping_offset    = mapping_offset;
 	root.indirect_search_iterations = 0;
 	root.bindless                   = true;
+	root.numeric_class              = ProbeBindlessHeapClass(runtime, heap_base, indirect);
 	return true;
 }
 
@@ -628,6 +681,8 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 			    fmt::format("image descriptor {} has an invalid mip range", i));
 		}
 		if (NullImageDescriptor(descriptor)) {
+			// A bindless image keeps the class its heap's records showed.
+			const auto heap_class = image.numeric_class;
 			image.numeric_class = base.atomic ? Prospero::TextureNumericClass::Uint
 			                                  : Prospero::TextureNumericClass::Float;
 			image.dimension     = Decoder::ImageDimension::Dim2D;
@@ -639,6 +694,17 @@ static bool BuildResourceSpecialization(const ResourcePlan& program, ResourceSna
 				                      ? Decoder::ImageDimension::Dim2D
 				                      : base.dimension;
 				image.cube      = base.cube;
+				// Integer arrays exist for 2D and 2D-array images only, and a depth compare
+				// samples float.
+				const bool integer_array =
+				    !image.cube && !base.depth_compare && !base.atomic &&
+				    base.resource_class == ImageResourceClass::Sampled &&
+				    (image.dimension == Decoder::ImageDimension::Dim2D ||
+				     image.dimension == Decoder::ImageDimension::Dim2DArray);
+				if (integer_array && (heap_class == Prospero::TextureNumericClass::Uint ||
+				                      heap_class == Prospero::TextureNumericClass::Sint)) {
+					image.numeric_class = heap_class;
+				}
 			}
 			continue;
 		}
@@ -1556,7 +1622,8 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 			DescriptorValue table;
 			if (indirect.bindless) {
 				if (!clean.EvaluateDescriptor(indirect.table_source, table) ||
-				    !MaterializeBindlessImage(indirect, table, i, snapshot, specialization.images)) {
+				    !MaterializeBindlessImage(indirect, table, i, runtime, snapshot,
+				                              specialization.images)) {
 					return ReportMaterializeFailure(program, "bindless image", i);
 				}
 				continue;

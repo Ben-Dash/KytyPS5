@@ -231,14 +231,22 @@ void DefineBindlessImages(EmitterState& state) {
 			continue;
 		}
 		uint32_t binding = IR::BindlessImages2D;
+		const bool arrayed = image.dimension == ImageDimension::Dim2DArray ||
+		                   image.dimension == ImageDimension::Dim2DMsaaArray;
 		if (image.cube) {
 			binding = IR::BindlessImagesCube;
 		} else if (image.dimension == ImageDimension::Dim3D) {
 			binding = IR::BindlessImages3D;
-		} else if (image.dimension == ImageDimension::Dim2DArray ||
-		           image.dimension == ImageDimension::Dim2DMsaaArray) {
+		} else if (image.numeric_class == Prospero::TextureNumericClass::Uint) {
+			binding = arrayed ? IR::BindlessImages2DArrayUint : IR::BindlessImages2DUint;
+		} else if (image.numeric_class == Prospero::TextureNumericClass::Sint) {
+			binding = arrayed ? IR::BindlessImages2DArraySint : IR::BindlessImages2DSint;
+		} else if (arrayed) {
 			binding = IR::BindlessImages2DArray;
 		}
+		// Integer cube and 3D images have no array; materialization keeps them float.
+		EXIT_IF((image.cube || image.dimension == ImageDimension::Dim3D) &&
+		        image.numeric_class != Prospero::TextureNumericClass::Float);
 		const auto array    = state.builder.Type(spv::OpTypeRuntimeArray, type);
 		const auto variable = state.builder.DefineGlobalVariable(
 		    TypePointer(state, spv::StorageClassUniformConstant, array),

@@ -1655,29 +1655,49 @@ static uint32_t BindlessBindingFor(const ShaderRecompiler::IR::ImageResource& re
 	if (resource.dimension == ImageDimension::Dim3D) {
 		return ShaderRecompiler::IR::BindlessImages3D;
 	}
-	if (resource.dimension == ImageDimension::Dim2DArray ||
-	    resource.dimension == ImageDimension::Dim2DMsaaArray) {
-		return ShaderRecompiler::IR::BindlessImages2DArray;
+	const bool arrayed = resource.dimension == ImageDimension::Dim2DArray ||
+	                     resource.dimension == ImageDimension::Dim2DMsaaArray;
+	if (resource.numeric_class == Prospero::TextureNumericClass::Uint) {
+		return arrayed ? ShaderRecompiler::IR::BindlessImages2DArrayUint
+		               : ShaderRecompiler::IR::BindlessImages2DUint;
 	}
-	return ShaderRecompiler::IR::BindlessImages2D;
+	if (resource.numeric_class == Prospero::TextureNumericClass::Sint) {
+		return arrayed ? ShaderRecompiler::IR::BindlessImages2DArraySint
+		               : ShaderRecompiler::IR::BindlessImages2DSint;
+	}
+	return arrayed ? ShaderRecompiler::IR::BindlessImages2DArray
+	               : ShaderRecompiler::IR::BindlessImages2D;
 }
 
-// A heap entry the bindless array of this binding can hold: a float-sampled, single-sample
-// texture of a matching shape. Anything else stays the placeholder rather than reaching
-// ResolveTexture, which exits on descriptors a draw would never bind that way.
+// The numeric class of a bindless image array.
+static Prospero::TextureNumericClass BindlessArrayClass(uint32_t binding) {
+	switch (binding) {
+		case ShaderRecompiler::IR::BindlessImages2DUint:
+		case ShaderRecompiler::IR::BindlessImages2DArrayUint: return Prospero::TextureNumericClass::Uint;
+		case ShaderRecompiler::IR::BindlessImages2DSint:
+		case ShaderRecompiler::IR::BindlessImages2DArraySint: return Prospero::TextureNumericClass::Sint;
+		default: return Prospero::TextureNumericClass::Float;
+	}
+}
+
+// A heap entry the bindless array of this binding can hold: a single-sample texture of the
+// array's numeric class (float, or the integer class of the integer arrays) and a matching shape.
+// Anything else stays the placeholder rather than reaching ResolveTexture, which exits on
+// descriptors a draw would never bind that way.
 static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t binding) {
 	if (descriptor.IsNull() ||
-	    Prospero::SampledTextureNumericClass(descriptor.Format()) !=
-	        Prospero::TextureNumericClass::Float) {
+	    Prospero::SampledTextureNumericClass(descriptor.Format()) != BindlessArrayClass(binding)) {
 		return false;
 	}
+	const bool flat = binding == ShaderRecompiler::IR::BindlessImages2D ||
+	                  binding == ShaderRecompiler::IR::BindlessImages2DArray ||
+	                  binding == ShaderRecompiler::IR::BindlessImages2DUint ||
+	                  binding == ShaderRecompiler::IR::BindlessImages2DArrayUint ||
+	                  binding == ShaderRecompiler::IR::BindlessImages2DSint ||
+	                  binding == ShaderRecompiler::IR::BindlessImages2DArraySint;
 	switch (descriptor.Type()) {
-		case Prospero::ImageType::kColor2D:
-			return binding == ShaderRecompiler::IR::BindlessImages2D ||
-			       binding == ShaderRecompiler::IR::BindlessImages2DArray;
-		case Prospero::ImageType::kColor2DArray:
-			return binding == ShaderRecompiler::IR::BindlessImages2D ||
-			       binding == ShaderRecompiler::IR::BindlessImages2DArray;
+		case Prospero::ImageType::kColor2D: return flat;
+		case Prospero::ImageType::kColor2DArray: return flat;
 		case Prospero::ImageType::kCube: return binding == ShaderRecompiler::IR::BindlessImagesCube;
 		case Prospero::ImageType::kColor3D: return binding == ShaderRecompiler::IR::BindlessImages3D;
 		default: return false;
