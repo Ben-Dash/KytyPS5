@@ -2238,22 +2238,32 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	if (layout.table) {
 		// The header's first DWORD is the flattened SRT's size; at least one (zero) DWORD
 		// follows, which a shader index past the SRT reads.
+		// Written straight into the ring: the entries, then the SRT with its bindless patches.
 		const auto& srt = snapshot.flattened_srt;
 		block[layout.table_srt_dword - ShaderRecompiler::IR::TableSrtHeaderDwords] =
 		    static_cast<uint32_t>(srt.size());
-		block.insert(block.end(), srt.begin(), srt.end());
-		for (const auto& [offset, region, entries]: prepared.bindless_patches) {
-			if (static_cast<size_t>(offset) + 1u < srt.size()) {
-				block[layout.table_srt_dword + offset]      = region;
-				block[layout.table_srt_dword + offset + 1u] = entries;
-			}
-		}
-		if (srt.empty()) {
-			block.push_back(0u);
-		}
+		const size_t srt_dwords = std::max<size_t>(srt.size(), 1u);
 		auto& ring = m_context.GetBufferCache().GetUtilityBuffer(MemoryUsage::Stream);
 		EXIT_IF(!ring.HasDeviceAddress());
-		const auto offset  = ring.Copy(block.data(), block.size() * sizeof(uint32_t), 256);
+		const auto [data, offset] =
+		    ring.Map((block.size() + srt_dwords) * sizeof(uint32_t),
+		             ShaderRecompiler::IR::TableBufferEntryDwords * sizeof(uint32_t));
+		EXIT_IF(data == nullptr);
+		auto* words = reinterpret_cast<uint32_t*>(data);
+		std::memcpy(words, block.data(), block.size() * sizeof(uint32_t));
+		words += block.size();
+		if (srt.empty()) {
+			words[0] = 0u;
+		} else {
+			std::memcpy(words, srt.data(), srt.size() * sizeof(uint32_t));
+		}
+		for (const auto& [patch, region, entries]: prepared.bindless_patches) {
+			if (static_cast<size_t>(patch) + 1u < srt.size()) {
+				words[patch]      = region;
+				words[patch + 1u] = entries;
+			}
+		}
+		ring.Commit();
 		const auto address = ring.BufferDeviceAddress() + offset;
 		prepared.shader_data[layout.TableDword()]      = static_cast<uint32_t>(address);
 		prepared.shader_data[layout.TableDword() + 1u] = static_cast<uint32_t>(address >> 32u);
@@ -2915,7 +2925,8 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 			planned = plan.usable && (plan.set == 0 || s + 1 == prepared_bindings.size()) &&
 			          prepared->images.size() == program.info.images.size() &&
 			          prepared->samplers.size() == program.info.samplers.size() &&
-			          prepared->buffers.size() == program.info.buffers.size();
+			          (program.bindings.table ||
+			           prepared->buffers.size() == program.info.buffers.size());
 		} else {
 			shader_stage = NativeShaderStage(program.stage);
 		}
