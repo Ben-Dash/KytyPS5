@@ -122,7 +122,25 @@ bool UsesFlattenedSrt(const Program& program) {
 	       std::ranges::any_of(program.info.samplers, &SamplerResource::bindless);
 }
 
-void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds_storage) {
+bool TableEligible(const Program& program) {
+	if ((program.stage != ShaderType::Vertex && program.stage != ShaderType::Pixel) ||
+	    program.info.uses_dma) {
+		return false;
+	}
+	if (std::ranges::any_of(program.info.buffers, [](const BufferResource& buffer) {
+		    return buffer.written || buffer.atomic;
+	    })) {
+		return false;
+	}
+	std::vector<uint32_t> live_buffers;
+	if (CollectMemoryResources(program, live_buffers).gds) {
+		return false;
+	}
+	return !program.info.buffers.empty() || UsesFlattenedSrt(program);
+}
+
+void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds_storage,
+                      bool table) {
 	if (!program.shader_info_complete || program.binding_layout_complete) {
 		EXIT("shader binding layout failed: %s", !program.shader_info_complete
 		                                             ? "shader info is not ready"
@@ -132,9 +150,15 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 	std::vector<uint32_t> live_buffers;
 	const auto shared = CollectMemoryResources(program, live_buffers);
 	CollectShaderData(program, next);
+	next.table = table && TableEligible(program);
 	// Every buffer stays bound, at its own index: the renderer prepares and offsets buffers by
-	// their index in program.info.buffers.
-	next.memory_offset_count = static_cast<uint32_t>(program.info.buffers.size());
+	// their index in program.info.buffers. A table program reads its offsets from the block.
+	next.memory_offset_count =
+	    next.table ? 0u : static_cast<uint32_t>(program.info.buffers.size());
+	next.table_srt_dword =
+	    next.table ? static_cast<uint32_t>(program.info.buffers.size()) * TableBufferEntryDwords +
+	                     TableSrtHeaderDwords
+	               : 0u;
 	// Strides and formats read at run time, only for the buffers that need them: a generic
 	// format's word holds its stride too.
 	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
@@ -147,7 +171,7 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 	next.reserve_object_id     = program.stage != ShaderType::Compute;
 	next.push_data_start_dword = next.PushStartFor(push_data_start_dword);
 
-	if (!program.info.buffers.empty()) {
+	if (!program.info.buffers.empty() && !next.table) {
 		// Draw binding accesses this first group directly when memory_offset_count is nonzero.
 		std::vector<uint32_t> resources(program.info.buffers.size());
 		for (uint32_t i = 0; i < resources.size(); i++) {
@@ -199,7 +223,7 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 		AddBinding(next, DescriptorBindingKind::BdaPagetable);
 		AddBinding(next, DescriptorBindingKind::FaultBuffer);
 	}
-	if (UsesFlattenedSrt(program)) {
+	if (UsesFlattenedSrt(program) && !next.table) {
 		AddBinding(next, DescriptorBindingKind::FlattenedSrt);
 	}
 

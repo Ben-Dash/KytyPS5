@@ -37,7 +37,8 @@ void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {
 		present[index]   = true;
 		expected[index]  = std::move(resources);
 	};
-	if (!program.info.buffers.empty()) {
+	const bool table = program.bindings.table;
+	if (!program.info.buffers.empty() && !table) {
 		Expect(Kind::Buffers, Dense(program.info.buffers.size()));
 	}
 	for (uint32_t i = 0; i < program.info.images.size(); i++) {
@@ -70,7 +71,7 @@ void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {
 		Expect(Kind::BdaPagetable);
 		Expect(Kind::FaultBuffer);
 	}
-	if (IR::UsesFlattenedSrt(program)) {
+	if (IR::UsesFlattenedSrt(program) && !table) {
 		Expect(Kind::FlattenedSrt);
 	}
 	if (program.bindings.ShaderDataDwords() != 0 && !program.bindings.UsesPushData()) {
@@ -100,7 +101,8 @@ void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {
 	    (has_dispatch_threads && (program.stage != ShaderType::Compute ||
 	                              program.bindings.dispatch_thread_dword != user_data_dwords)) ||
 	    program.bindings.memory_offset_dword != user_data_dwords + (has_dispatch_threads ? 3u : 0u) ||
-	    program.bindings.memory_offset_count != program.info.buffers.size() ||
+	    program.bindings.memory_offset_count != (table ? 0u : program.info.buffers.size()) ||
+	    (table && !IR::TableEligible(program)) ||
 	    has_shader_data_storage != (shader_data_dwords != 0 && !program.bindings.UsesPushData()) ||
 	    !std::is_sorted(program.bindings.user_data_registers.begin(),
 	                    program.bindings.user_data_registers.end()) ||

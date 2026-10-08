@@ -759,6 +759,9 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	    robustness2.nullDescriptor == VK_TRUE &&
 	    robustness2_properties.robustStorageBufferAccessSizeAlignment <= sizeof(uint32_t);
 	ShaderRecompiler::SetHardwareStorageBufferBounds(graphics.hardware_storage_buffer_bounds);
+	// KYTY_TABLE_MODE=1: read-only vertex and pixel shaders read buffers through a per-draw block.
+	ShaderRecompiler::SetTableMode(KYTY_GETENV("KYTY_TABLE_MODE") != nullptr &&
+	                                 std::strcmp(KYTY_GETENV("KYTY_TABLE_MODE"), "1") == 0);
 
 	LOGF("Vulkan robustness: robustImageAccess=%s robustImageAccess2=%s robustBufferAccess2=%s "
 	     "nullDescriptor=%s storage alignment=%u hardware storage buffer bounds=%s\n",

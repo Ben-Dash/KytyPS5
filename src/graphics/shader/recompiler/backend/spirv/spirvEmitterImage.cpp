@@ -794,10 +794,13 @@ static uint32_t BindlessSlot(ValueEmitContext& ctx, const IR::ImageResource& ima
                              IR::Value image_arg) {
 	auto&       state  = ctx.state;
 	const auto* handle = image_arg.ResolveInstruction();
-	EXIT_IF(handle == nullptr || handle->NumArgs() == 0u || state.flattened_srt_variable == 0 ||
+	EXIT_IF(handle == nullptr || handle->NumArgs() == 0u || !HasFlattenedSrt(state) ||
 	        state.bindless_translation_variable == 0);
 	const auto key  = ctx.Def(handle->Arg(0));
 	const auto Load = [&](uint32_t variable, uint32_t index) {
+		if (variable == state.flattened_srt_variable && state.program.bindings.table) {
+			return LoadFlattenedSrtWord(state, index);
+		}
 		const auto pointer = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state),
 		                          pointer, variable, ConstantU32(state, 0), index);
@@ -849,9 +852,12 @@ static uint32_t BindlessSamplerSlot(ValueEmitContext& ctx, const IR::SamplerReso
                                     IR::Value sampler_arg) {
 	auto&       state  = ctx.state;
 	const auto* handle = sampler_arg.ResolveInstruction();
-	EXIT_IF(handle == nullptr || handle->NumArgs() == 0u || state.flattened_srt_variable == 0);
+	EXIT_IF(handle == nullptr || handle->NumArgs() == 0u || !HasFlattenedSrt(state));
 	const auto key  = ctx.Def(handle->Arg(0));
 	const auto Load = [&](uint32_t index) {
+		if (state.program.bindings.table) {
+			return LoadFlattenedSrtWord(state, ConstantU32(state, index));
+		}
 		const auto pointer = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state),
 		                          pointer, state.flattened_srt_variable, ConstantU32(state, 0),
@@ -991,7 +997,7 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			        const auto* handle = image_arg.ResolveInstruction();
 			        if (image.indirect_root == mem.resource && !image.bindless &&
 			            image.indirect_resources.size() >= 2u && handle != nullptr &&
-			            handle->NumArgs() != 0u && state.flattened_srt_variable != 0 &&
+			            handle->NumArgs() != 0u && HasFlattenedSrt(state) &&
 			            image.indirect_search_iterations != 0u) {
 				        const auto selected = EmitIndirectResourceIndex(
 				            state, ctx.Def(handle->Arg(0)), image.indirect_mapping_offset,
@@ -1063,7 +1069,7 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			    image.indirect_resources.size() >= 2u) {
 				const auto* handle = image_arg.ResolveInstruction();
 				if (handle == nullptr || handle->NumArgs() == 0u ||
-				    state.flattened_srt_variable == 0 || image.indirect_search_iterations == 0u) {
+				    !HasFlattenedSrt(state) || image.indirect_search_iterations == 0u) {
 					ctx.Fail(inst, "has no indirect storage image runtime mapping");
 					return;
 				}
@@ -1269,7 +1275,7 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			return;
 		}
 		const auto key = ctx.Def(handle->Arg(0));
-		if (state.flattened_srt_variable == 0 || image.indirect_search_iterations == 0u ||
+		if (!HasFlattenedSrt(state) || image.indirect_search_iterations == 0u ||
 		    image.indirect_resources.size() < 2u) {
 			ctx.Fail(inst, "has no indirect image runtime mapping");
 			return;

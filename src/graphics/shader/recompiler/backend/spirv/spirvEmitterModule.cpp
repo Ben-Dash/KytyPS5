@@ -163,6 +163,15 @@ uint32_t TypePhysicalU32Pointer(EmitterState& state) {
 	return TypePointer(state, spv::StorageClassPhysicalStorageBuffer, TypeU32(state));
 }
 
+uint32_t TypePhysicalBufferPointer(EmitterState& state, uint32_t bits) {
+	return TypePointer(state, spv::StorageClassPhysicalStorageBuffer, StorageBufferType(state, bits));
+}
+
+uint32_t TypePhysicalBufferElementPointer(EmitterState& state, uint32_t bits) {
+	return TypePointer(state, spv::StorageClassPhysicalStorageBuffer,
+	                   TypeStorageBufferElement(state, bits));
+}
+
 uint32_t TypePushConstantElementPointer(EmitterState& state) {
 	return TypePointer(state, spv::StorageClassPushConstant, TypeU32(state));
 }
@@ -795,9 +804,11 @@ void DefineModule(EmitterState& state) {
 	if (state.requirements.buffer_u16) {
 		state.builder.RequireCapability(spv::CapabilityStorageBuffer16BitAccess);
 	}
-	// Mesh shaders load their draw parameter record through a device address.
-	const bool physical_addresses =
-	    state.program.info.uses_dma || state.program.stage == ShaderType::Mesh;
+	// Mesh shaders load their draw parameter record through a device address, table programs
+	// their buffers.
+	const bool physical_addresses = state.program.info.uses_dma ||
+	                                state.program.stage == ShaderType::Mesh ||
+	                                state.program.bindings.table;
 	if (physical_addresses) {
 		state.builder.RequireCapability(spv::CapabilityInt64);
 		state.builder.RequireCapability(spv::CapabilityPhysicalStorageBufferAddresses);

@@ -425,6 +425,8 @@ private:
 	uint64_t                              m_bindless_frame = UINT64_MAX;
 	std::vector<uint32_t>                 m_bindless_requests;
 	std::vector<uint32_t>                 m_bindless_srt;
+	// KYTY_TABLE_MODE: the block of the stage being rebound (RebindBuffers).
+	std::vector<uint32_t>                 m_table_block;
 	std::vector<vk::DescriptorBufferInfo> m_descriptor_buffers;
 	std::vector<vk::DescriptorImageInfo>  m_descriptor_images;
 	std::vector<vk::WriteDescriptorSet>   m_descriptor_writes;

@@ -36,6 +36,9 @@ uint32_t EmitBinaryU32(EmitterState& state, spv::Op opcode, uint32_t lhs, uint32
 uint32_t EmitIndirectResourceIndex(EmitterState& state, uint32_t key, uint32_t mapping_offset,
                                    uint32_t search_iterations, uint32_t default_resource) {
 	const auto LoadMapping = [&](uint32_t index) {
+		if (state.program.bindings.table) {
+			return LoadFlattenedSrtWord(state, index);
+		}
 		const auto pointer = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state),
 		                          pointer, state.flattened_srt_variable, ConstantU32(state, 0),
@@ -121,6 +124,98 @@ void EmitMemoryOffsets(EmitterState& state) {
 		state.buffer_strides[strides[k]] =
 		    EmitBinaryU32(state, spv::OpBitwiseAnd, word, ConstantU32(state, 0x3fffu));
 	}
+}
+
+namespace {
+
+// An aligned load of `type` from the device address `address` (u64).
+uint32_t LoadPhysical(EmitterState& state, uint32_t type, uint32_t address, uint32_t alignment) {
+	const auto pointer = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpConvertUToPtr,
+	                          TypePointer(state, spv::StorageClassPhysicalStorageBuffer, type),
+	                          pointer, address);
+	const auto value = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, type, value, pointer, spv::MemoryAccessAlignedMask,
+	                          alignment);
+	return value;
+}
+
+uint32_t TableBlockAddress(EmitterState& state, uint32_t dword) {
+	return Binary(state, spv::OpIAdd, TypeScalarU64(state), state.table_block_address,
+	              ConstantDeviceAddress(state, uint64_t {dword} * sizeof(uint32_t)));
+}
+
+} // namespace
+
+void EmitTableEntries(EmitterState& state) {
+	const auto& layout = state.program.bindings;
+	if (!layout.table) {
+		return;
+	}
+	state.table_block_address =
+	    DeviceAddressFromWords(state, EmitShaderDataDwordLoad(state, layout.TableDword()),
+	                           EmitShaderDataDwordLoad(state, layout.TableDword() + 1u));
+	const auto entry_type = TypeU32Vector(state, IR::TableBufferEntryDwords);
+	for (uint32_t i = 0; i < state.program.info.buffers.size(); i++) {
+		const auto entry = LoadPhysical(
+		    state, entry_type, TableBlockAddress(state, i * IR::TableBufferEntryDwords),
+		    IR::TableBufferEntryDwords * sizeof(uint32_t));
+		std::array<uint32_t, IR::TableBufferEntryDwords> words {};
+		for (uint32_t k = 0; k < words.size(); k++) {
+			words[k] = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), words[k], entry, k);
+		}
+		state.table_buffer_address[i] = DeviceAddressFromWords(state, words[0], words[1]);
+		state.table_buffer_bytes[i]   = words[2];
+		state.memory_byte_offsets[i]  = words[3];
+	}
+	if (IR::UsesFlattenedSrt(state.program)) {
+		const auto count = LoadPhysical(
+		    state, TypeU32(state),
+		    TableBlockAddress(state, layout.table_srt_dword - IR::TableSrtHeaderDwords),
+		    sizeof(uint32_t));
+		state.table_srt_last = Binary(state, spv::OpISub, TypeU32(state),
+		                              EmitGlsl<GLSLstd450UMax, IR::Type::U32>(state, count, ConstantU32(state, 1)),
+		                              ConstantU32(state, 1));
+	}
+}
+
+bool HasFlattenedSrt(const EmitterState& state) {
+	return state.flattened_srt_variable != 0 || state.table_srt_last != 0;
+}
+
+uint32_t LoadFlattenedSrtWord(EmitterState& state, uint32_t index) {
+	if (state.program.bindings.table) {
+		if (state.table_srt_last == 0) {
+			EXIT("table program reads a flattened SRT it has no size for\n");
+		}
+		// The block ends with the flattened SRT: an index past it reads its last DWORD.
+		const auto clamped = EmitGlsl<GLSLstd450UMin, IR::Type::U32>(state, index, state.table_srt_last);
+		const auto address = Binary(
+		    state, spv::OpIAdd, TypeScalarU64(state),
+		    TableBlockAddress(state, state.program.bindings.table_srt_dword),
+		    Binary(state, spv::OpShiftLeftLogical, TypeScalarU64(state),
+		           Unary(state, spv::OpUConvert, TypeScalarU64(state), clamped),
+		           ConstantDeviceAddress(state, 2)));
+		return LoadPhysical(state, TypeU32(state), address, sizeof(uint32_t));
+	}
+	const auto pointer = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state), pointer,
+	                          state.flattened_srt_variable, ConstantU32(state, 0), index);
+	const auto value = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpLoad, TypeU32(state), value, pointer);
+	return value;
+}
+
+void EmitBufferElementLoad(EmitterState& state, uint32_t type, uint32_t result, uint32_t pointer,
+                           const MemoryResourceAccess& access) {
+	if (access.physical) {
+		state.builder.AddFunction(spv::OpLoad, type, result, pointer,
+		                          static_cast<uint32_t>(access.memory_access | spv::MemoryAccessAlignedMask),
+		                          access.element_bits / 8u);
+		return;
+	}
+	state.builder.AddFunction(spv::OpLoad, type, result, pointer, access.memory_access);
 }
 
 uint32_t LdsDwordCount(const EmitterState& state) {
@@ -220,6 +315,32 @@ MemoryResourceAccess PrepareMemoryResourceAccess(EmitterState& state, const IR::
 		case IR::ResourceKind::Buffer: {
 			const auto bits = mem.kind == IR::ResourceKind::Buffer
 			                      ? StorageBufferElementBits(state.program, mem) : 32u;
+			if (state.program.bindings.table) {
+				// The buffer at its device address from the block (EmitTableEntries).
+				if (mem.resource >= state.program.info.buffers.size()) {
+					ExitDescriptorBindingFailure(state, IR::DescriptorBindingKind::Buffers,
+					                             mem.resource, "table buffer is missing");
+				}
+				access.memory_access = mem.coherent ? spv::MemoryAccessVolatileMask
+				                                    : spv::MemoryAccessMaskNone;
+				access.physical       = true;
+				access.element_bits   = bits;
+				access.object_pointer = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpConvertUToPtr, TypePhysicalBufferPointer(state, bits),
+				                          access.object_pointer,
+				                          state.table_buffer_address[mem.resource]);
+				const auto shift = static_cast<uint32_t>(std::countr_zero(bits / 8u));
+				access.length    = shift == 0u ? state.table_buffer_bytes[mem.resource]
+				                               : EmitBinaryU32(state, spv::OpShiftRightLogical,
+				                                               state.table_buffer_bytes[mem.resource],
+				                                               ConstantU32(state, shift));
+				access.last_element = EmitBinaryU32(
+				    state, spv::OpISub,
+				    EmitGlsl<GLSLstd450UMax, IR::Type::U32>(state, access.length, ConstantU32(state, 1)),
+				    ConstantU32(state, 1));
+				access.byte_offset = state.memory_byte_offsets[mem.resource];
+				return access;
+			}
 			const auto variable = bits == 8u ? state.storage_buffer_u8_variable
 			                      : bits == 16u ? state.storage_buffer_u16_variable
 			                                    : state.storage_buffer_variable;
@@ -241,7 +362,7 @@ uint32_t EmitMemoryElementInBounds(EmitterState& state, const MemoryResourceAcce
 
 uint32_t EmitWordAccessInBounds(EmitterState& state, const MemoryResourceAccess& access,
                                 uint32_t index) {
-	if (HardwareStorageBufferBounds() && (access.kind == IR::ResourceKind::Buffer ||
+	if (HardwareStorageBufferBounds() && !access.physical && (access.kind == IR::ResourceKind::Buffer ||
 	                                      access.kind == IR::ResourceKind::ScalarBuffer)) {
 		return ConstantBool(state, true);
 	}
@@ -275,6 +396,17 @@ uint32_t EmitMemoryElementPointer(EmitterState& state, const MemoryResourceAcces
 uint32_t EmitStorageBufferElementPointer(EmitterState& state,
                                          const MemoryResourceAccess& access, uint32_t index,
                                          uint32_t pointer_type) {
+	if (access.physical) {
+		// No robustness covers a device address: an out-of-bounds lane loads the last element
+		// (the empty buffer's address is the zero page), and its value is discarded as before.
+		const auto clamped =
+		    EmitGlsl<GLSLstd450UMin, IR::Type::U32>(state, index, access.last_element);
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpAccessChain,
+		                          TypePhysicalBufferElementPointer(state, access.element_bits),
+		                          pointer, access.object_pointer, ConstantU32(state, 0), clamped);
+		return pointer;
+	}
 	const auto pointer = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpAccessChain, pointer_type, pointer, access.object_pointer,
 	                          ConstantU32(state, 0), index);

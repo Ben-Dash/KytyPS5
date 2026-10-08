@@ -416,6 +416,15 @@ static bool StreamRingInHostMemory() {
 	return KYTY_GETENV("KYTY_DEBUG_STREAM_DEVICE") == nullptr;
 }
 
+// KYTY_TABLE_MODE=1: table programs read stream copies by device address (their table block and
+// the small buffers ObtainBuffer streams).
+static vk::BufferUsageFlags StreamRingFlags() {
+	const char* table = KYTY_GETENV("KYTY_TABLE_MODE");
+	return table != nullptr && std::strcmp(table, "1") == 0
+	           ? vk::BufferUsageFlags {vk::BufferUsageFlagBits::eShaderDeviceAddress}
+	           : vk::BufferUsageFlags {};
+}
+
 BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
                          PageManager& page_manager, TextureCache& texture_cache)
     : m_graphics(graphics), m_scheduler(scheduler), m_fault_manager(graphics, scheduler, *this),
@@ -426,7 +435,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
                       AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress, CACHING_PAGESIZE),
       m_memory_tracker(page_manager),
       m_staging_buffer(graphics, scheduler, MemoryUsage::Upload, 512 * MiB),
-      m_stream_buffer(graphics, scheduler, MemoryUsage::Stream, 64 * MiB, {},
+      m_stream_buffer(graphics, scheduler, MemoryUsage::Stream, 64 * MiB, StreamRingFlags(),
                       StreamRingInHostMemory()),
       m_download_buffer(graphics, scheduler, MemoryUsage::Download, 64 * MiB),
       m_device_buffer(graphics, scheduler, MemoryUsage::DeviceLocal, 128 * MiB),
@@ -478,7 +487,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	}
 	if (AbSelected("streamhost")) {
 		m_stream_device = std::make_unique<StreamBuffer>(graphics, scheduler, MemoryUsage::Stream,
-		                                                 64 * MiB, vk::BufferUsageFlags {}, false);
+		                                                 64 * MiB, StreamRingFlags(), false);
 		// Vulkan memory property bits: 1 device-local, 2 host-visible, 4 coherent, 8 cached.
 		std::printf("streamhost A/B: ring memory 0x%x, device ring memory 0x%x\n",
 		            m_stream_buffer.MemoryProperties(), m_stream_device->MemoryProperties());

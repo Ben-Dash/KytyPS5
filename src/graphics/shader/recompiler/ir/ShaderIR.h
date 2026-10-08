@@ -514,6 +514,12 @@ struct DescriptorBinding {
 	bool operator==(const DescriptorBinding& other) const = default;
 };
 
+// A table-mode block's entry of one buffer: device address (low, high), byte range from that
+// address, and the byte offset the shader adds to its addresses (below 256, as the memory
+// offsets of a bound buffer).
+inline constexpr uint32_t TableBufferEntryDwords = 4u;
+inline constexpr uint32_t TableSrtHeaderDwords   = 4u;
+
 struct BindingLayout {
 	uint32_t                       push_data_start_dword = PushData::NoStart;
 	uint32_t                       dispatch_thread_dword = PushData::NoStart;
@@ -527,6 +533,12 @@ struct BindingLayout {
 	std::vector<uint32_t>          buffer_formats;
 	// Graphics stages leave PushData::ObjectIdDword to the draw (its VGT_OBJECT_ID).
 	bool                           reserve_object_id = false;
+	// Table mode (KYTY_TABLE_MODE): no buffer, flattened-SRT or memory-offset descriptors. The
+	// shader reads them from a per-draw block whose device address is in the two shader-data
+	// DWORDs at TableDword(): TableBufferEntryDwords per buffer, then TableSrtHeaderDwords (the
+	// flattened SRT's DWORD count first), then the flattened SRT from table_srt_dword on.
+	bool                           table           = false;
+	uint32_t                       table_srt_dword = 0;
 	std::vector<uint32_t>          user_data_registers;
 	std::vector<DescriptorBinding> descriptors;
 
@@ -536,9 +548,10 @@ struct BindingLayout {
 	[[nodiscard]] uint32_t BufferFormatDword() const {
 		return BufferStrideDword() + static_cast<uint32_t>(buffer_strides.size() + 1u) / 2u;
 	}
-	[[nodiscard]] uint32_t ShaderDataDwords() const {
+	[[nodiscard]] uint32_t TableDword() const {
 		return BufferFormatDword() + static_cast<uint32_t>(buffer_formats.size());
 	}
+	[[nodiscard]] uint32_t ShaderDataDwords() const { return TableDword() + (table ? 2u : 0u); }
 	// Where the shader data goes in push data from `cursor` on, or PushData::NoStart (storage).
 	[[nodiscard]] uint32_t PushStartFor(uint32_t cursor) const {
 		return PushData::StartFor(cursor, ShaderDataDwords(),

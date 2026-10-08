@@ -136,11 +136,19 @@ static Prospero::BufferFormat RuntimeBufferFormat(const ShaderRecompiler::IR::Re
 
 static vk::DescriptorBufferInfo
 NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource& source,
-                    const ShaderRecompiler::IR::BufferResource& resource, uint32_t& buffer_offset) {
+                    const ShaderRecompiler::IR::BufferResource& resource, uint32_t& buffer_offset,
+                    vk::DeviceAddress* device_address = nullptr) {
 	buffer_offset = 0;
+	// Table mode: the device address of the returned range; the null buffer's is the zero page.
+	const auto null_address = [&] {
+		if (device_address != nullptr) {
+			*device_address = context.GetBufferCache().ZeroPageAddress();
+		}
+	};
 
 	const auto& [address, size, id] = source;
 	if (address == 0 || size == 0) {
+		null_address();
 		return {context.GetBufferCache().GetBuffer(NULL_BUFFER_ID).Handle(), 0, 16};
 	}
 	const auto& graphics  = context.GetGraphics();
@@ -190,6 +198,7 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 			            resource.formatted ? 1 : 0,
 			            static_cast<uint32_t>(resource.descriptor_format));
 		}
+		null_address();
 		return {context.GetBufferCache().GetBuffer(NULL_BUFFER_ID).Handle(), 0, 16};
 	}
 	buffer_offset = static_cast<uint32_t>(adjustment);
@@ -201,10 +210,15 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 		range &= ~vk::DeviceSize {sizeof(uint32_t) - 1};
 		if (range == 0) {
 			buffer_offset = 0;
+			null_address();
 			return {nullptr, 0, VK_WHOLE_SIZE};
 		}
 	}
 	const vk::DescriptorBufferInfo result {buffer->Handle(), aligned_offset, range};
+	if (device_address != nullptr) {
+		EXIT_IF(!buffer->HasDeviceAddress());
+		*device_address = buffer->BufferDeviceAddress() + aligned_offset;
+	}
 	if (resource.written) {
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::BufferInvalidate);
 		context.GetTextureCache().InvalidateMemoryFromGPU(address, size);
@@ -2166,7 +2180,31 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		const auto shift = (index % 4u) * 8u;
 		prepared.shader_data[dword] |= offset << shift;
 	};
-	for (uint32_t i = 0; i < program.info.buffers.size(); i++) {
+	// Table mode: buffer entries and the flattened SRT go into the draw's block instead
+	// (TableDword: its address).
+	auto& block = m_table_block;
+	if (layout.table) {
+		block.assign(layout.table_srt_dword, 0u);
+	}
+	for (uint32_t i = 0; i < program.info.buffers.size() && layout.table; i++) {
+		uint32_t          buffer_offset = 0;
+		vk::DeviceAddress address       = 0;
+		const auto&       resource      = program.info.buffers[i];
+		auto              runtime_resource = resource;
+		if (resource.descriptor_format == ShaderRecompiler::IR::GenericBufferFormat) {
+			runtime_resource.descriptor_format = RuntimeBufferFormat(snapshot, i);
+		}
+		const auto info = NativeStorageBuffer(m_context, prepared.buffer_sources[i],
+		                                      runtime_resource, buffer_offset, &address);
+		const uint64_t bytes = info.buffer ? info.range : 0u;
+		EXIT_IF(bytes > UINT32_MAX || address == 0);
+		auto* entry = &block[i * ShaderRecompiler::IR::TableBufferEntryDwords];
+		entry[0]    = static_cast<uint32_t>(address);
+		entry[1]    = static_cast<uint32_t>(address >> 32u);
+		entry[2]    = static_cast<uint32_t>(bytes);
+		entry[3]    = buffer_offset;
+	}
+	for (uint32_t i = 0; i < program.info.buffers.size() && !layout.table; i++) {
 		uint32_t buffer_offset = 0;
 		const auto& resource = program.info.buffers[i];
 		if (resource.descriptor_format == ShaderRecompiler::IR::GenericBufferFormat) {
@@ -2197,6 +2235,29 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		    ShaderRecompiler::IR::RuntimeBufferSlotWord(snapshot.buffers[index]);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::BufferViews);
+	if (layout.table) {
+		// The header's first DWORD is the flattened SRT's size; at least one (zero) DWORD
+		// follows, which a shader index past the SRT reads.
+		const auto& srt = snapshot.flattened_srt;
+		block[layout.table_srt_dword - ShaderRecompiler::IR::TableSrtHeaderDwords] =
+		    static_cast<uint32_t>(srt.size());
+		block.insert(block.end(), srt.begin(), srt.end());
+		for (const auto& [offset, region, entries]: prepared.bindless_patches) {
+			if (static_cast<size_t>(offset) + 1u < srt.size()) {
+				block[layout.table_srt_dword + offset]      = region;
+				block[layout.table_srt_dword + offset + 1u] = entries;
+			}
+		}
+		if (srt.empty()) {
+			block.push_back(0u);
+		}
+		auto& ring = m_context.GetBufferCache().GetUtilityBuffer(MemoryUsage::Stream);
+		EXIT_IF(!ring.HasDeviceAddress());
+		const auto offset  = ring.Copy(block.data(), block.size() * sizeof(uint32_t), 256);
+		const auto address = ring.BufferDeviceAddress() + offset;
+		prepared.shader_data[layout.TableDword()]      = static_cast<uint32_t>(address);
+		prepared.shader_data[layout.TableDword() + 1u] = static_cast<uint32_t>(address >> 32u);
+	}
 	if (ShaderRecompiler::IR::FindBinding(
 	        layout, ShaderRecompiler::IR::DescriptorBindingKind::FlattenedSrt) != nullptr) {
 		if (prepared.bindless_patches.empty()) {

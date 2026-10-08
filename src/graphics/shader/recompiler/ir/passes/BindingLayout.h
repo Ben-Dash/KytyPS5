@@ -5,8 +5,13 @@
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
 
+// `table`: lay out a program that qualifies (TableEligible) in table mode (BindingLayout::table).
 void AllocateBindings(Program& program, uint32_t push_data_start_dword = 0,
-                      bool lds_storage = false);
+                      bool lds_storage = false, bool table = false);
+
+// A vertex or pixel shader that only reads its buffers, without the BDA page table or GDS, and
+// has buffers or a flattened SRT to read.
+bool TableEligible(const Program& program);
 
 struct SharedMemoryResources {
 	bool lds = false;

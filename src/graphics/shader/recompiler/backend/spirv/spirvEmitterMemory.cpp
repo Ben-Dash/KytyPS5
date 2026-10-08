@@ -362,15 +362,17 @@ constexpr uint32_t HardwareBoundsByteCap = 0x7fffff00u;
 
 uint32_t ByteAddress(ValueEmitContext& ctx, const IR::Inst& inst, const IR::MemoryInfo& mem) {
 	if (mem.kind == IR::ResourceKind::Buffer) {
-		const auto resource = ResourceForDescriptor(ctx.state, IR::DescriptorBindingKind::Buffers,
-		                                            mem.resource);
+		const auto resource = ctx.state.program.bindings.table
+		                          ? mem.resource
+		                          : ResourceForDescriptor(ctx.state, IR::DescriptorBindingKind::Buffers,
+		                                                  mem.resource);
 		const auto prefix = ctx.state.memory_byte_offsets[resource];
 		const auto address = Binary(ctx.state, spv::OpIAdd, TypeU32(ctx.state),
 		                            BufferByteAddress(ctx, inst, mem), prefix);
 		// The host binding prefix must not wrap an out-of-range guest address into the buffer.
 		const auto wrapped =
 		    Binary(ctx.state, spv::OpUGreaterThanEqual, TypeBool(ctx.state), address, prefix);
-		if (!HardwareStorageBufferBounds()) {
+		if (!HardwareStorageBufferBounds() || ctx.state.program.bindings.table) {
 			return Select(ctx.state, TypeU32(ctx.state), wrapped, address,
 			              ConstantU32(ctx.state, UINT32_MAX));
 		}
@@ -484,6 +486,10 @@ uint32_t LoadWordInBounds(ValueEmitContext& ctx, const MemoryResourceAccess& res
                           uint32_t index) {
 	const auto value   = ctx.state.builder.AllocateId();
 	const auto pointer = EmitMemoryElementPointer(ctx.state, resource, index);
+	if (resource.physical) {
+		EmitBufferElementLoad(ctx.state, TypeU32(ctx.state), value, pointer, resource);
+		return value;
+	}
 	ctx.state.builder.AddFunction(spv::OpLoad, TypeU32(ctx.state), value, pointer,
 	                              resource.memory_access);
 	return value;
@@ -494,9 +500,14 @@ uint32_t LoadSubwordInBounds(ValueEmitContext& ctx, const MemoryResourceAccess& 
 	uint32_t value;
 	if (resource.element_bits < 32u) {
 		const auto loaded = ctx.state.builder.AllocateId();
-		ctx.state.builder.AddFunction(spv::OpLoad, TypeStorageBufferElement(ctx.state, bits), loaded,
-		                              EmitMemoryElementPointer(ctx.state, resource, index),
-		                              resource.memory_access);
+		if (resource.physical) {
+			EmitBufferElementLoad(ctx.state, TypeStorageBufferElement(ctx.state, bits), loaded,
+			                      EmitMemoryElementPointer(ctx.state, resource, index), resource);
+		} else {
+			ctx.state.builder.AddFunction(spv::OpLoad, TypeStorageBufferElement(ctx.state, bits),
+			                              loaded, EmitMemoryElementPointer(ctx.state, resource, index),
+			                              resource.memory_access);
+		}
 		value = Unary(ctx.state, spv::OpUConvert, TypeU32(ctx.state), loaded);
 	} else {
 		const auto word = LoadWordInBounds(ctx, resource, index);
@@ -750,7 +761,7 @@ void StoreWord(ValueEmitContext& ctx, const IR::Inst& inst, IR::MemoryInfo mem) 
 		const auto& buffer = state.program.info.buffers[mem.resource];
 		const auto* handle = inst.Arg(0).ResolveInstruction();
 		if (handle == nullptr || buffer.indirect_resources.empty() ||
-		    state.flattened_srt_variable == 0 || buffer.indirect_search_iterations == 0u) {
+		    !HasFlattenedSrt(state) || buffer.indirect_search_iterations == 0u) {
 			ctx.Fail(inst, "has no indirect buffer runtime mapping");
 			return;
 		}
@@ -2901,6 +2912,9 @@ uint32_t EmitAppendConsume(ValueEmitContext& ctx, const IR::Inst& inst) {
 
 uint32_t EmitReadConst(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto& state = ctx.state;
+	if (state.program.bindings.table) {
+		return LoadFlattenedSrtWord(state, ctx.Arg(inst, 1));
+	}
 	if (state.flattened_srt_variable == 0) {
 		ctx.Fail(inst, "requires the flattened SRT descriptor");
 	}
@@ -2931,7 +2945,7 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 	    state, spv::OpIAdd, TypeU32(state), index,
 	    Binary(state, spv::OpShiftRightLogical, TypeU32(state), access.byte_offset, ConstantU32(state, 2)));
 	auto condition = EmitWordAccessInBounds(state, access, element);
-	if (HardwareStorageBufferBounds()) {
+	if (HardwareStorageBufferBounds() && !access.physical) {
 		// SOFFSET and the immediate are aligned and added without wrapping, so an offset carry
 		// past 4 GiB gives an element of 2^30 or more. Hardware bounds check the element's byte
 		// offset plus size in 32 bits, which would wrap back into the buffer: reject those here,
@@ -2946,6 +2960,12 @@ void EmitReadConstBuffer(ValueEmitContext& ctx, const IR::Inst& inst) {
 		    state, element, ConstantU32(state, HardwareBoundsByteCap / 4u));
 	}
 	ctx.Define(inst, LoadElementOrZero(state, access, condition, element, [&](uint32_t target) {
+		           if (access.physical) {
+			           const auto value = state.builder.AllocateId();
+			           EmitBufferElementLoad(state, TypeU32(state), value,
+			                                 EmitMemoryElementPointer(state, access, target), access);
+			           return value;
+		           }
 		           return EmitNative<spv::OpLoad, IR::Type::U32>(
 		               state, EmitMemoryElementPointer(state, access, target));
 	           }));

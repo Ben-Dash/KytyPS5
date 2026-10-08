@@ -96,6 +96,11 @@ public:
 	[[nodiscard]] StreamBuffer& ActiveStream() noexcept;
 	// Device-addressable ring for per-draw parameter records that shaders load by address.
 	[[nodiscard]] StreamBuffer& GetDrawRecordBuffer() noexcept { return m_draw_record_buffer; }
+	// The zero page's device address (written on first use): a table block's null buffers.
+	[[nodiscard]] vk::DeviceAddress ZeroPageAddress() {
+		EnsureBdaZeroPage();
+		return m_bda_zero_page.BufferDeviceAddress();
+	}
 	[[nodiscard]] const Buffer* GetGdsBuffer() const noexcept { return &m_gds_buffer; }
 	[[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept { return &m_bda_pagetable_buffer; }
 	// KYTY_DEBUG_DEVICE_FAULT: once per frame an 8-byte readback of one page-table entry, compared

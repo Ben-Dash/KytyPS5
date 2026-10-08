@@ -497,6 +497,16 @@ bool HardwareStorageBufferBounds() {
 	return g_hardware_storage_buffer_bounds.load(std::memory_order_relaxed);
 }
 
+static std::atomic<bool> g_table_mode {false};
+
+void SetTableMode(bool enabled) {
+	g_table_mode.store(enabled, std::memory_order_relaxed);
+}
+
+bool TableMode() {
+	return g_table_mode.load(std::memory_order_relaxed);
+}
+
 static std::atomic<bool> g_native_float16 {false};
 
 void SetNativeFloat16(bool enabled) {
@@ -776,7 +786,8 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 	IR::CollectShaderInfo(ir, options.input_info);
 	IR::AllocateBindings(ir, push_data_start_dword,
 	                     ir.stage == ShaderType::Compute && options.input_info.compute != nullptr &&
-	                         options.input_info.compute->lds_storage);
+	                         options.input_info.compute->lds_storage,
+	                     TableMode());
 	std::string ir_dump;
 	if (options.dump_ir) {
 		ir_dump = MakeIrDump(translated.cfg_dump, ir);

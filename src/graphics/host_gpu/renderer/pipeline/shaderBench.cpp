@@ -761,6 +761,8 @@ int Run(int argc, char* argv[]) {
 	const bool hw_bounds = o.hw_bounds >= 0 ? o.hw_bounds != 0 : !have_device || device.hw_bounds;
 	ShaderRecompiler::SetHardwareStorageBufferBounds(hw_bounds);
 	ShaderRecompiler::SetNativeFloat16(have_device && device.native_float16);
+	ShaderRecompiler::SetTableMode(std::getenv("KYTY_TABLE_MODE") != nullptr &&
+	                                 std::string_view(std::getenv("KYTY_TABLE_MODE")) == "1");
 	std::printf("device: %s, max LDS %u, hw bounds %s, bindless %s, native fp16 %s\n",
 	            have_device ? device.properties.deviceName : "(none)", max_lds,
 	            hw_bounds ? "on" : "off", o.bindless ? "on" : "off",

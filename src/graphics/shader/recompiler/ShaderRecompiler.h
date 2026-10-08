@@ -49,6 +49,12 @@ struct CompileResult {
 void SetHardwareStorageBufferBounds(bool enabled);
 [[nodiscard]] bool HardwareStorageBufferBounds();
 
+// KYTY_TABLE_MODE=1 (research, off by default): vertex and pixel shaders that only read their
+// buffers read them and the flattened SRT through a per-draw block (IR::BindingLayout::table)
+// instead of storage buffer descriptors. Set before any compile.
+void SetTableMode(bool enabled);
+[[nodiscard]] bool TableMode();
+
 // Packed FP16 arithmetic runs as native 16-bit float vectors (shaderFloat16 with FP16 denormals
 // and signed zero/Inf/NaN preserved) instead of through F32. Set before any compile, only when the
 // device enables those; KYTY_NATIVE_FP16=0 turns it off.

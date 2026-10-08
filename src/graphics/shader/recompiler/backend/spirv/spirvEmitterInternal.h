@@ -131,6 +131,13 @@ struct EmitterState {
 	uint32_t                                         storage_buffer_u16_variable = 0;
 	uint32_t                                         storage_buffer_u64_variable = 0;
 	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> memory_byte_offsets {};
+	// Table mode (IR::BindingLayout::table), read at entry (EmitTableEntries): the block's device
+	// address, each buffer's device address (u64) and byte range, and the last flattened-SRT
+	// DWORD index (0 without a flattened SRT).
+	uint32_t                                         table_block_address = 0;
+	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> table_buffer_address {};
+	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> table_buffer_bytes {};
+	uint32_t                                         table_srt_last = 0;
 	// The strides of buffers with IR::DynamicBufferStride, from shader data at entry.
 	std::array<uint32_t, IR::ShaderInfo::MaxBuffers> buffer_strides {};
 	// The format and dst_sel of a buffer with IR::GenericBufferFormat, decoded once at entry
@@ -255,6 +262,9 @@ uint32_t TypeStorageBufferElement(EmitterState& state, uint32_t bits);
 uint32_t TypeStorageBufferPointer(EmitterState& state, uint32_t bits = 32);
 uint32_t TypeStorageBufferElementPointer(EmitterState& state, uint32_t bits = 32);
 uint32_t TypePhysicalU32Pointer(EmitterState& state);
+// A buffer of `bits`-wide elements, and one element, in PhysicalStorageBuffer (table mode).
+uint32_t TypePhysicalBufferPointer(EmitterState& state, uint32_t bits);
+uint32_t TypePhysicalBufferElementPointer(EmitterState& state, uint32_t bits);
 uint32_t TypePushConstantElementPointer(EmitterState& state);
 [[nodiscard]] bool UsesIdBuffer(const EmitterState& state);
 uint32_t TypeU32ArrayPointer(EmitterState& state, spv::StorageClass storage_class, uint32_t dwords);
@@ -516,7 +526,21 @@ struct MemoryResourceAccess {
 	uint32_t              byte_offset      = 0;
 	uint32_t              element_bits     = 32;
 	spv::MemoryAccessMask memory_access    = spv::MemoryAccessMaskNone;
+	// A table-mode buffer: object_pointer is a PhysicalStorageBuffer pointer, element pointers
+	// clamp their index to `last_element` (no robustness covers them) and loads are aligned.
+	bool                  physical         = false;
+	uint32_t              last_element     = 0;
 };
+
+// Table mode: reads the block entries of every buffer and the flattened SRT's size at entry.
+void EmitTableEntries(EmitterState& state);
+// Whether the program reads a flattened SRT, from its descriptor or its table block.
+[[nodiscard]] bool HasFlattenedSrt(const EmitterState& state);
+// A DWORD of the flattened SRT at `index` (a u32 id).
+uint32_t LoadFlattenedSrtWord(EmitterState& state, uint32_t index);
+// OpLoad of a buffer element through `pointer` (EmitMemoryElementPointer of `access`).
+void EmitBufferElementLoad(EmitterState& state, uint32_t type, uint32_t result, uint32_t pointer,
+                           const MemoryResourceAccess& access);
 
 uint32_t EmitIndirectResourceIndex(EmitterState& state, uint32_t key, uint32_t mapping_offset,
                                    uint32_t search_iterations, uint32_t default_resource);
