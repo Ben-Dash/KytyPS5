@@ -524,6 +524,53 @@ inline constexpr std::array<VideoOutFormatPolicy, 7> VIDEO_OUT_FORMAT_POLICIES {
 		clear = vk::ClearColorValue {};
 		return true;
 	}
+	// The dword is a memory fill: a narrower pixel takes one clear value only if every pixel gets
+	// the same bytes. Ghost of Yotei's "Clear G-Buffer" fills its 8-bit shadow mask with
+	// 0xffffffff; without this the clear did not reach the target, which kept stale contents.
+	switch (format) {
+		case vk::Format::eR8Unorm:
+		case vk::Format::eR8Srgb:
+		case vk::Format::eR8Uint: {
+			if (packed != (packed & 0xffu) * 0x01010101u) {
+				return false;
+			}
+			clear = vk::ClearColorValue {};
+			if (format == vk::Format::eR8Uint) {
+				clear.uint32[0] = packed & 0xffu;
+				return true;
+			}
+			vk::ClearColorValue rgba {};
+			if (!DecodePackedColorClear(format == vk::Format::eR8Srgb ? vk::Format::eR8G8B8A8Srgb
+			                                                          : vk::Format::eR8G8B8A8Unorm,
+			                            packed, rgba)) {
+				return false;
+			}
+			clear.float32[0] = rgba.float32[0];
+			return true;
+		}
+		case vk::Format::eR8G8Unorm:
+		case vk::Format::eR8G8Uint:
+		case vk::Format::eR16Unorm:
+		case vk::Format::eR16Uint: {
+			if (packed != (packed & 0xffffu) * 0x00010001u) {
+				return false;
+			}
+			clear = vk::ClearColorValue {};
+			if (format == vk::Format::eR8G8Unorm) {
+				clear.float32[0] = static_cast<float>(packed & 0xffu) / 255.0f;
+				clear.float32[1] = static_cast<float>((packed >> 8u) & 0xffu) / 255.0f;
+			} else if (format == vk::Format::eR8G8Uint) {
+				clear.uint32[0] = packed & 0xffu;
+				clear.uint32[1] = (packed >> 8u) & 0xffu;
+			} else if (format == vk::Format::eR16Unorm) {
+				clear.float32[0] = static_cast<float>(packed & 0xffffu) / 65535.0f;
+			} else {
+				clear.uint32[0] = packed & 0xffffu;
+			}
+			return true;
+		}
+		default: break;
+	}
 	return DecodePackedColorClear(format, packed, clear);
 }
 
