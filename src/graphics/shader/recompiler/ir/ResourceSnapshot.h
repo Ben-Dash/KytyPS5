@@ -25,6 +25,9 @@ struct UniformFill {
 	std::array<uint32_t, 3> group_stride {};
 	uint32_t                 words        = 0;
 	uint32_t                 value        = 0;
+	// Every stored word equals `value`. A store whose words differ keeps its first word in `value`
+	// (Ghost of Yotei's DCC comp-to-single color writes: the color in X, other data in Y..W).
+	bool                     uniform      = false;
 
 	bool operator==(const UniformFill&) const = default;
 };

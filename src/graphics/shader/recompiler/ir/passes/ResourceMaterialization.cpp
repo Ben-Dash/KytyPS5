@@ -1567,13 +1567,16 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 	const auto& fill = program.uniform_fill;
 	const auto words = fill.fill.words;
 	std::array<uint32_t, 4> stored {};
-	bool uniform_fill = words != 0;
-	for (uint32_t i = 0; i < words && uniform_fill; ++i) {
-		uniform_fill = clean.Evaluate(roots.Fill(i), stored[i]) && stored[i] == stored[0];
+	bool evaluated = words != 0;
+	bool uniform   = true;
+	for (uint32_t i = 0; i < words && evaluated; ++i) {
+		evaluated = clean.Evaluate(roots.Fill(i), stored[i]);
+		uniform   = uniform && stored[i] == stored[0];
 	}
-	if (uniform_fill) {
-		snapshot.uniform_fill = fill.fill;
-		snapshot.uniform_fill.value = stored[0];
+	if (evaluated) {
+		snapshot.uniform_fill         = fill.fill;
+		snapshot.uniform_fill.value   = stored[0];
+		snapshot.uniform_fill.uniform = uniform;
 	}
 	if constexpr (std::is_same_v<Roots, CompiledRoots>) {
 		if (memo != nullptr) {

@@ -148,8 +148,9 @@ public:
 	}
 	void MarkGpuWritten(ImageId id);
 
+	// `block_bytes` != 0: only an image of that many bytes per texel block qualifies.
 	[[nodiscard]] bool ClearImageFromBuffer(CommandBuffer& command, uint64_t address, uint64_t size,
-	                                        uint32_t packed_clear);
+	                                        uint32_t packed_clear, uint32_t block_bytes = 0);
 	void               InvalidateMemory(uint64_t address, uint64_t size);
 	// What wrote guest memory through a buffer (for the KYTY_GPU_ZONES refresh log); shader
 	// storage-buffer stores are the default.

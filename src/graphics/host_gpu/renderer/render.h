@@ -315,6 +315,10 @@ private:
 	[[nodiscard]] bool TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,
 	                                              CommandBuffer& command, uint32_t group_x,
 	                                              uint32_t group_y, uint32_t group_z, uint32_t mode);
+	[[nodiscard]] bool TryConsumeComputeDccSingleClear(const ShaderComputeInputInfo& input,
+	                                                  CommandBuffer& command, uint32_t group_x,
+	                                                  uint32_t group_y, uint32_t group_z,
+	                                                  uint32_t mode);
 	[[nodiscard]] bool ReadsPendingWrites(std::span<PreparedBindings* const> stages,
 	                                      const ShaderVertexInputInfo&       vertex_input,
 	                                      const DrawIndexBufferSource&       index_source,

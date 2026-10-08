@@ -2664,7 +2664,7 @@ void TextureCache::CommitGpuWrite(Image& image) {
 }
 
 bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address, uint64_t size,
-                                        uint32_t packed_clear) {
+                                        uint32_t packed_clear, uint32_t block_bytes) {
 	if (command.IsInvalid() || !GuestRange {address, size}.Valid()) {
 		EXIT("TextureCache: invalid image clear\n");
 	}
@@ -2720,6 +2720,10 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 		return false;
 	}
 	auto&          image = m_slot_images[selected];
+	if (block_bytes != 0 && (aspect != vk::ImageAspectFlagBits::eColor ||
+	                         image.info.bytes_per_block * image.info.samples != block_bytes)) {
+		return false;
+	}
 	vk::ClearValue clear {};
 	if (aspect == vk::ImageAspectFlagBits::eColor) {
 		if (!DecodeColorDwordFill(image.info.pixel_format, packed_clear, clear.color)) {

@@ -376,7 +376,7 @@ bool ResolveComputeBufferFill(const ShaderComputeInputInfo& input, uint32_t grou
                               uint64_t& resolved_size) {
 	const auto& resources = *input.stage.resources;
 	const auto& fill      = resources.uniform_fill;
-	if (fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer) {
+	if (fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer || !fill.uniform) {
 		return false;
 	}
 	const auto element_size = fill.words * sizeof(uint32_t);
@@ -413,6 +413,65 @@ bool ResolveComputeBufferFill(const ShaderComputeInputInfo& input, uint32_t grou
 	return true;
 }
 
+// DCC comp-to-single clear (GFX10+): the game sets every DCC key of a color surface to 0x10
+// ("the block's color is stored in the image") and then writes the clear color into the first
+// element of every 256-byte block, one thread per block. The hardware then reads the whole block
+// as that color; the host keeps no DCC, so only one texel in 64 got the color. Ghost of Yotei
+// clears its motion vectors to NaN this way ("no vector yet"), and the pass that fills in the
+// camera motion only touches NaN pixels: without this, static geometry and the sky kept zero
+// motion and TAA smeared buildings and characters behind every camera move.
+// KYTY_DCC_SINGLE_CLEAR=0: off.
+bool RenderExecutor::TryConsumeComputeDccSingleClear(const ShaderComputeInputInfo& input,
+                                                     CommandBuffer& command, uint32_t group_x,
+                                                     uint32_t group_y, uint32_t group_z,
+                                                     uint32_t mode) {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_DCC_SINGLE_CLEAR");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	constexpr uint32_t DccBlockBytes = 256;
+	const auto&        resources     = *input.stage.resources;
+	const auto&        fill          = resources.uniform_fill;
+	if (!enabled || fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer) {
+		return false;
+	}
+	const auto descriptor =
+	    DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[fill.resource]);
+	const auto format = descriptor.Format();
+	// One 32-bit element per block: the color of a 4-byte-per-texel surface.
+	if (descriptor.Stride() != DccBlockBytes ||
+	    (format != Prospero::BufferFormat::k32UInt && format != Prospero::BufferFormat::k32SInt &&
+	     format != Prospero::BufferFormat::k32Float) ||
+	    descriptor.DstSelX() != 4 || descriptor.SwizzleEnabled() || descriptor.IndexStride() != 0 ||
+	    descriptor.AddTid() || descriptor.Base48() == 0) {
+		return false;
+	}
+	if (input.threads_num[0] == 0 || input.threads_num[0] != fill.group_stride[0] ||
+	    input.threads_num[1] != 1 || input.threads_num[2] != 1 || group_x == 0 || group_y != 1 ||
+	    group_z != 1 || input.dispatch_thread_dimensions || mode != 0x41u) {
+		return false;
+	}
+	const uint64_t invocations = static_cast<uint64_t>(group_x) * input.threads_num[0];
+	const auto     size        = descriptor.GetSize();
+	if (invocations != descriptor.NumRecords() || size == 0 || size > UINT32_MAX ||
+	    !FillSourcesDisjoint(resources.buffers, {descriptor.Base48(), size}, fill.resource)) {
+		return false;
+	}
+	auto& cache = command.GetContext().GetTextureCache();
+	if (!cache.ClearImageFromBuffer(command, descriptor.Base48(), size, fill.value,
+	                                sizeof(uint32_t))) {
+		return false;
+	}
+	static std::atomic<uint32_t> logged {0};
+	if (logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+		std::printf("DCC single clear: shader=%016" PRIx64 " addr=0x%012" PRIx64 " size=0x%" PRIx64
+		            " color=0x%08" PRIx32 "\n",
+		            input.stage.program->shader_hash, descriptor.Base48(), size, fill.value);
+		std::fflush(stdout);
+	}
+	return true;
+}
+
 bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,
                                                 CommandBuffer& command, uint32_t group_x,
                                                 uint32_t group_y, uint32_t group_z, uint32_t mode) {
@@ -421,7 +480,7 @@ bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& i
 	const auto& fill      = resources.uniform_fill;
 	auto&       cache     = command.GetContext().GetTextureCache();
 	if (fill.kind == ShaderRecompiler::IR::UniformFillKind::Image) {
-		if (mode != 0x41u || input.dispatch_thread_dimensions || fill.value > 255 ||
+		if (!fill.uniform || mode != 0x41u || input.dispatch_thread_dimensions || fill.value > 255 ||
 		    input.threads_num[2] != 1)
 			return false;
 		const auto  descriptor = DecodeNativeDescriptor<ShaderTextureResource>(resources.images[0]);
@@ -469,7 +528,7 @@ bool RenderExecutor::TryConsumeComputeImageClear(const ShaderComputeInputInfo& i
 	uint64_t             size         = 0;
 	if (!ResolveComputeBufferFill(input, group_x, group_y, group_z, mode, descriptor, packed_clear,
 	                              size)) {
-		return false;
+		return TryConsumeComputeDccSingleClear(input, command, group_x, group_y, group_z, mode);
 	}
 	if (!cache.ClearImageFromBuffer(command, descriptor.Base48(), size, packed_clear)) {
 		return false;
