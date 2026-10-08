@@ -11,7 +11,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <numbers>
 #include <vector>
 
 namespace Libs::Audio {
@@ -190,6 +193,11 @@ struct AudioOut2PortStateEntry {
 	AudioInternal::Format  audio_format  = AudioInternal::Format::Unknown;
 	int                    audio_handle  = 0;
 	std::vector<uint8_t>   pcm_data;
+	// Object ports only: PCM set since the last push, and the last position the game sent.
+	bool                   pcm_fresh    = false;
+	bool                   has_position = false;
+	float                  position_x   = 0.0f;
+	float                  position_z   = 0.0f;
 };
 
 struct AudioOut2SpeakerArrayState {
@@ -361,6 +369,132 @@ static bool audioout2_context_has_queueable_device(AudioOut2ContextHandle ctx) {
 	return false;
 }
 
+static float audioout2_read_sample(const AudioOut2PortStateEntry& state, size_t index) {
+	if ((state.data_format & 0x7fu) == 1) {
+		int16_t value = 0;
+		std::memcpy(&value, state.pcm_data.data() + index * sizeof(int16_t), sizeof(int16_t));
+		return static_cast<float>(value) / 32768.0f;
+	}
+	float value = 0.0f;
+	std::memcpy(&value, state.pcm_data.data() + index * sizeof(float), sizeof(float));
+	return value;
+}
+
+// Console line every 5 s while objects play (first 60 reports): how many object blocks were mixed
+// into the bed and their loudest sample, to check in a log that objects are heard.
+struct AudioOut2ObjectMeter {
+	uint64_t report_start = 0;
+	uint32_t reports      = 0;
+	uint64_t blocks       = 0;
+	float    peak         = 0.0f;
+};
+static AudioOut2ObjectMeter g_object_meter;
+
+static void audioout2_report_object_level() {
+	const auto now = LibKernel::KernelGetProcessTime();
+	if (g_object_meter.report_start == 0) {
+		g_object_meter.report_start = now;
+	}
+	if (now - g_object_meter.report_start < 5000000) {
+		return;
+	}
+	if (g_object_meter.blocks != 0 && g_object_meter.reports < 60) {
+		g_object_meter.reports++;
+		std::printf("AudioOut2 objects mixed: t=%.1f s, %llu blocks, peak %.1f dBFS\n",
+		            static_cast<double>(now) / 1e6,
+		            static_cast<unsigned long long>(g_object_meter.blocks),
+		            g_object_meter.peak > 0.0f ? 20.0 * std::log10(g_object_meter.peak) : -999.0);
+		std::fflush(stdout);
+	}
+	g_object_meter.report_start = now;
+	g_object_meter.blocks       = 0;
+	g_object_meter.peak         = 0.0f;
+}
+
+// The emulator has no 3D renderer for object ports (sounds the game positions in space, e.g. Astro
+// Bot's flying animals), so each object is downmixed to mono and panned left/right by its position
+// into the context's main bed. Front/back and height are not rendered. Returns false when there is
+// nothing to mix or no main bed to mix into.
+static bool audioout2_mix_objects_locked(AudioOut2ContextHandle          ctx,
+                                         const AudioOut2PortStateEntry** bed_out,
+                                         std::vector<uint8_t>*           mix_out) {
+	const AudioOut2PortStateEntry* bed = nullptr;
+	for (const auto& state: g_audioout2_ports) {
+		if (state.used && state.context == ctx && state.audio_handle > 0 &&
+		    !state.pcm_data.empty() && !audioout2_port_type_is_object(state.port_type) &&
+		    (state.port_type & 0xffu) == 0) {
+			bed = &state;
+			break;
+		}
+	}
+
+	std::vector<float> mix;
+	uint32_t           bed_channels = 0;
+	for (auto& object: g_audioout2_ports) {
+		if (!object.used || object.context != ctx || !audioout2_port_type_is_object(object.port_type) ||
+		    !object.pcm_fresh) {
+			continue;
+		}
+		object.pcm_fresh = false;
+		if (bed == nullptr || object.pcm_data.empty() || object.samples_num != bed->samples_num) {
+			continue;
+		}
+		if (mix.empty()) {
+			bed_channels = audioout2_data_format_channels(bed->data_format);
+			mix.resize(static_cast<size_t>(bed->samples_num) * bed_channels);
+			for (size_t i = 0; i < mix.size(); i++) {
+				mix[i] = audioout2_read_sample(*bed, i);
+			}
+		}
+
+		// Equal-power pan over the azimuth; |z| folds sources behind the listener to the front.
+		float azimuth = 0.0f;
+		if (object.has_position && std::abs(object.position_x) + std::abs(object.position_z) > 1e-6f) {
+			azimuth = std::atan2(object.position_x, std::abs(object.position_z));
+		}
+		const float pan     = std::clamp(azimuth / std::numbers::pi_v<float> + 0.5f, 0.0f, 1.0f);
+		const float gain_l  = std::cos(pan * std::numbers::pi_v<float> * 0.5f);
+		const float gain_r  = std::sin(pan * std::numbers::pi_v<float> * 0.5f);
+		const auto  obj_ch  = audioout2_data_format_channels(object.data_format);
+		const float obj_div = 1.0f / static_cast<float>(obj_ch);
+		g_object_meter.blocks++;
+		for (uint32_t s = 0; s < bed->samples_num; s++) {
+			float mono = 0.0f;
+			for (uint32_t c = 0; c < obj_ch; c++) {
+				mono += audioout2_read_sample(object, static_cast<size_t>(s) * obj_ch + c);
+			}
+			mono *= obj_div;
+			g_object_meter.peak = std::max(g_object_meter.peak, std::abs(mono));
+			auto* frame = mix.data() + static_cast<size_t>(s) * bed_channels;
+			if (bed_channels == 1) {
+				frame[0] += mono;
+			} else {
+				frame[0] += mono * gain_l;
+				frame[1] += mono * gain_r;
+			}
+		}
+	}
+
+	audioout2_report_object_level();
+
+	if (mix.empty()) {
+		return false;
+	}
+
+	mix_out->resize(bed->pcm_data.size());
+	if ((bed->data_format & 0x7fu) == 1) {
+		for (size_t i = 0; i < mix.size(); i++) {
+			const auto value = static_cast<int16_t>(
+			    std::lrint(std::clamp(mix[i], -1.0f, 1.0f) * 32767.0f));
+			std::memcpy(mix_out->data() + i * sizeof(int16_t), &value, sizeof(int16_t));
+		}
+	} else {
+		std::memcpy(mix_out->data(), mix.data(), mix.size() * sizeof(float));
+	}
+	*bed_out = bed;
+	return true;
+}
+
 static void audioout2_queue_context_audio(AudioOut2ContextHandle ctx, bool blocking) {
 	// The backend consumes the buffers synchronously, but can block while pacing SDL's queue.
 	// Keep both PCM storage and port handles alive until it returns.
@@ -368,10 +502,14 @@ static void audioout2_queue_context_audio(AudioOut2ContextHandle ctx, bool block
 	params.reserve(AudioInternal::OUT_PORTS_MAX);
 
 	Common::LockGuard lock(g_audioout2_port_mutex);
+	const AudioOut2PortStateEntry* mixed_bed = nullptr;
+	std::vector<uint8_t>           mixed_pcm;
+	audioout2_mix_objects_locked(ctx, &mixed_bed, &mixed_pcm);
 	for (const auto& state: g_audioout2_ports) {
 		if (state.used && state.context == ctx && state.audio_handle > 0 &&
 		    !state.pcm_data.empty() && params.size() < AudioInternal::OUT_PORTS_MAX) {
-			params.push_back(AudioInternal::OutputParam {state.audio_handle, state.pcm_data.data()});
+			params.push_back(AudioInternal::OutputParam {
+			    state.audio_handle, &state == mixed_bed ? mixed_pcm.data() : state.pcm_data.data()});
 		}
 	}
 
@@ -675,12 +813,36 @@ int KYTY_SYSV_ABI AudioOut2PortDestroy(AudioOut2PortHandle port) {
 	return OK;
 }
 
+// Object attribute ids are not documented here; print each id/size pair once with its first value
+// so the position/gain mapping can be checked in a console log.
+static void audioout2_report_object_attributes(const AudioOut2Attribute* attributes, uint32_t num) {
+	static std::array<uint64_t, 32> seen {};
+	static uint32_t                  seen_num = 0;
+	for (uint32_t i = 0; i < num && seen_num < seen.size(); i++) {
+		const uint64_t key = (static_cast<uint64_t>(attributes[i].attribute_id) << 32u) |
+		                     static_cast<uint32_t>(attributes[i].value_size);
+		if (std::find(seen.begin(), seen.begin() + seen_num, key) != seen.begin() + seen_num) {
+			continue;
+		}
+		seen[seen_num++] = key;
+		float values[3] {};
+		if (attributes[i].value != nullptr && attributes[i].attribute_id != AUDIO_OUT2_PORT_ATTRIBUTE_ID_PCM) {
+			std::memcpy(values, attributes[i].value,
+			            std::min<size_t>(attributes[i].value_size, sizeof(values)));
+		}
+		std::printf("AudioOut2 object attribute id %u size %zu first value %g %g %g\n",
+		            attributes[i].attribute_id, attributes[i].value_size, values[0], values[1],
+		            values[2]);
+	}
+}
+
 int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
                                              const AudioOut2Attribute* attributes, uint32_t num) {
 	EXIT_NOT_IMPLEMENTED(num != 0 && attributes == nullptr);
 
-	const void* pcm_data = nullptr;
-	bool        has_pcm  = false;
+	const void*              pcm_data = nullptr;
+	bool                     has_pcm  = false;
+	const AudioOut2Position* position = nullptr;
 	for (uint32_t i = 0; i < num; i++) {
 		if (attributes[i].attribute_id == AUDIO_OUT2_PORT_ATTRIBUTE_ID_PCM &&
 		    attributes[i].value != nullptr && attributes[i].value_size >= sizeof(AudioOut2Pcm)) {
@@ -688,21 +850,35 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 			std::memcpy(&pcm, attributes[i].value, sizeof(AudioOut2Pcm));
 			pcm_data = pcm.data;
 			has_pcm  = true;
+		} else if (attributes[i].value != nullptr &&
+		           attributes[i].value_size == sizeof(AudioOut2Position)) {
+			// The only three-float attribute is the object position.
+			position = static_cast<const AudioOut2Position*>(attributes[i].value);
 		}
 	}
 
-	if (has_pcm) {
-		g_audioout2_port_mutex.Lock();
-		if (auto* state = audioout2_find_port_locked(port); state != nullptr) {
+	g_audioout2_port_mutex.Lock();
+	if (auto* state = audioout2_find_port_locked(port); state != nullptr) {
+		if (audioout2_port_type_is_object(state->port_type)) {
+			audioout2_report_object_attributes(attributes, num);
+			if (position != nullptr) {
+				state->has_position = true;
+				state->position_x   = position->x;
+				state->position_z   = position->z;
+			}
+		}
+		if (has_pcm) {
 			if (pcm_data != nullptr && state->audio_format != AudioInternal::Format::Unknown) {
 				const auto* bytes = static_cast<const uint8_t*>(pcm_data);
 				state->pcm_data.assign(bytes, bytes + audioout2_pcm_size(*state));
+				state->pcm_fresh = true;
 			} else {
 				state->pcm_data.clear();
+				state->pcm_fresh = false;
 			}
 		}
-		g_audioout2_port_mutex.Unlock();
 	}
+	g_audioout2_port_mutex.Unlock();
 
 	return OK;
 }
