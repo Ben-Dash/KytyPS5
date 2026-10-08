@@ -300,7 +300,7 @@ void RenderExecutor::SyncHtileReads(const ShaderComputeInputInfo& input) {
 }
 
 bool RenderExecutor::TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
-                                                const CommandBuffer&          buffer) {
+                                                const CommandBuffer& buffer, bool consume) {
 	const auto& program   = *input.stage.program;
 	const auto& resources = *input.stage.resources;
 	if (resources.buffers.size() != program.info.buffers.size()) {
@@ -324,7 +324,7 @@ bool RenderExecutor::TryConsumeComputeMetaClear(const ShaderComputeInputInfo& in
 				const auto descriptor =
 				    DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
 				if (cache.ClearMeta(descriptor.Base48())) {
-					return true;
+					return consume;
 				}
 			}
 		}
@@ -733,6 +733,12 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		if (StampTraceEnabled()) [[unlikely]] {
 			StampTraceDispatch(program.shader_hash);
 		}
+	}
+	// A dispatch specialized on guest data still runs, but its metadata clear is recorded:
+	// Ghost of Yotei clears each shadow map's HTile with such a dispatch, and without the
+	// recorded clear the depth target was never cleared (its casters failed the depth test).
+	if (!resources.specialization_reads.empty()) {
+		(void)TryConsumeComputeMetaClear(input_info, buffer, false);
 	}
 	if (resources.specialization_reads.empty() &&
 	    (TryConsumeComputeMetaClear(input_info, buffer) ||
