@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -1641,6 +1642,16 @@ static int KYTY_SYSV_ABI NpEntitlementAccessGetAddcontEntitlementInfo(
 	}
 
 	memset(info, 0, sizeof(*info));
+
+	// Which label the title asks for (printed once per label), to see why a title reports a
+	// missing entitlement.
+	static std::vector<std::string> printed;
+	const std::string label(entitlement_label->data, strnlen(entitlement_label->data, sizeof(entitlement_label->data)));
+	if (std::find(printed.begin(), printed.end(), label) == printed.end() && printed.size() < 64) {
+		printed.push_back(label);
+		std::printf("NpEntitlementAccessGetAddcontEntitlementInfo: service_label=%u label='%s'\n", service_label,
+		            label.c_str());
+	}
 
 	for (const auto& entitlement: NP_ENTITLEMENT_ACCESS_ADDON_LIST) {
 		if (strncmp(entitlement_label->data, entitlement.entitlement_label.data,
