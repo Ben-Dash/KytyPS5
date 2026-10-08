@@ -361,13 +361,18 @@ private:
 	DccClearResolver                   m_dcc_resolver;
 	HtileWriter                        m_htile_writer;
 	// HTile surfaces whose depth target was bound since their last synthesis (see SyncHtile).
+	// The depth target as the guest bound it: the cached image it was drawn into can be larger.
 	struct StaleHtile {
-		uint64_t address = 0;
-		uint64_t size    = 0;
+		uint64_t address      = 0;
+		uint64_t size         = 0;
+		uint64_t data_address = 0;
+		uint32_t width        = 0;
+		uint32_t height       = 0;
+		uint32_t layers       = 0;
 		ImageId  image {};
 	};
 	std::vector<StaleHtile>            m_htile_stale;
-	void MarkHtileStale(uint64_t address, uint64_t size, ImageId image);
+	void MarkHtileStale(const ImageDesc& desc, ImageId image);
 	void SynthesizeHtile(const StaleHtile& surface);
 	bool                               m_dcc_gpu_clear  = false;
 	uint64_t                           m_dcc_gpu_checks = 0;

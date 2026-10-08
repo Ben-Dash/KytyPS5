@@ -2626,7 +2626,7 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 			m_surface_meta_generation.fetch_add(1, std::memory_order_relaxed);
 		}
 		if (desc.info.metadata.kind == ImageMetadataKind::Htile) {
-			MarkHtileStale(desc.info.metadata.range.address, desc.info.metadata.range.size, id);
+			MarkHtileStale(desc, id);
 		}
 	}
 	RefreshImage(id);
@@ -3222,14 +3222,21 @@ static bool HtileDebugEnabled() {
 	return enabled;
 }
 
-void TextureCache::MarkHtileStale(uint64_t address, uint64_t size, ImageId image) {
-	if (!HtileSynthEnabled() || size == 0) {
+void TextureCache::MarkHtileStale(const ImageDesc& desc, ImageId image) {
+	const auto& range = desc.info.metadata.range;
+	if (!HtileSynthEnabled() || range.size == 0) {
 		return;
 	}
+	const StaleHtile surface {.address      = range.address,
+	                          .size         = range.size,
+	                          .data_address = desc.info.data.address,
+	                          .width        = desc.info.extent.width,
+	                          .height       = desc.info.extent.height,
+	                          .layers       = desc.info.resources.layers,
+	                          .image        = image};
 	for (auto& stale: m_htile_stale) {
-		if (stale.address == address) {
-			stale.size  = size;
-			stale.image = image;
+		if (stale.address == range.address) {
+			stale = surface;
 			return;
 		}
 	}
@@ -3238,7 +3245,7 @@ void TextureCache::MarkHtileStale(uint64_t address, uint64_t size, ImageId image
 	if (m_htile_stale.size() >= MaxStale) {
 		m_htile_stale.erase(m_htile_stale.begin());
 	}
-	m_htile_stale.push_back({address, size, image});
+	m_htile_stale.push_back(surface);
 }
 
 void TextureCache::SyncHtile(uint64_t address, uint64_t size) {
@@ -3258,16 +3265,20 @@ void TextureCache::SyncHtile(uint64_t address, uint64_t size) {
 
 void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
 	static std::atomic<uint32_t> skipped {0};
+	ImageInfo info {};
 	auto skip = [&](const char* why) {
 		if (skipped.fetch_add(1, std::memory_order_relaxed) < 16) {
-			std::printf("htile: not synthesized for 0x%016" PRIx64 ": %s\n", surface.address, why);
+			std::printf("htile: not synthesized for 0x%016" PRIx64 " (target %ux%u layers=%u, image "
+			            "%ux%u layers=%u pitch=%u): %s\n",
+			            surface.address, surface.width, surface.height, surface.layers,
+			            info.extent.width, info.extent.height, info.resources.layers, info.pitch,
+			            why);
 			std::fflush(stdout);
 		}
 	};
 	if (!m_htile_writer.Available()) {
 		return skip("no pipeline");
 	}
-	ImageInfo info {};
 	{
 		std::scoped_lock lock {m_lock};
 		const auto* image = m_slot_images.try_get(surface.image);
@@ -3278,32 +3289,46 @@ void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
 		}
 		info = image->info;
 	}
-	const auto layers         = info.resources.layers;
+	const auto layers         = surface.layers;
 	const auto transfer_bytes = DepthAspectTransferBytes(info.pixel_format);
 	const auto format         = DepthAspectTransferFormat(info.pixel_format);
 	if (info.metadata.stencil_compressed) {
 		return skip("stencil in HTile");
 	}
-	if (info.samples != 1 || layers == 0 || transfer_bytes == 0 || info.pitch < info.extent.width) {
+	// The target is the image's top-left corner, from its first layer on.
+	if (info.data.address != surface.data_address || surface.width == 0 || surface.height == 0 ||
+	    layers == 0 || surface.width > info.extent.width || surface.height > info.extent.height ||
+	    layers > info.resources.layers) {
+		return skip("target not at the image's origin");
+	}
+	if (info.samples != 1 || transfer_bytes == 0) {
 		return skip("multisampled or unsupported depth");
 	}
-	const auto layer_bytes = info.metadata.range.size / layers;
-	if (info.metadata.range.size % layers != 0 ||
-	    layer_bytes < HtileWriter::LayerBytes(info.extent.width, info.extent.height)) {
-		return skip("HTile range smaller than the surface");
+	const auto layer_bytes = surface.size / layers;
+	if (surface.size % layers != 0 ||
+	    layer_bytes < HtileWriter::LayerBytes(surface.width, surface.height)) {
+		return skip("HTile range smaller than the target");
 	}
-	const uint64_t texels_per_slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
+	const uint64_t texels_per_slice = static_cast<uint64_t>(surface.width) * surface.height;
 	const uint64_t transfer_slice =
 	    Common::AlignUp(texels_per_slice * transfer_bytes, uint64_t {4});
-	if (texels_per_slice > UINT32_MAX / 2 || transfer_slice * layers > UINT32_MAX) {
-		return skip("surface too large");
+	if (transfer_slice * layers > UINT32_MAX) {
+		return skip("target too large");
+	}
+	std::vector<vk::BufferImageCopy> copies(layers);
+	for (uint32_t layer = 0; layer < layers; ++layer) {
+		auto& copy             = copies[layer];
+		copy.bufferOffset      = transfer_slice * layer;
+		copy.bufferRowLength   = surface.width;
+		copy.bufferImageHeight = surface.height;
+		copy.imageSubresource  = {vk::ImageAspectFlagBits::eDepth, 0, layer, 1};
+		copy.imageExtent       = vk::Extent3D {surface.width, surface.height, 1};
 	}
 	TileManager::ScratchScope scratch_scope(m_tiler);
 	const auto linear = m_tiler.GetScratchBuffer(transfer_slice * layers);
-	const auto copies = BuildDepthCopies(info, transfer_slice, vk::ImageAspectFlagBits::eDepth);
 	// The rebuilt HTile is GPU-owned guest memory, like the DB's own writes.
 	const auto [htile, htile_offset] =
-	    m_buffer_cache.ObtainBuffer(surface.address, info.metadata.range.size, true, false);
+	    m_buffer_cache.ObtainBuffer(surface.address, surface.size, true, false);
 	{
 		std::scoped_lock lock {m_lock};
 		auto* image = m_slot_images.try_get(surface.image);
@@ -3314,10 +3339,10 @@ void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
 		image->Download(copies, linear.buffer, 0, linear.size, linear.capacity);
 	}
 	HtileWriter::Surface params {};
-	params.width        = info.extent.width;
-	params.height       = info.extent.height;
+	params.width        = surface.width;
+	params.height       = surface.height;
 	params.layers       = layers;
-	params.row_texels   = info.pitch;
+	params.row_texels   = surface.width;
 	params.slice_texels = static_cast<uint32_t>(transfer_slice / transfer_bytes);
 	params.layer_bytes  = layer_bytes;
 	params.format       = format == vk::Format::eD16Unorm          ? HtileWriter::DepthFormat::Unorm16
@@ -3331,10 +3356,10 @@ void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
 	m_surface_meta_generation.fetch_add(1, std::memory_order_release);
 	static std::atomic<uint32_t> printed {0};
 	if (HtileDebugEnabled() && printed.fetch_add(1, std::memory_order_relaxed) < 64) {
-		std::printf("htile: synthesized 0x%016" PRIx64 " size=0x%" PRIx64 " %ux%u layers=%u "
-		            "pitch=%u format=%u\n",
-		            surface.address, info.metadata.range.size, info.extent.width,
-		            info.extent.height, layers, info.pitch, static_cast<uint32_t>(params.format));
+		std::printf("htile: synthesized 0x%016" PRIx64 " size=0x%" PRIx64 " target %ux%u layers=%u "
+		            "image %ux%u format=%u\n",
+		            surface.address, surface.size, surface.width, surface.height, layers,
+		            info.extent.width, info.extent.height, static_cast<uint32_t>(params.format));
 		std::fflush(stdout);
 	}
 }
