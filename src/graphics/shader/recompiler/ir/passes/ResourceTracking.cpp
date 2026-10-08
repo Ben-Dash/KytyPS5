@@ -1948,24 +1948,24 @@ private:
 			const auto* memory = read != nullptr ? ScalarReadMemory(*read, memory_index) : nullptr;
 			if (memory == nullptr || memory->kind != ResourceKind::ScalarAddress ||
 			    memory->offset > INT32_MAX || !MemoryIndexBelongsTo(memory_index, *read)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			uint32_t added  = 0;
 			uint32_t stride = 0;
 			Value    current_layer;
 			if (!ImmediateU32(read->Arg(1), added) &&
 			    !MatchTableOffset(read->Arg(1), current_layer, added, stride)) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			if (added > INT32_MAX) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			const auto* current = read->Arg(0).Resolve().TryInstruction();
 			if (current == nullptr || current->GetOpcode() != ValueOpcode::GetAddressResource ||
 			    current->NumArgs() != 2u ||
 			    (address_handle != nullptr &&
 			     !EquivalentValue(m_program, Value(address_handle), Value(current)))) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			const auto offset = memory->offset + added;
 			if (dword == 0u) {
@@ -1975,7 +1975,7 @@ private:
 			} else if (static_cast<uint64_t>(descriptor_offset) + dword * 4u != offset ||
 			           stride != layer_stride || layer.IsEmpty() != current_layer.IsEmpty() ||
 			           (!layer.IsEmpty() && !EquivalentValue(m_program, layer, current_layer))) {
-				return false;
+				return RejectImage(__LINE__);
 			}
 			address_handle = current;
 			image_users_only &= UsesOnlyImageDescriptors(*read);
@@ -1983,18 +1983,21 @@ private:
 			plan.reads[dword]  = read;
 		}
 		if (address_handle == nullptr) {
-			return false;
+			return RejectImage(__LINE__);
 		}
 		// One half of the pointer: a uniformized dword of an untyped, indexed vector buffer load.
 		const auto pointer_half = [&](Value value, const Inst*& load, uint32_t& offset) {
 			const auto strip = [&](const Inst* inst) {
+				// A high dword sign-extended from bit 47 (SDWA WORD_0 sext) keeps the address bits.
 				uint32_t immediate = 0;
+				uint32_t width     = 0;
 				while (inst != nullptr && inst->NumArgs() >= 2u &&
 				       ((inst->GetOpcode() == ValueOpcode::BitwiseAnd32 &&
 				         ImmediateU32(inst->Arg(1), immediate)) ||
-				        (inst->GetOpcode() == ValueOpcode::BitFieldUExtract &&
+				        ((inst->GetOpcode() == ValueOpcode::BitFieldUExtract ||
+				          inst->GetOpcode() == ValueOpcode::BitFieldSExtract) &&
 				         inst->NumArgs() == 3u && ImmediateU32(inst->Arg(1), immediate) &&
-				         immediate == 0u))) {
+				         immediate == 0u && ImmediateU32(inst->Arg(2), width) && width >= 16u))) {
 					inst = resolve(inst->Arg(0)).TryInstruction();
 				}
 				return inst;
@@ -2004,6 +2007,30 @@ private:
 				return false;
 			}
 			inst = strip(resolve(inst->Arg(0)).TryInstruction());
+			// The VGPR holding the pointer was written under EXEC: SelectU32(exec, loaded, old).
+			// The first active lane took the loaded arm, so follow the arm that reaches the
+			// load (both arms reaching one would have to agree).
+			const auto loads = [&](const Inst* candidate) {
+				return candidate != nullptr &&
+				       (candidate->GetOpcode() == ValueOpcode::CompositeExtractU32x2 ||
+				        candidate->GetOpcode() == ValueOpcode::LoadBufferU32);
+			};
+			for (uint32_t depth = 0; depth < 4u && inst != nullptr &&
+			                         inst->GetOpcode() == ValueOpcode::SelectU32 &&
+			                         inst->NumArgs() == 3u;
+			     ++depth) {
+				const auto* taken = strip(resolve(inst->Arg(1)).TryInstruction());
+				const auto* kept  = strip(resolve(inst->Arg(2)).TryInstruction());
+				const bool  taken_loads =
+				    loads(taken) || (taken != nullptr && taken->GetOpcode() == ValueOpcode::SelectU32);
+				const bool kept_loads =
+				    loads(kept) || (kept != nullptr && kept->GetOpcode() == ValueOpcode::SelectU32);
+				if (taken_loads == kept_loads &&
+				    !(taken_loads && EquivalentValue(m_program, inst->Arg(1), inst->Arg(2)))) {
+					return false;
+				}
+				inst = taken_loads ? taken : kept;
+			}
 			uint32_t component = 0;
 			if (inst != nullptr && inst->GetOpcode() == ValueOpcode::CompositeExtractU32x2) {
 				if (!ImmediateU32(inst->Arg(1), component) || component > 1u) {
@@ -2043,16 +2070,16 @@ private:
 		    high_offset != low_offset + 4u ||
 		    !EquivalentValue(m_program, low_load->Arg(0), high_load->Arg(0)) ||
 		    !EquivalentValue(m_program, low_load->Arg(1), high_load->Arg(1))) {
-			return false;
+			return RejectImage(__LINE__);
 		}
 		const auto record = low_load->Arg(1).Resolve();
 		if (record.GetType() != Type::U32 || WorkgroupAxis(record) != UINT32_MAX ||
 		    (!layer.IsEmpty() && (layer.GetType() != Type::U32 || layer_stride == 0u))) {
-			return false;
+			return RejectImage(__LINE__);
 		}
 		DescriptorSource table_source;
 		if (!MakeRuntimeTableSource(*low_load, table_source) || table_source.dword_count != 4u) {
-			return false;
+			return RejectImage(__LINE__);
 		}
 		if (!image_users_only) {
 			// Other users keep the T# reads (they are not planning-only).
