@@ -505,7 +505,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		       runtime.read_specialization_memory(SpecializationUserdata(runtime), address, values);
 	};
 	auto     integer_class = Prospero::TextureNumericClass::Float;
-	uint32_t integers = 0, floats = 0, others = 0, nulls = 0, probed = 0;
+	uint32_t integers = 0, floats = 0, others = 0, nulls = 0, probed = 0, unreadable = 0;
 	for (uint32_t key = 0; key < ProbedRecords; key++) {
 		const auto offset = static_cast<uint64_t>(key) * record_stride;
 		if (heap_size != 0u && offset + indirect.table_offset + 16u > heap_size &&
@@ -517,7 +517,8 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		if (indirect.pointer_offset != UINT32_MAX) {
 			std::array<uint32_t, 2> pointer {};
 			if (!read(record + indirect.pointer_offset, pointer)) {
-				break;
+				unreadable++; // GPU-written or unbacked: look at the next record
+				continue;
 			}
 			const auto target =
 			    ((static_cast<uint64_t>(pointer[1]) << 32u) | pointer[0]) & AddressMask;
@@ -529,7 +530,8 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		}
 		std::array<uint32_t, 4> dwords {};
 		if (!read(address, dwords)) {
-			break;
+			unreadable++;
+			continue;
 		}
 		probed++;
 		const auto format = static_cast<Prospero::BufferFormat>((dwords[1] >> 20u) & 0x1ffu);
@@ -558,7 +560,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 	const auto result = integers > floats + others ? integer_class
 	                                               : Prospero::TextureNumericClass::Float;
 	static const bool debug = std::getenv("KYTY_DEBUG_BINDLESS_CLASS") != nullptr;
-	if (debug && (integers != 0u || others != 0u)) [[unlikely]] {
+	if (debug && (integers != 0u || others != 0u || unreadable != 0u)) [[unlikely]] {
 		static std::mutex                   mutex;
 		static std::unordered_set<uint64_t> seen;
 		const auto layout = (static_cast<uint64_t>(record_stride) << 40u) ^
@@ -568,12 +570,12 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		std::scoped_lock lock {mutex};
 		if (seen.size() < 256 && seen.insert(layout).second) {
 			std::printf("bindless-class: heap=0x%012llx stride=%u table_off=%u ptr_off=%d probed=%u "
-			            "null=%u int=%u float=%u other=%u -> %s\n",
+			            "null=%u int=%u float=%u other=%u unreadable=%u -> %s\n",
 			            static_cast<unsigned long long>(heap_base), record_stride,
 			            indirect.table_offset,
 			            indirect.pointer_offset == UINT32_MAX ? -1
 			                                                  : static_cast<int>(indirect.pointer_offset),
-			            probed, nulls, integers, floats, others,
+			            probed, nulls, integers, floats, others, unreadable,
 			            result == Prospero::TextureNumericClass::Uint   ? "uint"
 			            : result == Prospero::TextureNumericClass::Sint ? "sint"
 			                                                            : "float");
