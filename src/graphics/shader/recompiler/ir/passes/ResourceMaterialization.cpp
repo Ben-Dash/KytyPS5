@@ -19,6 +19,7 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <functional>
+#include <mutex>
 #include <numeric>
 #include <type_traits>
 #include <unordered_set>
@@ -482,20 +483,28 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 	return true;
 }
 
-// The numeric class of the first T#s of a bindless heap: integer only when every non-null one of
-// the first few records is a 2D or 2D-array texture of the same integer class (Ghost of Yotei:
-// heaps of R8_UINT terrain maps), so the shader reads them with an integer result type. Float
-// otherwise, or when the records cannot be read; the first float T# ends the probe.
+// The numeric class of the T#s of a bindless heap, from its first records: integer when most of
+// the non-null ones are 2D or 2D-array textures of one integer class (Ghost of Yotei: heaps of
+// R8_UINT terrain maps, whose first records can be null), so the shader reads them with an
+// integer result type. Float otherwise, or when the records cannot be read. Two float T#s before
+// any integer one end the probe early, as do four integer ones before any float one.
+// KYTY_DEBUG_BINDLESS_CLASS=1 logs the counts once per heap layout and result.
 Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, uint64_t heap_base,
+                                                     uint64_t heap_size,
                                                      const DescriptorSource::IndirectDescriptor& indirect) {
-	constexpr uint32_t ProbedRecords = 4;
-	auto               result        = Prospero::TextureNumericClass::Float;
-	if (runtime.read_memory == nullptr) {
-		return result;
+	constexpr uint32_t ProbedRecords = 32;
+	if (runtime.read_memory == nullptr || indirect.table_stride == 0u) {
+		return Prospero::TextureNumericClass::Float;
 	}
-	bool integer = false;
+	auto     integer_class = Prospero::TextureNumericClass::Float;
+	uint32_t integers = 0, floats = 0, others = 0, nulls = 0, probed = 0;
 	for (uint32_t key = 0; key < ProbedRecords; key++) {
-		const auto record  = heap_base + static_cast<uint64_t>(key) * indirect.table_stride;
+		const auto offset = static_cast<uint64_t>(key) * indirect.table_stride;
+		if (heap_size != 0u && offset + indirect.table_offset + 16u > heap_size &&
+		    indirect.pointer_offset == UINT32_MAX) {
+			break;
+		}
+		const auto record  = heap_base + offset;
 		auto       address = record + indirect.table_offset;
 		if (indirect.pointer_offset != UINT32_MAX) {
 			std::array<uint32_t, 2> pointer {};
@@ -505,6 +514,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 			const auto target =
 			    ((static_cast<uint64_t>(pointer[1]) << 32u) | pointer[0]) & AddressMask;
 			if (target == 0u) {
+				nulls++;
 				continue;
 			}
 			address = target + indirect.table_offset;
@@ -513,24 +523,56 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		if (!runtime.read_memory(runtime.userdata, address, dwords)) {
 			break;
 		}
+		probed++;
 		const auto format = static_cast<Prospero::BufferFormat>((dwords[1] >> 20u) & 0x1ffu);
 		if (format == Prospero::BufferFormat::kInvalid) {
-			continue; // a null record
+			nulls++;
+			continue;
 		}
-		const auto type = static_cast<Prospero::ImageType>((dwords[3] >> 28u) & 0xfu);
+		const auto type          = static_cast<Prospero::ImageType>((dwords[3] >> 28u) & 0xfu);
 		const auto numeric_class = Prospero::SampledTextureNumericClass(format);
-		if (numeric_class != Prospero::TextureNumericClass::Uint &&
-		    numeric_class != Prospero::TextureNumericClass::Sint) {
-			return Prospero::TextureNumericClass::Float;
+		const bool flat = type == Prospero::ImageType::kColor2D ||
+		                  type == Prospero::ImageType::kColor2DArray;
+		if (numeric_class == Prospero::TextureNumericClass::Float) {
+			floats++;
+		} else if (flat && (numeric_class == Prospero::TextureNumericClass::Uint ||
+		                    numeric_class == Prospero::TextureNumericClass::Sint) &&
+		           (integers == 0u || numeric_class == integer_class)) {
+			integers++;
+			integer_class = numeric_class;
+		} else {
+			others++;
 		}
-		if ((type != Prospero::ImageType::kColor2D && type != Prospero::ImageType::kColor2DArray) ||
-		    (integer && numeric_class != result)) {
-			return Prospero::TextureNumericClass::Float;
+		if ((integers == 0u && floats >= 2u) || (floats == 0u && others == 0u && integers >= 4u)) {
+			break;
 		}
-		integer = true;
-		result  = numeric_class;
 	}
-	return integer ? result : Prospero::TextureNumericClass::Float;
+	const auto result = integers > floats + others ? integer_class
+	                                               : Prospero::TextureNumericClass::Float;
+	static const bool debug = std::getenv("KYTY_DEBUG_BINDLESS_CLASS") != nullptr;
+	if (debug && (integers != 0u || others != 0u)) [[unlikely]] {
+		static std::mutex                   mutex;
+		static std::unordered_set<uint64_t> seen;
+		const auto layout = (static_cast<uint64_t>(indirect.table_stride) << 40u) ^
+		                    (static_cast<uint64_t>(indirect.table_offset) << 20u) ^
+		                    (static_cast<uint64_t>(indirect.pointer_offset) << 4u) ^
+		                    static_cast<uint64_t>(result);
+		std::scoped_lock lock {mutex};
+		if (seen.size() < 256 && seen.insert(layout).second) {
+			std::printf("bindless-class: heap=0x%012llx stride=%u table_off=%u ptr_off=%d probed=%u "
+			            "null=%u int=%u float=%u other=%u -> %s\n",
+			            static_cast<unsigned long long>(heap_base), indirect.table_stride,
+			            indirect.table_offset,
+			            indirect.pointer_offset == UINT32_MAX ? -1
+			                                                  : static_cast<int>(indirect.pointer_offset),
+			            probed, nulls, integers, floats, others,
+			            result == Prospero::TextureNumericClass::Uint   ? "uint"
+			            : result == Prospero::TextureNumericClass::Sint ? "sint"
+			                                                            : "float");
+			std::fflush(stdout);
+		}
+	}
+	return result;
 }
 
 // The shader looks the key up in the bindless translation table: nothing to enumerate. Record
@@ -576,7 +618,7 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 	root.indirect_mapping_offset    = mapping_offset;
 	root.indirect_search_iterations = 0;
 	root.bindless                   = true;
-	root.numeric_class              = ProbeBindlessHeapClass(runtime, heap_base, indirect);
+	root.numeric_class              = ProbeBindlessHeapClass(runtime, heap_base, heap_size, indirect);
 	return true;
 }
 
