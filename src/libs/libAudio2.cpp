@@ -198,6 +198,7 @@ struct AudioOut2PortStateEntry {
 	bool                   has_position = false;
 	float                  position_x   = 0.0f;
 	float                  position_z   = 0.0f;
+	float                  gain         = 1.0f;
 };
 
 struct AudioOut2SpeakerArrayState {
@@ -232,6 +233,8 @@ static constexpr int AUDIO_OUT2_ERROR_BUSY                        = -2144960505;
 static constexpr int AUDIO_OUT2_ERROR_MASTERING_INVALID_API_PARAM = -2144959999; /* 0x80268201 */
 static constexpr int AUDIO_OUT2_ERROR_MASTERING_INVALID_STATES_ID = -2144959996; /* 0x80268204 */
 static constexpr uint32_t AUDIO_OUT2_PORT_ATTRIBUTE_ID_PCM        = 0;
+// Object ports: Astro Bot sends id 1 as one float (1.0 at first) and id 3 as three floats.
+static constexpr uint32_t AUDIO_OUT2_PORT_ATTRIBUTE_ID_GAIN       = 1;
 static constexpr uint32_t AUDIO_OUT2_MASTERING_OUTPUT_RECORDING   = 2;
 static constexpr uint32_t AUDIO_OUT2_MASTERING_STATES_ID_DEFAULT  = 1;
 static constexpr uint32_t AUDIO_OUT2_MASTERING_STATES_ID_V2       = 2;
@@ -387,6 +390,8 @@ struct AudioOut2ObjectMeter {
 	uint32_t reports      = 0;
 	uint64_t blocks       = 0;
 	float    peak         = 0.0f;
+	uint64_t muted        = 0;
+	float    max_gain     = 0.0f;
 };
 static AudioOut2ObjectMeter g_object_meter;
 
@@ -400,15 +405,19 @@ static void audioout2_report_object_level() {
 	}
 	if (g_object_meter.blocks != 0 && g_object_meter.reports < 60) {
 		g_object_meter.reports++;
-		std::printf("AudioOut2 objects mixed: t=%.1f s, %llu blocks, peak %.1f dBFS\n",
+		std::printf("AudioOut2 objects mixed: t=%.1f s, %llu blocks (%llu with gain 0), max gain "
+		            "%.2f, peak after gain %.1f dBFS\n",
 		            static_cast<double>(now) / 1e6,
 		            static_cast<unsigned long long>(g_object_meter.blocks),
+		            static_cast<unsigned long long>(g_object_meter.muted), g_object_meter.max_gain,
 		            g_object_meter.peak > 0.0f ? 20.0 * std::log10(g_object_meter.peak) : -999.0);
 		std::fflush(stdout);
 	}
 	g_object_meter.report_start = now;
 	g_object_meter.blocks       = 0;
 	g_object_meter.peak         = 0.0f;
+	g_object_meter.muted        = 0;
+	g_object_meter.max_gain     = 0.0f;
 }
 
 // The emulator has no 3D renderer for object ports (sounds the game positions in space, e.g. Astro
@@ -453,18 +462,22 @@ static bool audioout2_mix_objects_locked(AudioOut2ContextHandle          ctx,
 			azimuth = std::atan2(object.position_x, std::abs(object.position_z));
 		}
 		const float pan     = std::clamp(azimuth / std::numbers::pi_v<float> + 0.5f, 0.0f, 1.0f);
-		const float gain_l  = std::cos(pan * std::numbers::pi_v<float> * 0.5f);
-		const float gain_r  = std::sin(pan * std::numbers::pi_v<float> * 0.5f);
+		const float gain_l  = object.gain * std::cos(pan * std::numbers::pi_v<float> * 0.5f);
+		const float gain_r  = object.gain * std::sin(pan * std::numbers::pi_v<float> * 0.5f);
 		const auto  obj_ch  = audioout2_data_format_channels(object.data_format);
 		const float obj_div = 1.0f / static_cast<float>(obj_ch);
 		g_object_meter.blocks++;
+		g_object_meter.max_gain = std::max(g_object_meter.max_gain, object.gain);
+		if (object.gain == 0.0f) {
+			g_object_meter.muted++;
+		}
 		for (uint32_t s = 0; s < bed->samples_num; s++) {
 			float mono = 0.0f;
 			for (uint32_t c = 0; c < obj_ch; c++) {
 				mono += audioout2_read_sample(object, static_cast<size_t>(s) * obj_ch + c);
 			}
 			mono *= obj_div;
-			g_object_meter.peak = std::max(g_object_meter.peak, std::abs(mono));
+			g_object_meter.peak = std::max(g_object_meter.peak, std::abs(mono) * object.gain);
 			auto* frame = mix.data() + static_cast<size_t>(s) * bed_channels;
 			if (bed_channels == 1) {
 				frame[0] += mono;
@@ -843,6 +856,7 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 	const void*              pcm_data = nullptr;
 	bool                     has_pcm  = false;
 	const AudioOut2Position* position = nullptr;
+	const float*             gain     = nullptr;
 	for (uint32_t i = 0; i < num; i++) {
 		if (attributes[i].attribute_id == AUDIO_OUT2_PORT_ATTRIBUTE_ID_PCM &&
 		    attributes[i].value != nullptr && attributes[i].value_size >= sizeof(AudioOut2Pcm)) {
@@ -854,6 +868,9 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 		           attributes[i].value_size == sizeof(AudioOut2Position)) {
 			// The only three-float attribute is the object position.
 			position = static_cast<const AudioOut2Position*>(attributes[i].value);
+		} else if (attributes[i].attribute_id == AUDIO_OUT2_PORT_ATTRIBUTE_ID_GAIN &&
+		           attributes[i].value != nullptr && attributes[i].value_size == sizeof(float)) {
+			gain = static_cast<const float*>(attributes[i].value);
 		}
 	}
 
@@ -865,6 +882,9 @@ int KYTY_SYSV_ABI AudioOut2PortSetAttributes(AudioOut2PortHandle       port,
 				state->has_position = true;
 				state->position_x   = position->x;
 				state->position_z   = position->z;
+			}
+			if (gain != nullptr) {
+				state->gain = std::isfinite(*gain) ? std::max(*gain, 0.0f) : 0.0f;
 			}
 		}
 		if (has_pcm) {
