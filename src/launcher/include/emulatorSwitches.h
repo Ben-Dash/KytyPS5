@@ -16,7 +16,7 @@ struct EmulatorSwitch {
 	const char* verdict; // How it did in our tests, kept general: games react differently
 };
 
-inline constexpr std::array<EmulatorSwitch, 5> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 6> EMULATOR_SWITCHES = {{
     {"KYTY_TRACKING_LOCK_BACKOFF", "Calmer waiting on memory checks (not recommended)",
      "When many game threads touch the same memory at once, they queue up and keep asking whether "
      "it is their turn, which keeps the processor busy with waiting. With this on, waiting threads "
@@ -33,6 +33,12 @@ inline constexpr std::array<EmulatorSwitch, 5> EMULATOR_SWITCHES = {{
      "each getting its own. That means fewer setups to prepare while playing. The first start "
      "with this on prepares the setups again once, so expect a slow first start.",
      "In our tests this was slightly slower. May help some games."},
+    {"KYTY_TABLE_MODE", "Shaders read game data directly (experimental, not recommended)",
+     "Shaders that only read game data get it straight from memory addresses the emulator hands "
+     "them for each drawing step, instead of through per-step binding tables. Meant to save setup "
+     "work per drawing step. The first start with this on prepares the shaders again once, so "
+     "expect a slow first start.",
+     "In our tests no clear difference. Experimental, may help some games."},
     {"KYTY_DEBUG_DRAW_REPEAT", "Count repeating draws (diagnostics)",
      "Every 120 frames the console window shows how many drawing steps look exactly like one "
      "from the last frames. That tells whether reusing them would help in this game.",
