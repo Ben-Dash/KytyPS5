@@ -2673,6 +2673,7 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 	ImageId               stencil_id {};
 	vk::ImageAspectFlags  aspect {};
 	ImageSubresourceRange subresources;
+	std::vector<ImageId>  also_clear;
 	for (const auto id: FindImagesInRegion(address, size, false)) {
 		auto owner = m_slot_images.try_get(id);
 		if (owner == nullptr) {
@@ -2699,6 +2700,14 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 		if (!candidate) {
 			continue;
 		}
+		if (selected && candidate == vk::ImageAspectFlagBits::eColor &&
+		    aspect == vk::ImageAspectFlagBits::eColor && selected != candidate_id) {
+			// Several color images over exactly this memory (Ghost of Yotei: its 8-bit shadow mask
+			// and an R16G16 float surface that reuses the memory): the fill writes the same bytes
+			// under all of them, so each gets the clear. Rejecting the fill left the mask stale.
+			also_clear.push_back(candidate_id);
+			continue;
+		}
 		if (selected && (selected != candidate_id || subresources != candidate_subresources)) {
 			return false;
 		}
@@ -2716,6 +2725,13 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 		if (!DecodeColorDwordFill(image.info.pixel_format, packed_clear, clear.color)) {
 			return false;
 		}
+		for (const auto other: also_clear) {
+			vk::ClearColorValue unused {};
+			if (!DecodeColorDwordFill(m_slot_images[other].info.pixel_format, packed_clear, unused)) {
+				note_fill("rejected: value not decodable for an aliased format");
+				return false;
+			}
+		}
 	} else {
 		uint8_t stencil_clear = 0;
 		if ((aspect == vk::ImageAspectFlagBits::eDepth &&
@@ -2729,6 +2745,15 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 	ClearImage(command, selected, image.backing.format,
 	           {aspect, subresources.base_level, subresources.level_count,
 	            subresources.base_layer, subresources.layer_count}, clear);
+	for (const auto other: also_clear) {
+		auto&          alias = m_slot_images[other];
+		vk::ClearValue alias_clear {};
+		(void)DecodeColorDwordFill(alias.info.pixel_format, packed_clear, alias_clear.color);
+		ClearImage(command, other, alias.backing.format,
+		           {vk::ImageAspectFlagBits::eColor, 0, alias.info.resources.levels, 0,
+		            alias.info.TransferLayers()},
+		           alias_clear);
+	}
 	if (stencil_id) {
 		TrackImage(stencil_id);
 		CommitGpuWrite(m_slot_images[stencil_id]);
