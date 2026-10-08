@@ -2700,6 +2700,16 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 		if (!candidate) {
 			continue;
 		}
+		// A DCC comp-to-single block color belongs to the compressed surface of that texel size
+		// only; other images over the memory (aliases of another format) are left alone.
+		if (block_bytes != 0 && (candidate != vk::ImageAspectFlagBits::eColor ||
+		                         owner->info.bytes_per_block * owner->info.samples != block_bytes)) {
+			continue;
+		}
+		if (selected && block_bytes != 0) {
+			note_fill("rejected: several exact images for a block color");
+			return false;
+		}
 		if (selected && candidate == vk::ImageAspectFlagBits::eColor &&
 		    aspect == vk::ImageAspectFlagBits::eColor && selected != candidate_id) {
 			// Several color images over exactly this memory (Ghost of Yotei: its 8-bit shadow mask
