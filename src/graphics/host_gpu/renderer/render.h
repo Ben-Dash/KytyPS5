@@ -308,6 +308,8 @@ private:
 	void                      ResetBindings();
 	// Rebuilds the HTile of depth surfaces the dispatch's buffers read (TextureCache::SyncHtile).
 	void                      SyncHtileReads(const ShaderComputeInputInfo& input);
+	// Records an in-place HTile rewrite (read and write, no swizzle) as a clear.
+	void                      RecordHtileRewriteClear(const ShaderComputeInputInfo& input);
 	[[nodiscard]] bool        TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
 	                                                     const CommandBuffer&          buffer, bool consume = true);
 	[[nodiscard]] bool TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,

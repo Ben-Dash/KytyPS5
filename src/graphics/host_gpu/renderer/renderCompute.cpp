@@ -299,6 +299,44 @@ void RenderExecutor::SyncHtileReads(const ShaderComputeInputInfo& input) {
 	}
 }
 
+void RenderExecutor::RecordHtileRewriteClear(const ShaderComputeInputInfo& input) {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_HTILE_RMW_CLEAR");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	const auto& program   = *input.stage.program;
+	const auto& resources = *input.stage.resources;
+	if (!enabled || program.info.has_bitwise_xor) {
+		return;
+	}
+	auto&      cache = m_context.GetTextureCache();
+	const auto count = std::min(program.info.buffers.size(), resources.buffers.size());
+	uint64_t   meta  = 0;
+	for (size_t i = 0; i < count; i++) {
+		if (!program.info.buffers[i].written) {
+			continue;
+		}
+		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
+		if (!cache.IsMeta(descriptor.Base48())) {
+			continue;
+		}
+		if (meta != 0 || !program.info.buffers[i].read) {
+			return; // Several metadata surfaces, or a write-only clear handled by consumption.
+		}
+		meta = descriptor.Base48();
+	}
+	if (meta != 0 && cache.ClearMeta(meta)) {
+		static std::atomic<uint32_t> printed {0};
+		if (KYTY_GETENV("KYTY_DEBUG_HTILE") != nullptr &&
+		    printed.fetch_add(1, std::memory_order_relaxed) < 32) {
+			std::printf("htile: rewrite by shader %016llx taken as a clear of 0x%012llx\n",
+			            static_cast<unsigned long long>(program.shader_hash),
+			            static_cast<unsigned long long>(meta));
+			std::fflush(stdout);
+		}
+	}
+}
+
 bool RenderExecutor::TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
                                                 const CommandBuffer& buffer, bool consume) {
 	const auto& program   = *input.stage.program;
@@ -734,12 +772,12 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 			StampTraceDispatch(program.shader_hash);
 		}
 	}
-	// A dispatch specialized on guest data still runs, but its metadata clear is recorded:
-	// Ghost of Yotei clears each shadow map's HTile with such a dispatch, and without the
-	// recorded clear the depth target was never cleared (its casters failed the depth test).
-	if (!resources.specialization_reads.empty()) {
-		(void)TryConsumeComputeMetaClear(input_info, buffer, false);
-	}
+	// Ghost of Yotei clears each shadow map's HTile with a dispatch that reads and rewrites every
+	// HTile word in place (no address swizzle, one buffer exactly on the metadata). It is not a
+	// proven full overwrite, so it is not consumed, but the clear is recorded for the next draw:
+	// without it the depth target was never cleared and every caster failed the depth test.
+	// KYTY_HTILE_RMW_CLEAR=0 turns this off.
+	RecordHtileRewriteClear(input_info);
 	if (resources.specialization_reads.empty() &&
 	    (TryConsumeComputeMetaClear(input_info, buffer) ||
 	     TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
