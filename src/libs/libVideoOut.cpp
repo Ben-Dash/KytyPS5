@@ -68,7 +68,7 @@ static KYTY_SYSV_ABI int VideoOutVrrStatus_kP2L8t3j_aM() {
 // KytyPS5 836deab9 (VideoOutGetVrrStatus).
 static KYTY_SYSV_ABI int VideoOutVrrStatus_gWT7X8H0bYs(int /*handle*/, int32_t* status) {
 	if (status == nullptr) {
-		return VIDEO_OUT_ERROR_INVALID_ADDRESS;
+		return VideoOut::VIDEO_OUT_ERROR_INVALID_ADDRESS;
 	}
 	*status = 0;
 	return OK;
