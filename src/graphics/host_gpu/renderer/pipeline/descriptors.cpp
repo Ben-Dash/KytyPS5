@@ -1704,21 +1704,32 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 	}
 }
 
+// A pointer heap with layers (sub_keys): key = record * sub_keys + layer, and the layer's T# lies
+// sub_stride bytes after the previous one behind the record's pointer.
+static uint64_t BindlessPointerAddress(const BindlessTable::Heap& heap, uint32_t key) {
+	const auto record = heap.sub_keys != 0u ? key / heap.sub_keys : key;
+	return heap.base + static_cast<uint64_t>(record) * heap.record_stride + heap.pointer_offset;
+}
+
+static uint64_t BindlessLayerOffset(const BindlessTable::Heap& heap, uint32_t key) {
+	return heap.sub_keys != 0u ? static_cast<uint64_t>(key % heap.sub_keys) * heap.sub_stride : 0u;
+}
+
 // The record of `key` as ResolveBindlessKey reads it (the pointer and the 32 descriptor bytes),
 // hashed; distinct values for an unreadable record, a null pointer and an unreadable target.
 static uint64_t BindlessRecordHash(const BindlessTable::Heap& heap, uint32_t key) {
 	std::array<uint64_t, 5> words {};
 	auto address = heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	if (heap.pointer_offset != UINT32_MAX) {
-		if (!Libs::LibKernel::Memory::TryReadBacking(
-		        heap.base + static_cast<uint64_t>(key) * heap.record_stride + heap.pointer_offset,
-		        &words[4], sizeof(uint64_t))) {
+		if (!Libs::LibKernel::Memory::TryReadBacking(BindlessPointerAddress(heap, key), &words[4],
+		                                             sizeof(uint64_t))) {
 			return 1;
 		}
 		if ((words[4] & 0x0000ffffffffffffull) == 0) {
 			return 2;
 		}
-		address = (words[4] & 0x0000ffffffffffffull) + heap.table_offset;
+		address = (words[4] & 0x0000ffffffffffffull) + heap.table_offset +
+		          BindlessLayerOffset(heap, key);
 	}
 	if (!Libs::LibKernel::Memory::TryReadBacking(address, words.data(), 32u)) {
 		return 3;
@@ -1750,14 +1761,14 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (heap.pointer_offset != UINT32_MAX) {
 		// The record holds a pointer to the structure that contains the T#.
 		uint64_t pointer = 0;
-		if (!Libs::LibKernel::Memory::TryReadBacking(
-		        heap.base + static_cast<uint64_t>(key) * heap.record_stride + heap.pointer_offset,
-		        &pointer, sizeof(pointer)) ||
+		if (!Libs::LibKernel::Memory::TryReadBacking(BindlessPointerAddress(heap, key), &pointer,
+		                                             sizeof(pointer)) ||
 		    (pointer & 0x0000ffffffffffffull) == 0) {
 			table.SetTranslation(heap, key, 0u);
 			return false;
 		}
-		address = (pointer & 0x0000ffffffffffffull) + heap.table_offset;
+		address = (pointer & 0x0000ffffffffffffull) + heap.table_offset +
+		          BindlessLayerOffset(heap, key);
 	}
 	if (!Libs::LibKernel::Memory::TryReadBacking(address, value.dwords.data(), 32u)) {
 		table.SetTranslation(heap, key, 0u);
@@ -1945,10 +1956,13 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		    : use.record_stride == 32u ? span / 32u
 		    : span >= 32u              ? (span - 32u) / use.record_stride + 1u
 		                               : 0u;
-		const auto entries   = static_cast<uint32_t>(std::min<uint64_t>(keys, 1u << 18u));
+		const auto layered   = use.pointer_offset != UINT32_MAX && use.sub_keys != 0u
+		                           ? keys * use.sub_keys
+		                           : keys;
+		const auto entries   = static_cast<uint32_t>(std::min<uint64_t>(layered, 1u << 18u));
 		auto* heap = table.FindOrCreateHeap(use.base, use.table_offset, use.record_stride,
 		                                    BindlessBindingFor(resource), entries, resource,
-		                                    use.pointer_offset);
+		                                    use.pointer_offset, use.sub_stride, use.sub_keys);
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
 		}

@@ -615,6 +615,13 @@ struct DescriptorSource {
 		// Bindless only: each record holds a 64-bit pointer at this offset, and the T# lies at
 		// pointer + table_offset (UINT32_MAX: the T# is in the record itself).
 		uint32_t pointer_offset  = UINT32_MAX;
+		// Bindless pointer records read by a vector buffer load (Ghost of Yotei 617c7166f3308810:
+		// per-instance material pointer, BUFFER_LOAD idxen + V_READFIRSTLANE): the record stride
+		// is the V#'s. With sub_keys != 0 the shader's key is record * sub_keys + layer and the
+		// T# lies at pointer + table_offset + layer * sub_stride.
+		bool     stride_from_buffer = false;
+		uint32_t sub_stride      = 0;
+		uint32_t sub_keys        = 0;
 		Value    key_count;
 		Value                 selector_first;
 		Value    selector_mask;

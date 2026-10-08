@@ -1916,6 +1916,186 @@ private:
 		return true;
 	}
 
+	// A T# read through a 64-bit pointer a vector buffer load fetches per lane and
+	// V_READFIRSTLANE makes uniform for the scalar load (a waterfall loop over the lanes' records;
+	// Ghost of Yotei 617c7166f3308810: per-instance material pointer, T#s at
+	// pointer + layer * 368 + 0/64/128/160/192):
+	//   p = ReadFirstLane(CompositeExtract(LoadBufferU32x2(V#, index, 0, soffset), 0 / 1))
+	//   dword d = LoadAddressU32(GetAddressResource(p.lo, p.hi), layer * stride or immediate)
+	// The bindless lookup follows the pointer of each index's record; a GPU-computed layer
+	// becomes the low part of the key (index * BufferPointerLayers + layer).
+	static constexpr uint32_t BufferPointerLayers = 256;
+
+	bool TryMakeBufferPointerImage(Inst& handle, IndirectDescriptorPlan& plan) {
+		const bool  r128              = UsedAsR128(handle);
+		const Inst* address_handle    = nullptr;
+		uint32_t    descriptor_offset = 0;
+		Value       layer;
+		uint32_t    layer_stride      = 0;
+		bool        image_users_only  = true;
+		const auto  resolve           = [&](Value value) {
+			const auto resolved = ResolveInvariantPhi(m_program, value);
+			return resolved.IsEmpty() ? value.Resolve() : resolved;
+		};
+		for (uint32_t dword = 0; dword < handle.NumArgs(); ++dword) {
+			if (dword >= 4u && r128 && handle.Arg(dword).Resolve().IsImmediate()) {
+				plan.memory[dword] = plan.memory[0];
+				plan.reads[dword]  = plan.reads[0];
+				continue;
+			}
+			auto*       read         = resolve(handle.Arg(dword)).TryInstruction();
+			uint32_t    memory_index = 0;
+			const auto* memory = read != nullptr ? ScalarReadMemory(*read, memory_index) : nullptr;
+			if (memory == nullptr || memory->kind != ResourceKind::ScalarAddress ||
+			    memory->offset > INT32_MAX || !MemoryIndexBelongsTo(memory_index, *read)) {
+				return false;
+			}
+			uint32_t added  = 0;
+			uint32_t stride = 0;
+			Value    current_layer;
+			if (!ImmediateU32(read->Arg(1), added) &&
+			    !MatchTableOffset(read->Arg(1), current_layer, added, stride)) {
+				return false;
+			}
+			if (added > INT32_MAX) {
+				return false;
+			}
+			const auto* current = read->Arg(0).Resolve().TryInstruction();
+			if (current == nullptr || current->GetOpcode() != ValueOpcode::GetAddressResource ||
+			    current->NumArgs() != 2u ||
+			    (address_handle != nullptr &&
+			     !EquivalentValue(m_program, Value(address_handle), Value(current)))) {
+				return false;
+			}
+			const auto offset = memory->offset + added;
+			if (dword == 0u) {
+				descriptor_offset = offset;
+				layer             = current_layer;
+				layer_stride      = stride;
+			} else if (static_cast<uint64_t>(descriptor_offset) + dword * 4u != offset ||
+			           stride != layer_stride || layer.IsEmpty() != current_layer.IsEmpty() ||
+			           (!layer.IsEmpty() && !EquivalentValue(m_program, layer, current_layer))) {
+				return false;
+			}
+			address_handle = current;
+			image_users_only &= UsesOnlyImageDescriptors(*read);
+			plan.memory[dword] = memory_index;
+			plan.reads[dword]  = read;
+		}
+		if (address_handle == nullptr) {
+			return false;
+		}
+		// One half of the pointer: a uniformized dword of an untyped, indexed vector buffer load.
+		const auto pointer_half = [&](Value value, const Inst*& load, uint32_t& offset) {
+			const auto strip = [&](const Inst* inst) {
+				uint32_t immediate = 0;
+				while (inst != nullptr && inst->NumArgs() >= 2u &&
+				       ((inst->GetOpcode() == ValueOpcode::BitwiseAnd32 &&
+				         ImmediateU32(inst->Arg(1), immediate)) ||
+				        (inst->GetOpcode() == ValueOpcode::BitFieldUExtract &&
+				         inst->NumArgs() == 3u && ImmediateU32(inst->Arg(1), immediate) &&
+				         immediate == 0u))) {
+					inst = resolve(inst->Arg(0)).TryInstruction();
+				}
+				return inst;
+			};
+			const auto* inst = strip(resolve(value).TryInstruction());
+			if (inst == nullptr || inst->GetOpcode() != ValueOpcode::ReadFirstLane) {
+				return false;
+			}
+			inst = strip(resolve(inst->Arg(0)).TryInstruction());
+			uint32_t component = 0;
+			if (inst != nullptr && inst->GetOpcode() == ValueOpcode::CompositeExtractU32x2) {
+				if (!ImmediateU32(inst->Arg(1), component) || component > 1u) {
+					return false;
+				}
+				inst = resolve(inst->Arg(0)).TryInstruction();
+				if (inst == nullptr || inst->GetOpcode() != ValueOpcode::LoadBufferU32x2) {
+					return false;
+				}
+			} else if (inst == nullptr || inst->GetOpcode() != ValueOpcode::LoadBufferU32) {
+				return false;
+			}
+			const auto index = inst->Flags<MemoryFlags>().index;
+			if (index >= m_program.memory_info.size() || inst->NumArgs() != 5u) {
+				return false;
+			}
+			const auto& memory      = m_program.memory_info[index];
+			uint32_t    voffset     = 1u;
+			uint32_t    soffset     = 0u;
+			if (memory.kind != ResourceKind::Buffer || memory.typed || memory.formatted ||
+			    !memory.idxen || memory.offen || memory.data_bits != 32u ||
+			    !ImmediateU32(inst->Arg(2), voffset) || voffset != 0u ||
+			    !ImmediateU32(inst->Arg(3), soffset) || memory.offset > INT32_MAX ||
+			    soffset > INT32_MAX) {
+				return false;
+			}
+			load   = inst;
+			offset = memory.offset + soffset + component * 4u;
+			return true;
+		};
+		const Inst* low_load    = nullptr;
+		const Inst* high_load   = nullptr;
+		uint32_t    low_offset  = 0;
+		uint32_t    high_offset = 0;
+		if (!pointer_half(address_handle->Arg(0), low_load, low_offset) ||
+		    !pointer_half(address_handle->Arg(1), high_load, high_offset) ||
+		    high_offset != low_offset + 4u ||
+		    !EquivalentValue(m_program, low_load->Arg(0), high_load->Arg(0)) ||
+		    !EquivalentValue(m_program, low_load->Arg(1), high_load->Arg(1))) {
+			return false;
+		}
+		const auto record = low_load->Arg(1).Resolve();
+		if (record.GetType() != Type::U32 || WorkgroupAxis(record) != UINT32_MAX ||
+		    (!layer.IsEmpty() && (layer.GetType() != Type::U32 || layer_stride == 0u))) {
+			return false;
+		}
+		DescriptorSource table_source;
+		if (!MakeRuntimeTableSource(*low_load, table_source) || table_source.dword_count != 4u) {
+			return false;
+		}
+		if (!image_users_only) {
+			// Other users keep the T# reads (they are not planning-only).
+			plan.reads.fill(nullptr);
+		}
+		// The key: the lane's record index, with the layer below it.
+		Value key = record;
+		if (!layer.IsEmpty()) {
+			auto*      block = handle.Parent();
+			const auto where = std::ranges::find_if(block->Instructions(),
+			                                        [&](const Inst& inst) { return &inst == &handle; });
+			auto& scaled  = *block->PrependNewInst(where, ValueOpcode::IMul32,
+			                                       {record, Value(BufferPointerLayers)});
+			auto& sum     = *block->PrependNewInst(where, ValueOpcode::IAdd32,
+			                                       {Value(&scaled), layer});
+			auto& inside  = *block->PrependNewInst(where, ValueOpcode::ULessThan32,
+			                                       {layer, Value(BufferPointerLayers)});
+			// A layer outside the key space reads no record: the placeholder.
+			auto& checked = *block->PrependNewInst(where, ValueOpcode::SelectU32,
+			                                       {Value(&inside), Value(&sum), Value(UINT32_MAX)});
+			key = Value(&checked);
+		}
+		DescriptorSource::IndirectDescriptor indirect;
+		indirect.table_offset       = descriptor_offset;
+		indirect.table_stride       = 0;
+		indirect.bindless           = true;
+		indirect.pointer_offset     = low_offset;
+		indirect.stride_from_buffer = true;
+		indirect.sub_stride         = layer.IsEmpty() ? 0u : layer_stride;
+		indirect.sub_keys           = layer.IsEmpty() ? 0u : BufferPointerLayers;
+		indirect.table_source       = InternSource(table_source);
+		DescriptorSource image_source;
+		image_source.dword_count = 8u;
+		image_source.dwords.fill(Value(0u));
+		std::copy_n(table_source.dwords.begin(), 4u, image_source.dwords.begin() + 4u);
+		image_source.indirect_descriptor = indirect;
+		plan.handle = &handle;
+		plan.source = InternSource(image_source);
+		plan.key    = key;
+		plan.roots  = image_source.dwords;
+		return true;
+	}
+
 	bool TryMakeIndirectImage(Inst& handle, const DescriptorSource& descriptor,
 	                          IndirectDescriptorPlan& plan) {
 		if (handle.GetOpcode() == ValueOpcode::GetImageResource && handle.NumArgs() == 8u &&
@@ -1923,6 +2103,11 @@ private:
 			IndirectDescriptorPlan pointer_plan;
 			if (TryMakePointerRecordImage(handle, pointer_plan)) {
 				plan = std::move(pointer_plan);
+				return true;
+			}
+			IndirectDescriptorPlan buffer_pointer_plan;
+			if (TryMakeBufferPointerImage(handle, buffer_pointer_plan)) {
+				plan = std::move(buffer_pointer_plan);
 				return true;
 			}
 		}

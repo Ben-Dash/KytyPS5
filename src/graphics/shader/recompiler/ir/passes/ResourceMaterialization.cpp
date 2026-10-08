@@ -490,16 +490,16 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 // any integer one end the probe early, as do four integer ones before any float one.
 // KYTY_DEBUG_BINDLESS_CLASS=1 logs the counts once per heap layout and result.
 Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, uint64_t heap_base,
-                                                     uint64_t heap_size,
+                                                     uint64_t heap_size, uint32_t record_stride,
                                                      const DescriptorSource::IndirectDescriptor& indirect) {
 	constexpr uint32_t ProbedRecords = 32;
-	if (runtime.read_memory == nullptr || indirect.table_stride == 0u) {
+	if (runtime.read_memory == nullptr || record_stride == 0u) {
 		return Prospero::TextureNumericClass::Float;
 	}
 	auto     integer_class = Prospero::TextureNumericClass::Float;
 	uint32_t integers = 0, floats = 0, others = 0, nulls = 0, probed = 0;
 	for (uint32_t key = 0; key < ProbedRecords; key++) {
-		const auto offset = static_cast<uint64_t>(key) * indirect.table_stride;
+		const auto offset = static_cast<uint64_t>(key) * record_stride;
 		if (heap_size != 0u && offset + indirect.table_offset + 16u > heap_size &&
 		    indirect.pointer_offset == UINT32_MAX) {
 			break;
@@ -553,7 +553,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 	if (debug && (integers != 0u || others != 0u)) [[unlikely]] {
 		static std::mutex                   mutex;
 		static std::unordered_set<uint64_t> seen;
-		const auto layout = (static_cast<uint64_t>(indirect.table_stride) << 40u) ^
+		const auto layout = (static_cast<uint64_t>(record_stride) << 40u) ^
 		                    (static_cast<uint64_t>(indirect.table_offset) << 20u) ^
 		                    (static_cast<uint64_t>(indirect.pointer_offset) << 4u) ^
 		                    static_cast<uint64_t>(result);
@@ -561,7 +561,7 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 		if (seen.size() < 256 && seen.insert(layout).second) {
 			std::printf("bindless-class: heap=0x%012llx stride=%u table_off=%u ptr_off=%d probed=%u "
 			            "null=%u int=%u float=%u other=%u -> %s\n",
-			            static_cast<unsigned long long>(heap_base), indirect.table_stride,
+			            static_cast<unsigned long long>(heap_base), record_stride,
 			            indirect.table_offset,
 			            indirect.pointer_offset == UINT32_MAX ? -1
 			                                                  : static_cast<int>(indirect.pointer_offset),
@@ -583,8 +583,12 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
                               const DescriptorValue& table_value, uint32_t image_index,
                               const SrtRuntime& runtime, ResourceSnapshot& snapshot,
                               std::vector<Specialization>& specializations) {
-	uint64_t heap_base = 0;
-	uint64_t heap_size = 0;
+	uint64_t heap_base     = 0;
+	uint64_t heap_size     = 0;
+	uint32_t record_stride = indirect.table_stride;
+	if (indirect.stride_from_buffer && table_value.dword_count != 4u) {
+		return false;
+	}
 	if (table_value.dword_count == 2u) {
 		// A bare address has no bounds: the heap covers a fixed number of records. Keys are
 		// resolved when the shader names them, so only those records are read.
@@ -602,6 +606,13 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 		}
 		heap_base = heap.Base48();
 		heap_size = heap.GetSize();
+		if (indirect.stride_from_buffer) {
+			// Records of an indexed vector load: the V# gives their stride.
+			record_stride = heap.Stride();
+			if (record_stride < 8u) {
+				return false;
+			}
+		}
 	}
 	const auto mapping_offset = static_cast<uint32_t>(snapshot.flattened_srt.size());
 	snapshot.flattened_srt.resize(mapping_offset + 2u, 0u);
@@ -609,16 +620,19 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 	snapshot.bindless_heaps.push_back({.base           = heap_base,
 	                                   .size           = heap_size,
 	                                   .table_offset   = indirect.table_offset,
-	                                   .record_stride  = indirect.table_stride,
+	                                   .record_stride  = record_stride,
 	                                   .image          = image_index,
 	                                   .mapping_offset = mapping_offset,
-	                                   .pointer_offset = indirect.pointer_offset});
+	                                   .pointer_offset = indirect.pointer_offset,
+	                                   .sub_stride     = indirect.sub_stride,
+	                                   .sub_keys       = indirect.sub_keys});
 	auto& root                      = specializations[image_index];
 	root.indirect_root              = image_index;
 	root.indirect_mapping_offset    = mapping_offset;
 	root.indirect_search_iterations = 0;
 	root.bindless                   = true;
-	root.numeric_class              = ProbeBindlessHeapClass(runtime, heap_base, heap_size, indirect);
+	root.numeric_class              = ProbeBindlessHeapClass(runtime, heap_base, heap_size, record_stride,
+	                                                    indirect);
 	return true;
 }
 

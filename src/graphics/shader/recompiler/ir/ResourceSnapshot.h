@@ -42,6 +42,10 @@ struct BindlessHeapUse {
 	// The record holds a pointer at this offset; the T# is at pointer + table_offset
 	// (UINT32_MAX: the T# is in the record).
 	uint32_t pointer_offset = UINT32_MAX;
+	// Keys per record (0: one); key k reads record k / sub_keys and the T# at
+	// pointer + table_offset + (k % sub_keys) * sub_stride.
+	uint32_t sub_stride     = 0;
+	uint32_t sub_keys       = 0;
 
 	bool operator==(const BindlessHeapUse&) const = default;
 };
