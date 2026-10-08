@@ -214,12 +214,15 @@ void CollectPixelInputs(const Program& program, const ShaderPixelInputInfo* pixe
 	}
 	std::array<bool, 32> per_vertex {};
 	std::array<bool, 32> interpolated {};
+	std::array<bool, 32> read {};
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
 			if (inst.GetOpcode() == ValueOpcode::GetAttribute) {
 				interpolated[inst.Arg(0).U32()] = true;
+				read[inst.Arg(0).U32()]         = true;
 			} else if (inst.GetOpcode() == ValueOpcode::GetInterpolationParameter) {
 				const auto input = inst.Arg(0).U32();
+				read[input]      = true;
 				const auto mode  = inst.Arg(2).U32();
 				per_vertex[input] =
 				    per_vertex[input] || mode < 2u || !ShaderPixelParameterIsFlat(*pixel, input);
@@ -227,7 +230,21 @@ void CollectPixelInputs(const Program& program, const ShaderPixelInputInfo* pixe
 		}
 	}
 	// Aliases of a vertex output share one SPIR-V interface variable. If any
-	// alias reads raw vertices, interpolate the other aliases from those too.
+	// alias reads raw vertices, interpolate the other aliases from those too. A flat and a
+	// smooth alias of one output both read the raw vertices (one variable cannot be both).
+	for (uint32_t input = 0; input < pixel->input_num; input++) {
+		for (uint32_t alias = 0; alias < pixel->input_num; alias++) {
+			if (alias == input || !read[input] || !read[alias] ||
+			    ShaderPixelParameterMappedLocation(*pixel, input) !=
+			        ShaderPixelParameterMappedLocation(*pixel, alias)) {
+				continue;
+			}
+			if (ShaderPixelParameterIsFlat(*pixel, input) !=
+			    ShaderPixelParameterIsFlat(*pixel, alias)) {
+				per_vertex[input] = true;
+			}
+		}
+	}
 	for (uint32_t input = 0; input < pixel->input_num; input++) {
 		for (uint32_t alias = 0; alias < pixel->input_num; alias++) {
 			if (ShaderPixelParameterMappedLocation(*pixel, input) ==

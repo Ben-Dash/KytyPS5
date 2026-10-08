@@ -16,35 +16,11 @@ uint32_t ShaderPixelParameterMappedLocation(const ShaderPixelInputInfo& info, ui
 }
 
 uint32_t ShaderPixelParameterLocation(const ShaderPixelInputInfo& info,
-                                      std::span<const uint32_t> active_inputs, uint32_t input) {
-	std::array<bool, 32> used_locations {};
-	for (const auto active_input: active_inputs) {
-		used_locations[ShaderPixelParameterMappedLocation(info, active_input)] = true;
-	}
-	std::array<uint32_t, 64> group_locations;
-	group_locations.fill(UINT32_MAX);
-	for (const auto active_input: active_inputs) {
-		const auto mapped = ShaderPixelParameterMappedLocation(info, active_input);
-		const auto group  = mapped * 2u + ShaderPixelParameterIsFlat(info, active_input);
-		auto&      location = group_locations[group];
-		if (location == UINT32_MAX) {
-			location = mapped;
-			// Smooth and custom interpolation read the same vertex output. Only
-			// differing flat/smooth rectangle outputs need separate locations.
-			if (group_locations[group ^ 1u] != UINT32_MAX) {
-				location = 0;
-				while (location < used_locations.size() && used_locations[location]) {
-					location++;
-				}
-				EXIT_NOT_IMPLEMENTED(location >= used_locations.size());
-			}
-			used_locations[location] = true;
-		}
-
-		if (active_input == input) {
-			return location;
-		}
-	}
+                                      std::span<const uint32_t> /*active_inputs*/, uint32_t input) {
+	// Every input reads the vertex output it is mapped to. A flat input whose vertex output a
+	// smooth input also reads shares that location: both read the raw vertices (PerVertexKHR),
+	// the flat one vertex 0. A location of its own would be one no vertex shader exports
+	// (Ghost of Yotei grass f23f7e7f30362713: its material key read (0,0,0,1)).
 	return ShaderPixelParameterMappedLocation(info, input);
 }
 
