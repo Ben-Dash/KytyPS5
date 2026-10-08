@@ -9,6 +9,7 @@
 #include "graphics/host_gpu/rangeSet.h"
 #include "graphics/host_gpu/regionManager.h"
 #include "graphics/host_gpu/renderer/cache/dccClearResolver.h"
+#include "graphics/host_gpu/renderer/cache/htileWriter.h"
 #include "graphics/host_gpu/renderer/cache/multiLevelPageTable.h"
 #include "graphics/host_gpu/renderer/image/blitHelper.h"
 #include "graphics/host_gpu/renderer/image/image.h"
@@ -169,6 +170,13 @@ public:
 	[[nodiscard]] bool IsMetaCleared(uint64_t address, uint32_t slice);
 	[[nodiscard]] bool ClearMeta(uint64_t address);
 	[[nodiscard]] bool TouchMeta(uint64_t address, uint32_t slice, bool is_clear);
+	// HTile synthesis. On the PS5 the DB keeps a depth target's HTile (min/max depth per 8x8 tile)
+	// current while it renders; Ghost of Yotei bins its shadow-cascade tiles by reading it, and
+	// with HTile left at zero no tile reached a cascade (the moonlight was gone). The host never
+	// writes HTile, so a guest read of a surface whose depth target was bound since the last
+	// synthesis rebuilds it from the depth image first. GPU thread only. KYTY_HTILE_SYNTH=0: off.
+	[[nodiscard]] bool HasStaleHtile() const noexcept { return !m_htile_stale.empty(); }
+	void               SyncHtile(uint64_t address, uint64_t size);
 
 	void UnmapMemory(uint64_t address, uint64_t size);
 	void ProcessDownloadImages();
@@ -351,6 +359,16 @@ private:
 		uint32_t code_mask = 0;
 	};
 	DccClearResolver                   m_dcc_resolver;
+	HtileWriter                        m_htile_writer;
+	// HTile surfaces whose depth target was bound since their last synthesis (see SyncHtile).
+	struct StaleHtile {
+		uint64_t address = 0;
+		uint64_t size    = 0;
+		ImageId  image {};
+	};
+	std::vector<StaleHtile>            m_htile_stale;
+	void MarkHtileStale(uint64_t address, uint64_t size, ImageId image);
+	void SynthesizeHtile(const StaleHtile& surface);
 	bool                               m_dcc_gpu_clear  = false;
 	uint64_t                           m_dcc_gpu_checks = 0;
 	// Slice address -> slices whose GPU check still reflects the metadata. Any recorded GPU write

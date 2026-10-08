@@ -347,6 +347,21 @@ add_custom_command(
 )
 list(APPEND kyty_emulator_src "${dcc_clear_shader_header}")
 
+set(htile_synth_shader_source "${gpu_tiler_shader_dir}/htile_synth.comp")
+set(htile_synth_shader_spv "${gpu_tiler_generated_dir}/htile_synth.spv")
+set(htile_synth_shader_header "${gpu_tiler_generated_dir}/htile_synth_spv.h")
+add_custom_command(
+	OUTPUT "${htile_synth_shader_header}"
+	COMMAND ${CMAKE_COMMAND} -E make_directory "${gpu_tiler_generated_dir}"
+	COMMAND "${KYTY_GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 -Os
+	        -o "${htile_synth_shader_spv}" "${htile_synth_shader_source}"
+	COMMAND ${CMAKE_COMMAND} -DINPUT=${htile_synth_shader_spv} -DOUTPUT=${htile_synth_shader_header}
+	        -DSYMBOL=HTILE_SYNTH_SPV -P "${KYTY_SOURCE_DIR}/embed_spirv.cmake"
+	DEPENDS "${htile_synth_shader_source}"
+	VERBATIM
+)
+list(APPEND kyty_emulator_src "${htile_synth_shader_header}")
+
 set(mesh_indirect_shader_source "${gpu_tiler_shader_dir}/mesh_indirect_args.comp")
 set(mesh_indirect_shader_spv "${gpu_tiler_generated_dir}/mesh_indirect_args.spv")
 set(mesh_indirect_shader_header "${gpu_tiler_generated_dir}/mesh_indirect_args_spv.h")

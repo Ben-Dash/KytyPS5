@@ -225,7 +225,7 @@ TextureCache::TextureCache(GraphicContext& graphics, CommandScheduler& scheduler
     : m_graphics(graphics), m_scheduler(scheduler), m_page_manager(page_manager),
       m_blit_helper(graphics, scheduler),
       m_tiler(graphics, scheduler, buffer_cache.GetUtilityBuffer(MemoryUsage::Stream)),
-      m_buffer_cache(buffer_cache), m_dcc_resolver(graphics, scheduler),
+      m_buffer_cache(buffer_cache), m_dcc_resolver(graphics, scheduler), m_htile_writer(graphics),
       m_readback_linear_images(Config::ReadbackLinearImagesEnabled()) {
 	m_dcc_gpu_clear = Config::DccGpuClearEnabled() && m_dcc_resolver.Available();
 	if (m_graphics.CanReportMemoryUsage()) {
@@ -2625,6 +2625,9 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 		        .second) {
 			m_surface_meta_generation.fetch_add(1, std::memory_order_relaxed);
 		}
+		if (desc.info.metadata.kind == ImageMetadataKind::Htile) {
+			MarkHtileStale(desc.info.metadata.range.address, desc.info.metadata.range.size, id);
+		}
 	}
 	RefreshImage(id);
 	CommitGpuWrite(image);
@@ -3202,6 +3205,137 @@ void TextureCache::InvalidateCpuAliases(uint64_t address, uint64_t size) {
 		} else {
 			MarkAsMaybeDirty(id, *owner);
 		}
+	}
+}
+
+static bool HtileSynthEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_HTILE_SYNTH");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+// KYTY_DEBUG_HTILE=1 prints each synthesis (the first 64).
+static bool HtileDebugEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_HTILE") != nullptr;
+	return enabled;
+}
+
+void TextureCache::MarkHtileStale(uint64_t address, uint64_t size, ImageId image) {
+	if (!HtileSynthEnabled() || size == 0) {
+		return;
+	}
+	for (auto& stale: m_htile_stale) {
+		if (stale.address == address) {
+			stale.size  = size;
+			stale.image = image;
+			return;
+		}
+	}
+	// Surfaces nobody reads stay listed; keep the list (checked for every compute read) short.
+	constexpr size_t MaxStale = 32;
+	if (m_htile_stale.size() >= MaxStale) {
+		m_htile_stale.erase(m_htile_stale.begin());
+	}
+	m_htile_stale.push_back({address, size, image});
+}
+
+void TextureCache::SyncHtile(uint64_t address, uint64_t size) {
+	if (m_htile_stale.empty() || size == 0 || size > UINT64_MAX - address) {
+		return;
+	}
+	for (size_t index = 0; index < m_htile_stale.size();) {
+		const auto stale = m_htile_stale[index];
+		if (stale.address < address + size && address < stale.address + stale.size) {
+			m_htile_stale.erase(m_htile_stale.begin() + static_cast<std::ptrdiff_t>(index));
+			SynthesizeHtile(stale);
+		} else {
+			index++;
+		}
+	}
+}
+
+void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
+	static std::atomic<uint32_t> skipped {0};
+	auto skip = [&](const char* why) {
+		if (skipped.fetch_add(1, std::memory_order_relaxed) < 16) {
+			std::printf("htile: not synthesized for 0x%016" PRIx64 ": %s\n", surface.address, why);
+			std::fflush(stdout);
+		}
+	};
+	if (!m_htile_writer.Available()) {
+		return skip("no pipeline");
+	}
+	ImageInfo info {};
+	{
+		std::scoped_lock lock {m_lock};
+		const auto* image = m_slot_images.try_get(surface.image);
+		if (image == nullptr || !image->registered || image->backing.image == nullptr ||
+		    image->depth_id || image->info.metadata.kind != ImageMetadataKind::Htile ||
+		    image->info.metadata.range.address != surface.address) {
+			return skip("depth image gone or rebound");
+		}
+		info = image->info;
+	}
+	const auto layers         = info.resources.layers;
+	const auto transfer_bytes = DepthAspectTransferBytes(info.pixel_format);
+	const auto format         = DepthAspectTransferFormat(info.pixel_format);
+	if (info.metadata.stencil_compressed) {
+		return skip("stencil in HTile");
+	}
+	if (info.samples != 1 || layers == 0 || transfer_bytes == 0 || info.pitch < info.extent.width) {
+		return skip("multisampled or unsupported depth");
+	}
+	const auto layer_bytes = info.metadata.range.size / layers;
+	if (info.metadata.range.size % layers != 0 ||
+	    layer_bytes < HtileWriter::LayerBytes(info.extent.width, info.extent.height)) {
+		return skip("HTile range smaller than the surface");
+	}
+	const uint64_t texels_per_slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
+	const uint64_t transfer_slice =
+	    Common::AlignUp(texels_per_slice * transfer_bytes, uint64_t {4});
+	if (texels_per_slice > UINT32_MAX / 2 || transfer_slice * layers > UINT32_MAX) {
+		return skip("surface too large");
+	}
+	TileManager::ScratchScope scratch_scope(m_tiler);
+	const auto linear = m_tiler.GetScratchBuffer(transfer_slice * layers);
+	const auto copies = BuildDepthCopies(info, transfer_slice, vk::ImageAspectFlagBits::eDepth);
+	// The rebuilt HTile is GPU-owned guest memory, like the DB's own writes.
+	const auto [htile, htile_offset] =
+	    m_buffer_cache.ObtainBuffer(surface.address, info.metadata.range.size, true, false);
+	{
+		std::scoped_lock lock {m_lock};
+		auto* image = m_slot_images.try_get(surface.image);
+		if (image == nullptr || !image->registered || image->backing.image == nullptr) {
+			return skip("depth image gone");
+		}
+		RefreshImage(surface.image);
+		image->Download(copies, linear.buffer, 0, linear.size, linear.capacity);
+	}
+	HtileWriter::Surface params {};
+	params.width        = info.extent.width;
+	params.height       = info.extent.height;
+	params.layers       = layers;
+	params.row_texels   = info.pitch;
+	params.slice_texels = static_cast<uint32_t>(transfer_slice / transfer_bytes);
+	params.layer_bytes  = layer_bytes;
+	params.format       = format == vk::Format::eD16Unorm          ? HtileWriter::DepthFormat::Unorm16
+	                      : format == vk::Format::eX8D24UnormPack32 ? HtileWriter::DepthFormat::Unorm24
+	                                                                : HtileWriter::DepthFormat::Float32;
+	auto& command = m_scheduler.Current();
+	command.EndRendering();
+	m_htile_writer.Record(command.Handle(), linear.buffer, linear.size, *htile, htile_offset, params);
+	// A depth target reused without a fresh acquisition (IsDepthTargetCurrent) would not mark the
+	// surface stale again when it is drawn to next.
+	m_surface_meta_generation.fetch_add(1, std::memory_order_release);
+	static std::atomic<uint32_t> printed {0};
+	if (HtileDebugEnabled() && printed.fetch_add(1, std::memory_order_relaxed) < 64) {
+		std::printf("htile: synthesized 0x%016" PRIx64 " size=0x%" PRIx64 " %ux%u layers=%u "
+		            "pitch=%u format=%u\n",
+		            surface.address, info.metadata.range.size, info.extent.width,
+		            info.extent.height, layers, info.pitch, static_cast<uint32_t>(params.format));
+		std::fflush(stdout);
 	}
 }
 

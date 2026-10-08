@@ -306,6 +306,8 @@ private:
 	void                      BindImage(ImageId id, bool storage);
 	void                      BindRenderTarget(ImageId id);
 	void                      ResetBindings();
+	// Rebuilds the HTile of depth surfaces the dispatch's buffers read (TextureCache::SyncHtile).
+	void                      SyncHtileReads(const ShaderComputeInputInfo& input);
 	[[nodiscard]] bool        TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
 	                                                     const CommandBuffer&          buffer);
 	[[nodiscard]] bool TryConsumeComputeImageClear(const ShaderComputeInputInfo& input,

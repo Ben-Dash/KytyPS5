@@ -279,6 +279,26 @@ static bool FillSourcesDisjoint(std::span<const ShaderRecompiler::IR::Descriptor
 	return true;
 }
 
+void RenderExecutor::SyncHtileReads(const ShaderComputeInputInfo& input) {
+	auto& cache = m_context.GetTextureCache();
+	if (!cache.HasStaleHtile()) {
+		return;
+	}
+	const auto& program   = *input.stage.program;
+	const auto& resources = *input.stage.resources;
+	const auto  count     = std::min(program.info.buffers.size(), resources.buffers.size());
+	for (size_t i = 0; i < count; i++) {
+		if (!program.info.buffers[i].read) {
+			continue;
+		}
+		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
+		const auto size       = descriptor.GetSize();
+		if (descriptor.Base48() != 0 && size != 0) {
+			cache.SyncHtile(descriptor.Base48(), size);
+		}
+	}
+}
+
 bool RenderExecutor::TryConsumeComputeMetaClear(const ShaderComputeInputInfo& input,
                                                 const CommandBuffer&          buffer) {
 	const auto& program   = *input.stage.program;
@@ -808,6 +828,7 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 
 	buffer.EndRendering();
+	SyncHtileReads(input_info);
 	auto& pipeline = [&]() -> PipelineCache::Pipeline& {
 		DrainStats::SlowLookupTimer create_timer(DrainStats::Kind::PipelineCreate);
 		return m_context.GetPipelineCache().GetComputePipeline(input_info, compute_program);
@@ -924,6 +945,7 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		return true;
 	}
 	buffer.EndRendering();
+	SyncHtileReads(input_info);
 	auto& pipeline = [&]() -> PipelineCache::Pipeline& {
 		DrainStats::SlowLookupTimer create_timer(DrainStats::Kind::PipelineCreate);
 		return m_context.GetPipelineCache().GetComputePipeline(input_info, compute_program);
