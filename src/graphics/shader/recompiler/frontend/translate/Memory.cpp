@@ -433,7 +433,8 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 	const bool d16 = inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_X ||
 	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY ||
 	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ ||
-	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW;
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW ||
+	                 inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_HI_X;
 	auto memory = MemoryInfoFromDecoded(inst);
 	memory.d16  = d16;
 	IR::ValueOpcode opcode;
@@ -463,7 +464,12 @@ void Translator::BUFFER_LOAD(const Decoder::Instruction& inst) {
 	const auto loaded =
 	    ir.Emit(opcode, {resource, address.index, address.offset, address.soffset, ir.GetExec()},
 	            AddMemoryInfo(memory, inst.pc));
-	if (d16) {
+	if (inst.opcode == Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_HI_X) {
+		// The one 16-bit component goes to the register's high half; the low half is kept.
+		const auto value = ir.ShiftLeftLogical(IR::U32(loaded), IR::U32(IR::Value(16u)));
+		const auto kept  = ir.BitwiseAnd(ReadU32(inst.dst), IR::U32(IR::Value(0xffffu)));
+		WriteOperand(inst.dst, ir.BitwiseOr(kept, value));
+	} else if (d16) {
 		// The backend returns each component as 16 bits (MemoryInfo::d16); two per register.
 		const auto component = [&](uint32_t index) {
 			if (index >= memory.data_dwords) {
@@ -1057,6 +1063,7 @@ void Translator::EmitMemory(const Decoder::Instruction& inst) {
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XY:
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZ:
 		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_XYZW:
+		case Decoder::Opcode::BUFFER_LOAD_FORMAT_D16_HI_X:
 		case Decoder::Opcode::BUFFER_LOAD_UBYTE_D16:
 		case Decoder::Opcode::BUFFER_LOAD_UBYTE_D16_HI:
 		case Decoder::Opcode::BUFFER_LOAD_SBYTE_D16:

@@ -83,6 +83,7 @@ constexpr MemoryOpcodeInfo MUBUF_OPCODE_LIST[] = {
     {0x81u, Opcode::BUFFER_LOAD_FORMAT_D16_XY, 2, 32, false, false, true},
     {0x82u, Opcode::BUFFER_LOAD_FORMAT_D16_XYZ, 3, 32, false, false, true},
     {0x83u, Opcode::BUFFER_LOAD_FORMAT_D16_XYZW, 4, 32, false, false, true},
+    {0x26u, Opcode::BUFFER_LOAD_FORMAT_D16_HI_X, 1, 32, false, false, true},
 };
 
 constexpr MemoryOpcodeInfo MTBUF_OPCODE_LIST[] = {
