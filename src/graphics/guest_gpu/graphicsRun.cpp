@@ -1626,6 +1626,15 @@ bool CommandProcessor::TryDrawIndirectOnGpu(uint64_t address) {
 	return true;
 }
 
+// The VS InstanceID input excludes the first instance on the console; a shader that needs the
+// base reads it from the user SGPR the packet names (written above). Vulkan's gl_InstanceIndex
+// includes firstInstance, so that draw passes 0 when the shader gets the base through an SGPR:
+// otherwise it was counted twice (Ghost of Yotei dust particles read the instance records of
+// other particles and came out red).
+static uint32_t DrawFirstInstance(IndirectDrawRegisters registers, uint32_t first_instance) {
+	return registers.instance_offset != Pm4::SH_NOP ? 0u : first_instance;
+}
+
 // Upstream 9f83fd5f: an indirect draw writes its vertex offset, first instance and first index
 // into the user SGPRs its packet names, as the command processor does on the console.
 static void PatchIndirectDrawOffsets(CommandProcessor& cp, IndirectDrawRegisters registers,
@@ -1696,7 +1705,7 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 		DrawIndexAuto({.vertex_count   = args.vertex_count_per_instance,
 		               .instance_count = args.instance_count,
 		               .first_vertex   = args.start_vertex_location,
-		               .first_instance = args.start_instance_location,
+		               .first_instance = DrawFirstInstance(registers, args.start_instance_location),
 		               .offset_source  = DrawOffsetSource::IndirectArgs});
 		return;
 	}
@@ -1735,7 +1744,7 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 	           .index_addr     = index_addr,
 	           .instance_count = args.instance_count,
 	           .base_vertex    = static_cast<int32_t>(args.base_vertex_location),
-	           .first_instance = args.start_instance_location,
+	           .first_instance = DrawFirstInstance(registers, args.start_instance_location),
 	           .offset_source  = DrawOffsetSource::IndirectArgs});
 }
 
@@ -1812,7 +1821,7 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 			DrawIndexAuto({.vertex_count   = args->vertex_count_per_instance,
 			               .instance_count = args->instance_count,
 			               .first_vertex   = args->start_vertex_location,
-			               .first_instance = args->start_instance_location,
+			               .first_instance = DrawFirstInstance(registers, args->start_instance_location),
 			               .offset_source  = DrawOffsetSource::IndirectArgs});
 			continue;
 		}
@@ -1853,7 +1862,7 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		           .index_addr     = index_addr,
 		           .instance_count = args->instance_count,
 		           .base_vertex    = static_cast<int32_t>(args->base_vertex_location),
-		           .first_instance = args->start_instance_location,
+		           .first_instance = DrawFirstInstance(registers, args->start_instance_location),
 		           .offset_source  = DrawOffsetSource::IndirectArgs});
 	}
 }
