@@ -10,6 +10,7 @@
 
 #include <functional>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdlib>
 #include <fmt/format.h>
@@ -862,6 +863,35 @@ private:
 			}
 		}
 		m_program.srt_plan_complete = true;
+	}
+
+	// Whether a descriptor dword is built from a vector memory load. Such a value (a record count
+	// a previous dispatch wrote, read through a V#) exists only on the GPU when the dispatch runs:
+	// the host cannot evaluate it ahead of time (the bytes are GPU-written, and a readback would
+	// see them before that dispatch's producers ran).
+	bool DependsOnVectorLoad(Value value) const {
+		std::vector<const Inst*> pending;
+		std::unordered_set<const Inst*> visited;
+		if (const auto* first = value.Resolve().TryInstruction(); first != nullptr) {
+			pending.push_back(first);
+		}
+		while (!pending.empty()) {
+			const auto* inst = pending.back();
+			pending.pop_back();
+			if (!visited.insert(inst).second) {
+				continue;
+			}
+			if (BufferAccessOf(inst->GetOpcode()) == BufferAccess::Read &&
+			    inst->GetOpcode() != ValueOpcode::ReadConstBuffer) {
+				return true;
+			}
+			for (size_t i = 0; i < inst->NumArgs(); i++) {
+				if (const auto* arg = inst->Arg(i).Resolve().TryInstruction(); arg != nullptr) {
+					pending.push_back(arg);
+				}
+			}
+		}
+		return false;
 	}
 
 	bool ValidateSource(const DescriptorSource& descriptor, uint32_t& bad_dword) const {
@@ -2903,10 +2933,19 @@ private:
 		if (buffer != BufferAccess::None) {
 			handle = inst.Arg(0).Resolve().TryInstruction();
 			const auto* indirect = handle == nullptr ? nullptr : FindIndirectDescriptor(*handle);
+			const bool  gpu_built =
+			    indirect == nullptr && handle != nullptr &&
+			    handle->GetOpcode() == ValueOpcode::GetBufferResource && handle->NumArgs() == 4u &&
+			    memory.kind == ResourceKind::Buffer &&
+			    (memory.SupportsIndirectBufferLoad(op) || memory.SupportsIndirectBufferStore(op) ||
+			     memory.SupportsIndirectBufferAtomic(op)) &&
+			    std::ranges::any_of(std::array {0u, 1u, 2u, 3u}, [&](uint32_t dword) {
+				    return DependsOnVectorLoad(handle->Arg(dword));
+			    });
 			if (indirect != nullptr) {
 				source = indirect->source;
-			} else if (!GetHandle(inst.Arg(0), ValueOpcode::GetBufferResource, 4, flags.pc,
-			               memory.resource * 4u, handle, source)) {
+			} else if (gpu_built || !GetHandle(inst.Arg(0), ValueOpcode::GetBufferResource, 4,
+			                                   flags.pc, memory.resource * 4u, handle, source)) {
 				const bool indirect_store = memory.SupportsIndirectBufferStore(op) ||
 				                            memory.SupportsIndirectBufferAtomic(op);
 				if (memory.kind != (op == ValueOpcode::ReadConstBuffer ? ResourceKind::ScalarBuffer
