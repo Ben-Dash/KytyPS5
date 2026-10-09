@@ -10,14 +10,16 @@
 #include <optional>
 #include <vector>
 
+#include <fmt/format.h>
+
 namespace Libs::Graphics::ShaderRecompiler::Spirv {
 
 namespace {
 
 [[noreturn]] void Fail(const IR::Program& program, const char* reason) {
-	EXIT("SPIR-V validation failed: hash=0x%016" PRIx64 " stage=%u reason=%s\n",
-	     program.shader_hash, static_cast<unsigned>(program.stage), reason);
-	std::abort();
+	throw ValidationError(fmt::format("SPIR-V validation failed: hash=0x{:016x} stage={} reason={}",
+	                                  program.shader_hash, static_cast<unsigned>(program.stage),
+	                                  reason));
 }
 
 void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {

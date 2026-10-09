@@ -25,6 +25,7 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
+#include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
 #include "graphics/shader/shaderCompiler.h"
 #include "kernel/memory.h"
@@ -432,6 +433,8 @@ struct PipelineCache::ProgramCache {
 		ShaderRecompiler::IR::CompiledShaderInfo program;
 		vk::ShaderModule                         module      = nullptr;
 		size_t                                   spirv_words = 0;
+		// The emitter rejected the planned program: the shader is skipped like an untranslatable one.
+		bool                                     failed      = false;
 	};
 
 	// A permutation compiling on a worker thread.
@@ -502,9 +505,16 @@ struct PipelineCache::ProgramCache {
 	                                    ShaderRecompiler::TranslateResult                   translated,
 	                                    const ShaderRecompiler::IR::ResourceSpecialization& specialization,
 	                                    uint32_t push_data_start_dword) {
-		const char* stage_name = StageName(options.stage);
-		auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
-		                                               specialization, push_data_start_dword);
+		const char*                     stage_name = StageName(options.stage);
+		ShaderRecompiler::CompileResult result;
+		try {
+			result = ShaderRecompiler::CompileProgram(std::move(translated), options, specialization,
+			                                          push_data_start_dword);
+		} catch (const ShaderRecompiler::Spirv::ValidationError& error) {
+			Log::WriteToConsoleAndLog(fmt::format("Warning: skipping shader 0x{:016x}: {}\n",
+			                                      options.shader_hash, error.what()));
+			return {.failed = true};
+		}
 		DumpShaderOriginal(stage_name, options.shader_hash, code);
 		if (!ValidateShaderSpirv(options.dump_label, options.shader_hash, result.spirv)) {
 			DumpShaderSpirv(stage_name, options.shader_hash, result.spirv);
@@ -540,16 +550,6 @@ struct PipelineCache::ProgramCache {
 		    .program        = std::move(compiled.program),
 		    .handle         = {.id = ++next_shader_id, .module = compiled.module},
 		};
-	}
-
-	Permutation CompilePermutation(const ShaderParams&                          params,
-	                               const ShaderRecompiler::CompileOptions&      options,
-	                               ShaderRecompiler::TranslateResult            translated,
-	                               ShaderRecompiler::IR::ResourceSpecialization specialization,
-	                               uint32_t push_data_start_dword) {
-		auto compiled = CompileModule(device, params.code, options, std::move(translated),
-		                              specialization, push_data_start_dword);
-		return MakePermutation(options, std::move(specialization), std::move(compiled));
 	}
 
 	// KYTY_DEBUG_REPLAY_VERIFY=1, on the first live use of a replayed permutation: compiles it again
@@ -1048,16 +1048,20 @@ struct PipelineCache::ProgramCache {
 				return defer();
 			}
 		}
-		if (compiled) {
-			source.permutations.push_back(
-			    MakePermutation(options, source.specialization, std::move(*compiled)));
-		} else {
+		if (!compiled) {
 			if (!translated) {
 				translated = ShaderRecompiler::TranslateProgram(params.code, options);
 			}
-			source.permutations.push_back(CompilePermutation(
-			    params, options, std::move(*translated), source.specialization, push_data_cursor));
+			compiled = CompileModule(device, params.code, options, std::move(*translated),
+			                         source.specialization, push_data_cursor);
 		}
+		if (compiled->failed) {
+			std::unique_lock lock(programs_mutex);
+			source.skip_dispatch = true;
+			return {};
+		}
+		source.permutations.push_back(
+		    MakePermutation(options, source.specialization, std::move(*compiled)));
 		source.last_permutation = static_cast<uint32_t>(source.permutations.size() - 1u);
 		source.last_push_cursor = push_data_cursor;
 		auto& permutation = source.permutations.back();
@@ -1600,7 +1604,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 			result.compiled =
 			    ProgramCache::CompileModule(m_graphics.device, params.code, options, std::move(translated),
 			                                record.specialization, record.push_data_start_dword);
-			result.valid = true;
+			result.valid = !result.compiled.failed;
 		}
 	};
 	// As before the compute pipeline queue (whose thread count is configured): translating with
