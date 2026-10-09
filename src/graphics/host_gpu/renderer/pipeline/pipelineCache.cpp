@@ -218,6 +218,72 @@ void DumpShaderSpirv(const char* stage_name, uint64_t shader_hash,
 	file.Write(spirv.data(), spirv.size() * sizeof(uint32_t));
 }
 
+// Shaders that failed to translate or compile are listed in _PipelineCache/failed_shaders.txt
+// (one hex hash per line, kept across runs). A failure prints a red console line; a listed shader
+// that now translates and compiles prints a magenta line and leaves the list, so a translator fix
+// is visible in the console the first time the game uses that shader again.
+class ShaderOutcomes {
+public:
+	void Failed(uint64_t hash, const char* stage) {
+		std::scoped_lock lock(m_mutex);
+		Load();
+		if (!m_failed.insert(hash).second) {
+			return;
+		}
+		Save();
+		std::printf("\x1b[91mshader %016llx failed (%s): skipped, listed in %s\x1b[0m\n",
+		            static_cast<unsigned long long>(hash), stage, Path().string().c_str());
+		std::fflush(stdout);
+	}
+	void Works(uint64_t hash) {
+		std::scoped_lock lock(m_mutex);
+		Load();
+		if (m_failed.erase(hash) == 0) {
+			return;
+		}
+		Save();
+		std::printf("\x1b[95mshader %016llx works now: translated and compiled (it failed before)"
+		            "\x1b[0m\n",
+		            static_cast<unsigned long long>(hash));
+		std::fflush(stdout);
+	}
+
+private:
+	static std::filesystem::path Path() { return std::filesystem::path("_PipelineCache") / "failed_shaders.txt"; }
+	void Load() {
+		if (m_loaded) {
+			return;
+		}
+		m_loaded = true;
+		if (auto* file = std::fopen(Path().string().c_str(), "rb"); file != nullptr) {
+			unsigned long long hash = 0;
+			while (std::fscanf(file, "%llx", &hash) == 1) {
+				m_failed.insert(hash);
+			}
+			std::fclose(file);
+		}
+	}
+	void Save() const {
+		std::error_code ec;
+		std::filesystem::create_directories(Path().parent_path(), ec);
+		if (auto* file = std::fopen(Path().string().c_str(), "wb"); file != nullptr) {
+			for (const auto hash: m_failed) {
+				std::fprintf(file, "%016llx\n", static_cast<unsigned long long>(hash));
+			}
+			std::fclose(file);
+		}
+	}
+
+	std::mutex                   m_mutex;
+	bool                         m_loaded = false;
+	std::unordered_set<uint64_t> m_failed;
+};
+
+ShaderOutcomes& Outcomes() {
+	static ShaderOutcomes outcomes;
+	return outcomes;
+}
+
 // A skipped draw or dispatch is visible in the frame; name the shader once per hash.
 void ReportMaterializeFailure(uint64_t shader_hash) {
 	static std::mutex                   mutex;
@@ -992,6 +1058,7 @@ struct PipelineCache::ProgramCache {
 				translated = ShaderRecompiler::TranslateProgram(params.code, options);
 			}
 			if (translated->skip_dispatch) {
+				Outcomes().Failed(params.hash, "translation");
 				std::unique_lock lock(programs_mutex);
 				entry = programs.try_emplace(lookup_key, ShaderRecompiler::IR::ResourcePlan {}).first;
 				entry->second.skip_dispatch = true;
@@ -1056,12 +1123,14 @@ struct PipelineCache::ProgramCache {
 			                         source.specialization, push_data_cursor);
 		}
 		if (compiled->failed) {
+			Outcomes().Failed(params.hash, "SPIR-V emit");
 			std::unique_lock lock(programs_mutex);
 			source.skip_dispatch = true;
 			return {};
 		}
 		source.permutations.push_back(
 		    MakePermutation(options, source.specialization, std::move(*compiled)));
+		Outcomes().Works(params.hash);
 		source.last_permutation = static_cast<uint32_t>(source.permutations.size() - 1u);
 		source.last_push_cursor = push_data_cursor;
 		auto& permutation = source.permutations.back();
