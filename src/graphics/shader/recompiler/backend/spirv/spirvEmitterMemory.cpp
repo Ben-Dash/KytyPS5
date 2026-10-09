@@ -1680,7 +1680,9 @@ uint32_t LoadIndirectBuffer(ValueEmitContext& ctx, const IR::Inst& inst, uint32_
 		                        ? in_bounds[component]
 		                        : AndCondition(state, window.usable[component], in_bounds[component]);
 	}
-	const auto words = LoadElementWords(state, window, usable);
+	// GLC/DLC loads bypass the caches on the GPU; a spin on another workgroup's flag (decoupled
+	// look-back in a prefix scan) would otherwise never see the store.
+	const auto words = LoadElementWords(state, window, usable, ctx.Memory(inst).coherent);
 	std::array<uint32_t, 4> values {};
 	std::copy_n(words.begin(), components, values.begin());
 	return ConstructU32Composite(state, components, values);
