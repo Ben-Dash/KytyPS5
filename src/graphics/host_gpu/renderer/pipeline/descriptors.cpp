@@ -38,6 +38,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdlib>
 #include <cinttypes>
 #include <cstdio>
@@ -522,15 +523,57 @@ static void PopulateTextureMipLayout(ImageInfo& info) {
 // resolved: that key then samples the placeholder (the shader keeps running).
 static thread_local bool g_soft_texture_failures = false;
 static thread_local bool g_soft_texture_failed   = false;
+// The bindless key being resolved, for the placeholder message: its heap, key, and whether a
+// shader asked for it (otherwise a small heap is resolved completely, unused slots included).
+struct BindlessFailContext {
+	uint64_t heap_base = 0;
+	uint32_t binding   = 0;
+	uint32_t key       = 0;
+	bool     requested = false;
+};
+static thread_local BindlessFailContext g_bindless_fail_context;
+// Every distinct placeholder is printed in red (no shader may lose a texture unnoticed, user
+// 2026-10-09); the same texture failing again in later frames is not repeated.
+// KYTY_STRICT_TEXTURES=1 (test runs) ends the session at the first one a shader asked for.
+static void ReportPlaceholder(const char* reason, bool quiet = false) {
+	static std::mutex                      mutex;
+	static std::unordered_set<std::string> seen;
+	static const bool strict   = KYTY_GETENV("KYTY_STRICT_TEXTURES") != nullptr;
+	const auto&       context  = g_bindless_fail_context;
+	auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={}): {}",
+	                        context.requested ? "requested by a shader" : "unrequested slot",
+	                        context.heap_base, context.binding, context.key, reason);
+	if (strict && context.requested) {
+		EXIT("%s", line.c_str());
+	}
+	const std::lock_guard lock(mutex);
+	// Records of small tables resolved ahead (no shader named them yet) that hold no texture at
+	// all (other data, null) are counted, not listed: thousands per scene would bury the rest.
+	if (!context.requested && quiet) {
+		static uint64_t counted = 0;
+		static auto     next    = std::chrono::steady_clock::now();
+		counted++;
+		if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+			next = now + std::chrono::seconds(30);
+			std::printf("\x1b[91mbindless: %llu table records resolved ahead hold no usable T# (placeholder "
+			            "until a shader asks for them)\x1b[0m\n",
+			            static_cast<unsigned long long>(counted));
+			std::fflush(stdout);
+		}
+		return;
+	}
+	if (seen.size() < 4096 && seen.insert(line).second) {
+		std::printf("\x1b[91m%s\x1b[0m", line.c_str());
+		std::fflush(stdout);
+	}
+}
 #define KYTY_TEXTURE_FAIL(...)                                                                   \
 	do {                                                                                         \
 		if (g_soft_texture_failures) {                                                           \
 			g_soft_texture_failed = true;                                                        \
-			static std::atomic<uint32_t> soft_logged {0};                                        \
-			if (soft_logged.fetch_add(1) < 16) {                                                 \
-				std::printf("bindless: texture kept as placeholder: " __VA_ARGS__);              \
-				std::fflush(stdout);                                                             \
-			}                                                                                    \
+			char reason_text[512];                                                               \
+			std::snprintf(reason_text, sizeof(reason_text), __VA_ARGS__);                        \
+			ReportPlaceholder(reason_text);                                                      \
 			return {};                                                                           \
 		}                                                                                        \
 		EXIT(__VA_ARGS__);                                                                       \
@@ -1698,6 +1741,9 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 	switch (descriptor.Type()) {
 		case Prospero::ImageType::kColor2D: return flat;
 		case Prospero::ImageType::kColor2DArray: return flat;
+		// A 1D texture is a 2D one of height 1 (sampled through the 2D arrays, see ResolveBindlessKey).
+		case Prospero::ImageType::kColor1D:
+		case Prospero::ImageType::kColor1DArray: return flat;
 		case Prospero::ImageType::kCube: return binding == ShaderRecompiler::IR::BindlessImagesCube;
 		case Prospero::ImageType::kColor3D: return binding == ShaderRecompiler::IR::BindlessImages3D;
 		default: return false;
@@ -1754,6 +1800,9 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	    heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	heap.settled[key]  = 1;
 	heap.record_hash[key] = BindlessRecordHash(heap, key);
+	g_bindless_fail_context.heap_base = heap.base;
+	g_bindless_fail_context.binding   = heap.binding;
+	g_bindless_fail_context.key       = key;
 	if (heap.listed[key] == 0) {
 		heap.listed[key] = 1;
 		heap.settled_keys.push_back(key);
@@ -1764,6 +1813,11 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		if (!Libs::LibKernel::Memory::TryReadBacking(BindlessPointerAddress(heap, key), &pointer,
 		                                             sizeof(pointer)) ||
 		    (pointer & 0x0000ffffffffffffull) == 0) {
+			// A null record pointer is the game's own empty slot (reads zero on the GPU too);
+			// it only counts when a shader asked for it.
+			if (g_bindless_fail_context.requested) {
+				ReportPlaceholder("record pointer is null or unreadable\n");
+			}
 			table.SetTranslation(heap, key, 0u);
 			return false;
 		}
@@ -1771,6 +1825,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		          BindlessLayerOffset(heap, key);
 	}
 	if (!Libs::LibKernel::Memory::TryReadBacking(address, value.dwords.data(), 32u)) {
+		ReportPlaceholder(fmt::format("T# at 0x{:x} is unreadable\n", address).c_str(), true);
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
@@ -1780,8 +1835,19 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	}
 	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
 	if (!BindlessCompatible(descriptor, heap.binding)) {
+		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
+		                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
+		                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str(),
+		                  true);
 		table.SetTranslation(heap, key, 0u);
 		return false;
+	}
+	// Ghost of Yotei keeps 1x1 1D color textures (format 56) in its material tables and samples them
+	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
+	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
+	if (descriptor.Type() == Prospero::ImageType::kColor1D ||
+	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
+		value.dwords[3] += 1u << 28u;
 	}
 	g_soft_texture_failures = true;
 	g_soft_texture_failed   = false;
@@ -1796,6 +1862,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	auto& texture_cache = m_context.GetTextureCache();
 	auto* image = texture_cache.m_slot_images.try_get(binding.image_id);
 	if (image == nullptr || image->info.data.Empty()) {
+		ReportPlaceholder("the texture cache has no image for the T#\n");
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
@@ -1855,7 +1922,9 @@ void RenderExecutor::ResolveBindlessRequests() {
 			if (resolved >= Budget) {
 				break; // still pending: the next frame flags it again
 			}
+			g_bindless_fail_context.requested = true;
 			resolved += ResolveBindlessKey(heap, key) ? 1u : 0u;
+			g_bindless_fail_context.requested = false;
 		}
 	}
 	table.RecordFeedbackSnapshot(scheduler);

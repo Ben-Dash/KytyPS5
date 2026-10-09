@@ -22,7 +22,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default
 };
 
-inline constexpr std::array<EmulatorSwitch, 7> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 8> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -61,6 +61,11 @@ inline constexpr std::array<EmulatorSwitch, 7> EMULATOR_SWITCHES = {{
      "emulator asks Windows each time instead of remembering it. Only there to compare against "
      "the new way if a game misbehaves.",
      "For comparison only, usually much slower."},
+    {"KYTY_STRICT_TEXTURES", "Stop at the first texture that cannot be shown (testing)",
+     "Normally a texture the emulator cannot show yet is replaced by a plain stand-in and a red " 
+     "line names it in the console window, so the game keeps running. With this on, the emulator " 
+     "stops at the first such texture a shader really uses, so it can be found and fixed.",
+     "For testing only: the game ends where a texture is missing."},
 }};
 
 // Whether the switch is on by default for this title.
