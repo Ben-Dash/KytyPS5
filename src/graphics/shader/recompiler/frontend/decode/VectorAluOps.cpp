@@ -569,8 +569,10 @@ struct Vop1SdwaRule {
 };
 
 constexpr Vop1SdwaRule VOP1_SDWA_RULES[] = {
+    // Byte packing (Ghost of Yotei particle compute 2f014654ce4bf63a: v_mov_b32_sdwa dst_sel:BYTE_1
+    // src0_sel:BYTE_0): any source field may go to any destination field (see V_NOT_B32).
     {Opcode::V_MOV_B32, SdwaSelBytes() | SdwaSelWords() | SdwaSelFull(), SdwaSelBytes() | SdwaSelWords(),
-     SdwaSelWords() | SdwaSelFull(), false},
+     SdwaSelBytes() | SdwaSelWords() | SdwaSelFull(), false},
     {Opcode::V_CVT_F32_U32, SdwaSelBytes() | SdwaSelWords() | SdwaSelFull(), 0, 0, false},
     {Opcode::V_CVT_F32_I32, SdwaSelBytes() | SdwaSelWords() | SdwaSelFull(), 0, 0, false},
     {Opcode::V_CVT_F32_UBYTE0, SdwaSelBytes() | SdwaSelWords() | SdwaSelFull(), 0, 0, false},
