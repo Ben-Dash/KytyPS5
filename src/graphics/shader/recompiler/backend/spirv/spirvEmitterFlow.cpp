@@ -1,6 +1,7 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
 
 #include "common/logging/log.h"
+#include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 
 #include <algorithm>
 #include <atomic>
@@ -428,6 +429,117 @@ uint32_t ConvertPositionToClipSpace(EmitterState& state, uint32_t position) {
 	return converted;
 }
 
+// KYTY_VTX_EXPLODE_CHECK: a position that explodes is logged into the fault buffer's explode
+// region (layout in VertexExplodeLog.h); the position itself is written unchanged.
+void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
+	if (state.fault_buffer_variable == 0 || !IR::UsesVertexExplodeLog(state.program)) {
+		return;
+	}
+	static std::atomic_bool logged = false;
+	if (!logged.exchange(true, std::memory_order_relaxed)) {
+		Log::WriteToConsoleAndLog("Shader: emitted vertex explode check (KYTY_VTX_EXPLODE_CHECK)\n");
+	}
+	const auto boolean  = TypeBool(state);
+	const auto booleans = TypeBoolVector(state, 4);
+	const auto f32      = TypeF32(state);
+	std::array<uint32_t, 4> magnitude {};
+	for (uint32_t i = 0; i < 4; i++) {
+		const auto component = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpCompositeExtract, f32, component, position, i);
+		magnitude[i] = EmitGlsl<GLSLstd450FAbs, IR::Type::F32>(state, component);
+	}
+	const auto non_finite = Unary(
+	    state, spv::OpAny, boolean,
+	    Binary(state, spv::OpLogicalOr, booleans, Unary(state, spv::OpIsNan, booleans, position),
+	           Unary(state, spv::OpIsInf, booleans, position)));
+	const auto zero = Unary(
+	    state, spv::OpAll, boolean,
+	    Binary(state, spv::OpFOrdEqual, booleans, position,
+	           state.builder.Constant(spv::OpConstantNull, TypeF32Vector(state, 4))));
+	const auto w_zero = Binary(state, spv::OpFOrdLessThan, boolean, magnitude[3],
+	                           ConstantF32Value(state, 1e-6f));
+	const auto huge   = Binary(
+	    state, spv::OpFOrdGreaterThan, boolean,
+	    EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, magnitude[0], magnitude[1]),
+	    Binary(state, spv::OpFMul, f32, magnitude[3],
+	           ConstantF32Value(state, IR::VertexExplodeCheck().limit)));
+	const auto hit = Binary(state, spv::OpLogicalOr, boolean,
+	                        Binary(state, spv::OpLogicalOr, boolean, non_finite, zero),
+	                        Binary(state, spv::OpLogicalOr, boolean, w_zero, huge));
+	const auto kind_constant = [&](IR::VertexExplodeKind kind) {
+		return ConstantU32(state, static_cast<uint32_t>(kind));
+	};
+	const auto kind = Select(
+	    state, TypeU32(state), non_finite, kind_constant(IR::VertexExplodeKind::NonFinite),
+	    Select(state, TypeU32(state), zero, kind_constant(IR::VertexExplodeKind::Zero),
+	           Select(state, TypeU32(state), w_zero, kind_constant(IR::VertexExplodeKind::WZero),
+	                  kind_constant(IR::VertexExplodeKind::Huge))));
+	EmitIfCondition(state, hit, [&] {
+		const auto element = [&](uint32_t index) {
+			const auto pointer = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state),
+			                          pointer, state.fault_buffer_variable, ConstantU32(state, 0),
+			                          index);
+			return pointer;
+		};
+		const auto add = [&](uint32_t index) {
+			const auto old = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpAtomicIAdd, TypeU32(state), old, element(index),
+			                          ConstantU32(state, spv::ScopeDevice), ConstantU32(state, 0),
+			                          ConstantU32(state, 1));
+			return old;
+		};
+		const auto hash = state.program.shader_hash;
+		(void)add(ConstantU32(state, IR::ExplodeLogBaseWord));
+		const auto slot = EmitBinaryU32(
+		    state, spv::OpIAdd, kind,
+		    ConstantU32(state, IR::ExplodeLogBucket(hash) *
+		                           static_cast<uint32_t>(IR::VertexExplodeKind::Count)));
+		const auto first = Binary(
+		    state, spv::OpIEqual, boolean,
+		    add(EmitBinaryU32(state, spv::OpIAdd, slot,
+		                      ConstantU32(state, IR::ExplodeLogBaseWord + IR::ExplodeLogCounterWord))),
+		    ConstantU32(state, 0));
+		EmitIfCondition(state, first, [&] {
+			const bool mesh = state.program.stage == ShaderType::Mesh;
+			const auto load_index = [&](IR::StageInputKind input) {
+				const auto variable = InputVariableForKind(state, input);
+				if (variable == 0) {
+					return ConstantU32(state, 0xffffffffu);
+				}
+				const auto value = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpLoad, TypeI32(state), value, variable);
+				return Unary(state, spv::OpBitcast, TypeU32(state), value);
+			};
+			const auto vertex   = mesh ? EmitLocalInvocationIndex(state)
+			                           : load_index(IR::StageInputKind::VertexIndex);
+			const auto instance = mesh ? EmitInputComponentU32(state, IR::StageInputKind::WorkgroupId, 0)
+			                           : load_index(IR::StageInputKind::InstanceIndex);
+			const auto base = EmitBinaryU32(
+			    state, spv::OpIAdd,
+			    EmitBinaryU32(state, spv::OpIMul, slot, ConstantU32(state, IR::ExplodeLogRecordWords)),
+			    ConstantU32(state, IR::ExplodeLogBaseWord + IR::ExplodeLogRecordWord));
+			const auto store = [&](uint32_t offset, uint32_t value) {
+				state.builder.AddFunction(
+				    spv::OpStore,
+				    element(EmitBinaryU32(state, spv::OpIAdd, base, ConstantU32(state, offset))),
+				    value);
+			};
+			store(0, EmitBinaryU32(state, spv::OpBitwiseOr, kind,
+			                       ConstantU32(state, IR::ExplodeLogMarker | (mesh ? 0x100u : 0u))));
+			store(1, ConstantU32(state, static_cast<uint32_t>(hash)));
+			store(2, ConstantU32(state, static_cast<uint32_t>(hash >> 32u)));
+			store(3, vertex);
+			store(4, instance);
+			for (uint32_t i = 0; i < 4; i++) {
+				const auto component = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpCompositeExtract, f32, component, position, i);
+				store(5 + i, Unary(state, spv::OpBitcast, TypeU32(state), component));
+			}
+		});
+	});
+}
+
 } // namespace
 uint32_t EmitWqmU64(EmitterState& state, uint32_t value) {
 	const auto shifted_one = state.builder.AllocateId();
@@ -562,9 +674,13 @@ void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {
 			const auto kind = exp.kind == IR::ExportTargetKind::Position
 			                      ? IR::StageOutputKind::Position
 			                      : IR::StageOutputKind::Parameter;
+			if (kind == IR::StageOutputKind::Position && exp.index == 0) {
+				EmitVertexExplodeCheck(state, value);
+			}
 			state.builder.AddFunction(spv::OpStore, MeshOutputPointer(state, kind, exp.index),
 			                          value);
 		} else if (exp.kind == IR::ExportTargetKind::Position) {
+			EmitVertexExplodeCheck(state, value);
 			if (state.invalid_position_clip_distance != UINT32_MAX) {
 				const auto zero = state.builder.Constant(spv::OpConstantNull, TypeF32Vector(state, 4));
 				const auto equal = state.builder.AllocateId();

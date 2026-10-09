@@ -9,6 +9,8 @@
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
+#include "graphics/host_gpu/renderer/vertexExplode.h"
+#include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <bit>
@@ -25,16 +27,35 @@ namespace {
 constexpr size_t MaxPageFaults    = 1024;
 constexpr size_t PageFaultAreaSize = MaxPageFaults * sizeof(uint64_t);
 
+namespace IR = ShaderRecompiler::IR;
+constexpr uint64_t FaultBitmapSize  = BufferCache::CACHING_NUMPAGES / 8;
+static_assert(FaultBitmapSize == uint64_t {IR::ExplodeLogBaseWord} * sizeof(uint32_t),
+              "the explode log region starts right after the fault bitmap");
+constexpr uint64_t ExplodeLogOffset = FaultBitmapSize;
+constexpr uint64_t ExplodeLogSize   = uint64_t {IR::ExplodeLogWords} * sizeof(uint32_t);
+// Header and counters: cleared after each copy (the records are only read where a counter is set).
+constexpr uint64_t ExplodeLogClearSize = uint64_t {IR::ExplodeLogRecordWord} * sizeof(uint32_t);
+
 } // namespace
 
 FaultManager::FaultManager(GraphicContext& graphics, CommandScheduler& scheduler,
                            BufferCache& buffer_cache)
     : m_graphics(graphics), m_scheduler(scheduler), m_buffer_cache(buffer_cache),
       m_fault_buffer(graphics, scheduler, MemoryUsage::DeviceLocal, 0, AllFlags,
-                     BufferCache::CACHING_NUMPAGES / 8),
+                     FaultBitmapSize + (VertexExplode::Enabled() ? ExplodeLogSize : 0)),
       m_download_buffer(graphics, scheduler, MemoryUsage::Download, 0, AllFlags,
                         MaxPendingFaults * PageFaultAreaSize) {
 	SetVulkanObjectNameF(m_graphics.device, m_fault_buffer.Handle(), "Fault Buffer");
+	if (VertexExplode::Enabled()) {
+		m_explode_download = std::make_unique<Buffer>(graphics, scheduler, MemoryUsage::Download, 0,
+		                                              AllFlags, MaxPendingFaults * ExplodeLogSize);
+		std::printf("VtxExplode: KYTY_VTX_EXPLODE_CHECK active: vertex and mesh shaders check their "
+		            "positions (nan/inf, |w| < 1e-6, |x/w| or |y/w| > %g), CPU check of index "
+		            "ranges, %u log bytes after the fault bitmap\n",
+		            static_cast<double>(IR::VertexExplodeCheck().limit),
+		            static_cast<uint32_t>(ExplodeLogSize));
+		std::fflush(stdout);
+	}
 
 	const vk::DescriptorSetLayoutBinding bindings[] {
 	    {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr},
@@ -162,6 +183,67 @@ void FaultManager::ProcessFaultBuffer() {
 
 	m_fault_areas[m_current_area++] = m_scheduler.CurrentTick();
 	m_current_area %= MaxPendingFaults;
+}
+
+void FaultManager::ProcessExplodeLog() {
+	if (m_explode_download == nullptr) {
+		return;
+	}
+	const auto frame = m_graphics.presented_frames.load(std::memory_order_relaxed);
+	if (frame == m_explode_frame) {
+		return;
+	}
+	if (const auto wait_tick = m_explode_areas[m_explode_area]; wait_tick != 0) {
+		// The copy of MaxPendingFaults frames ago is still in flight; try at the next frame.
+		return;
+	}
+	m_explode_frame = frame;
+	m_scheduler.EndRendering();
+	auto command = m_scheduler.Current().Handle();
+
+	vk::BufferMemoryBarrier2 pre_barrier {};
+	pre_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
+	pre_barrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+	pre_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+	pre_barrier.dstAccessMask =
+	    vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
+	pre_barrier.buffer = m_fault_buffer.Handle();
+	pre_barrier.offset = ExplodeLogOffset;
+	pre_barrier.size   = ExplodeLogSize;
+	auto post_barrier          = pre_barrier;
+	post_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+	post_barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	post_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
+	post_barrier.dstAccessMask =
+	    vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
+	vk::DependencyInfo dependency {};
+	dependency.bufferMemoryBarrierCount = 1;
+	dependency.pBufferMemoryBarriers    = &pre_barrier;
+	command.pipelineBarrier2(dependency);
+	if (!m_explode_cleared) {
+		// Device-local memory starts undefined: clear the whole region once.
+		m_explode_cleared = true;
+		command.fillBuffer(m_fault_buffer.Handle(), ExplodeLogOffset, ExplodeLogSize, 0);
+		dependency.pBufferMemoryBarriers = &post_barrier;
+		command.pipelineBarrier2(dependency);
+		return;
+	}
+	const auto       offset = m_explode_area * ExplodeLogSize;
+	const vk::BufferCopy copy {ExplodeLogOffset, offset, ExplodeLogSize};
+	command.copyBuffer(m_fault_buffer.Handle(), m_explode_download->Handle(), 1, &copy);
+	command.fillBuffer(m_fault_buffer.Handle(), ExplodeLogOffset, ExplodeLogClearSize, 0);
+	dependency.pBufferMemoryBarriers = &post_barrier;
+	command.pipelineBarrier2(dependency);
+
+	const auto area   = m_explode_area;
+	auto*      mapped = m_explode_download->Mapped().data() + offset;
+	m_scheduler.DeferOperation([this, mapped, offset, area, frame] {
+		m_explode_download->Invalidate(offset, ExplodeLogSize);
+		VertexExplode::Report(std::bit_cast<const uint32_t*>(mapped), frame);
+		m_explode_areas[area] = 0;
+	});
+	m_explode_areas[m_explode_area++] = m_scheduler.CurrentTick();
+	m_explode_area %= MaxPendingFaults;
 }
 
 } // namespace Libs::Graphics

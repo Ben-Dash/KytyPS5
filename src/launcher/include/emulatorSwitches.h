@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 9> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 10> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -57,6 +57,13 @@ inline constexpr std::array<EmulatorSwitch, 9> EMULATOR_SWITCHES = {{
      "Every 120 frames the console window shows how many drawing steps look exactly like one "
      "from the last frames. That tells whether reusing them would help in this game.",
      "Diagnostics only, no speed gain."},
+    {"KYTY_VTX_EXPLODE_CHECK", "Report exploding triangles (diagnostics)",
+     "Every drawn vertex is checked for a broken screen position (not a number, divided by zero, "
+     "or far outside the screen), and each drawing step's largest index is compared with its "
+     "vertex data. Each finding prints one red line in the console window, naming the shader and "
+     "the buffers involved. Nothing in the picture changes. Uses its own shader cache, so the "
+     "first start with this on prepares the shaders again.",
+     "Diagnostics only, costs speed."},
     {"KYTY_PROTECT_EXEC_QUERY", "Old memory protection check (not recommended)",
      "Brings back the old way of checking whether game code may run from a piece of memory: the "
      "emulator asks Windows each time instead of remembering it. Only there to compare against "

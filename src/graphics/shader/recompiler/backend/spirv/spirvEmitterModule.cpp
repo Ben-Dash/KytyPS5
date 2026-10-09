@@ -562,6 +562,17 @@ void DefineInputs(EmitterState& state) {
 			add_builtin(IR::StageInputKind::WorkgroupId, 3, "gl_WorkGroupID");
 		}
 	}
+	// KYTY_VTX_EXPLODE_CHECK: the explode records name the vertex and instance (mesh: the
+	// invocation and workgroup).
+	if (IR::UsesVertexExplodeLog(state.program)) {
+		if (state.program.stage == ShaderType::Mesh) {
+			add_builtin(IR::StageInputKind::LocalInvocationIndex, 1, "gl_LocalInvocationIndex");
+			add_builtin(IR::StageInputKind::WorkgroupId, 3, "gl_WorkGroupID");
+		} else {
+			add_builtin(IR::StageInputKind::VertexIndex, 1, "gl_VertexIndex");
+			add_builtin(IR::StageInputKind::InstanceIndex, 1, "gl_InstanceIndex");
+		}
+	}
 	for (auto& input: state.inputs) {
 		if (state.program.stage == ShaderType::Pixel &&
 		    input.kind == IR::StageInputKind::Parameter) {

@@ -135,6 +135,7 @@ public:
 	void               OnCommandRecorded();
 	void               RecordEagerReadbacks();
 	void               ProcessFaultBuffer();
+	void               ProcessExplodeLog() { m_fault_manager.ProcessExplodeLog(); }
 	void               SynchronizeBuffersInRange(uint64_t vaddr, uint64_t size);
 	void               PublishBdaHints(uint64_t vaddr, uint64_t size) noexcept;
 	void               SynchronizeBdaLegacy(const RangeSet& mapped);

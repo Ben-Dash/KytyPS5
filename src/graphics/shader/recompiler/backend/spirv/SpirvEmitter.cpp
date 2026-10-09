@@ -71,6 +71,8 @@ void ValidateNativeProgram(const IR::Program& program, bool lds_storage) {
 	}
 	if (program.info.uses_dma) {
 		Expect(Kind::BdaPagetable);
+	}
+	if (program.info.uses_dma || IR::UsesVertexExplodeLog(program)) {
 		Expect(Kind::FaultBuffer);
 	}
 	if (IR::UsesFlattenedSrt(program) && !table) {

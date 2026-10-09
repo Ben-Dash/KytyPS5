@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 
 namespace Libs::Graphics {
 
@@ -22,6 +23,9 @@ public:
 	[[nodiscard]] Buffer* GetFaultBuffer() noexcept { return &m_fault_buffer; }
 	[[nodiscard]] const Buffer* GetFaultBuffer() const noexcept { return &m_fault_buffer; }
 	void                  ProcessFaultBuffer();
+	// KYTY_VTX_EXPLODE_CHECK: once per presented frame, copies the explode region after the page
+	// bitmap back and clears its counters; VertexExplode::Report prints it after the GPU is done.
+	void                  ProcessExplodeLog();
 
 private:
 	GraphicContext&                            m_graphics;
@@ -31,6 +35,12 @@ private:
 	Buffer                                     m_download_buffer;
 	std::array<uint64_t, MaxPendingFaults>      m_fault_areas {};
 	uint32_t                                   m_current_area = 0;
+	// KYTY_VTX_EXPLODE_CHECK only (empty otherwise).
+	std::unique_ptr<Buffer>                    m_explode_download;
+	std::array<uint64_t, MaxPendingFaults>      m_explode_areas {};
+	uint32_t                                   m_explode_area    = 0;
+	uint64_t                                   m_explode_frame   = UINT64_MAX;
+	bool                                       m_explode_cleared = false;
 	vk::DescriptorSetLayout                    m_fault_process_desc_layout = nullptr;
 	vk::Pipeline                               m_fault_process_pipeline = nullptr;
 	vk::PipelineLayout                         m_fault_process_pipeline_layout = nullptr;

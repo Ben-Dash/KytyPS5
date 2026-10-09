@@ -25,6 +25,7 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
@@ -2608,6 +2609,24 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		    index_source.address,
 		    gpu_args ? index_source.size
 		             : static_cast<uint64_t>(draw.index_count) * index_source.guest_element_size);
+	}
+	if (VertexExplode::Enabled()) [[unlikely]] {
+		VertexExplode::DrawNote note;
+		note.frame          = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
+		note.stages         = vertex_stages;
+		note.indexed        = draw.IsIndexed();
+		note.gpu_args       = gpu_args;
+		note.restart        = primitive_restart_enable;
+		note.primitive      = static_cast<uint32_t>(ucfg.GetPrimType());
+		note.index_address  = index_source.address;
+		note.index_host     = index_source.host_data;
+		note.index_size     = index_source.type == vk::IndexType::eUint32 ? 4u : 2u;
+		note.index_count    = draw.index_count;
+		note.instance_count = draw.instance_count;
+		note.vertex_offset  = draw.IsIndexed() ? emit.vertex_offset
+		                                       : static_cast<int32_t>(emit.first_vertex);
+		note.first_instance = emit.first_instance;
+		VertexExplode::NoteDraw(m_context.GetBufferCache(), note);
 	}
 	LogDrawPhase(draw.Name(), "PrepareBindings");
 	auto&                            bindings = m_graphics_bindings;

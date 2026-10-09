@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
+#include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 
 #include <algorithm>
@@ -122,6 +123,16 @@ bool UsesFlattenedSrt(const Program& program) {
 	       std::ranges::any_of(program.info.samplers, &SamplerResource::bindless);
 }
 
+bool UsesVertexExplodeLog(const Program& program) {
+	if (!VertexExplodeCheck().enabled ||
+	    (program.stage != ShaderType::Vertex && program.stage != ShaderType::Mesh)) {
+		return false;
+	}
+	return std::ranges::any_of(program.info.outputs, [](const StageOutput& output) {
+		return output.kind == StageOutputKind::Position && output.index == 0;
+	});
+}
+
 bool TableEligible(const Program& program) {
 	if ((program.stage != ShaderType::Vertex && program.stage != ShaderType::Pixel) ||
 	    program.info.uses_dma) {
@@ -221,6 +232,8 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 	}
 	if (program.info.uses_dma) {
 		AddBinding(next, DescriptorBindingKind::BdaPagetable);
+	}
+	if (program.info.uses_dma || UsesVertexExplodeLog(program)) {
 		AddBinding(next, DescriptorBindingKind::FaultBuffer);
 	}
 	if (UsesFlattenedSrt(program) && !next.table) {

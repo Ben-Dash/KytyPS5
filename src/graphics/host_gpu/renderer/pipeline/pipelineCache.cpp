@@ -27,6 +27,7 @@
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
+#include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "graphics/shader/shaderCompiler.h"
 #include "kernel/memory.h"
 #include "kytyGitVersion.h"
@@ -132,6 +133,17 @@ std::string DriverCacheSignature(const vk::PhysicalDeviceProperties& properties)
 	return fmt::format("KytyPC3:{}:{:08x}:{:08x}:{:08x}:{}:opt={}\n", KYTY_SHADER_CACHE_KEY,
 	                   properties.vendorID, properties.deviceID, properties.driverVersion, uuid,
 	                   static_cast<uint32_t>(Config::GetShaderOptimizationType()));
+}
+
+// The driver cache file's signature. KYTY_VTX_EXPLODE_CHECK changes every vertex and mesh shader:
+// its pipelines go to an own file with an own key, so the regular driver cache stays untouched.
+// The shader journal (.shaders) records only guest permutations and keeps the regular key.
+std::string DriverBinarySignature(const vk::PhysicalDeviceProperties& properties) {
+	auto signature = DriverCacheSignature(properties);
+	if (ShaderRecompiler::IR::VertexExplodeCheck().enabled) {
+		signature += "vtxexplode=1\n";
+	}
+	return signature;
 }
 
 std::string PipelineCacheTitleId() {
@@ -1538,12 +1550,18 @@ void PipelineCache::InitializeDriverCache() {
 		return;
 	}
 
-	m_driver_cache_path = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
+	// KYTY_VTX_EXPLODE_CHECK changes every vertex shader: its pipelines go to own files.
+	const bool        explode    = ShaderRecompiler::IR::VertexExplodeCheck().enabled;
+	const std::string cache_name = explode ? title_id + ".vtxexplode" : title_id;
+	if (explode) {
+		PipelineCacheLog("Vulkan pipeline cache: KYTY_VTX_EXPLODE_CHECK uses its own files");
+	}
+	m_driver_cache_path = std::filesystem::path("_PipelineCache") / (cache_name + ".bin");
 	// Shard i > 0 is "<title>.<i>.bin". Without pipelineCreationCacheControl only shard 0 is used.
 	const auto shard_path = [&](uint32_t index) {
 		return index == 0 ? m_driver_cache_path
 		                  : std::filesystem::path("_PipelineCache") /
-		                        fmt::format("{}.{}.bin", title_id, index);
+		                        fmt::format("{}.{}.bin", cache_name, index);
 	};
 	const uint32_t max_shards =
 	    m_graphics.pipeline_creation_cache_control ? DriverPipelineCache::kMaxShards : 1;
@@ -1600,7 +1618,7 @@ vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::pat
 	if (cache_exists) {
 		Common::File file(cache_path, Common::File::Mode::Read);
 		const auto   file_size = file.IsInvalid() ? 0 : file.Size();
-		const auto   signature = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
+		const auto   signature = DriverBinarySignature(m_graphics.GetPhysicalDeviceProperties());
 		if (file_size >= signature.size() + sizeof(uint64_t) &&
 		    file_size <= std::numeric_limits<uint32_t>::max()) {
 			std::string cached_signature(signature.size(), '\0');
@@ -1662,8 +1680,7 @@ void PipelineCache::InitializeShaderPrecompile() {
 	if (!Config::ShaderPrecompileEnabled() || !m_driver_cache ||
 	    m_driver_cache_path.empty())
 		return;
-	auto path = m_driver_cache_path;
-	path.replace_extension(".shaders");
+	auto path = m_driver_cache_path.parent_path() / (PipelineCacheTitleId() + ".shaders");
 	auto        key = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
 	std::string app_version;
 	(void)Loader::SystemContentParamSfoGetString("APP_VER", &app_version);
@@ -2009,7 +2026,7 @@ bool PipelineCache::WriteDriverCache() {
 		return false;
 	}
 	payload.resize(size);
-	auto       prefix       = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
+	auto       prefix       = DriverBinarySignature(m_graphics.GetPhysicalDeviceProperties());
 	const auto payload_hash = XXH3_64bits(payload.data(), payload.size());
 	prefix.append(reinterpret_cast<const char*>(&payload_hash), sizeof(payload_hash));
 	if (!Common::File::CreateDirectories(m_driver_cache_write_path.parent_path())) {

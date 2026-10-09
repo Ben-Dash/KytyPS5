@@ -25,6 +25,9 @@ uint32_t ShaderDataBaseDwords(const Program& program);
 
 SharedMemoryResources CollectMemoryResources(const Program& program, std::vector<uint32_t>& buffers);
 bool UsesFlattenedSrt(const Program& program);
+// KYTY_VTX_EXPLODE_CHECK: a vertex or mesh shader writing a position logs exploded positions
+// through the fault buffer (VertexExplodeLog.h).
+bool UsesVertexExplodeLog(const Program& program);
 
 const DescriptorBinding* FindBinding(const BindingLayout& layout, DescriptorBindingKind kind);
 
