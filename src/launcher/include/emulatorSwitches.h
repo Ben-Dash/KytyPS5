@@ -5,6 +5,7 @@
 #include <QStringList>
 
 #include <array>
+#include <string_view>
 
 // Emulator switches read from the environment (KYTY_GETENV): a game profile can turn them on, and
 // the launcher then sets them to "1" for that game's emulator process. A switch can be on by
@@ -19,10 +20,10 @@ struct EmulatorSwitch {
 	const char* label;   // Check box text in the profile dialog
 	const char* tooltip; // What it does, in plain words
 	const char* verdict; // How it did in our tests, kept general: games react differently
-	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default
+	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 8> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 9> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -66,10 +67,18 @@ inline constexpr std::array<EmulatorSwitch, 8> EMULATOR_SWITCHES = {{
      "line names it in the console window, so the game keeps running. With this on, the emulator " 
      "stops at the first such texture a shader really uses, so it can be found and fixed.",
      "For testing only: the game ends where a texture is missing."},
+    {"KYTY_CONSOLE_COLORS", "Colored console window",
+     "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
+     "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 
+     "the plain console.",
+     "Only changes how the console looks, no effect on the game.", "*"},
 }};
 
 // Whether the switch is on by default for this title.
 [[nodiscard]] inline bool IsSwitchDefaultOn(const EmulatorSwitch& entry, const QString& title_id) {
+	if (entry.default_titles != nullptr && std::string_view(entry.default_titles) == "*") {
+		return true;
+	}
 	return entry.default_titles != nullptr && !title_id.trimmed().isEmpty() &&
 	       QString::fromLatin1(entry.default_titles)
 	           .split(QLatin1Char(','))
