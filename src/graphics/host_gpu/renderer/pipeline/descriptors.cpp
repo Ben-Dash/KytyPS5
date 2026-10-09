@@ -547,22 +547,23 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 		EXIT("%s", line.c_str());
 	}
 	const std::lock_guard lock(mutex);
-	// Records of small tables resolved ahead (no shader named them yet) that hold no texture at
-	// all (other data, null) are counted, not listed: thousands per scene would bury the rest.
-	if (!context.requested && quiet) {
+	// Records that hold no image T# at all (null, other data: shader feedback also names keys of
+	// lanes that never sample) are counted, not listed: thousands per scene would bury the rest.
+	if (quiet) {
 		static uint64_t counted = 0;
 		static auto     next    = std::chrono::steady_clock::now();
 		counted++;
 		if (const auto now = std::chrono::steady_clock::now(); now >= next) {
 			next = now + std::chrono::seconds(30);
-			std::printf("\x1b[91mbindless: %llu table records resolved ahead hold no usable T# (placeholder "
-			            "until a shader asks for them)\x1b[0m\n",
+			std::printf("\x1b[91mbindless: %llu table records hold no image T# (null or other data; they read "
+			            "the zero placeholder)\x1b[0m\n",
 			            static_cast<unsigned long long>(counted));
 			std::fflush(stdout);
 		}
 		return;
 	}
-	if (seen.size() < 4096 && seen.insert(line).second) {
+	// Once per distinct T# and reason: the same record shows up in many heaps and keys.
+	if (seen.size() < 4096 && seen.insert(reason).second) {
 		std::printf("\x1b[91m%s\x1b[0m", line.c_str());
 		std::fflush(stdout);
 	}
@@ -1727,6 +1728,13 @@ static Prospero::TextureNumericClass BindlessArrayClass(uint32_t binding) {
 // array's numeric class (float, or the integer class of the integer arrays) and a matching shape.
 // Anything else stays the placeholder rather than reaching ResolveTexture, which exits on
 // descriptors a draw would never bind that way.
+// An image T# (1D..2D array, a format the GPU knows): anything else in a texture table is other
+// data or null.
+static bool PlausibleImageDescriptor(const ShaderTextureResource& descriptor) {
+	const auto type = static_cast<uint32_t>(descriptor.Type());
+	return !descriptor.IsNull() && type >= 8u && type <= 13u && TextureHasSurfaceFormat(descriptor.Format());
+}
+
 static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t binding) {
 	if (descriptor.IsNull() ||
 	    Prospero::SampledTextureNumericClass(descriptor.Format()) != BindlessArrayClass(binding)) {
@@ -1838,7 +1846,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
 		                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
 		                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str(),
-		                  true);
+		                  !PlausibleImageDescriptor(descriptor));
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
