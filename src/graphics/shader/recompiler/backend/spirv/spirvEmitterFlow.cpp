@@ -773,12 +773,25 @@ uint32_t EmitConditionRef(ValueEmitContext& ctx, const IR::Inst& inst) {
 	ctx.state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(ctx.state), high, ballot, 1);
 	const bool zero = kind == CFG::BranchCondition::ExecZero ||
 	                  kind == CFG::BranchCondition::VccZero || kind == CFG::BranchCondition::SccZero;
-	ctx.state.builder.AddFunction(zero ? spv::OpBitwiseAnd : spv::OpBitwiseOr,
-	                              TypeU32(ctx.state), combined, low, high);
-	ctx.state.builder.AddFunction(zero ? spv::OpIEqual : spv::OpINotEqual,
-	                              TypeBool(ctx.state), result, combined,
-	                              ConstantU32(ctx.state, zero ? ~0u : 0u));
-	return result;
+	if (!zero) {
+		ctx.state.builder.AddFunction(spv::OpBitwiseOr, TypeU32(ctx.state), combined, low, high);
+		ctx.state.builder.AddFunction(spv::OpINotEqual, TypeBool(ctx.state), result, combined,
+		                              ConstantU32(ctx.state, 0u));
+		return result;
+	}
+	// "Zero" holds when every active lane of both halves says so. Invocations that are not running
+	// (a partial wave, lanes that left the shader) have no ballot bit; comparing with all ones
+	// instead of the active mask kept such waves in their loop forever (Ghost of Yotei cutscene
+	// compute b5d1ae71f2600147, a merge-path search, hung the GPU).
+	const auto active      = ctx.Ballot(IR::Value(true));
+	const auto active_word = ctx.state.builder.AllocateId();
+	const auto low_all     = ctx.state.builder.AllocateId();
+	const auto high_all    = ctx.state.builder.AllocateId();
+	ctx.state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(ctx.state), active_word, active, 0);
+	ctx.state.builder.AddFunction(spv::OpIEqual, TypeBool(ctx.state), low_all, low, active_word);
+	ctx.state.builder.AddFunction(spv::OpIEqual, TypeBool(ctx.state), high_all, high, active_word);
+	ctx.state.builder.AddFunction(spv::OpLogicalAnd, TypeBool(ctx.state), combined, low_all, high_all);
+	return combined;
 }
 
 uint32_t EmitBallot(ValueEmitContext& ctx, IR::Value predicate) {
