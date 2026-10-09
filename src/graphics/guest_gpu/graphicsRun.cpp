@@ -1628,20 +1628,9 @@ bool CommandProcessor::TryDrawIndirectOnGpu(uint64_t address) {
 
 // Upstream 9f83fd5f: an indirect draw writes its vertex offset, first instance and first index
 // into the user SGPRs its packet names, as the command processor does on the console.
-// KYTY_DEBUG_INDIRECT_SGPR=1 logs the first draws that name registers.
 static void PatchIndirectDrawOffsets(CommandProcessor& cp, IndirectDrawRegisters registers,
                                      uint32_t vertex_offset, uint32_t instance_offset,
                                      uint32_t first_index) {
-	static const bool log = KYTY_GETENV("KYTY_DEBUG_INDIRECT_SGPR") != nullptr;
-	if (log) [[unlikely]] {
-		static std::atomic<uint32_t> logged {0};
-		if (logged.fetch_add(1, std::memory_order_relaxed) < 64) {
-			std::printf("indirect-sgpr: vtx@0x%x=%u inst@0x%x=%u idx@0x%x=%u\n", registers.vertex_offset,
-			            vertex_offset, registers.instance_offset, instance_offset,
-			            registers.index_offset, first_index);
-			std::fflush(stdout);
-		}
-	}
 	const auto write = [&](uint32_t location, uint32_t value) {
 		if (location == Pm4::SH_NOP) {
 			return;

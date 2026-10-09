@@ -300,13 +300,9 @@ void RenderExecutor::SyncHtileReads(const ShaderComputeInputInfo& input) {
 }
 
 void RenderExecutor::RecordHtileRewriteClear(const ShaderComputeInputInfo& input) {
-	static const bool enabled = [] {
-		const char* text = KYTY_GETENV("KYTY_HTILE_RMW_CLEAR");
-		return text == nullptr || std::strcmp(text, "0") != 0;
-	}();
 	const auto& program   = *input.stage.program;
 	const auto& resources = *input.stage.resources;
-	if (!enabled || program.info.has_bitwise_xor) {
+	if (program.info.has_bitwise_xor) {
 		return;
 	}
 	auto&      cache = m_context.GetTextureCache();
@@ -325,15 +321,8 @@ void RenderExecutor::RecordHtileRewriteClear(const ShaderComputeInputInfo& input
 		}
 		meta = descriptor.Base48();
 	}
-	if (meta != 0 && cache.ClearMeta(meta)) {
-		static std::atomic<uint32_t> printed {0};
-		if (KYTY_GETENV("KYTY_DEBUG_HTILE") != nullptr &&
-		    printed.fetch_add(1, std::memory_order_relaxed) < 32) {
-			std::printf("htile: rewrite by shader %016llx taken as a clear of 0x%012llx\n",
-			            static_cast<unsigned long long>(program.shader_hash),
-			            static_cast<unsigned long long>(meta));
-			std::fflush(stdout);
-		}
+	if (meta != 0) {
+		(void)cache.ClearMeta(meta);
 	}
 }
 
@@ -420,19 +409,14 @@ bool ResolveComputeBufferFill(const ShaderComputeInputInfo& input, uint32_t grou
 // clears its motion vectors to NaN this way ("no vector yet"), and the pass that fills in the
 // camera motion only touches NaN pixels: without this, static geometry and the sky kept zero
 // motion and TAA smeared buildings and characters behind every camera move.
-// KYTY_DCC_SINGLE_CLEAR=0: off.
 bool RenderExecutor::TryConsumeComputeDccSingleClear(const ShaderComputeInputInfo& input,
                                                      CommandBuffer& command, uint32_t group_x,
                                                      uint32_t group_y, uint32_t group_z,
                                                      uint32_t mode) {
-	static const bool enabled = [] {
-		const char* text = KYTY_GETENV("KYTY_DCC_SINGLE_CLEAR");
-		return text == nullptr || std::strcmp(text, "0") != 0;
-	}();
 	constexpr uint32_t DccBlockBytes = 256;
 	const auto&        resources     = *input.stage.resources;
 	const auto&        fill          = resources.uniform_fill;
-	if (!enabled || fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer) {
+	if (fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer) {
 		return false;
 	}
 	const auto descriptor =
@@ -835,7 +819,6 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	// HTile word in place (no address swizzle, one buffer exactly on the metadata). It is not a
 	// proven full overwrite, so it is not consumed, but the clear is recorded for the next draw:
 	// without it the depth target was never cleared and every caster failed the depth test.
-	// KYTY_HTILE_RMW_CLEAR=0 turns this off.
 	RecordHtileRewriteClear(input_info);
 	// A fill consumed as a metadata clear may also cover color images over exactly its memory:
 	// Ghost of Yotei's 8-bit shadow mask lives at an address a depth target used once as its HTile

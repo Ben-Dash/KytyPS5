@@ -488,7 +488,6 @@ bool MaterializeIndirectDescriptor(const ResourcePlan& program, const Roots& roo
 // R8_UINT terrain maps, whose first records can be null), so the shader reads them with an
 // integer result type. Float otherwise, or when the records cannot be read. Two float T#s before
 // any integer one end the probe early, as do four integer ones before any float one.
-// KYTY_DEBUG_BINDLESS_CLASS=1 logs the counts once per heap layout and result.
 Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, uint64_t heap_base,
                                                      uint64_t heap_size, uint32_t record_stride,
                                                      const DescriptorSource::IndirectDescriptor& indirect) {
@@ -559,29 +558,6 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 	}
 	const auto result = integers > floats + others ? integer_class
 	                                               : Prospero::TextureNumericClass::Float;
-	static const bool debug = std::getenv("KYTY_DEBUG_BINDLESS_CLASS") != nullptr;
-	if (debug && (integers != 0u || others != 0u || unreadable != 0u)) [[unlikely]] {
-		static std::mutex                   mutex;
-		static std::unordered_set<uint64_t> seen;
-		const auto layout = (static_cast<uint64_t>(record_stride) << 40u) ^
-		                    (static_cast<uint64_t>(indirect.table_offset) << 20u) ^
-		                    (static_cast<uint64_t>(indirect.pointer_offset) << 4u) ^
-		                    static_cast<uint64_t>(result);
-		std::scoped_lock lock {mutex};
-		if (seen.size() < 256 && seen.insert(layout).second) {
-			std::printf("bindless-class: heap=0x%012llx stride=%u table_off=%u ptr_off=%d probed=%u "
-			            "null=%u int=%u float=%u other=%u unreadable=%u -> %s\n",
-			            static_cast<unsigned long long>(heap_base), record_stride,
-			            indirect.table_offset,
-			            indirect.pointer_offset == UINT32_MAX ? -1
-			                                                  : static_cast<int>(indirect.pointer_offset),
-			            probed, nulls, integers, floats, others, unreadable,
-			            result == Prospero::TextureNumericClass::Uint   ? "uint"
-			            : result == Prospero::TextureNumericClass::Sint ? "sint"
-			                                                            : "float");
-			std::fflush(stdout);
-		}
-	}
 	return result;
 }
 

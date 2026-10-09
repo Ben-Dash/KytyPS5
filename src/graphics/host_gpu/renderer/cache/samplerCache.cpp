@@ -177,14 +177,9 @@ vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
 	}
 
 	// S# FILTER_MODE: 0 blends the filter footprint, 1 takes its minimum, 2 its maximum (RDNA2).
-	// The minimum/maximum filters were applied as a blend before. KYTY_SAMPLER_MINMAX=0 restores
-	// that (A/B).
+	// The minimum/maximum filters were applied as a blend before.
 	vk::SamplerReductionModeCreateInfo reduction {};
-	static const bool minmax_enabled = [] {
-		const char* text = KYTY_GETENV("KYTY_SAMPLER_MINMAX");
-		return text == nullptr || std::strcmp(text, "0") != 0;
-	}();
-	if (const auto mode = r.FilterMode(); minmax_enabled && (mode == 1u || mode == 2u)) {
+	if (const auto mode = r.FilterMode(); mode == 1u || mode == 2u) {
 		reduction.reductionMode =
 		    mode == 1u ? vk::SamplerReductionMode::eMin : vk::SamplerReductionMode::eMax;
 		sampler_info.pNext = &reduction;

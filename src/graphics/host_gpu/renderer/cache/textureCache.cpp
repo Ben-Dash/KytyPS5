@@ -2707,7 +2707,6 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 			continue;
 		}
 		if (selected && block_bytes != 0) {
-			note_fill("rejected: several exact images for a block color");
 			return false;
 		}
 		if (selected && candidate == vk::ImageAspectFlagBits::eColor &&
@@ -2742,7 +2741,6 @@ bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address
 		for (const auto other: also_clear) {
 			vk::ClearColorValue unused {};
 			if (!DecodeColorDwordFill(m_slot_images[other].info.pixel_format, packed_clear, unused)) {
-				note_fill("rejected: value not decodable for an aliased format");
 				return false;
 			}
 		}
@@ -3247,23 +3245,9 @@ void TextureCache::InvalidateCpuAliases(uint64_t address, uint64_t size) {
 	}
 }
 
-static bool HtileSynthEnabled() {
-	static const bool enabled = [] {
-		const char* text = KYTY_GETENV("KYTY_HTILE_SYNTH");
-		return text == nullptr || std::strcmp(text, "0") != 0;
-	}();
-	return enabled;
-}
-
-// KYTY_DEBUG_HTILE=1 prints each synthesis (the first 64).
-static bool HtileDebugEnabled() {
-	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_HTILE") != nullptr;
-	return enabled;
-}
-
 void TextureCache::MarkHtileStale(const ImageDesc& desc, ImageId image) {
 	const auto& range = desc.info.metadata.range;
-	if (!HtileSynthEnabled() || range.size == 0) {
+	if (range.size == 0) {
 		return;
 	}
 	const StaleHtile surface {.address      = range.address,
@@ -3393,14 +3377,6 @@ void TextureCache::SynthesizeHtile(const StaleHtile& surface) {
 	// A depth target reused without a fresh acquisition (IsDepthTargetCurrent) would not mark the
 	// surface stale again when it is drawn to next.
 	m_surface_meta_generation.fetch_add(1, std::memory_order_release);
-	static std::atomic<uint32_t> printed {0};
-	if (HtileDebugEnabled() && printed.fetch_add(1, std::memory_order_relaxed) < 64) {
-		std::printf("htile: synthesized 0x%016" PRIx64 " size=0x%" PRIx64 " target %ux%u layers=%u "
-		            "image %ux%u format=%u\n",
-		            surface.address, surface.size, surface.width, surface.height, layers,
-		            info.extent.width, info.extent.height, static_cast<uint32_t>(params.format));
-		std::fflush(stdout);
-	}
 }
 
 bool TextureCache::IsMeta(uint64_t address) {

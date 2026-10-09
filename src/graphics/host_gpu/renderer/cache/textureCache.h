@@ -175,7 +175,7 @@ public:
 	// current while it renders; Ghost of Yotei bins its shadow-cascade tiles by reading it, and
 	// with HTile left at zero no tile reached a cascade (the moonlight was gone). The host never
 	// writes HTile, so a guest read of a surface whose depth target was bound since the last
-	// synthesis rebuilds it from the depth image first. GPU thread only. KYTY_HTILE_SYNTH=0: off.
+	// synthesis rebuilds it from the depth image first. GPU thread only.
 	[[nodiscard]] bool HasStaleHtile() const noexcept { return !m_htile_stale.empty(); }
 	void               SyncHtile(uint64_t address, uint64_t size);
 
