@@ -1626,7 +1626,36 @@ bool CommandProcessor::TryDrawIndirectOnGpu(uint64_t address) {
 	return true;
 }
 
-void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed) {
+// Upstream 9f83fd5f: an indirect draw writes its vertex offset, first instance and first index
+// into the user SGPRs its packet names, as the command processor does on the console.
+// KYTY_DEBUG_INDIRECT_SGPR=1 logs the first draws that name registers.
+static void PatchIndirectDrawOffsets(CommandProcessor& cp, CommandProcessor::IndirectDrawRegisters registers,
+                                     uint32_t vertex_offset, uint32_t instance_offset,
+                                     uint32_t first_index) {
+	static const bool log = KYTY_GETENV("KYTY_DEBUG_INDIRECT_SGPR") != nullptr;
+	if (log) [[unlikely]] {
+		static std::atomic<uint32_t> logged {0};
+		if (logged.fetch_add(1, std::memory_order_relaxed) < 64) {
+			std::printf("indirect-sgpr: vtx@0x%x=%u inst@0x%x=%u idx@0x%x=%u\n", registers.vertex_offset,
+			            vertex_offset, registers.instance_offset, instance_offset,
+			            registers.index_offset, first_index);
+			std::fflush(stdout);
+		}
+	}
+	const auto write = [&](uint32_t location, uint32_t value) {
+		if (location == Pm4::SH_NOP) {
+			return;
+		}
+		EXIT_NOT_IMPLEMENTED(location >= Pm4::SH_NUM || g_hw_sh_indirect_func[location] == nullptr);
+		g_hw_sh_indirect_func[location](cp, location, value);
+	};
+	write(registers.vertex_offset, vertex_offset);
+	write(registers.instance_offset, instance_offset);
+	write(registers.index_offset, first_index);
+}
+
+void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed,
+                                    IndirectDrawRegisters registers) {
 	EXIT_NOT_IMPLEMENTED((draw_initiator & ~0x20u) != 2u);
 	EXIT_NOT_IMPLEMENTED(m_draw_indirect_args_base_addr == 0);
 
@@ -1642,7 +1671,13 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 		                   mesh ? 1 : 0);
 	}
 	const auto prim_type = m_ucfg.GetPrimType();
-	if (gpu_args && (indexed ? TryDrawIndexedIndirectOnGpu(address) : TryDrawIndirectOnGpu(address))) {
+	if (registers.Any()) {
+		// The register values come from the arguments: read GPU-written ones back first.
+		if (gpu_args) {
+			m_renderer.GetBufferCache().ReadMemory(address, size, false);
+		}
+	} else if (gpu_args &&
+	           (indexed ? TryDrawIndexedIndirectOnGpu(address) : TryDrawIndirectOnGpu(address))) {
 		return;
 	}
 
@@ -1665,6 +1700,8 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 	if (!indexed) {
 		DrawIndirectArgs args {};
 		std::memcpy(&args, args_addr, sizeof(args));
+		PatchIndirectDrawOffsets(*this, registers, args.start_vertex_location,
+		                         args.start_instance_location, 0);
 		m_num_instances = args.instance_count;
 		m_num_instances_address = 0;
 		DrawIndexAuto({.vertex_count   = args.vertex_count_per_instance,
@@ -1701,6 +1738,8 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 		}
 	}
 
+	PatchIndirectDrawOffsets(*this, registers, args.base_vertex_location,
+	                         args.start_instance_location, args.start_index_location);
 	m_num_instances = args.instance_count;
 	m_num_instances_address = 0;
 	DrawIndex({.index_count    = index_count,
@@ -1714,7 +1753,7 @@ void CommandProcessor::DrawIndirect(uint32_t data_offset, uint32_t draw_initiato
 void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_count_or_count,
                                          const volatile uint32_t* count_addr,
                                          uint32_t stride_in_bytes, uint32_t draw_initiator,
-                                         bool indexed) {
+                                         bool indexed, IndirectDrawRegisters registers) {
 	EXIT_NOT_IMPLEMENTED((draw_initiator & ~0x20u) != 2u);
 	EXIT_NOT_IMPLEMENTED(m_draw_indirect_args_base_addr == 0);
 
@@ -1767,11 +1806,18 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		                       static_cast<uint64_t>(i) * stride_in_bytes;
 
 		if (!indexed) {
-			if (m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size) &&
-			    TryDrawIndirectOnGpu(args_addr)) {
+			const bool gpu_before =
+			    m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size);
+			if (registers.Any()) {
+				if (gpu_before) {
+					m_renderer.GetBufferCache().ReadMemory(args_addr, args_size, false);
+				}
+			} else if (gpu_before && TryDrawIndirectOnGpu(args_addr)) {
 				continue;
 			}
 			auto* args = reinterpret_cast<const DrawIndirectArgs*>(args_addr);
+			PatchIndirectDrawOffsets(*this, registers, args->start_vertex_location,
+			                         args->start_instance_location, 0);
 			m_num_instances = args->instance_count;
 			m_num_instances_address = 0;
 			DrawIndexAuto({.vertex_count   = args->vertex_count_per_instance,
@@ -1783,8 +1829,12 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 		}
 
 		// The count is CPU-written, but a culling pass may have written the arguments.
-		if (m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size) &&
-		    TryDrawIndexedIndirectOnGpu(args_addr)) {
+		const bool gpu_before = m_renderer.GetBufferCache().IsRegionGpuModified(args_addr, args_size);
+		if (registers.Any()) {
+			if (gpu_before) {
+				m_renderer.GetBufferCache().ReadMemory(args_addr, args_size, false);
+			}
+		} else if (gpu_before && TryDrawIndexedIndirectOnGpu(args_addr)) {
 			continue;
 		}
 
@@ -1806,6 +1856,8 @@ void CommandProcessor::DrawIndirectMulti(uint32_t data_offset, uint32_t max_coun
 			}
 		}
 
+		PatchIndirectDrawOffsets(*this, registers, args->base_vertex_location,
+		                         args->start_instance_location, args->start_index_location);
 		m_num_instances = args->instance_count;
 		m_num_instances_address = 0;
 		DrawIndex({.index_count    = index_count,

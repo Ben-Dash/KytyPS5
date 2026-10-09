@@ -1646,7 +1646,13 @@ KYTY_CP_OP_PARSER(CpOpDrawIndirect) {
 	const auto draw_initiator = buffer[3];
 	const bool indexed        = (cmd_id == 0xc0032500);
 
-	cp.DrawIndirect(data_offset, draw_initiator, indexed);
+	// Words 1/2 name the user SGPRs for the vertex offset (low half), first index (high half,
+	// indexed, enabled by a flag in word 2) and first instance (upstream 9f83fd5f).
+	CommandProcessor::IndirectDrawRegisters registers;
+	registers.vertex_offset   = buffer[1] & 0xffffu;
+	registers.instance_offset = buffer[2] & 0xffffu;
+	registers.index_offset    = indexed && ((buffer[2] >> 27u) & 0x3u) != 0 ? buffer[1] >> 16u : 0x280u;
+	cp.DrawIndirect(data_offset, draw_initiator, indexed, registers);
 
 	return 4;
 }
@@ -1669,8 +1675,12 @@ KYTY_CP_OP_PARSER(CpOpDrawIndirectMulti) {
 		count_addr = nullptr;
 	}
 
+	CommandProcessor::IndirectDrawRegisters registers;
+	registers.vertex_offset   = buffer[1] & 0xffffu;
+	registers.instance_offset = buffer[2] & 0xffffu;
+	registers.index_offset    = indexed && ((buffer[3] >> 27u) & 0x3u) != 0 ? buffer[1] >> 16u : 0x280u;
 	cp.DrawIndirectMulti(data_offset, max_count_or_count, count_addr, stride_in_bytes,
-	                     draw_initiator, indexed);
+	                     draw_initiator, indexed, registers);
 
 	return 9;
 }

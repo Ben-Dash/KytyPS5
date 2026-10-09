@@ -113,12 +113,24 @@ public:
 	void DrawIndex(DrawIndexArgs args);
 	void DrawIndexOffset(uint32_t index_offset, uint32_t index_count);
 	void DrawIndexAuto(DrawAutoArgs args);
-	void DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed);
+	// Upstream 9f83fd5f: the packet names user SGPRs that receive the draw's vertex offset,
+	// first instance and first index (SH_NOP when unused).
+	struct IndirectDrawRegisters {
+		uint32_t vertex_offset   = 0x280u;
+		uint32_t instance_offset = 0x280u;
+		uint32_t index_offset    = 0x280u;
+		[[nodiscard]] bool Any() const noexcept {
+			return vertex_offset != 0x280u || instance_offset != 0x280u || index_offset != 0x280u;
+		}
+	};
+	void DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed,
+	                  IndirectDrawRegisters registers = {});
 	bool TryDrawIndexedIndirectOnGpu(uint64_t address);
 	bool TryDrawIndirectOnGpu(uint64_t address);
 	void DrawIndirectMulti(uint32_t data_offset, uint32_t max_count_or_count,
 	                       const volatile uint32_t* count_addr, uint32_t stride_in_bytes,
-	                       uint32_t draw_initiator, bool indexed);
+	                       uint32_t draw_initiator, bool indexed,
+	                       IndirectDrawRegisters registers = {});
 	void WriteAtEndOfPipe32(uint32_t cache_policy, uint32_t event_write_dest,
 	                        uint32_t eop_event_type, uint32_t cache_action, uint32_t event_index,
 	                        uint32_t event_write_source, void* dst_gpu_addr, uint32_t value,
