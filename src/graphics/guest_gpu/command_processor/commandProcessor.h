@@ -66,6 +66,17 @@ private:
 	bool                      m_made_progress = false;
 };
 
+// Upstream 9f83fd5f: the packet names user SGPRs that receive the draw's vertex offset,
+// first instance and first index (SH_NOP when unused).
+struct IndirectDrawRegisters {
+	uint32_t vertex_offset   = 0x280u;
+	uint32_t instance_offset = 0x280u;
+	uint32_t index_offset    = 0x280u;
+	[[nodiscard]] bool Any() const noexcept {
+		return vertex_offset != 0x280u || instance_offset != 0x280u || index_offset != 0x280u;
+	}
+};
+
 class CommandProcessor {
 public:
 	// Where the last Process call left its execution (see Process: a resume keeps the walk).
@@ -113,16 +124,6 @@ public:
 	void DrawIndex(DrawIndexArgs args);
 	void DrawIndexOffset(uint32_t index_offset, uint32_t index_count);
 	void DrawIndexAuto(DrawAutoArgs args);
-	// Upstream 9f83fd5f: the packet names user SGPRs that receive the draw's vertex offset,
-	// first instance and first index (SH_NOP when unused).
-	struct IndirectDrawRegisters {
-		uint32_t vertex_offset   = 0x280u;
-		uint32_t instance_offset = 0x280u;
-		uint32_t index_offset    = 0x280u;
-		[[nodiscard]] bool Any() const noexcept {
-			return vertex_offset != 0x280u || instance_offset != 0x280u || index_offset != 0x280u;
-		}
-	};
 	void DrawIndirect(uint32_t data_offset, uint32_t draw_initiator, bool indexed,
 	                  IndirectDrawRegisters registers = {});
 	bool TryDrawIndexedIndirectOnGpu(uint64_t address);

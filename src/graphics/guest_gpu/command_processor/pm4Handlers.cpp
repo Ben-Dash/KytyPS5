@@ -1648,7 +1648,7 @@ KYTY_CP_OP_PARSER(CpOpDrawIndirect) {
 
 	// Words 1/2 name the user SGPRs for the vertex offset (low half), first index (high half,
 	// indexed, enabled by a flag in word 2) and first instance (upstream 9f83fd5f).
-	CommandProcessor::IndirectDrawRegisters registers;
+	IndirectDrawRegisters registers;
 	registers.vertex_offset   = buffer[1] & 0xffffu;
 	registers.instance_offset = buffer[2] & 0xffffu;
 	registers.index_offset    = indexed && ((buffer[2] >> 27u) & 0x3u) != 0 ? buffer[1] >> 16u : 0x280u;
@@ -1675,7 +1675,7 @@ KYTY_CP_OP_PARSER(CpOpDrawIndirectMulti) {
 		count_addr = nullptr;
 	}
 
-	CommandProcessor::IndirectDrawRegisters registers;
+	IndirectDrawRegisters registers;
 	registers.vertex_offset   = buffer[1] & 0xffffu;
 	registers.instance_offset = buffer[2] & 0xffffu;
 	registers.index_offset    = indexed && ((buffer[3] >> 27u) & 0x3u) != 0 ? buffer[1] >> 16u : 0x280u;
