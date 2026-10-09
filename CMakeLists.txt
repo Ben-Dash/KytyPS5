@@ -950,6 +950,12 @@ if(APPLE)
 endif()
 
 install(TARGETS kyty_emulator DESTINATION .)
+if(WIN32)
+	# Colors the emulator's console window (common/consoleColors.h); found next to the emulator.
+	add_executable(kyty_console "${KYTY_SOURCE_DIR}/consoleHelper/kytyConsole.cpp")
+	add_dependencies(kyty_emulator kyty_console)
+	install(TARGETS kyty_console DESTINATION .)
+endif()
 if(KYTY_BUILD_LAUNCHER)
 	add_subdirectory("${KYTY_SOURCE_DIR}/launcher" "${CMAKE_CURRENT_BINARY_DIR}/launcher")
 

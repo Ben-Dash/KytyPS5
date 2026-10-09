@@ -1,5 +1,6 @@
 #include "common/archive.h"
 #include "common/common.h"
+#include "common/consoleColors.h"
 #include "common/dateTime.h"
 #include "common/debug.h"
 #include "common/file.h"
@@ -747,6 +748,7 @@ static void StartProfileWriter() {
 #endif
 
 static int Main(int argc, char* argv[]) {
+	ConsoleColors::Install();
 #if defined(KYTY_PGO_GENERATE)
 	StartProfileWriter();
 #endif
