@@ -306,15 +306,12 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		                     title_id.c_str(), options.config.gpu_timestamp_scale_percent);
 	}
 	if (title_id == "PPSA26344") {
-		// Ghost of Yotei: heap-indexed textures need the bindless arrays. Shaders that hang the host
-		// GPU are skipped: the RENDERWORLD clear pair (wave64 min loop) and two that lose the device
-		// once they run.
+		// Ghost of Yotei: heap-indexed textures need the bindless arrays. No shader is skipped (user
+		// 2026-10-09): the former skip list (RENDERWORLD clear pair, terrain splat pair) runs.
 		options.config.bindless_images_enabled = true;
-		KYTY_SET_DEFAULT_SWITCH("KYTY_DEBUG_SKIP_SHADERS",
-		                        "964747887d898821,f0a524a3bcc360f1,e374a8dfad01be72,f08cf07763b51d49");
 		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
 		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
-		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, GPU-hang shaders skipped, compute chain\n",
+		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, compute chain\n",
 		                     title_id.c_str());
 	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger

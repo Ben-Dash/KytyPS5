@@ -1058,11 +1058,11 @@ struct PipelineCache::ProgramCache {
 				translated = ShaderRecompiler::TranslateProgram(params.code, options);
 			}
 			if (translated->skip_dispatch) {
+				// No shader is left out (user 2026-10-09): a shader we cannot translate ends the
+				// session, so that it gets fixed instead of silently missing from the picture.
 				Outcomes().Failed(params.hash, "translation");
-				std::unique_lock lock(programs_mutex);
-				entry = programs.try_emplace(lookup_key, ShaderRecompiler::IR::ResourcePlan {}).first;
-				entry->second.skip_dispatch = true;
-				return {};
+				EXIT("shader 0x%016llx could not be translated (see the warning above)\n",
+				     static_cast<unsigned long long>(params.hash));
 			}
 			{
 				std::unique_lock lock(programs_mutex);
@@ -1123,10 +1123,10 @@ struct PipelineCache::ProgramCache {
 			                         source.specialization, push_data_cursor);
 		}
 		if (compiled->failed) {
+			// As above: the emitter rejected the program; end the session instead of skipping it.
 			Outcomes().Failed(params.hash, "SPIR-V emit");
-			std::unique_lock lock(programs_mutex);
-			source.skip_dispatch = true;
-			return {};
+			EXIT("shader 0x%016llx failed SPIR-V validation (see the warning above)\n",
+			     static_cast<unsigned long long>(params.hash));
 		}
 		source.permutations.push_back(
 		    MakePermutation(options, source.specialization, std::move(*compiled)));
