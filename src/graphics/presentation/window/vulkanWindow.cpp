@@ -62,6 +62,8 @@ vk::PhysicalDeviceVulkan11Features WindowContext::RequiredVulkan11Features() noe
 vk::PhysicalDeviceVulkan12Features WindowContext::RequiredVulkan12Features() noexcept {
 	vk::PhysicalDeviceVulkan12Features features {};
 	features.samplerMirrorClampToEdge  = VK_TRUE;
+	// Min/max sampler reduction (S# FILTER_MODE 1/2), e.g. for depth pyramids.
+	features.samplerFilterMinmax       = VK_TRUE;
 	features.timelineSemaphore         = VK_TRUE;
 	features.shaderOutputLayer         = VK_TRUE;
 	features.shaderOutputViewportIndex = VK_TRUE;

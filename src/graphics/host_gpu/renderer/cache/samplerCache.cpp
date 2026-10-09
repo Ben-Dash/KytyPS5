@@ -4,6 +4,11 @@
 #include "common/logging/log.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "common/switches.h"
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
 
 namespace Libs::Graphics {
 
@@ -169,6 +174,26 @@ vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
 		sampler_info.maxAnisotropy    = 1.0f;
 		sampler_info.compareEnable    = VK_FALSE;
 		sampler_info.mipLodBias       = 0.0f;
+	}
+
+	// S# FILTER_MODE: 0 blends the filter footprint, 1 takes its minimum, 2 its maximum (RDNA2).
+	// The minimum/maximum filters were applied as a blend before. KYTY_SAMPLER_MINMAX=0 restores
+	// that (A/B).
+	vk::SamplerReductionModeCreateInfo reduction {};
+	static const bool minmax_enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_SAMPLER_MINMAX");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
+	if (const auto mode = r.FilterMode(); minmax_enabled && (mode == 1u || mode == 2u)) {
+		reduction.reductionMode =
+		    mode == 1u ? vk::SamplerReductionMode::eMin : vk::SamplerReductionMode::eMax;
+		sampler_info.pNext = &reduction;
+		static std::atomic<uint32_t> logged {0};
+		if (logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+			std::printf("sampler %s reduction: fields=%08x,%08x,%08x,%08x\n", mode == 1u ? "min" : "max",
+			            r.fields[0], r.fields[1], r.fields[2], r.fields[3]);
+			std::fflush(stdout);
+		}
 	}
 
 	vk::Sampler vk_sampler = nullptr;
