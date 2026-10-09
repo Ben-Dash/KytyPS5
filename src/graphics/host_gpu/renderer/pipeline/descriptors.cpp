@@ -583,8 +583,11 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& resource,
                                      const ShaderTextureResource& descriptor, vk::Format format,
                                      const SurfaceFormatInfo& surface_format, bool storage,
-                                     uint32_t view_levels, uint32_t image_layers) {
+                                     uint32_t view_levels, uint32_t image_layers,
+                                     uint32_t layer_offset = 0) {
 	ImageViewInfo view {};
+	// The image may start at the view's first layer (see DescribeTexture): layers count from there.
+	const uint32_t base_array = descriptor.BaseArray5() - layer_offset;
 	view.format      = format;
 	view.aspect      = vk::ImageAspectFlagBits::eColor;
 	view.base_level  = descriptor.BaseLevel();
@@ -605,7 +608,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 	switch (resource.dimension) {
 		case ShaderRecompiler::Decoder::ImageDimension::Dim1D:
 			view.type       = vk::ImageViewType::e1D;
-			view.base_layer = descriptor.BaseArray5();
+			view.base_layer = base_array;
 			if (view.base_layer >= image_layers) {
 				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
 			}
@@ -613,7 +616,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			break;
 		case ShaderRecompiler::Decoder::ImageDimension::Dim1DArray:
 			view.type       = vk::ImageViewType::e1DArray;
-			view.base_layer = descriptor.BaseArray5();
+			view.base_layer = base_array;
 			if (view.base_layer >= image_layers) {
 				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
 			}
@@ -627,7 +630,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DArray:
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaaArray:
 			view.type       = vk::ImageViewType::e2DArray;
-			view.base_layer = descriptor.BaseArray5();
+			view.base_layer = base_array;
 			if (view.base_layer >= image_layers) {
 				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
 			}
@@ -636,7 +639,7 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2D:
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaa:
 			view.type       = vk::ImageViewType::e2D;
-			view.base_layer = descriptor.BaseArray5();
+			view.base_layer = base_array;
 			if (view.base_layer >= image_layers) {
 				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
 			}
@@ -720,9 +723,9 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	// IMAGE_STORE addresses BASE_LEVEL; only IMAGE_STORE_MIP selects other view mips.
 	const bool single_storage_mip =
 	    storage && resource.mip_mode != ShaderRecompiler::IR::ImageMipMode::Dynamic;
-	const auto view_levels = multisampled || single_storage_mip
-	                             ? 1u
-	                             : static_cast<uint32_t>(last_level - base_level) + 1u;
+	auto view_levels = multisampled || single_storage_mip
+	                       ? 1u
+	                       : static_cast<uint32_t>(last_level - base_level) + 1u;
 	auto levels =
 	    multisampled ? 1u : std::max(physical_levels, base_level + view_levels);
 	const auto tile       = descriptor.TileMode();
@@ -767,14 +770,25 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	const bool    layered      = type == Prospero::ImageType::kColor1DArray ||
 	                             type == Prospero::ImageType::kColor2DArray ||
 	                             type == Prospero::ImageType::kColor2DMsaaArray;
-	const auto    image_layers = layered ? depth : 1u;
+	auto          image_layers = layered ? depth : 1u;
 	auto          view_base    = static_cast<uint32_t>(base_level);
+	auto          image_address = address;
+	uint32_t      layer_offset  = 0;
 	if (levels > physical_levels) {
 		const TileSurfaceDescription physical {
 		    format, tile, volume ? TileSurfaceDimension::Dim3D : TileSurfaceDimension::Dim2D,
 		    width, height, volume ? depth : 1u, physical_levels, image_layers};
-		if (!ResolveTextureMipView(physical, !resource.r128 && descriptor.MetaCompress(),
-		                           view_levels, levels, view_base)) {
+		if (ResolveTextureMipView(physical, !resource.r128 && descriptor.MetaCompress(),
+		                          view_levels, levels, view_base)) {
+			// The view maps onto the stored levels.
+		} else if (!resource.written && base_level < physical_levels) {
+			// The memory holds MAX_MIP + 1 levels; LAST_LEVEL beyond them names mips that do not
+			// exist (Ghost of Yotei 512x512x33 arrays: max 2, view 1..9). The GPU reads the stored
+			// levels then, so the view keeps the stored ones instead of the whole texture failing.
+			levels      = physical_levels;
+			view_levels = physical_levels - base_level;
+			view_base   = base_level;
+		} else {
 			KYTY_TEXTURE_FAIL("unsupported texture mip view changes physical layout: base=%u last=%u max=%u "
 			     "extent=%ux%ux%u tile=%u\n",
 			     base_level, last_level, max_mip, width, height, depth,
@@ -814,6 +828,16 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 			// One slice, then the layers: an array over 4 GiB (Ghost of Yotei after the
 			// calligraphy scene) would end the session in the tiler.
 			TileGetTextureTotalSize(format, width, height, 1u, physical_levels, tile, false, size);
+			if (size.size > UINT32_MAX / image_layers && layered && !descriptor.MetaCompress() &&
+			    descriptor.BaseArray5() < image_layers &&
+			    size.size <= UINT32_MAX / (image_layers - descriptor.BaseArray5())) {
+				// DEPTH is the view's last layer, BASE_ARRAY its first: a pool of hundreds of layers
+				// (Ghost of Yotei's calligraphy cloth, 2048x2048x515 RG8) is seen one range at a time,
+				// so the image covers that range only, from its first layer on.
+				layer_offset  = descriptor.BaseArray5();
+				image_address = address + uint64_t {layer_offset} * size.size;
+				image_layers -= layer_offset;
+			}
 			if (size.size > UINT32_MAX / image_layers) {
 				KYTY_TEXTURE_FAIL("texture array larger than 4 GiB: format=%u tile=%u type=%u "
 				                  "extent=%ux%u layers=%u levels=%u address=0x%016" PRIx64 "\n",
@@ -826,7 +850,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	}
 	// Ghost of Yotei places small swizzled textures (16x16 in a 4 KiB mode) inside a block, so
 	// only the descriptor's own 256-byte address granularity is required.
-	if (size.size == 0 || size.align == 0 || (address & 0xffu) != 0) {
+	if (size.size == 0 || size.align == 0 || (image_address & 0xffu) != 0) {
 		KYTY_TEXTURE_FAIL("unsupported texture layout: format=%u tile=%u type=%u extent=%ux%ux%u levels=%u "
 		     "address=0x%016" PRIx64 " size=%u align=%u\n",
 		     static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
@@ -835,9 +859,9 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	}
 	// A descriptor read from guest data at run time (a bindless key) can name memory outside
 	// the guest's address space; the texture cache must not see it.
-	if (!GuestRange {address, size.size}.Valid()) {
+	if (!GuestRange {image_address, size.size}.Valid()) {
 		KYTY_TEXTURE_FAIL("texture outside guest memory: address=0x%016" PRIx64 " size=0x%x\n",
-		                  address, static_cast<uint32_t>(size.size));
+		                  image_address, static_cast<uint32_t>(size.size));
 	}
 	if (storage) {
 		ValidateStorageTexture(resource, descriptor, size.size);
@@ -865,7 +889,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 	                                     : pixel_format;
 	const auto block_bytes         = Prospero::BlockCompressedBytesPerBlock(format);
 	TextureCache::ImageDesc desc {};
-	desc.info.data         = {address, size.size};
+	desc.info.data         = {image_address, size.size};
 	desc.info.pixel_format = pixel_format;
 	desc.info.guest_format = format;
 	desc.info.type         = TextureBaseType(type);
@@ -909,7 +933,7 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		PopulateTextureMipLayout(desc.info);
 	}
 	desc.view_info = TextureViewInfo(resource, descriptor, view_format, surface_format, storage,
-	                                 view_levels, desc.info.resources.layers);
+	                                 view_levels, desc.info.resources.layers, layer_offset);
 	if (g_soft_texture_failures && g_soft_texture_failed) {
 		return {};
 	}
