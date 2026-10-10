@@ -591,14 +591,14 @@ bool BindlessTable::SnapshotReady(CommandScheduler& scheduler) {
 	return m_snapshot_tick != 0 && scheduler.IsFree(m_snapshot_tick);
 }
 
-// KYTY_BINDLESS_KEY_BOUNDS=1: requests only for keys a draw's descriptor covers, and none from a
+// KYTY_BINDLESS_KEY_BOUNDS (default on, =0 turns it off): requests only for keys a draw's descriptor covers, and none from a
 // snapshot recorded before the heap's region was allocated: after ResetHeaps a new heap reuses the
 // regions of dropped ones, whose flags the older snapshot still holds (Ghost of Yotei: 6cc64dee's
 // 8-key table got requests for keys near 18000, other data whose resolution lost the device).
 bool BindlessTable::KeyBoundsEnabled() {
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_BINDLESS_KEY_BOUNDS");
-		return text != nullptr && std::strcmp(text, "0") != 0;
+		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
 }
