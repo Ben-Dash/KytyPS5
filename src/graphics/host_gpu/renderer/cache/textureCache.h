@@ -179,7 +179,11 @@ public:
 	};
 	static inline thread_local MetaClearSource t_meta_clear_source {};
 	[[nodiscard]] static bool MetaClearLogEnabled();
-	static void LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask);
+	static void LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask,
+	                         uint64_t owner = 0);
+	// KYTY_META_CLEAR_ZMASK: the metadata surface keeps no clear (an expanded-HTile write).
+	bool ExpandMeta(uint64_t address);
+	[[nodiscard]] uint64_t MetaOwner(uint64_t address);
 	[[nodiscard]] bool ClearMeta(uint64_t address);
 	[[nodiscard]] bool TouchMeta(uint64_t address, uint32_t slice, bool is_clear);
 	// HTile synthesis. On the PS5 the DB keeps a depth target's HTile (min/max depth per 8x8 tile)
@@ -212,6 +216,8 @@ private:
 
 		Type     type;
 		uint32_t clear_mask = UINT32_MAX;
+		// The image whose metadata this is (the last one registered with it), for diagnostics.
+		uint64_t owner_address = 0;
 	};
 
 	struct OverlapResult {

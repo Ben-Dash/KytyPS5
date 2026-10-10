@@ -351,6 +351,43 @@ bool RenderExecutor::TryConsumeComputeMetaClear(const ShaderComputeInputInfo& in
 			if (resource.written) {
 				const auto descriptor =
 				    DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
+				// KYTY_META_CLEAR_ZMASK=1: a uniform fill is an HTile clear only when its words say
+				// "cleared" (ZMask, bits 0-3, is 0). 0xffffffff (Ghost of Yotei's "Clear G-Buffer"
+				// fill 2bd3cd12 over memory a depth target uses as HTile) means expanded: the depth
+				// is in memory, and recording a clear wiped that target's depth every frame.
+				static const bool zmask_check = [] {
+					const char* text = KYTY_GETENV("KYTY_META_CLEAR_ZMASK");
+					return text != nullptr && std::strcmp(text, "0") != 0;
+				}();
+				const auto& fill       = resources.uniform_fill;
+				const bool  fill_known = fill.kind == ShaderRecompiler::IR::UniformFillKind::Buffer &&
+				                         fill.uniform && fill.resource == i;
+				if (zmask_check && cache.IsMeta(descriptor.Base48())) {
+					static std::mutex                   zmask_mutex;
+					static std::unordered_set<uint64_t> zmask_seen;
+					const bool expanded = fill_known && (fill.value & 0xfu) != 0u;
+					{
+						const std::lock_guard zmask_lock(zmask_mutex);
+						const uint64_t key = descriptor.Base48() ^ (uint64_t {fill.value} << 20u) ^
+						                     program.shader_hash ^ (fill_known ? 1u : 0u);
+						if (zmask_seen.size() < 1024 && zmask_seen.insert(key).second) {
+							std::printf("\x1b[91mmeta-zmask: %s fill on HTile 0x%016llx (image 0x%016llx) value=%s0x%08x "
+							            "shader=%016llx\x1b[0m\n",
+							            !fill_known ? "accepted (value unknown)"
+							            : expanded  ? "refused (ZMask!=0, expanded)"
+							                        : "accepted (ZMask=0, cleared)",
+							            static_cast<unsigned long long>(descriptor.Base48()),
+							            static_cast<unsigned long long>(cache.MetaOwner(descriptor.Base48())),
+							            fill_known ? "" : "~", fill.value,
+							            static_cast<unsigned long long>(program.shader_hash));
+							std::fflush(stdout);
+						}
+					}
+					if (expanded) {
+						(void)cache.ExpandMeta(descriptor.Base48());
+						return false; // not a metadata clear; the colour-clear path may still take it
+					}
+				}
 				if (cache.ClearMeta(descriptor.Base48())) {
 					return consume;
 				}

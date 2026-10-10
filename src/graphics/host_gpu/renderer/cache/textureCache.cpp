@@ -2619,11 +2619,12 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 	BumpImageCleanEpoch();
 	image.info.metadata = desc.info.metadata;
 	if (desc.info.HasMetadata()) {
-		if (m_surface_metas
-		        .emplace(desc.info.metadata.range.address,
-		                 MetaDataInfo {.type       = MetaDataInfo::Type::HTile,
-		                               .clear_mask = image.info.htile_clear_mask})
-		        .second) {
+		const auto [meta, inserted] = m_surface_metas.emplace(
+		    desc.info.metadata.range.address,
+		    MetaDataInfo {.type       = MetaDataInfo::Type::HTile,
+		                  .clear_mask = image.info.htile_clear_mask});
+		meta->second.owner_address = desc.info.data.address;
+		if (inserted) {
 			m_surface_meta_generation.fetch_add(1, std::memory_order_relaxed);
 		}
 		if (desc.info.metadata.kind == ImageMetadataKind::Htile) {
@@ -3448,7 +3449,8 @@ bool TextureCache::MetaClearLogEnabled() {
 	return enabled;
 }
 
-void TextureCache::LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask) {
+void TextureCache::LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask,
+                                uint64_t owner) {
 	static std::mutex                   mutex;
 	static std::unordered_set<uint64_t> seen;
 	static uint64_t                     seen_frame = UINT64_MAX;
@@ -3461,10 +3463,11 @@ void TextureCache::LogMetaClear(const char* what, uint64_t address, int32_t laye
 	const auto key = address ^ (uint64_t(uint32_t(layer)) << 48u) ^ reinterpret_cast<uint64_t>(what) ^
 	                 (reinterpret_cast<uint64_t>(source.source) << 7u);
 	if (seen.size() < 512 && seen.insert(key).second) {
-		std::printf("\x1b[91mmeta-clear: frame %llu %s address=0x%016llx layer=%d mask=0x%08x source=%s "
-		            "shader=%016llx\x1b[0m\n",
+		std::printf("\x1b[91mmeta-clear: frame %llu %s address=0x%016llx image=0x%016llx layer=%d mask=0x%08x "
+		            "source=%s shader=%016llx\x1b[0m\n",
 		            static_cast<unsigned long long>(source.frame), what,
-		            static_cast<unsigned long long>(address), layer, mask,
+		            static_cast<unsigned long long>(address), static_cast<unsigned long long>(owner),
+		            layer, mask,
 		            source.source != nullptr ? source.source : "unknown",
 		            static_cast<unsigned long long>(source.shader));
 		std::fflush(stdout);
@@ -3480,9 +3483,28 @@ bool TextureCache::ClearMeta(uint64_t address) {
 	found->second.clear_mask = UINT32_MAX;
 	m_meta_clear_generation.fetch_add(1, std::memory_order_release);
 	if (MetaClearLogEnabled()) [[unlikely]] {
-		LogMetaClear("recorded clear (all layers)", address, -1, UINT32_MAX);
+		LogMetaClear("recorded clear (all layers)", address, -1, UINT32_MAX, found->second.owner_address);
 	}
 	return true;
+}
+
+bool TextureCache::ExpandMeta(uint64_t address) {
+	std::scoped_lock lock {m_lock};
+	const auto       found = m_surface_metas.find(address);
+	if (found == m_surface_metas.end()) {
+		return false;
+	}
+	if (found->second.clear_mask != 0) {
+		found->second.clear_mask = 0;
+		m_meta_clear_generation.fetch_add(1, std::memory_order_release);
+	}
+	return true;
+}
+
+uint64_t TextureCache::MetaOwner(uint64_t address) {
+	std::scoped_lock lock {m_lock};
+	const auto       found = m_surface_metas.find(address);
+	return found != m_surface_metas.end() ? found->second.owner_address : 0;
 }
 
 bool TextureCache::TouchMeta(uint64_t address, uint32_t slice, bool is_clear) {
@@ -3501,7 +3523,7 @@ bool TextureCache::TouchMeta(uint64_t address, uint32_t slice, bool is_clear) {
 		m_meta_clear_generation.fetch_add(1, std::memory_order_release);
 		if (is_clear && MetaClearLogEnabled()) [[unlikely]] {
 			LogMetaClear("recorded clear (one layer)", address, static_cast<int32_t>(slice),
-			             found->second.clear_mask);
+			             found->second.clear_mask, found->second.owner_address);
 		}
 	}
 	return true;

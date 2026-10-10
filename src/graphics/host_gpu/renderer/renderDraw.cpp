@@ -1047,7 +1047,8 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			TextureCache::t_meta_clear_source.source = "pending metadata clear";
 			TextureCache::LogMetaClear("depth bind becomes LoadOpClear", metadata.range.address,
 			                           static_cast<int32_t>(depth.desc.view_info.base_layer),
-			                           std::bit_cast<uint32_t>(depth.depth_clear_value)); // mask = clear value bits
+			                           std::bit_cast<uint32_t>(depth.depth_clear_value), // clear value bits
+			                           depth.desc.info.data.address);
 		}
 		if (meta_clear &&
 		    !cache.TouchMeta(metadata.range.address, depth.desc.view_info.base_layer, false)) {
