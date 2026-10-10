@@ -517,6 +517,14 @@ bool BindlessTyped() {
 	return enabled;
 }
 
+bool WaveBranchFull() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_WAVE_BRANCH_FULL");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 static std::atomic<bool> g_native_float16 {false};
 
 void SetNativeFloat16(bool enabled) {

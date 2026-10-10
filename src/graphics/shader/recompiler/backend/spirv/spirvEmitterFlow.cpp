@@ -1,3 +1,4 @@
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
 
 #include "common/logging/log.h"
@@ -906,6 +907,23 @@ uint32_t EmitDppUpdateU32(ValueEmitContext& ctx, const IR::Inst& inst) {
 }
 
 uint32_t EmitConditionRef(ValueEmitContext& ctx, const IR::Inst& inst) {
+	if (ShaderRecompiler::WaveBranchFull()) {
+		// Upstream a8beac19: scalar branches include lanes disabled by EXEC, which the branch body
+		// may restore.
+		if (ctx.other_half != nullptr && ctx.half != 0) {
+			return ctx.other_half->Def(IR::Value(const_cast<IR::Inst*>(&inst)));
+		}
+		const auto kind = inst.Flags<CFG::BranchCondition>();
+		if (kind == CFG::BranchCondition::ScalarInstruction) return ctx.Arg(inst, 0);
+		const bool zero = kind == CFG::BranchCondition::ExecZero ||
+		                  kind == CFG::BranchCondition::VccZero ||
+		                  kind == CFG::BranchCondition::SccZero;
+		const auto ballot    = ctx.Ballot(inst.Arg(0));
+		const auto reference = zero ? ctx.Ballot(IR::Value(true)) : ConstantU32CompositeZero(ctx.state, 4);
+		const auto compare   = Binary(ctx.state, zero ? spv::OpIEqual : spv::OpINotEqual,
+		                              TypeBoolVector(ctx.state, 4), ballot, reference);
+		return Unary(ctx.state, zero ? spv::OpAll : spv::OpAny, TypeBool(ctx.state), compare);
+	}
 	// Argument 1 is the branch's emitted condition; argument 0 is only for analysis.
 	if (ctx.other_half == nullptr) return ctx.Arg(inst, 1);
 	// A native scalar branch makes one decision for both emulated wave halves.
