@@ -2149,6 +2149,21 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	heap.resolved.push_back(binding.image_id);
 	table.AddImageReference(binding.image_id, heap, key);
 	table.SetTranslation(heap, key, heap.slots[key]);
+	if (typed_other) {
+		// KYTY_BINDLESS_TYPED: how many keys each array took that the instruction's own array
+		// could not hold (once per 30 s, per heap array and T# array).
+		static std::map<std::pair<uint32_t, uint32_t>, uint64_t> counts;
+		static auto next = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+		counts[{heap.binding, typed_binding}]++;
+		if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+			next = now + std::chrono::seconds(30);
+			for (const auto& [arrays, total]: counts) {
+				std::printf("\x1b[92mbindless-typed: %llu keys of array %u read through array %u\x1b[0m\n",
+				            static_cast<unsigned long long>(total), arrays.first, arrays.second);
+			}
+			std::fflush(stdout);
+		}
+	}
 	return true;
 }
 
