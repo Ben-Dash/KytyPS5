@@ -4,6 +4,7 @@
 #include "common/logging/log.h"
 #include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/hostMemory.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
@@ -11,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
+#include <utility>
 
 namespace Libs::Graphics {
 
@@ -197,6 +199,21 @@ void OcclusionQueries::Publish(const PendingDump& pending) {
 	m_segments.Release(dump.end_slot);
 	if (!pending.write) {
 		return;
+	}
+	// The counters reach guest memory later than the dump; memory the GPU never mapped is not
+	// covered by OnUnmap, so make sure it is still committed before writing.
+	if (!m_context.IsMapped(dump.address, OcclusionCounters::DumpSize)) {
+		uint64_t accessible = 0;
+		if (!HostMemoryQueryRange(dump.address, OcclusionCounters::DumpSize,
+		                          HostMemoryAccess::Mapped, accessible) ||
+		    accessible < OcclusionCounters::DumpSize) {
+			static bool logged = false;
+			if (!std::exchange(logged, true)) {
+				Log::WriteToConsoleAndLog(fmt::format(
+				    "Occlusion queries: dropped a dump to freed memory 0x{:016x}\n", dump.address));
+			}
+			return;
+		}
 	}
 	// DB 0 last: once its ready bit is visible, the other DBs are too.
 	auto* counters = reinterpret_cast<volatile uint64_t*>(dump.address);
