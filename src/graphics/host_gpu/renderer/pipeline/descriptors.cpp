@@ -1876,6 +1876,16 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
+	// The reserved component selectors 2 and 3 only appear in records that hold other data
+	// (Ghost of Yotei tutorial: "unknown swizzle: 3" stopped the emulator on such a record).
+	if (!IsValidImageSwizzle(descriptor.DstSelXYZW())) {
+		ReportPlaceholder(fmt::format("T# has a reserved component swizzle 0x{:03x} dwords={:08x},{:08x},{:08x},{:08x}\n",
+		                              descriptor.DstSelXYZW(), value.dwords[0], value.dwords[1],
+		                              value.dwords[2], value.dwords[3]).c_str(),
+		                  !PlausibleImageDescriptor(descriptor));
+		table.SetTranslation(heap, key, 0u);
+		return false;
+	}
 	// Ghost of Yotei keeps 1x1 1D color textures (format 56) in its material tables and samples them
 	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
 	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
