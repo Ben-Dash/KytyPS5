@@ -24,6 +24,7 @@
 #include <iterator>
 #include <map>
 #include <nlohmann/json.hpp>
+#include <renderdoc_app.h>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -125,6 +126,26 @@ void Must(vk::Result result, const char* what) {
 std::vector<uint8_t> ReadFile(const fs::path& path) {
 	std::ifstream in(path, std::ios::binary);
 	return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+// Under RenderDoc (rdc capture -- kyty_emulator --dispatch-replay ...): each replayed dispatch is
+// captured as one frame through the in-app API, so its shader can be debugged step by step.
+RENDERDOC_API_1_6_0* RenderDoc() {
+	static RENDERDOC_API_1_6_0* api = [] {
+		RENDERDOC_API_1_6_0* bound = nullptr;
+#if defined(_WIN32)
+		if (HMODULE module = GetModuleHandleA("renderdoc.dll"); module != nullptr) {
+			auto* get_api = reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(module, "RENDERDOC_GetAPI"));
+			void* raw     = nullptr;
+			if (get_api != nullptr && get_api(eRENDERDOC_API_Version_1_6_0, &raw) == 1) {
+				bound = static_cast<RENDERDOC_API_1_6_0*>(raw);
+				std::printf("RenderDoc: capturing each replayed dispatch\n");
+			}
+		}
+#endif
+		return bound;
+	}();
+	return api;
 }
 
 // ---- Device ----
@@ -1155,11 +1176,14 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 	submit.commandBufferCount = 1;
 	submit.pCommandBuffers    = &cmd;
 	const auto start          = std::chrono::steady_clock::now();
+	auto*      rdoc           = RenderDoc();
+	if (rdoc != nullptr) rdoc->StartFrameCapture(nullptr, nullptr);
 	auto       submitted      = d.queue.submit(1, &submit, fence);
 	vk::Result waited         = submitted;
 	if (submitted == vk::Result::eSuccess) {
 		waited = device.waitForFences(1, &fence, VK_TRUE, uint64_t {o.timeout_ms} * 1000000ull);
 	}
+	if (rdoc != nullptr) rdoc->EndFrameCapture(nullptr, nullptr);
 	const auto gpu_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 	result.ran = true;
 	if (waited == vk::Result::eErrorDeviceLost) {
