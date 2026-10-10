@@ -159,6 +159,9 @@ struct ShaderComputeInputInfo: ShaderWorkgroupInputInfo {
 };
 
 enum class ShaderAlphaBlendSource : uint8_t { None, SourceAlpha, SourceAlphaOne, SourceAlphaZero };
+// Which raw vertex a flat input read through PerVertexKHR takes (upstream b38b7454): the provoking
+// vertex, first or last (PA_SU_SC_MODE_CNTL.PROVOKING_VTX_LAST). KYTY_PIXEL_PROVOKING_VERTEX=1.
+enum class ShaderPixelParameterMode : uint8_t { FirstVertex, LastVertex };
 
 struct ShaderPixelInputInfo {
 	uint32_t                                       interpolator_settings[32]    = {0};
@@ -180,6 +183,7 @@ struct ShaderPixelInputInfo {
 	bool                                           ps_front_face                = false;
 	bool                                           ps_ancillary                 = false;
 	bool                                           ps_no_perspective            = false;
+	ShaderPixelParameterMode                       parameter_mode = ShaderPixelParameterMode::FirstVertex;
 	bool                                           ps_pixel_kill_enable         = false;
 	bool                                           ps_depth_export_enable       = false;
 	bool                                           ps_sample_mask_export_enable = false;

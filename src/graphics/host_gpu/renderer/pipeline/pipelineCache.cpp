@@ -2164,6 +2164,15 @@ static std::array<ShaderParams, 3> PrepareGraphicsStages(
 	g_draw_phases.Mark(DrawPhaseTimer::VertexParams);
 	if (pixel_active) {
 		pixel_params      = PrepareProgram(pixel_regs, sh, target_export_mapping, pixel_info);
+		// KYTY_PIXEL_PROVOKING_VERTEX=1 (upstream b38b7454, A/B): flat inputs read through raw
+		// vertices take the provoking vertex the context selects, not always the first.
+		static const bool provoking_switch = [] {
+			const char* text = KYTY_GETENV("KYTY_PIXEL_PROVOKING_VERTEX");
+			return text != nullptr && std::strcmp(text, "0") != 0;
+		}();
+		pixel_info.parameter_mode = provoking_switch && context.GetModeControl().provoking_vtx_last
+		                                ? ShaderPixelParameterMode::LastVertex
+		                                : ShaderPixelParameterMode::FirstVertex;
 		const auto& blend = context.GetBlendControl(0);
 		pixel_info.dual_source_blending =
 		    blend.enable && !context.GetRenderTarget(0).info.blend_bypass &&

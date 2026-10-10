@@ -799,6 +799,7 @@ void BuildStageStaticKey(const ShaderPixelInputInfo& info, std::vector<uint32_t>
 	key.push_back(static_cast<uint32_t>(info.ps_front_face));
 	key.push_back(static_cast<uint32_t>(info.ps_ancillary));
 	key.push_back(static_cast<uint32_t>(info.ps_no_perspective));
+	key.push_back(static_cast<uint32_t>(info.parameter_mode));
 	key.push_back(static_cast<uint32_t>(info.ps_pixel_kill_enable));
 	key.push_back(static_cast<uint32_t>(info.ps_depth_export_enable));
 	key.push_back(static_cast<uint32_t>(info.ps_sample_mask_export_enable));
@@ -1108,7 +1109,7 @@ bool SamePixelInputInfo(const ShaderPixelInputInfo& a, const ShaderPixelInputInf
 	       same_mapping() && a.scratch_size_dwords == b.scratch_size_dwords &&
 	       a.ps_pos_x == b.ps_pos_x && a.ps_pos_y == b.ps_pos_y && a.ps_pos_z == b.ps_pos_z &&
 	       a.ps_pos_w == b.ps_pos_w && a.ps_front_face == b.ps_front_face &&
-	       a.ps_ancillary == b.ps_ancillary && a.ps_no_perspective == b.ps_no_perspective &&
+	       a.ps_ancillary == b.ps_ancillary && a.ps_no_perspective == b.ps_no_perspective && a.parameter_mode == b.parameter_mode &&
 	       a.ps_pixel_kill_enable == b.ps_pixel_kill_enable &&
 	       a.ps_depth_export_enable == b.ps_depth_export_enable &&
 	       a.ps_sample_mask_export_enable == b.ps_sample_mask_export_enable &&

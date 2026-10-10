@@ -179,9 +179,11 @@ uint32_t EmitAttribute(EmitterState& state, uint32_t attr, uint32_t chan) {
 	};
 	if (input->per_vertex && PixelParameterIsFlat(state, attr)) {
 		// A flat input read through raw vertices (it shares its vertex output with a smooth
-		// input): the value of vertex 0, as the flat interpolation would give.
+		// input): the value of the provoking vertex, as the flat interpolation would give.
+		const auto provoking =
+		    state.input_info.pixel->parameter_mode == ShaderPixelParameterMode::LastVertex ? 2u : 0u;
 		const auto bits = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpBitcast, TypeU32(state), bits, load_per_vertex(0));
+		state.builder.AddFunction(spv::OpBitcast, TypeU32(state), bits, load_per_vertex(provoking));
 		return bits;
 	}
 	if (input->per_vertex) {
@@ -239,8 +241,13 @@ uint32_t EmitInterpolationParameter(ValueEmitContext& ctx, uint32_t attr, uint32
 		return value;
 	};
 
-	const auto selected_vertex = (mode + 1u) % 3u;
-	uint32_t   value           = load_vertex(selected_vertex);
+	auto     selected_vertex = (mode + 1u) % 3u;
+	// A flat parameter (mode 2) comes from the provoking vertex.
+	if (mode == 2u && PixelParameterIsFlat(state, attr) &&
+	    state.input_info.pixel->parameter_mode == ShaderPixelParameterMode::LastVertex) {
+		selected_vertex = 2u;
+	}
+	uint32_t value = load_vertex(selected_vertex);
 	if (!PixelParameterIsCustom(state, attr) && mode < 2u) {
 		const auto delta = state.builder.AllocateId();
 		state.builder.AddFunction(spv::OpFSub, TypeF32(state), delta, value, load_vertex(0));
