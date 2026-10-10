@@ -294,12 +294,24 @@ void RunProbe(BufferCache& cache, const DrawNote& note, const ShaderVertexInputI
 	const bool index_gpu = note.indexed && note.index_host == nullptr && note.index_address != 0 &&
 	                       cache.IsRegionGpuModified(note.index_address,
 	                                                 uint64_t {note.index_count} * note.index_size);
+	// The permutation the draw uses (its compiled info is unique per permutation) and its buffer
+	// descriptors: a buffer whose V# is empty reads zero in this permutation.
+	const auto& buffers = stage.stage.resources->buffers;
+	uint32_t    empty   = 0;
+	std::string list;
+	for (size_t i = 0; i < buffers.size(); i++) {
+		ShaderBufferResource b;
+		std::memcpy(b.fields, buffers[i].dwords.data(), sizeof(b.fields));
+		empty += b.Base48() == 0 && b.NumRecords() == 0 ? 1u : 0u;
+		list += fmt::format(" {}:{:x}/{}/{}", i, b.Base48(), b.Stride(), b.NumRecords());
+	}
 	std::printf("VtxExplode probe #%u: vs=%016" PRIx64 " frame %" PRIu64 " V#(s%u) 0x%" PRIx64
 	            " +%u = 0x%08x (GPU-written %d) | indexed %d isize %u idx 0x%" PRIx64
-	            " n=%u index GPU-written %d gpu-args %d%s",
+	            " n=%u index GPU-written %d gpu-args %d | permutation %p, %zu buffers, %u empty:%s%s",
 	            count, probe.hash, note.frame, probe.sgpr, v.Base48(), probe.offset, value, gpu,
 	            note.indexed, note.index_size, note.index_address, note.index_count, index_gpu,
-	            note.gpu_args, "\n");
+	            note.gpu_args, static_cast<const void*>(&program), buffers.size(), empty,
+	            list.c_str(), "\n");
 }
 
 void NoteDraw(BufferCache& cache, const DrawNote& note) {
