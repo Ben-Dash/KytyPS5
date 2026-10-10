@@ -263,7 +263,10 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 		args << "--hide-cursor";
 	}
 	args << "--readback-linear-images" << BoolArg(info.readback_linear_images);
-	args << "--sync-raw-image-buffers" << BoolArg(info.sync_raw_image_buffers);
+	// Only when checked: unchecked leaves it to the title profile (on for Ghost of Yotei).
+	if (info.sync_raw_image_buffers) {
+		args << "--sync-raw-image-buffers" << BoolArg(true);
+	}
 	args << "--trophy-notifications" << BoolArg(info.trophy_enabled);
 	if (info.tessellation_enabled) {
 		args << "--tessellation";

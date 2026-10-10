@@ -254,6 +254,8 @@ static bool ParseUserId(const std::string& value, int32_t& out) {
 
 static bool g_dualsense_fix         = false;
 static bool g_timestamp_scale_given = false;
+// --sync-raw-image-buffers given (command line or kyty_settings.ini): the title profile keeps it.
+static bool g_sync_raw_given = false;
 
 // The game's title ID: from sce_sys/param.json of a game folder, else the first PPSA/CUSA ID in
 // the game path.
@@ -315,8 +317,14 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		options.config.bindless_images_enabled = true;
 		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
 		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
-		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, compute chain\n",
-		                     title_id.c_str());
+		// Raw storage reads synchronized with GPU image aliases (user 2026-10-10): with it, a2dfc83f's
+		// R16 moonlight tiles hold the same nonzero values in 3 runs instead of zeros, the grey haze
+		// at the Torii is gone, fps unchanged (7-7.5).
+		if (!g_sync_raw_given) {
+			options.config.sync_raw_image_buffers = true;
+		}
+		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, compute chain, sync raw image buffers %s\n",
+		                     title_id.c_str(), options.config.sync_raw_image_buffers ? "on" : "off");
 	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger
 	// resistance, and controller speaker sounds play on the PC output.
@@ -711,6 +719,7 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 				return false;
 			}
 		} else if (arg == "--sync-raw-image-buffers") {
+			g_sync_raw_given = true;
 			if (!ParseBool(value, options.config.sync_raw_image_buffers)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
