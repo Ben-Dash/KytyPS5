@@ -3,6 +3,7 @@
 #include "common/logging/log.h"
 #include "common/switches.h"
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
+#include "graphics/presentation/renderDoc.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "graphics/shader/shader.h"
@@ -428,6 +429,22 @@ void Report(const uint32_t* region, uint64_t frame) {
 		const auto hash = uint64_t {record[1]} | (uint64_t {record[2]} << 32u);
 		if (kind >= 4) {
 			continue;
+		}
+		const uint32_t capture_index = record[10] == 1u ? record[3] - record[9] : record[3];
+		// KYTY_VTX_EXPLODE_CAPTURE=<hash> (with --rd): the first huge or non-finite position of that
+		// shader at a vertex index above 65535 requests one RenderDoc capture.
+		static const uint64_t capture_hash = [] {
+			const char* text = KYTY_GETENV("KYTY_VTX_EXPLODE_CAPTURE");
+			return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
+		}();
+		static bool capture_requested = false;
+		if (capture_hash != 0 && hash == capture_hash && !capture_requested && capture_index > 0xffffu &&
+		    (kind == static_cast<uint32_t>(IR::VertexExplodeKind::Huge) ||
+		     kind == static_cast<uint32_t>(IR::VertexExplodeKind::NonFinite))) {
+			capture_requested = true;
+			std::printf("VtxExplode: requesting a RenderDoc capture for vs=%016" PRIx64 "%s", hash,
+			            "\n");
+			RenderDocRequestCapture();
 		}
 		state.hits[kind] += count;
 		if (!state.reported.insert(hash * 4u + kind).second) {
