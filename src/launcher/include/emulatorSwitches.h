@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 12> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 14> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -64,6 +64,21 @@ inline constexpr std::array<EmulatorSwitch, 12> EMULATOR_SWITCHES = {{
      "the buffers involved. Nothing in the picture changes. Uses its own shader cache, so the "
      "first start with this on prepares the shaders again.",
      "Diagnostics only, costs speed."},
+    {"KYTY_BINDLESS_EAGER", "Load texture tables of rare compute steps right away",
+     "Some compute steps read their textures from a list the game rebuilds at a new place each "
+     "time and run only now and then. Without this the emulator sets up the textures of such a "
+     "list only after the step asked for them, which is too late, so the step sees empty "
+     "textures (Ghost of Yotei: the moonlight stays dark). With this on, a new list is set up "
+     "completely the first time a compute step uses it. On by default; uncheck it to turn it off.",
+     "Under test: meant to fix the empty moon volumes in Ghost of Yotei. May cost a short "
+     "hitch when such a list is first seen.", "*"},
+    {"KYTY_DISPATCH_SNAPSHOT", "Record compute steps for offline replay (diagnostics)",
+     "Writes compute steps of the game to the _snapshots folder: the shader and every input it "
+     "reads, and what it wrote. kyty_emulator --dispatch-replay runs them again later without the "
+     "game, to test a fix in seconds. Which steps: the shader hashes or frame:<n> in "
+     "dispatch_snapshot.txt next to the emulator, otherwise every step of frame 600. Each "
+     "recorded step waits for the graphics card, so the game stutters while it records.",
+     "Diagnostics only, costs speed and disk space while recording."},
     {"KYTY_PROTECT_EXEC_QUERY", "Old memory protection check (not recommended)",
      "Brings back the old way of checking whether game code may run from a piece of memory: the "
      "emulator asks Windows each time instead of remembering it. Only there to compare against "

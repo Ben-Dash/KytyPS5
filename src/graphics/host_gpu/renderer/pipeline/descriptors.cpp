@@ -35,6 +35,7 @@
 #include "kernel/memory.h"
 
 #include <algorithm>
+#include <unordered_map>
 #include <unordered_set>
 #include <array>
 #include <atomic>
@@ -2151,6 +2152,54 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	return true;
 }
 
+void RenderExecutor::ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint32_t entries,
+                                                uint64_t shader_hash) {
+	const auto keys   = std::min<uint32_t>(entries, static_cast<uint32_t>(heap.settled.size()));
+	uint32_t   images = 0, resolved = 0, other = 0;
+	std::vector<uint8_t> records(static_cast<size_t>(keys) * 32u);
+	const auto base = heap.base + heap.table_offset;
+	if (keys == 0 || !Libs::LibKernel::Memory::TryReadBacking(base, records.data(), records.size())) {
+		return;
+	}
+	static std::unordered_set<uint64_t> reported;
+	for (uint32_t key = 0; key < keys; key++) {
+		ShaderRecompiler::IR::DescriptorValue value {};
+		value.dword_count = 8u;
+		std::memcpy(value.dwords.data(), records.data() + static_cast<size_t>(key) * 32u, 32u);
+		const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+		if (descriptor.IsNull()) {
+			continue; // the game's own empty slot
+		}
+		if (!PlausibleImageDescriptor(descriptor)) {
+			other++;
+			// Once per distinct record: other data, not an image.
+			uint64_t hash = 0xcbf29ce484222325ull;
+			for (const auto word: value.dwords) hash = (hash ^ word) * 0x100000001b3ull;
+			if (reported.size() < 2048 && reported.insert(hash).second) {
+				std::printf("\x1b[91mbindless-eager: cs %016llx heap 0x%llx key %u skipped, no image T#: "
+				            "%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\x1b[0m\n",
+				            static_cast<unsigned long long>(shader_hash),
+				            static_cast<unsigned long long>(heap.base), key, value.dwords[0],
+				            value.dwords[1], value.dwords[2], value.dwords[3], value.dwords[4],
+				            value.dwords[5], value.dwords[6], value.dwords[7]);
+			}
+			continue;
+		}
+		images++;
+		resolved += ResolveBindlessKey(heap, key) ? 1u : 0u;
+	}
+	// One line per shader and heap layout (the table moves every run).
+	const auto line_key = shader_hash ^ (uint64_t {heap.table_offset} << 48u) ^ (uint64_t {heap.binding} << 56u);
+	static std::unordered_map<uint64_t, uint32_t> lines;
+	if (lines[line_key]++ < 4u) {
+		std::printf("\x1b[91mbindless-eager: cs %016llx heap 0x%llx (+%u, binding %u) resolved on first "
+		            "sight: %u of %u image T#s, %u other records skipped, %u keys\x1b[0m\n",
+		            static_cast<unsigned long long>(shader_hash), static_cast<unsigned long long>(heap.base),
+		            heap.table_offset, heap.binding, resolved, images, other, keys);
+		std::fflush(stdout);
+	}
+}
+
 void RenderExecutor::ResolveBindlessRequests() {
 	const auto frame = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
 	if (frame == m_bindless_frame) {
@@ -2322,6 +2371,20 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 					(void)ResolveBindlessKey(*heap, key);
 				}
 			}
+		}
+		// A compute shader that runs rarely and gets a T# table at a new address each time (Ghost
+		// of Yotei's moon volume pass ef5181198aadd55d, 8192 keys) finds every key still pending:
+		// the feedback that would name them arrives after its heap is gone, so it sampled only
+		// placeholders and wrote zeros. A heap of plain T# records nothing has resolved yet is
+		// resolved right away at a compute dispatch, every key that holds an image T#.
+		// KYTY_BINDLESS_EAGER=0 turns it off.
+		static const bool eager = [] {
+			const char* text = KYTY_GETENV("KYTY_BINDLESS_EAGER");
+			return text == nullptr || std::strcmp(text, "0") != 0;
+		}();
+		if (eager && program.stage == ShaderType::Compute && use.record_stride == 32u &&
+		    use.pointer_offset == UINT32_MAX && heap->settled_keys.empty()) {
+			ResolveBindlessHeapEagerly(*heap, std::min(entries, heap->entries), program.shader_hash);
 		}
 		// A table of material records is rewritten at a new address every frame, so its heap
 		// is new each frame and the shader's feedback would name its keys only after the heap

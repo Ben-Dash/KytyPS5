@@ -249,6 +249,8 @@ public:
 	void PrepareBindlessHeaps(const ShaderStageRuntime& runtime, PreparedBindings& prepared);
 	void ResolveBindlessRequests();
 	bool ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key);
+	// KYTY_BINDLESS_EAGER: resolves every image T# key of a heap nothing has resolved yet.
+	void ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint32_t entries, uint64_t shader_hash);
 	void                           FindBuffers(PreparedBindings& bindings);
 	void                           RebindBuffers(PreparedBindings& bindings);
 	void                           RebindImages(PreparedBindings& bindings);
