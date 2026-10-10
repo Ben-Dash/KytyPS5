@@ -505,6 +505,9 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	meta["shader_data_buffer"] = Json::object();
 	meta["gds"]           = Json::object();
 	meta["args"]          = Json::object();
+	// Every key the readbacks fill in exists before the first one: they keep pointers into meta.
+	meta["bda_pages"]          = Json::array();
+	meta["bda_unmapped_pages"] = 0;
 	meta["shared_memory"] = bindings.shared_memory.buffer != nullptr ? bindings.shared_memory.range : 0;
 	{
 		// Not captured (v1): the replay binds zeroed buffers of these sizes.
@@ -545,6 +548,73 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	add_view(bindings.gds, "gds");
 	if (args != nullptr) {
 		collector.AddBuffer(args, args_offset, sizeof(vk::DispatchIndirectCommand), meta["args"]);
+	}
+	// BDA: the shader reads guest memory by address through the page table, which maps the whole
+	// address space and is not captured. The pages around every pointer in its user data and
+	// flattened SRT are (plus KYTY_DISPATCH_SNAPSHOT_PAGES=<hex addr>+<hex size>,...), as the
+	// cache buffers hold them; the replay reports the pages it read beyond them.
+	if (program.info.uses_dma) {
+		constexpr uint64_t PageSize = BufferCache::CACHING_PAGESIZE;
+		constexpr uint32_t Window   = 4; // pages from each pointer's page
+		std::vector<uint64_t> pages;
+		const auto add_range = [&](uint64_t address, uint64_t size) {
+			for (uint64_t page = address & ~(PageSize - 1u); page < address + size && pages.size() < 8192;
+			     page += PageSize) {
+				pages.push_back(page);
+			}
+		};
+		const auto scan = [&](const std::vector<uint32_t>& words) {
+			for (size_t i = 0; i + 1 < words.size(); i++) {
+				const uint64_t value = words[i] | (uint64_t {words[i + 1]} << 32u);
+				if (value >= 0x10000u && value < (1ull << 48u)) {
+					add_range(value, Window * PageSize);
+				}
+			}
+		};
+		scan(resources.user_data);
+		scan(resources.flattened_srt);
+		if (const char* extra = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_PAGES"); extra != nullptr) {
+			for (const char* p = extra; p != nullptr && *p != '\0';) {
+				char*      end     = nullptr;
+				const auto address = std::strtoull(p, &end, 16);
+				uint64_t   size    = PageSize;
+				if (*end == '+') size = std::strtoull(end + 1, &end, 16);
+				add_range(address, size);
+				p = *end == ',' ? end + 1 : nullptr;
+			}
+		}
+		std::ranges::sort(pages);
+		pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
+		// Runs of pages contiguous in one cache buffer become one readback each.
+		struct Run {
+			uint64_t   address = 0;
+			vk::Buffer buffer;
+			uint64_t   offset = 0;
+			uint64_t   size   = 0;
+		};
+		std::vector<Run> runs;
+		auto&            buffers = context.GetBufferCache();
+		uint32_t         unmapped = 0;
+		for (const auto page: pages) {
+			const auto [buffer, offset] = buffers.PeekPage(page);
+			if (buffer == nullptr) {
+				unmapped++;
+				continue;
+			}
+			if (!runs.empty() && runs.back().buffer == buffer && runs.back().address + runs.back().size == page &&
+			    runs.back().offset + runs.back().size == offset) {
+				runs.back().size += PageSize;
+			} else {
+				runs.push_back({page, buffer, offset, PageSize});
+			}
+		}
+		meta["bda_unmapped_pages"] = unmapped;
+		for (const auto& run: runs) {
+			meta["bda_pages"].push_back({{"address", run.address}});
+		}
+		for (size_t r = 0; r < runs.size(); r++) {
+			collector.AddBuffer(runs[r].buffer, runs[r].offset, runs[r].size, meta["bda_pages"][r]);
+		}
 	}
 	collector.Finish(s.directory / "blobs");
 	meta["outputs"] = nullptr; // Filled in after the dispatch; null: the run ended before.

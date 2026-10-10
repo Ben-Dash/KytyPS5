@@ -963,6 +963,19 @@ void BufferCache::RecordEagerReadbacks() {
 	}
 }
 
+std::pair<vk::Buffer, uint64_t> BufferCache::PeekPage(uint64_t vaddr) {
+	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
+	if (owner == nullptr || !*owner) {
+		return {};
+	}
+	auto&      buffer = m_slot_buffers[*owner];
+	const auto page   = vaddr & ~(CACHING_PAGESIZE - 1u);
+	if (buffer.is_deleted || !buffer.IsInBounds(page, CACHING_PAGESIZE)) {
+		return {};
+	}
+	return {buffer.Handle(), page - buffer.CpuAddress()};
+}
+
 void BufferCache::DebugDescribePage(uint64_t vaddr) {
 	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
 	if (owner == nullptr || !*owner) {

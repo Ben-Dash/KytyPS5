@@ -103,6 +103,9 @@ public:
 	}
 	[[nodiscard]] const Buffer* GetGdsBuffer() const noexcept { return &m_gds_buffer; }
 	[[nodiscard]] Buffer* GetBdaPageTableBuffer() noexcept { return &m_bda_pagetable_buffer; }
+	// For dispatch snapshots: the cache buffer that holds a guest page (where BDA reads it) and
+	// the page's offset in it, without creating one; a null buffer when the page has none.
+	[[nodiscard]] std::pair<vk::Buffer, uint64_t> PeekPage(uint64_t vaddr);
 	// KYTY_DEBUG_DEVICE_FAULT: once per frame an 8-byte readback of one page-table entry, compared
 	// with the value written there (the combined build probes its zero-page entry). For tests,
 	// KYTY_DEBUG_PAGETABLE_PROBE=<entry>:<hex value> sets it.

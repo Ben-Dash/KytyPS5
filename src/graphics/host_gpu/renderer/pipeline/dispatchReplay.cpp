@@ -366,7 +366,8 @@ public:
 		return UINT32_MAX;
 	}
 
-	Allocation Allocate(const vk::MemoryRequirements& req, vk::MemoryPropertyFlags flags) {
+	Allocation Allocate(const vk::MemoryRequirements& req, vk::MemoryPropertyFlags flags,
+	                    bool device_address = false) {
 		auto type = MemoryType(req.memoryTypeBits, flags);
 		if (type == UINT32_MAX && (flags & vk::MemoryPropertyFlagBits::eDeviceLocal)) {
 			type = MemoryType(req.memoryTypeBits, flags & ~vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -376,7 +377,10 @@ public:
 		vk::MemoryAllocateInfo info {};
 		info.allocationSize  = req.size;
 		info.memoryTypeIndex = type;
-		a.memory             = Must(m_d.device.allocateMemory(info), "vkAllocateMemory");
+		vk::MemoryAllocateFlagsInfo address_flags {};
+		address_flags.flags = vk::MemoryAllocateFlagBits::eDeviceAddress;
+		if (device_address) info.pNext = &address_flags;
+		a.memory = Must(m_d.device.allocateMemory(info), "vkAllocateMemory");
 		m_memory.push_back(a.memory);
 		if (flags & vk::MemoryPropertyFlagBits::eHostVisible) {
 			a.mapped = Must(m_d.device.mapMemory(a.memory, 0, VK_WHOLE_SIZE), "vkMapMemory");
@@ -385,24 +389,40 @@ public:
 	}
 
 	// A host-visible buffer of `size` bytes, filled from `data` (zeros past it).
-	std::pair<vk::Buffer, uint8_t*> HostBuffer(uint64_t size, std::span<const uint8_t> data = {}) {
+	std::pair<vk::Buffer, uint8_t*> HostBuffer(uint64_t size, std::span<const uint8_t> data = {},
+	                                           bool device_address = false) {
 		size = std::max<uint64_t>(size, 16);
 		vk::BufferCreateInfo bci {};
 		bci.size  = size;
 		bci.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eUniformBuffer |
 		            vk::BufferUsageFlagBits::eTransferSrc | vk::BufferUsageFlagBits::eTransferDst |
 		            vk::BufferUsageFlagBits::eIndirectBuffer;
+		if (device_address) bci.usage |= vk::BufferUsageFlagBits::eShaderDeviceAddress;
 		auto buffer = Must(m_d.device.createBuffer(bci), "vkCreateBuffer");
 		m_buffers.push_back(buffer);
 		auto alloc = Allocate(m_d.device.getBufferMemoryRequirements(buffer),
 		                      vk::MemoryPropertyFlagBits::eHostVisible |
 		                          vk::MemoryPropertyFlagBits::eHostCoherent |
-		                          vk::MemoryPropertyFlagBits::eDeviceLocal);
+		                          vk::MemoryPropertyFlagBits::eDeviceLocal,
+		                      device_address);
 		Must(m_d.device.bindBufferMemory(buffer, alloc.memory, 0), "vkBindBufferMemory");
 		auto* bytes = static_cast<uint8_t*>(alloc.mapped);
 		std::memset(bytes, 0, size);
 		if (!data.empty()) std::memcpy(bytes, data.data(), std::min<uint64_t>(size, data.size()));
 		return {buffer, bytes};
+	}
+
+	// A device-local buffer only the GPU fills (the BDA page table: 800 MB of mostly zeros).
+	vk::Buffer DeviceBuffer(uint64_t size) {
+		vk::BufferCreateInfo bci {};
+		bci.size  = std::max<uint64_t>(size, 16);
+		bci.usage = vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst;
+		auto buffer = Must(m_d.device.createBuffer(bci), "vkCreateBuffer");
+		m_buffers.push_back(buffer);
+		auto alloc = Allocate(m_d.device.getBufferMemoryRequirements(buffer),
+		                      vk::MemoryPropertyFlagBits::eDeviceLocal);
+		Must(m_d.device.bindBufferMemory(buffer, alloc.memory, 0), "vkBindBufferMemory");
+		return buffer;
 	}
 
 	vk::Image Image(const vk::ImageCreateInfo& ici) {
@@ -592,7 +612,6 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 	ShaderRecompiler::SetNativeFloat16(globals.value("native_fp16", d.native_float16));
 	ShaderRecompiler::SetTableMode(globals.value("table_mode", false));
 	if (globals.value("hw_bounds", false) && !d.hw_bounds) result.notes += " [device lacks hw bounds]";
-	if (meta["flags"].value("uses_dma", false)) result.notes += " [BDA: guest memory not captured]";
 	if (meta["flags"].value("uses_bindless", false))
 		result.notes += " [bindless: heap entries are placeholders]";
 	if (meta["flags"].value("table", false)) result.notes += " [table mode: addresses not rebased]";
@@ -649,8 +668,12 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 	const auto shader_data = special("shader_data_buffer", 0);
 	const auto gds         = special("gds", 0);
 	const auto shared      = res.HostBuffer(std::max<uint64_t>(meta.value("shared_memory", uint64_t {0}), 16));
-	const auto page_table  = res.HostBuffer(std::max<uint64_t>(meta.value("bda_page_table", uint64_t {0}), 256));
-	const auto faults      = res.HostBuffer(std::max<uint64_t>(meta.value("fault_buffer", uint64_t {0}), 256));
+	// BDA: the page table and fault bitmap at their live sizes only for a shader that uses them.
+	const bool     dma         = program.info.uses_dma;
+	const uint64_t table_size  = dma ? std::max<uint64_t>(meta.value("bda_page_table", uint64_t {0}), 256) : 256;
+	const uint64_t fault_size  = dma ? std::max<uint64_t>(meta.value("fault_buffer", uint64_t {0}), 256) : 256;
+	const auto     page_table  = std::pair<vk::Buffer, uint8_t*> {res.DeviceBuffer(table_size), nullptr};
+	const auto     faults      = res.HostBuffer(fault_size);
 
 	vk::CommandBufferAllocateInfo cai {};
 	cai.commandPool        = d.pool;
@@ -745,6 +768,48 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 		              vk::ImageLayout::eGeneral);
 	}
 
+	// The page table: zero, then each captured page's entry its copy's device address, and the
+	// zero page's entry (the last) a zeroed page (bufferCache.cpp, spirvEmitterMemory.cpp).
+	constexpr uint64_t PageBits = 14;
+	constexpr uint64_t PageSize = uint64_t {1} << PageBits;
+	constexpr uint64_t Lower    = uint64_t {1} << 40u;      // LOWER_ADDRESS_SIZE
+	constexpr uint64_t Extended = 0x080000000000ull;         // kExtendedMemoryBase
+	const auto page_index = [&](uint64_t address) {
+		return (address >= Extended ? address - (Extended - Lower) : address) >> PageBits;
+	};
+	uint32_t bda_pages = 0;
+	if (dma) {
+		cmd.fillBuffer(page_table.first, 0, VK_WHOLE_SIZE, 0);
+		vk::MemoryBarrier filled {};
+		filled.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		filled.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+		cmd.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eTransfer, {}, 1,
+		                    &filled, 0, nullptr, 0, nullptr);
+		uint64_t total = PageSize; // the zero page first
+		for (const auto& run: meta["bda_pages"]) total += run.value("size", uint64_t {0});
+		auto [pages, bytes] = res.HostBuffer(total, {}, true);
+		vk::BufferDeviceAddressInfo address_info {};
+		address_info.buffer = pages;
+		const auto base     = d.device.getBufferAddress(address_info);
+		const auto entry    = [&](uint64_t index, uint64_t value) {
+            cmd.updateBuffer(page_table.first, index * 8u, 8u, &value);
+		};
+		entry(table_size / 8u - 1u, base);
+		uint64_t offset = PageSize;
+		for (const auto& run: meta["bda_pages"]) {
+			const auto data    = Blob(blobs, run);
+			const auto address = run["address"].get<uint64_t>();
+			std::memcpy(bytes + offset, data.data(), data.size());
+			for (uint64_t page = 0; page * PageSize < data.size(); page++) {
+				entry(page_index(address + page * PageSize), base + offset + page * PageSize);
+				bda_pages++;
+			}
+			offset += run.value("size", uint64_t {0});
+		}
+		result.notes += fmt::format(" [BDA: {} pages captured, {} seed pages unmapped live]", bda_pages,
+		                            meta.value("bda_unmapped_pages", 0u));
+	}
+
 	// Samplers, made as SamplerCache makes them.
 	std::map<uint32_t, vk::Sampler> samplers;
 	for (const auto& entry: meta["samplers"]) {
@@ -810,8 +875,8 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 						                       vk::ImageLayout::eUndefined});
 					}
 					break;
-				case Kind::BdaPagetable: add({page_table.first, std::max<uint64_t>(meta.value("bda_page_table", uint64_t {0}), 256)}); break;
-				case Kind::FaultBuffer: add({faults.first, std::max<uint64_t>(meta.value("fault_buffer", uint64_t {0}), 256)}); break;
+				case Kind::BdaPagetable: add({page_table.first, table_size}); break;
+				case Kind::FaultBuffer: add({faults.first, fault_size}); break;
 				case Kind::FlattenedSrt: add(flattened); break;
 				case Kind::ShaderData: add(shader_data); break;
 				case Kind::SharedMemory:
@@ -1133,6 +1198,26 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 				std::ofstream(o.dump / (name + ".bin"), std::ios::binary)
 				    .write(reinterpret_cast<const char*>(output.bytes), static_cast<std::streamsize>(output.size));
 			}
+		}
+	}
+	if (dma && !result.lost && !result.timeout) {
+		// Pages the shader read that the snapshot lacks (or that were unmapped live as well).
+		const auto* words = reinterpret_cast<const uint32_t*>(faults.second);
+		std::vector<uint64_t> missing;
+		for (uint64_t w = 0; w < fault_size / 4u; w++) {
+			for (uint32_t bit = 0; words[w] != 0 && bit < 32; bit++) {
+				if ((words[w] >> bit) & 1u) {
+					const auto packed = (w * 32u + bit) << PageBits;
+					missing.push_back(packed >= Lower ? packed + (Extended - Lower) : packed);
+				}
+			}
+		}
+		if (!missing.empty()) {
+			std::string list;
+			for (size_t i = 0; i < missing.size() && i < 12; i++) list += fmt::format(" 0x{:x}", missing[i]);
+			result.notes += fmt::format(" [BDA: read {} pages not in the snapshot:{}{}; add them with "
+			                            "KYTY_DISPATCH_SNAPSHOT_PAGES]",
+			                            missing.size(), list, missing.size() > 12 ? " ..." : "");
 		}
 	}
 	result.notes = fmt::format("pipeline {:.1f} ms, gpu {:.1f} ms", compile_ms, gpu_ms) + result.notes;
