@@ -11,8 +11,8 @@ namespace Libs::Graphics::ShaderRecompiler::IR {
 // Diagnostics, KYTY_VTX_EXPLODE_CHECK=1 (off by default): every vertex and mesh shader checks the
 // clip-space position it writes and logs a record when it explodes, without changing it. Kinds:
 // a NaN or infinite component; |w| below 1e-6 unless x and y are zero too; in front of the camera
-// (w > 1e-6) |x| or |y| above KYTY_VTX_EXPLODE_LIMIT * w (default 1000), or |x|, |y| or |z| above
-// 1e6; and x = y = w = 0 (the usual ways to cull a vertex, (0,0,0,0) and (0,0,10,0); only counted).
+// (w > 1e-6) |x| or |y| above KYTY_VTX_EXPLODE_LIMIT * w (default 1000); and x = y = w = 0 (the usual ways to cull a vertex,
+// (0,0,0,0) and (0,0,10,0); only counted).
 // The shaders then bind the fault buffer and write into a region after its page bitmap;
 // FaultManager copies that region back once per frame and VertexExplode prints the records.
 // Without the switch no shader, binding or cache changes.
@@ -40,7 +40,7 @@ inline const VertexExplodeSettings& VertexExplodeCheck() {
 enum class VertexExplodeKind : uint32_t {
 	NonFinite = 0, // a NaN or infinite component
 	WZero     = 1, // |w| < 1e-6, x or y not zero
-	Huge      = 2, // w > 0 and |x| or |y| above limit * w, or |x|, |y|, |z| above 1e6
+	Huge      = 2, // w > 0 and |x| or |y| above limit * w
 	Zero      = 3, // x = y = w = 0 (culling idiom)
 	Count     = 4,
 };

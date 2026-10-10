@@ -5,6 +5,7 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "graphics/shader/shader.h"
+#include "kernel/memory.h"
 
 #include <fmt/format.h>
 
@@ -18,6 +19,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace Libs::Graphics::VertexExplode {
 
@@ -133,8 +135,17 @@ void CheckIndices(State& state, BufferCache& cache, const DrawNote& note, uint64
 		state.cpu_gpu_written++;
 		return;
 	}
-	const auto* data    = note.index_host != nullptr ? note.index_host
-	                                                 : reinterpret_cast<const void*>(note.index_address);
+	// Guest memory is read without faulting (a fault handler may wait for the GPU).
+	std::vector<uint8_t> copy;
+	const void*          data = note.index_host;
+	if (data == nullptr) {
+		copy.resize(bytes);
+		if (!LibKernel::Memory::TryReadGpuCleanBacking(note.index_address, copy.data(), bytes)) {
+			state.cpu_gpu_written++;
+			return;
+		}
+		data = copy.data();
+	}
 	const uint32_t restart = note.index_size == 2 ? 0xffffu : 0xffffffffu;
 	uint32_t       max_index = 0;
 	uint32_t       patterns  = 0;
@@ -258,11 +269,18 @@ void Report(const uint32_t* region, uint64_t frame) {
 				if (b.addr == 0 || b.stride == 0 || record[3] >= b.num_records) {
 					continue;
 				}
-				const auto* bytes =
-				    reinterpret_cast<const uint8_t*>(b.addr) + uint64_t {record[3]} * b.stride;
+				// Read without faulting: this runs in a deferred scheduler callback, where a fault
+				// handler waiting for the GPU would end the session.
+				std::array<uint8_t, 32> bytes {};
+				const auto size = std::min(b.stride, 32u);
 				std::string hex;
-				for (uint32_t k = 0; k < std::min(b.stride, 32u); k++) {
-					hex += fmt::format("{:02x}{}", bytes[k], (k % 4 == 3) ? " " : "");
+				if (LibKernel::Memory::TryReadGpuCleanBacking(
+				        b.addr + uint64_t {record[3]} * b.stride, bytes.data(), size)) {
+					for (uint32_t k = 0; k < size; k++) {
+						hex += fmt::format("{:02x}{}", bytes[k], (k % 4 == 3) ? " " : "");
+					}
+				} else {
+					hex = "(not readable now: GPU-written or not on the GPU thread)";
 				}
 				std::printf("%s  vb%u[%u] @0x%" PRIx64 ": %s%s\n", on, i, record[3],
 				            b.addr + uint64_t {record[3]} * b.stride, hex.c_str(), off);

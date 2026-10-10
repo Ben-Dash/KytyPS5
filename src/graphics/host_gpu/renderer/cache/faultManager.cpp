@@ -50,7 +50,7 @@ FaultManager::FaultManager(GraphicContext& graphics, CommandScheduler& scheduler
 		m_explode_download = std::make_unique<Buffer>(graphics, scheduler, MemoryUsage::Download, 0,
 		                                              AllFlags, MaxPendingFaults * ExplodeLogSize);
 		std::printf("VtxExplode: KYTY_VTX_EXPLODE_CHECK active: vertex and mesh shaders check their "
-		            "positions (nan/inf, |w| < 1e-6, w > 0 and |x/w| or |y/w| > %g, |xyz| > 1e6), CPU check of index "
+		            "positions (nan/inf, |w| < 1e-6, w > 0 and |x/w| or |y/w| > %g), CPU check of index "
 		            "ranges, %u log bytes after the fault bitmap\n",
 		            static_cast<double>(IR::VertexExplodeCheck().limit),
 		            static_cast<uint32_t>(ExplodeLogSize));

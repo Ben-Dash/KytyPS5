@@ -462,20 +462,15 @@ void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
 	                         is_zero(3));
 	const auto w_zero = Binary(state, spv::OpFOrdLessThan, boolean, magnitude[3],
 	                           ConstantF32Value(state, 1e-6f));
-	// Huge: in front of the camera (w > 1e-6) with |x| or |y| above limit * w, or |x|, |y| or |z|
-	// above 1e6. A point behind the camera is clipped correctly.
+	// Huge: in front of the camera (w > 1e-6) with |x| or |y| above limit * w. A point behind the
+	// camera, however large, is clipped correctly.
 	const auto xy_max = EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, magnitude[0], magnitude[1]);
 	const auto huge   = Binary(
-	    state, spv::OpLogicalOr, boolean,
-	    Binary(state, spv::OpLogicalAnd, boolean,
-	           Binary(state, spv::OpFOrdGreaterThan, boolean, value[3],
-	                  ConstantF32Value(state, 1e-6f)),
-	           Binary(state, spv::OpFOrdGreaterThan, boolean, xy_max,
-	                  Binary(state, spv::OpFMul, f32, value[3],
-	                         ConstantF32Value(state, IR::VertexExplodeCheck().limit)))),
-	    Binary(state, spv::OpFOrdGreaterThan, boolean,
-	           EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, xy_max, magnitude[2]),
-	           ConstantF32Value(state, 1e6f)));
+	    state, spv::OpLogicalAnd, boolean,
+	    Binary(state, spv::OpFOrdGreaterThan, boolean, value[3], ConstantF32Value(state, 1e-6f)),
+	    Binary(state, spv::OpFOrdGreaterThan, boolean, xy_max,
+	           Binary(state, spv::OpFMul, f32, value[3],
+	                  ConstantF32Value(state, IR::VertexExplodeCheck().limit))));
 	const auto hit = Binary(state, spv::OpLogicalOr, boolean,
 	                        Binary(state, spv::OpLogicalOr, boolean, non_finite, zero),
 	                        Binary(state, spv::OpLogicalOr, boolean, w_zero, huge));
