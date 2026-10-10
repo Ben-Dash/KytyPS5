@@ -263,6 +263,25 @@ void DefineBindlessImages(EmitterState& state) {
 				state.bindless_image_variables[flat_type] = flat_variable;
 			}
 		}
+		// A 2D float image's keys may hold 3D textures (BindlessVolumeIn2D): it also reads the 3D
+		// array.
+		if (binding == IR::BindlessImages2D && !image.depth_compare) {
+			auto volume      = image;
+			volume.dimension = ImageDimension::Dim3D;
+			const auto volume_type = ImageType(state, volume);
+			if (!state.bindless_image_variables.contains(volume_type)) {
+				const auto volume_array    = state.builder.Type(spv::OpTypeRuntimeArray, volume_type);
+				const auto volume_variable = state.builder.DefineGlobalVariable(
+				    TypePointer(state, spv::StorageClassUniformConstant, volume_array),
+				    spv::StorageClassUniformConstant);
+				state.builder.AddName(volume_variable, "bindless_images");
+				state.builder.AddAnnotation(spv::OpDecorate, volume_variable,
+				                            spv::DecorationDescriptorSet, IR::BindlessDescriptorSet);
+				state.builder.AddAnnotation(spv::OpDecorate, volume_variable, spv::DecorationBinding,
+				                            IR::BindlessImages3D);
+				state.bindless_image_variables[volume_type] = volume_variable;
+			}
+		}
 		// Integer cube and 3D images have no array; materialization keeps them float.
 		EXIT_IF((image.cube || image.dimension == ImageDimension::Dim3D) &&
 		        image.numeric_class != Prospero::TextureNumericClass::Float);

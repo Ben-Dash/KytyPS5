@@ -1760,6 +1760,17 @@ static bool PlausibleImageDescriptor(const ShaderTextureResource& descriptor) {
 	return !descriptor.IsNull() && type >= 8u && type <= 13u && TextureHasSurfaceFormat(descriptor.Format());
 }
 
+// A small power-of-two volume (Ghost of Yotei: colour LUTs and fog volumes up to 128^3). Records
+// that only look like 3D T#s have extents like 2217x1x531, which the tiler cannot lay out.
+static bool PlausibleVolume(const ShaderTextureResource& descriptor) {
+	const auto pow2 = [](uint32_t value) { return value != 0u && (value & (value - 1u)) == 0u; };
+	const auto width  = static_cast<uint32_t>(descriptor.Width5()) + 1u;
+	const auto height = static_cast<uint32_t>(descriptor.Height5()) + 1u;
+	const auto depth  = static_cast<uint32_t>(descriptor.Depth()) + 1u;
+	return pow2(width) && pow2(height) && pow2(depth) && width <= 512u && height <= 512u &&
+	       depth <= 512u && descriptor.TileMode() != Prospero::TileMode::kLinear;
+}
+
 static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t binding) {
 	if (descriptor.IsNull() ||
 	    Prospero::SampledTextureNumericClass(descriptor.Format()) != BindlessArrayClass(binding)) {
@@ -1875,7 +1886,14 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	const bool flat_in_volume = heap.binding == ShaderRecompiler::IR::BindlessImages3D &&
 	                            descriptor.Type() == Prospero::ImageType::kColor2D &&
 	                            !heap.resource.cube;
-	const auto array_binding  = flat_in_volume ? ShaderRecompiler::IR::BindlessImages2D : heap.binding;
+	// A 3D texture in a 2D float image's heap: an explicit-LOD 2D sample reads it at (u, v, 0) from
+	// the 3D array; its translation carries IR::BindlessVolumeIn2D.
+	const bool volume_in_2d = heap.binding == ShaderRecompiler::IR::BindlessImages2D &&
+	                          descriptor.Type() == Prospero::ImageType::kColor3D &&
+	                          PlausibleImageDescriptor(descriptor) && PlausibleVolume(descriptor);
+	const auto array_binding  = flat_in_volume ? ShaderRecompiler::IR::BindlessImages2D
+	                            : volume_in_2d ? ShaderRecompiler::IR::BindlessImages3D
+	                                           : heap.binding;
 	// Not yet for a DCC-compressed one: its color metadata stopped the texture cache (Ghost of
 	// Yotei, frame 777 at the Torii). It keeps the placeholder with a red line.
 	if (flat_in_volume && descriptor.MetaCompress()) {
@@ -1916,6 +1934,9 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (flat_in_volume) {
 		resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim2D;
 	}
+	if (volume_in_2d) {
+		resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim3D;
+	}
 	auto binding            = ResolveTexture(resource, value);
 	g_soft_texture_failures = false;
 	const bool soft_failed  = g_soft_texture_failed;
@@ -1946,7 +1967,9 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
-	heap.slots[key]         = flat_in_volume ? slot | ShaderRecompiler::IR::BindlessFlat2DInVolume : slot;
+	heap.slots[key]         = flat_in_volume ? slot | ShaderRecompiler::IR::BindlessFlat2DInVolume
+	                          : volume_in_2d ? slot | ShaderRecompiler::IR::BindlessVolumeIn2D
+	                                         : slot;
 	image->bindless_pinned  = true;
 	image->usage.texture    = true;
 	heap.resolved.push_back(binding.image_id);

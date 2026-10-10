@@ -843,6 +843,29 @@ static uint32_t BindlessSlot(ValueEmitContext& ctx, const IR::ImageResource& ima
 	                          raw);
 	state.bindless_flat_in_volume = 0;
 	state.bindless_flat_slot      = 0;
+	state.bindless_volume_in_2d   = 0;
+	state.bindless_volume_slot    = 0;
+	if (image.dimension == ImageDimension::Dim2D && !image.cube && !image.depth_compare &&
+	    image.numeric_class == Prospero::TextureNumericClass::Float) {
+		// A 3D texture in a 2D float image's heap (IR::BindlessVolumeIn2D): the 2D array reads the
+		// placeholder, an explicit-LOD sample reads the 3D array at the flagged slot.
+		const auto flag_bits   = Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                                ConstantU32(state, IR::BindlessVolumeIn2D));
+		const auto is_volume   = Binary(state, spv::OpINotEqual, TypeBool(state), flag_bits,
+		                                ConstantU32(state, 0u));
+		const auto volume_slot = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), volume_slot, is_volume,
+		                          Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                                 ConstantU32(state, ~IR::BindlessVolumeIn2D)),
+		                          ConstantU32(state, 0u));
+		state.builder.AddAnnotation(spv::OpDecorate, volume_slot, spv::DecorationNonUniform);
+		const auto flat_slot = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), flat_slot, is_volume,
+		                          ConstantU32(state, 0u), slot);
+		slot                         = flat_slot;
+		state.bindless_volume_in_2d  = is_volume;
+		state.bindless_volume_slot   = volume_slot;
+	}
 	if (image.dimension == ImageDimension::Dim3D && !image.cube) {
 		// A 2D texture in a 3D image's heap (IR::BindlessFlat2DInVolume): the 3D array reads the
 		// placeholder, the sample reads the 2D array at the flagged slot.
@@ -1317,6 +1340,49 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 				const auto selected = state.builder.AllocateId();
 				state.builder.AddFunction(spv::OpSelect, result_type, selected,
 				                          state.bindless_flat_in_volume, flat_sample, sample);
+				sample = selected;
+			}
+			// An explicit-LOD 2D bindless sample whose key holds a 3D texture reads it at (u, v, 0).
+			if (image.bindless && state.bindless_volume_in_2d != 0u && !dref &&
+			    (operand_mask & ~static_cast<uint32_t>(spv::ImageOperandsLodMask)) == 0u &&
+			    explicit_lod && layout.offset == NoImageComponent) {
+				auto volume      = image;
+				volume.dimension = ImageDimension::Dim3D;
+				const auto volume_type = ImageType(state, volume);
+				const auto variable    = state.bindless_image_variables.find(volume_type);
+				EXIT_IF(variable == state.bindless_image_variables.end());
+				const auto pointer = state.builder.AllocateId();
+				state.builder.AddFunction(
+				    spv::OpAccessChain,
+				    state.builder.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, volume_type),
+				    pointer, variable->second, state.bindless_volume_slot);
+				state.builder.AddAnnotation(spv::OpDecorate, pointer, spv::DecorationNonUniform);
+				const auto volume_image = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpLoad, volume_type, volume_image, pointer);
+				state.builder.AddAnnotation(spv::OpDecorate, volume_image, spv::DecorationNonUniform);
+				const auto sampled = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpSampledImage,
+				                          state.builder.Type(spv::OpTypeSampledImage, volume_type),
+				                          sampled, volume_image, sampler_id);
+				state.builder.AddAnnotation(spv::OpDecorate, sampled, spv::DecorationNonUniform);
+				const auto flat_coord = CoordF32(ctx, mem, *address, layout.coord, 2u, false);
+				const auto u          = state.builder.AllocateId();
+				const auto v          = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), u, flat_coord, 0u);
+				state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), v, flat_coord, 1u);
+				const auto coord = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpCompositeConstruct, TypeF32Vector(state, 3), coord,
+				                          u, v, ZeroF32(state));
+				const auto volume_sample = state.builder.AllocateId();
+				std::vector<uint32_t> words {result_type, volume_sample, sampled, coord};
+				if (operand_mask != 0u) {
+					words.push_back(operand_mask);
+					words.insert(words.end(), operands.begin(), operands.end());
+				}
+				state.builder.AddFunction(opcode, words);
+				const auto selected = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpSelect, result_type, selected,
+				                          state.bindless_volume_in_2d, volume_sample, sample);
 				sample = selected;
 			}
 			auto       result = sample;

@@ -178,6 +178,9 @@ struct EmitterState {
 	// A 3D bindless image: whether the key holds a 2D texture (bool) and its 2D-array slot.
 	uint32_t                                         bindless_flat_in_volume       = 0;
 	uint32_t                                         bindless_flat_slot            = 0;
+	// A 2D float bindless image: whether the key holds a 3D texture (bool) and its 3D slot.
+	uint32_t                                         bindless_volume_in_2d         = 0;
+	uint32_t                                         bindless_volume_slot          = 0;
 	uint32_t                                         bindless_sampler_variable     = 0;
 	uint32_t                                         bindless_sampler_slot         = 0;
 	uint32_t                                         sampler_variable          = 0;

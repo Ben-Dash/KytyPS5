@@ -45,6 +45,10 @@ inline constexpr uint32_t BindlessPending        = 0xffffffffu;
 // array. The GPU reads a T# by its own type, so a 3D sample instruction reads a 2D texture as 2D
 // (Ghost of Yotei builds its moon-shadow volumes from 2D shadow maps this way).
 inline constexpr uint32_t BindlessFlat2DInVolume = 0x40000000u;
+// A translation entry of a 2D float-array key whose T# is a 3D texture: the slot is in the 3D
+// array, and an explicit-LOD 2D sample reads it at (u, v, 0) (the instruction has no r coordinate).
+inline constexpr uint32_t BindlessVolumeIn2D     = 0x20000000u;
+inline constexpr uint32_t BindlessSlotFlags      = BindlessFlat2DInVolume | BindlessVolumeIn2D;
 // The S# a sampler without a usable heap entry gets: wrap on every axis, trilinear, full LOD range.
 inline constexpr std::array<uint32_t, 4> BindlessDefaultSampler {
     0x00000000u,                             // wrap on every axis
