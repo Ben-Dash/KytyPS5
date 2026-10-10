@@ -69,7 +69,7 @@ inline constexpr std::array<EmulatorSwitch, 14> EMULATOR_SWITCHES = {{
      "time and run only now and then. Without this the emulator sets up the textures of such a "
      "list only after the step asked for them, which is too late, so the step sees empty "
      "textures (Ghost of Yotei: the moonlight stays dark). With this on, a new list is set up "
-     "completely the first time a compute step uses it. On by default; uncheck it to turn it off.",
+     "completely the first time a compute step uses it (3D textures only). On by default; uncheck it to turn it off.",
      "Under test: meant to fix the empty moon volumes in Ghost of Yotei. May cost a short "
      "hitch when such a list is first seen.", "*"},
     {"KYTY_DISPATCH_SNAPSHOT", "Record compute steps for offline replay (diagnostics)",

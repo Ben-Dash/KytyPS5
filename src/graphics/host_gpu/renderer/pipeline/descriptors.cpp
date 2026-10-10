@@ -2156,6 +2156,39 @@ void RenderExecutor::ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint3
                                                 uint64_t shader_hash) {
 	const auto keys   = std::min<uint32_t>(entries, static_cast<uint32_t>(heap.settled.size()));
 	uint32_t   images = 0, resolved = 0, other = 0;
+	const auto started = std::chrono::steady_clock::now();
+	// Every 10 s: how many heaps were resolved eagerly, by which shaders, and what it cost.
+	struct Totals {
+		uint64_t heaps = 0, keys = 0, images = 0, ns = 0;
+	};
+	static std::unordered_map<uint64_t, Totals> totals;
+	static auto next_report = started + std::chrono::seconds(10);
+	struct Charge {
+		Totals& t;
+		const std::chrono::steady_clock::time_point& start;
+		uint32_t& images;
+		uint32_t keys;
+		~Charge() {
+			t.heaps++;
+			t.keys += keys;
+			t.images += images;
+			t.ns += static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+			                                  std::chrono::steady_clock::now() - start)
+			                                  .count());
+		}
+	} charge {totals[shader_hash], started, resolved, keys};
+	if (started >= next_report) {
+		next_report = started + std::chrono::seconds(10);
+		for (auto& [hash, t]: totals) {
+			std::printf("\x1b[91mbindless-eager: last 10 s cs %016llx: %llu heaps, %llu keys read, %llu images "
+			            "resolved, %.1f ms\x1b[0m\n",
+			            static_cast<unsigned long long>(hash), static_cast<unsigned long long>(t.heaps),
+			            static_cast<unsigned long long>(t.keys), static_cast<unsigned long long>(t.images),
+			            static_cast<double>(t.ns) / 1e6);
+		}
+		std::fflush(stdout);
+		totals.clear();
+	}
 	std::vector<uint8_t> records(static_cast<size_t>(keys) * 32u);
 	const auto base = heap.base + heap.table_offset;
 	if (keys == 0 || !Libs::LibKernel::Memory::TryReadBacking(base, records.data(), records.size())) {
@@ -2185,6 +2218,9 @@ void RenderExecutor::ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint3
 			}
 			continue;
 		}
+		if (descriptor.Type() != Prospero::ImageType::kColor3D) {
+			continue; // left to the shader's feedback, as before
+		}
 		images++;
 		resolved += ResolveBindlessKey(heap, key) ? 1u : 0u;
 	}
@@ -2193,7 +2229,7 @@ void RenderExecutor::ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint3
 	static std::unordered_map<uint64_t, uint32_t> lines;
 	if (lines[line_key]++ < 4u) {
 		std::printf("\x1b[91mbindless-eager: cs %016llx heap 0x%llx (+%u, binding %u) resolved on first "
-		            "sight: %u of %u image T#s, %u other records skipped, %u keys\x1b[0m\n",
+		            "sight: %u of %u 3D T#s, %u other records skipped, %u keys\x1b[0m\n",
 		            static_cast<unsigned long long>(shader_hash), static_cast<unsigned long long>(heap.base),
 		            heap.table_offset, heap.binding, resolved, images, other, keys);
 		std::fflush(stdout);
@@ -2375,15 +2411,17 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		// A compute shader that runs rarely and gets a T# table at a new address each time (Ghost
 		// of Yotei's moon volume pass ef5181198aadd55d, 8192 keys) finds every key still pending:
 		// the feedback that would name them arrives after its heap is gone, so it sampled only
-		// placeholders and wrote zeros. A heap of plain T# records nothing has resolved yet is
-		// resolved right away at a compute dispatch, every key that holds an image T#.
-		// KYTY_BINDLESS_EAGER=0 turns it off.
+		// placeholders and wrote zeros. A volume heap of plain T# records nothing has resolved yet
+		// is resolved right away at a compute dispatch, every key that holds a 3D T#. Only volumes:
+		// resolving every image of the per-frame 2D tables cost seconds per 10 s and reached a
+		// depth T# no shader samples (an EXIT). KYTY_BINDLESS_EAGER=0 turns it off.
 		static const bool eager = [] {
 			const char* text = KYTY_GETENV("KYTY_BINDLESS_EAGER");
 			return text == nullptr || std::strcmp(text, "0") != 0;
 		}();
 		if (eager && program.stage == ShaderType::Compute && use.record_stride == 32u &&
-		    use.pointer_offset == UINT32_MAX && heap->settled_keys.empty()) {
+		    use.pointer_offset == UINT32_MAX && heap->binding == ShaderRecompiler::IR::BindlessImages3D &&
+		    heap->settled_keys.empty()) {
 			ResolveBindlessHeapEagerly(*heap, std::min(entries, heap->entries), program.shader_hash);
 		}
 		// A table of material records is rewritten at a new address every frame, so its heap
