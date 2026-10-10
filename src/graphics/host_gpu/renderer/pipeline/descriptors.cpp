@@ -2515,6 +2515,49 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		prepared.bindless_images.insert(prepared.bindless_images.end(), heap->resolved.begin(),
 		                                heap->resolved.end());
 	}
+	// KYTY_BINDLESS_REFRESH=1: a resolved bindless texture is checked once per frame for CPU writes
+	// and uploaded again when its memory changed. A key is resolved once, and nothing else looks at
+	// the image afterwards, so data the game streams in later (APR reads into an allocated texture,
+	// Ghost of Yotei: four 128x128x8 arrays at 0x50c7b00000 stayed empty) never reached the GPU.
+	static const bool refresh = [] {
+		const char* text = KYTY_GETENV("KYTY_BINDLESS_REFRESH");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	if (refresh && !prepared.bindless_images.empty()) {
+		static uint64_t                     refreshed_frame = UINT64_MAX;
+		static std::unordered_set<uint64_t> refreshed;
+		static uint64_t                     uploads = 0, checks = 0;
+		static auto                         next_report = std::chrono::steady_clock::now();
+		if (refreshed_frame != frame) {
+			refreshed_frame = frame;
+			refreshed.clear();
+		}
+		auto& texture_cache = m_context.GetTextureCache();
+		for (const auto id: prepared.bindless_images) {
+			const auto image_key = static_cast<uint64_t>(id.index) | (uint64_t {id.generation} << 32u);
+			if (!refreshed.insert(image_key).second) {
+				continue;
+			}
+			auto* image = texture_cache.m_slot_images.try_get(id);
+			if (image == nullptr || !image->registered || image->binding.is_target ||
+			    image->info.data.Empty()) {
+				continue;
+			}
+			checks++;
+			const bool dirty = image->IsBufferModified() || image->IsDefinitelyCpuDirty() ||
+			                   image->IsMaybeCpuDirty();
+			texture_cache.RefreshImage(id);
+			uploads += dirty ? 1u : 0u;
+		}
+		if (const auto now = std::chrono::steady_clock::now(); now >= next_report) {
+			next_report = now + std::chrono::seconds(30);
+			std::printf("\x1b[92mbindless-refresh: %llu checks, %llu with CPU writes since the last report\x1b[0m\n",
+			            static_cast<unsigned long long>(checks), static_cast<unsigned long long>(uploads));
+			std::fflush(stdout);
+			checks  = 0;
+			uploads = 0;
+		}
+	}
 }
 
 void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
