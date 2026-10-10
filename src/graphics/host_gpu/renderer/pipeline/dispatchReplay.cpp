@@ -612,24 +612,28 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 	}
 
 	Resources res(d);
-	// Buffers by resource index.
-	std::map<uint32_t, std::pair<vk::Buffer, uint64_t>> buffers;
-	std::map<uint32_t, uint8_t*>                        buffer_bytes;
-	for (const auto& entry: meta["buffers"]) {
-		const auto index = entry["index"].get<uint32_t>();
-		if (entry.value("null", false)) {
-			buffers[index] = {nullptr, 0};
-			continue;
-		}
+	// The host memory regions the buffers view (several V#s may view one region), then each
+	// buffer by resource index as a view of its region.
+	std::map<uint32_t, std::pair<vk::Buffer, uint8_t*>> regions;
+	for (const auto& entry: meta["buffer_regions"]) {
+		const auto id   = entry["id"].get<uint32_t>();
 		const auto data = Blob(blobs, entry);
 		const auto size = entry.value("size", uint64_t {0});
-		if (data.empty() && entry.contains("skipped")) {
-			result.notes += " [buffer " + std::to_string(index) + " " + entry["skipped"].get<std::string>() + "]";
+		if (data.empty()) result.notes += " [buffer region " + std::to_string(id) + " not captured]";
+		regions[id] = res.HostBuffer(std::max<uint64_t>(size, data.size()), data);
+	}
+	std::map<uint32_t, vk::DescriptorBufferInfo> buffers;
+	for (const auto& entry: meta["buffers"]) {
+		const auto index = entry["index"].get<uint32_t>();
+		const auto found = entry.contains("region") ? regions.find(entry["region"].get<uint32_t>()) : regions.end();
+		if (found == regions.end()) {
+			if (entry.contains("skipped")) {
+				result.notes += " [buffer " + std::to_string(index) + " " + entry["skipped"].get<std::string>() + "]";
+			}
+			buffers[index] = {nullptr, 0, VK_WHOLE_SIZE};
+			continue;
 		}
-		const auto bytes = size == VK_WHOLE_SIZE ? data.size() : size;
-		auto [buffer, mapped] = res.HostBuffer(bytes, data);
-		buffers[index]        = {buffer, std::max<uint64_t>(bytes, 16)};
-		buffer_bytes[index]   = mapped;
+		buffers[index] = {found->second.first, entry["offset"].get<uint64_t>(), entry["size"].get<uint64_t>()};
 	}
 	const auto special = [&](const char* key, uint64_t fallback) -> std::pair<vk::Buffer, uint64_t> {
 		const auto& entry = meta[key];
@@ -794,7 +798,8 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 				case Kind::Buffers:
 					for (const auto resource: binding.resources) {
 						const auto found = buffers.find(resource);
-						add(found != buffers.end() ? found->second : std::pair<vk::Buffer, uint64_t> {});
+						buffer_infos.push_back(found != buffers.end() ? found->second
+						                                              : vk::DescriptorBufferInfo {nullptr, 0, VK_WHOLE_SIZE});
 					}
 					break;
 				case Kind::Samplers:
@@ -1047,11 +1052,11 @@ Result ReplayOne(Device& d, const Options& o, const fs::path& folder, uint32_t r
 	std::vector<Output> outputs;
 	const auto& jout = meta["outputs"];
 	if (jout.is_object()) {
-		for (const auto& entry: jout["buffers"]) {
-			const auto index = entry["index"].get<uint32_t>();
-			const auto found = buffer_bytes.find(index);
-			outputs.push_back({"buffer " + std::to_string(index), &entry,
-			                   found != buffer_bytes.end() ? found->second : nullptr,
+		for (const auto& entry: jout["regions"]) {
+			const auto id    = entry["id"].get<uint32_t>();
+			const auto found = regions.find(id);
+			outputs.push_back({"region " + std::to_string(id), &entry,
+			                   found != regions.end() ? found->second.second : nullptr,
 			                   entry.value("size", uint64_t {0})});
 		}
 		for (const auto& entry: jout["images"]) {

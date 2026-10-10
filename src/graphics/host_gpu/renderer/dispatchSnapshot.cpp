@@ -272,6 +272,51 @@ private:
 	bool                  m_buffer_barrier_done = false;
 };
 
+// The host memory the shader's buffers cover. Several V#s of one dispatch often view the same
+// memory (Ghost of Yotei binds one record array through descriptors of different strides), so
+// buffers of one host buffer that overlap or lie close together share a region: the replay binds
+// them into one buffer, and a write through one view is seen through the others, as live.
+struct BufferRegion {
+	vk::Buffer buffer;
+	uint64_t   begin   = 0;
+	uint64_t   end     = 0;
+	bool       written = false;
+};
+
+std::vector<BufferRegion> BufferRegions(const PreparedBindings&                        bindings,
+                                        const ShaderRecompiler::IR::CompiledShaderInfo& program,
+                                        std::vector<int>&                               region_of) {
+	constexpr uint64_t Gap   = 64u * 1024u;
+	constexpr uint64_t Align = 256u;
+	std::vector<BufferRegion> regions;
+	region_of.assign(bindings.buffers.size(), -1);
+	std::vector<size_t> order;
+	for (size_t i = 0; i < bindings.buffers.size(); i++) {
+		const auto& view = bindings.buffers[i];
+		if (view.buffer != nullptr && view.range != 0 && view.range != VK_WHOLE_SIZE) order.push_back(i);
+	}
+	std::ranges::sort(order, [&](size_t a, size_t b) {
+		const auto& x = bindings.buffers[a];
+		const auto& y = bindings.buffers[b];
+		return std::pair(static_cast<VkBuffer>(x.buffer), x.offset) <
+		       std::pair(static_cast<VkBuffer>(y.buffer), y.offset);
+	});
+	for (const auto i: order) {
+		const auto& view    = bindings.buffers[i];
+		const bool  written = i < program.info.buffers.size() && program.info.buffers[i].written;
+		const auto  begin   = view.offset & ~(Align - 1u);
+		if (regions.empty() || regions.back().buffer != view.buffer || begin > regions.back().end + Gap) {
+			regions.push_back({view.buffer, begin, view.offset + view.range, written});
+		} else {
+			auto& last   = regions.back();
+			last.end     = std::max(last.end, view.offset + view.range);
+			last.written = last.written || written;
+		}
+		region_of[i] = static_cast<int>(regions.size() - 1);
+	}
+	return regions;
+}
+
 Json DescriptorJson(const ShaderRecompiler::IR::DescriptorValue& value) {
 	Json words = Json::array();
 	for (uint32_t i = 0; i < value.dword_count && i < value.dwords.size(); i++) {
@@ -400,11 +445,27 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	Collector collector(context);
 	auto&     cache = context.GetTextureCache();
 	// Reserve every array first: the collector keeps pointers into them.
+	std::vector<int> region_of;
+	const auto       regions = BufferRegions(bindings, program, region_of);
+	meta["buffer_regions"]   = Json::array();
+	for (size_t r = 0; r < regions.size(); r++) {
+		meta["buffer_regions"].push_back({{"id", r}, {"written", regions[r].written}});
+	}
 	meta["buffers"] = Json::array();
 	for (size_t i = 0; i < bindings.buffers.size(); i++) {
-		Json entry;
+		const auto& view = bindings.buffers[i];
+		Json        entry;
 		entry["index"]   = i;
 		entry["written"] = i < program.info.buffers.size() && program.info.buffers[i].written;
+		entry["size"]    = view.range;
+		if (view.buffer == nullptr) {
+			entry["null"] = true;
+		} else if (region_of[i] < 0) {
+			entry["skipped"] = view.range == 0 ? "empty" : "whole size";
+		} else {
+			entry["region"] = region_of[i];
+			entry["offset"] = view.offset - regions[region_of[i]].begin;
+		}
 		meta["buffers"].push_back(std::move(entry));
 	}
 	meta["images"] = Json::array();
@@ -454,9 +515,9 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 		meta["fault_buffer"]   = faults != nullptr ? faults->Size() : 0;
 	}
 
-	for (size_t i = 0; i < bindings.buffers.size(); i++) {
-		const auto& view = bindings.buffers[i];
-		collector.AddBuffer(view.buffer, view.offset, view.range, meta["buffers"][i]);
+	for (size_t r = 0; r < regions.size(); r++) {
+		collector.AddBuffer(regions[r].buffer, regions[r].begin, regions[r].end - regions[r].begin,
+		                    meta["buffer_regions"][r]);
 	}
 	size_t image_entry = 0;
 	for (size_t i = 0; i < bindings.images.size(); i++) {
@@ -503,13 +564,13 @@ void CaptureOutputs(RenderContext& context, const Pending& pending, const Shader
 	auto&       meta    = open->second;
 	const auto& program = *input.stage.program;
 	Json        outputs;
-	outputs["buffers"] = Json::array();
+	std::vector<int> region_of;
+	const auto       regions = BufferRegions(bindings, program, region_of);
+	outputs["regions"] = Json::array();
 	outputs["images"]  = Json::array();
-	for (size_t i = 0; i < bindings.buffers.size(); i++) {
-		if (i < program.info.buffers.size() && program.info.buffers[i].written) {
-			Json entry;
-			entry["index"] = i;
-			outputs["buffers"].push_back(std::move(entry));
+	for (size_t r = 0; r < regions.size(); r++) {
+		if (regions[r].written) {
+			outputs["regions"].push_back({{"id", r}});
 		}
 	}
 	auto& cache = context.GetTextureCache();
@@ -528,11 +589,11 @@ void CaptureOutputs(RenderContext& context, const Pending& pending, const Shader
 		}
 	}
 	Collector collector(context);
-	size_t    buffer_entry = 0;
-	for (size_t i = 0; i < bindings.buffers.size(); i++) {
-		if (i < program.info.buffers.size() && program.info.buffers[i].written) {
-			const auto& view = bindings.buffers[i];
-			collector.AddBuffer(view.buffer, view.offset, view.range, outputs["buffers"][buffer_entry++]);
+	size_t    region_entry = 0;
+	for (size_t r = 0; r < regions.size(); r++) {
+		if (regions[r].written) {
+			collector.AddBuffer(regions[r].buffer, regions[r].begin, regions[r].end - regions[r].begin,
+			                    outputs["regions"][region_entry++]);
 		}
 	}
 	size_t image_entry = 0;
