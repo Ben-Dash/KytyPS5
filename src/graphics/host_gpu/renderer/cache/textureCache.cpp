@@ -3150,8 +3150,38 @@ void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size,
 			exact            = exact || (data.address == address && data.size == size);
 		}
 	}
+	// KYTY_BC_BUFFER_WRITES=1: a block-compressed image takes buffer writes anywhere inside it.
+	// Nothing renders or stores to a BC surface as an image, so a GPU write into its range is the
+	// game filling it through a buffer alias, mip by mip and layer by layer (Ghost of Yotei
+	// 4337635433d63234 compresses its reflection cubes into a 102-layer BC6H array at
+	// 0x503228f000 in 0x10000/0x4000/0x1000 pieces; none starts at the array, so it stayed empty).
+	static const bool bc_buffer_writes = [] {
+		const char* text = KYTY_GETENV("KYTY_BC_BUFFER_WRITES");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
 	for (const auto id: images) {
 		auto& image = m_slot_images[id];
+		if (bc_buffer_writes && image.info.IsBlock() && image.info.data.address != address &&
+		    address >= image.info.data.address && address + size <= image.info.data.End()) {
+			static std::mutex                   bc_mutex;
+			static std::unordered_set<uint64_t> bc_seen;
+			{
+				const std::lock_guard bc_lock(bc_mutex);
+				if (bc_seen.size() < 1024 && bc_seen.insert(image.info.data.address).second) {
+					std::printf("\x1b[91mbc-buffer-write: BC image 0x%016" PRIx64 " (%ux%u, %u layers, %u mips) takes "
+					            "a buffer write at +0x%" PRIx64 " size 0x%" PRIx64 "\x1b[0m\n",
+					            image.info.data.address, image.info.extent.width, image.info.extent.height,
+					            image.info.resources.layers, image.info.resources.levels,
+					            address - image.info.data.address, size);
+					std::fflush(stdout);
+				}
+			}
+			if (image.IsGpuModified()) {
+				image.ClearGpuModified();
+			}
+			image.MarkBufferModified();
+			continue;
+		}
 		if (image.info.data.address != address) {
 			continue;
 		}
