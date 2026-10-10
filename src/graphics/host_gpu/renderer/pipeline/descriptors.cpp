@@ -2453,6 +2453,35 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 				}
 			}
 		}
+		// KYTY_DEBUG_BINDLESS_PENDING=1: every 10 s, per shader, how many of its heap bindings had no
+		// key resolved yet when it ran (it then samples only placeholders), most such first.
+		static const bool pending_stats = KYTY_GETENV("KYTY_DEBUG_BINDLESS_PENDING") != nullptr;
+		if (pending_stats) [[unlikely]] {
+			struct Uses {
+				uint64_t uses = 0, empty = 0, keys = 0;
+			};
+			static std::unordered_map<uint64_t, Uses> uses;
+			static auto next = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+			auto&       u    = uses[program.shader_hash];
+			u.uses++;
+			u.empty += heap->settled_keys.empty() ? 1u : 0u;
+			u.keys += heap->settled_keys.size();
+			if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+				next = now + std::chrono::seconds(10);
+				std::vector<std::pair<uint64_t, Uses>> list(uses.begin(), uses.end());
+				std::ranges::sort(list, [](const auto& a, const auto& b) { return a.second.empty > b.second.empty; });
+				for (size_t i = 0; i < list.size() && i < 12; i++) {
+					std::printf("\x1b[91mbindless-pending: shader %016llx: %llu heap bindings, %llu with no key "
+					            "resolved, %.1f keys on average\x1b[0m\n",
+					            static_cast<unsigned long long>(list[i].first),
+					            static_cast<unsigned long long>(list[i].second.uses),
+					            static_cast<unsigned long long>(list[i].second.empty),
+					            static_cast<double>(list[i].second.keys) / static_cast<double>(list[i].second.uses));
+				}
+				std::fflush(stdout);
+				uses.clear();
+			}
+		}
 		prepared.bindless_patches.push_back(
 		    {use.mapping_offset, heap->region, std::min(entries, heap->entries)});
 		prepared.bindless_images.insert(prepared.bindless_images.end(), heap->resolved.begin(),
