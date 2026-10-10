@@ -961,6 +961,9 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		               input_info.stage.program->shader_hash);
 	}
 	RebindBuffers(bindings);
+	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
+		DispatchSnapshot::WatchDispatch(input_info);
+	}
 	DispatchSnapshot::Pending snapshot;
 	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
 		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings,
@@ -1098,6 +1101,9 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	    args_addr, sizeof(vk::DispatchIndirectCommand), false);
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
+	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
+		DispatchSnapshot::WatchDispatch(input_info);
+	}
 	DispatchSnapshot::Pending snapshot;
 	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
 		std::array<uint32_t, 3> groups {};

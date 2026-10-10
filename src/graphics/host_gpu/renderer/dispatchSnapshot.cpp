@@ -17,6 +17,7 @@
 #include "graphics/shader/shader.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cinttypes>
 #include <cstdio>
@@ -346,6 +347,64 @@ std::unordered_map<uint32_t, Json>& OpenSnapshots() {
 
 bool Enabled() {
 	return GetSettings().enabled;
+}
+
+namespace {
+const std::vector<std::pair<uint64_t, uint64_t>>& WatchRanges() {
+	static const auto ranges = [] {
+		std::vector<std::pair<uint64_t, uint64_t>> list;
+		const char* text = KYTY_GETENV("KYTY_WRITE_WATCH");
+		for (const char* p = text; p != nullptr && *p != '\0';) {
+			char*      end     = nullptr;
+			const auto address = std::strtoull(p, &end, 16);
+			if (end == p) break;
+			uint64_t size = 4;
+			if (*end == '+') size = std::strtoull(end + 1, &end, 16);
+			list.emplace_back(address, std::max<uint64_t>(size, 1));
+			p = *end == ',' ? end + 1 : nullptr;
+		}
+		for (const auto& [address, size]: list) {
+			std::printf("write-watch: 0x%llx+0x%llx\n", static_cast<unsigned long long>(address),
+			            static_cast<unsigned long long>(size));
+		}
+		std::fflush(stdout);
+		return list;
+	}();
+	return ranges;
+}
+} // namespace
+
+bool WatchActive() {
+	return !WatchRanges().empty();
+}
+
+void WatchWrite(const char* source, uint64_t address, uint64_t size, uint64_t detail) {
+	if (size == 0) return;
+	for (const auto& [watched, length]: WatchRanges()) {
+		if (address < watched + length && watched < address + size) {
+			static std::atomic<uint32_t> lines {0};
+			if (lines.fetch_add(1, std::memory_order_relaxed) < 2000u) {
+				std::printf("\x1b[91mwrite-watch: %s writes 0x%llx+0x%llx (watched 0x%llx) detail=0x%llx\x1b[0m\n",
+				            source, static_cast<unsigned long long>(address),
+				            static_cast<unsigned long long>(size), static_cast<unsigned long long>(watched),
+				            static_cast<unsigned long long>(detail));
+				std::fflush(stdout);
+			}
+			return;
+		}
+	}
+}
+
+void WatchDispatch(const ShaderComputeInputInfo& input) {
+	const auto& program   = *input.stage.program;
+	const auto& resources = *input.stage.resources;
+	for (size_t i = 0; i < program.info.buffers.size() && i < resources.buffers.size(); i++) {
+		if (!program.info.buffers[i].written || resources.buffers[i].dword_count < 4) continue;
+		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
+		const auto source     = fmt::format("cs {:016x} buffer {}", program.shader_hash, i);
+		WatchWrite(source.c_str(), descriptor.Base48(), descriptor.GetSize(),
+		           uint64_t {input.workgroup_counts[0]} | (uint64_t {input.workgroup_counts[1]} << 32u));
+	}
 }
 
 bool Wanted(uint64_t shader_hash, uint64_t frame) {

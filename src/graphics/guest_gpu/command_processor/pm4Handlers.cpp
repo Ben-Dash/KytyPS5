@@ -2,6 +2,7 @@
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/stringUtils.h"
+#include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
 #include "graphics/guest_gpu/command_processor/pm4Dispatch.h"
@@ -1562,6 +1563,9 @@ KYTY_CP_OP_PARSER(CpOpCopyData) {
 		EXIT("unsupported 64-bit immediate copyData\n");
 	}
 
+	if (Libs::Graphics::DispatchSnapshot::WatchActive()) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("COPY_DATA", dst, num_bytes, src);
+	}
 	cp.DmaData(0, CopyDataDstToDma(dst_sel), dst_cache, dst, dma_src, src_cache, src, num_bytes, 1,
 	           write_confirm, 1);
 
@@ -1594,6 +1598,9 @@ KYTY_CP_OP_PARSER(CpOpDmaData) {
 	const uint8_t  write_confirm = static_cast<uint8_t>((control2 >> 31u) & 0x1u);
 	const uint32_t num_bytes     = control2 & 0x03ffffffu;
 
+	if (Libs::Graphics::DispatchSnapshot::WatchActive()) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("DMA_DATA", dst, num_bytes, src);
+	}
 	cp.DmaData(engine, dst_sel, dst_cache_policy, dst, src_sel, src_cache_policy, src, num_bytes,
 	           wait_previous, write_confirm, block_engine);
 
@@ -1800,6 +1807,9 @@ KYTY_CP_OP_PARSER(CpOpEventWriteEop) {
 	    reinterpret_cast<void*>(buffer[1] | (static_cast<uint64_t>(buffer[2] & 0xffffu) << 32u));
 	uint64_t value = (buffer[3] | (static_cast<uint64_t>(buffer[4]) << 32u));
 
+	if (Libs::Graphics::DispatchSnapshot::WatchActive()) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("EVENT_WRITE_EOP", reinterpret_cast<uint64_t>(dst_gpu_addr), 8, value);
+	}
 	cp.WriteAtEndOfPipe64(cache_policy, event_write_dest, eop_event_type, cache_action, event_index,
 	                      event_write_source, dst_gpu_addr, value, interrupt_selector);
 
@@ -1823,6 +1833,9 @@ KYTY_CP_OP_PARSER(CpOpEventWriteEos) {
 	    reinterpret_cast<void*>(buffer[1] | (static_cast<uint64_t>(buffer[2] & 0xffffu) << 32u));
 	uint32_t value = buffer[3];
 
+	if (Libs::Graphics::DispatchSnapshot::WatchActive()) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("EVENT_WRITE_EOS", reinterpret_cast<uint64_t>(dst_gpu_addr), 4, value);
+	}
 	cp.WriteAtEndOfPipe32(cache_policy, event_write_dest, eop_event_type, cache_action, event_index,
 	                      event_write_source, dst_gpu_addr, value, interrupt_selector);
 
@@ -2327,6 +2340,10 @@ KYTY_CP_OP_PARSER(CpOpReleaseMem) {
 	                     data_sel != 5);
 
 	LogUnknownReleaseMemGcr(gcr_cntl);
+	if (Libs::Graphics::DispatchSnapshot::WatchActive() && data_sel != 0) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("RELEASE_MEM", reinterpret_cast<uint64_t>(dst_gpu_addr),
+		                             data_sel == 1 ? 4u : 8u, value);
+	}
 
 	const bool gl2_writeback = ((gcr_cntl & GcrGl2Writeback) != 0);
 
@@ -2703,6 +2720,10 @@ KYTY_CP_OP_PARSER(CpOpWriteData) {
 	auto  write_control = buffer[0];
 	auto* dst = reinterpret_cast<uint32_t*>(buffer[1] | (static_cast<uint64_t>(buffer[2]) << 32u));
 
+	if (Libs::Graphics::DispatchSnapshot::WatchActive()) [[unlikely]] {
+		Libs::Graphics::DispatchSnapshot::WatchWrite("WRITE_DATA", reinterpret_cast<uint64_t>(dst), (dw_num - 2u) * 4u,
+		                             dw_num > 2u ? buffer[3] : 0u);
+	}
 	cp.WriteData(dst, buffer + 3, dw_num - 2, write_control);
 
 	return 1 + dw_num;

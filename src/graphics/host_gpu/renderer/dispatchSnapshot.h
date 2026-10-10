@@ -56,6 +56,15 @@ struct Pending {
 void CaptureOutputs(RenderContext& context, const Pending& pending,
                     const ShaderComputeInputInfo& input, const PreparedBindings& bindings);
 
+// KYTY_WRITE_WATCH=<hex address>[+<hex size>][,...] (diagnostic, off by default): one red line per
+// write that reaches a watched range, naming its source: the command processor's WRITE_DATA,
+// COPY_DATA, DMA_DATA, RELEASE_MEM and end-of-pipe writes, and compute dispatches that bind a
+// written buffer over it. Finds who writes (or never writes) a value the GPU reads.
+[[nodiscard]] bool WatchActive();
+void               WatchWrite(const char* source, uint64_t address, uint64_t size, uint64_t detail = 0);
+// Every written buffer of a compute dispatch against the watched ranges.
+void WatchDispatch(const ShaderComputeInputInfo& input);
+
 } // namespace DispatchSnapshot
 } // namespace Libs::Graphics
 
