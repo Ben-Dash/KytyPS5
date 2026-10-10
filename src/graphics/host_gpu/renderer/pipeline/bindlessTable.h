@@ -85,6 +85,8 @@ public:
 		// Keys the region holds. The guest appends textures to a heap as it streams them in and
 		// its descriptor grows; each draw patches its own descriptor's entry count.
 		uint32_t                            entries      = 0;
+		// The last shader that indexed this heap (placeholder reports name it).
+		uint64_t                            shader_hash  = 0;
 		ShaderRecompiler::IR::ImageResource resource;
 		std::vector<uint32_t>               slots;    // per key; 0 = not resolved
 		std::vector<uint8_t>                settled;  // per key; resolved, or known placeholder

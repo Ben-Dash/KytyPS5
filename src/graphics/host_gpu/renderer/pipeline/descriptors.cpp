@@ -529,6 +529,7 @@ struct BindlessFailContext {
 	uint64_t heap_base = 0;
 	uint32_t binding   = 0;
 	uint32_t key       = 0;
+	uint64_t shader    = 0;
 	bool     requested = false;
 };
 static thread_local BindlessFailContext g_bindless_fail_context;
@@ -540,9 +541,9 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 	static std::unordered_set<std::string> seen;
 	static const bool strict   = KYTY_GETENV("KYTY_STRICT_TEXTURES") != nullptr;
 	const auto&       context  = g_bindless_fail_context;
-	auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={}): {}",
+	auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={} shader={:016x}): {}",
 	                        context.requested ? "requested by a shader" : "unrequested slot",
-	                        context.heap_base, context.binding, context.key, reason);
+	                        context.heap_base, context.binding, context.key, context.shader, reason);
 	if (strict && context.requested) {
 		EXIT("%s", line.c_str());
 	}
@@ -1837,6 +1838,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	g_bindless_fail_context.heap_base = heap.base;
 	g_bindless_fail_context.binding   = heap.binding;
 	g_bindless_fail_context.key       = key;
+	g_bindless_fail_context.shader    = heap.shader_hash;
 	if (heap.listed[key] == 0) {
 		heap.listed[key] = 1;
 		heap.settled_keys.push_back(key);
@@ -2098,6 +2100,7 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
 		}
+		heap->shader_hash = program.shader_hash;
 		// A heap seen in an earlier frame: a record the guest rewrote since (a per-frame table
 		// whose address comes round again, a streamed texture replaced) is resolved again, or
 		// the key would keep showing the earlier frame's texture.
