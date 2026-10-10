@@ -8,6 +8,7 @@
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -104,10 +105,28 @@ void OcclusionQueries::OnFrame() {
 	}
 	auto& scheduler = m_context.GetCommandScheduler();
 	if (tick != 0 && !scheduler.GetMasterSemaphore().IsFree(tick)) {
+		const auto wait_start = std::chrono::steady_clock::now();
 		scheduler.Wait(tick);
+		m_stats.flip_waits++;
+		m_stats.flip_wait_ns += static_cast<uint64_t>(
+		    std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() -
+		                                                         wait_start)
+		        .count());
 	}
 	m_frame++;
 	PublishCompleted(true);
+	// Every 300 frames: how many dumps the game made, how many counted segments saw no samples
+	// (what the game may skip drawing) and how long flips waited for results.
+	if (m_pool != nullptr && m_frame % 300 == 0) {
+		Log::WriteToConsoleAndLog(fmt::format(
+		    "Occlusion queries: {} frames, dumps={} ({:.1f}/frame), counted segments={} empty={}, "
+		    "flip waits={} {:.1f}ms ({:.2f}ms/frame), open={}\n",
+		    300, m_stats.dumps, static_cast<double>(m_stats.dumps) / 300.0, m_stats.segments,
+		    m_stats.empty_segments, m_stats.flip_waits,
+		    static_cast<double>(m_stats.flip_wait_ns) / 1e6,
+		    static_cast<double>(m_stats.flip_wait_ns) / 1e6 / 300.0, m_segments.OpenQueries()));
+		m_stats = {};
+	}
 }
 
 void OcclusionQueries::PublishCompleted(bool refresh) {
@@ -143,6 +162,7 @@ void OcclusionQueries::Dump(CommandScheduler& scheduler, uint64_t address) {
 	if (m_query_active) {
 		EndQuery(recorder);
 	}
+	m_stats.dumps++;
 	m_pending.push_back(
 	    {.dump = m_segments.OnDump(address), .tick = scheduler.CurrentTick(), .frame = m_frame});
 	PublishCompleted(false);
@@ -190,8 +210,13 @@ uint64_t OcclusionQueries::ReadSamples(uint64_t first_slot, uint64_t end_slot) {
 }
 
 void OcclusionQueries::Publish(const PendingDump& pending) {
-	const auto& dump = pending.dump;
-	m_total += ReadSamples(dump.first_slot, dump.end_slot);
+	const auto& dump    = pending.dump;
+	const auto  samples = ReadSamples(dump.first_slot, dump.end_slot);
+	m_total += samples;
+	if (dump.end_slot != dump.first_slot) {
+		m_stats.segments++;
+		m_stats.empty_segments += samples == 0 && !dump.uncounted ? 1u : 0u;
+	}
 	if (dump.uncounted) {
 		m_total += OcclusionCounters::UncountedSamples;
 	}

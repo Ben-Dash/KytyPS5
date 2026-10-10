@@ -171,6 +171,13 @@ private:
 	uint64_t                    m_frame        = 0;
 	uint64_t                    m_total        = 0;
 	std::deque<PendingDump>     m_pending;
+	struct Stats {
+		uint64_t dumps          = 0;
+		uint64_t segments       = 0;
+		uint64_t empty_segments = 0;
+		uint64_t flip_waits     = 0;
+		uint64_t flip_wait_ns   = 0;
+	} m_stats;
 	std::vector<uint64_t>       m_results;
 };
 
