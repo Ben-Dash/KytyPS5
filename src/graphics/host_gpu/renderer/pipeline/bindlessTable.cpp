@@ -473,7 +473,12 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	heap.sub_keys       = sub_keys;
 	// A plain T# heap grows as the guest streams textures in; a table of larger records (one
 	// per material) has a fixed size.
-	const auto initial = record_stride == 32u ? std::max(entries, 1u << 14u) : std::max(entries, 16u);
+	// KYTY_BINDLESS_KEY_BOUNDS: a small table (Ghost of Yotei: 131 tables of 8 T#s per frame for
+	// 6cc64dee) gets room for four times its keys instead of 16384, so the regions do not fill up
+	// and start over every few frames.
+	const auto initial = record_stride != 32u ? std::max(entries, 16u)
+	                     : KeyBoundsEnabled()  ? std::max(entries, std::min(entries * 4u, 1u << 14u))
+	                                           : std::max(entries, 1u << 14u);
 	if (!AllocateRegion(heap, initial)) {
 		m_heaps.pop_back();
 		static std::atomic<uint32_t> resets {0};
