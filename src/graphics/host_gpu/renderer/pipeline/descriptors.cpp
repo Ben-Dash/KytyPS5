@@ -1882,7 +1882,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		ReportPlaceholder(fmt::format("T# has a reserved component swizzle 0x{:03x} dwords={:08x},{:08x},{:08x},{:08x}\n",
 		                              descriptor.DstSelXYZW(), value.dwords[0], value.dwords[1],
 		                              value.dwords[2], value.dwords[3]).c_str(),
-		                  !PlausibleImageDescriptor(descriptor));
+		                  !g_bindless_fail_context.requested);
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
