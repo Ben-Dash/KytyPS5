@@ -33,6 +33,12 @@ struct DrawNote {
 	uint32_t                            instance_count = 0;
 	int32_t                             vertex_offset  = 0;
 	uint32_t                            first_instance = 0;
+	uint64_t                            ps_hash        = 0; // 0: no pixel shader (depth only)
+	uint32_t                            color_count    = 0;
+	uint64_t                            color_address  = 0; // first color target
+	uint64_t                            depth_address  = 0;
+	uint32_t                            target_width   = 0;
+	uint32_t                            target_height  = 0;
 };
 void NoteDraw(BufferCache& cache, const DrawNote& note);
 

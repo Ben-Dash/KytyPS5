@@ -30,6 +30,9 @@ struct DrawInfo {
 	uint64_t    frame = 0;
 	uint64_t    draw  = 0;
 	std::string text;
+	// The first stage's fetch buffers, to print the raw bytes of a reported vertex.
+	std::array<ShaderVertexInputBuffer, 4> buffers {};
+	uint32_t                                buffer_count = 0;
 };
 
 struct State {
@@ -56,8 +59,8 @@ const char* KindName(uint32_t kind) {
 	switch (static_cast<IR::VertexExplodeKind>(kind)) {
 		case IR::VertexExplodeKind::NonFinite: return "nan/inf";
 		case IR::VertexExplodeKind::WZero: return "w~0";
-		case IR::VertexExplodeKind::Huge: return "huge-xy/w";
-		case IR::VertexExplodeKind::Zero: return "zero(cull)";
+		case IR::VertexExplodeKind::Huge: return "huge";
+		case IR::VertexExplodeKind::Zero: return "cull(xyw=0)";
 		default: return "?";
 	}
 }
@@ -67,6 +70,9 @@ std::string DescribeDraw(const DrawNote& note, uint64_t draw) {
 	std::string text = fmt::format("draw #{} frame {} prim={} inst={} first_inst={} voff={}", draw,
 	                               note.frame, note.primitive, note.instance_count,
 	                               note.first_instance, note.vertex_offset);
+	text += fmt::format(" ps={:016x} rt={}x{} colors={} c0=0x{:x} depth=0x{:x}", note.ps_hash,
+	                    note.target_width, note.target_height, note.color_count,
+	                    note.color_address, note.depth_address);
 	if (note.indexed) {
 		text += fmt::format(" idx=0x{:x} n={} isize={}{}{}", note.index_address, note.index_count,
 		                    note.index_size, note.gpu_args ? " gpu-args" : "",
@@ -192,6 +198,11 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 				text = DescribeDraw(note, state.draws);
 			}
 			info.text = text;
+			const auto& first = note.stages.front();
+			info.buffer_count = static_cast<uint32_t>(std::clamp(first.buffers_num, 0, 4));
+			for (uint32_t i = 0; i < info.buffer_count; i++) {
+				info.buffers[i] = first.buffers[i];
+			}
 		}
 		info.frame = note.frame;
 		info.draw  = state.draws;
@@ -240,6 +251,23 @@ void Report(const uint32_t* region, uint64_t frame) {
 		            on, mesh ? "mesh" : "vs", hash, KindName(kind), frame, count,
 		            mesh ? "invocation" : "vertex", record[3], mesh ? "group" : "instance",
 		            record[4], x, y, z, w, text.c_str(), off);
+		// The reported vertex's bytes in each fetch buffer (as the CPU sees them now).
+		if (draw != state.last_draw.end() && !mesh) {
+			for (uint32_t i = 0; i < draw->second.buffer_count; i++) {
+				const auto& b = draw->second.buffers[i];
+				if (b.addr == 0 || b.stride == 0 || record[3] >= b.num_records) {
+					continue;
+				}
+				const auto* bytes =
+				    reinterpret_cast<const uint8_t*>(b.addr) + uint64_t {record[3]} * b.stride;
+				std::string hex;
+				for (uint32_t k = 0; k < std::min(b.stride, 32u); k++) {
+					hex += fmt::format("{:02x}{}", bytes[k], (k % 4 == 3) ? " " : "");
+				}
+				std::printf("%s  vb%u[%u] @0x%" PRIx64 ": %s%s\n", on, i, record[3],
+				            b.addr + uint64_t {record[3]} * b.stride, hex.c_str(), off);
+			}
+		}
 		LOGF("VtxExplode: %s=%016" PRIx64 " kind=%s frame=%" PRIu64 " hits=%u vertex=%u "
 		     "instance=%u pos=(%g, %g, %g, %g) | last %s\n",
 		     mesh ? "mesh" : "vs", hash, KindName(kind), frame, count, record[3], record[4], x,

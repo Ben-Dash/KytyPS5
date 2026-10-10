@@ -2626,6 +2626,16 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		note.vertex_offset  = draw.IsIndexed() ? emit.vertex_offset
 		                                       : static_cast<int32_t>(emit.first_vertex);
 		note.first_instance = emit.first_instance;
+		if (state.ps_active && state.ps_input_info.stage.program != nullptr) {
+			note.ps_hash = state.ps_input_info.stage.program->shader_hash;
+		}
+		note.color_count   = state.color_count;
+		note.color_address = state.color_count != 0 ? state.color_info[0].desc.info.data.address : 0;
+		note.depth_address = state.depth_info.desc.info.data.address;
+		const auto& extent = state.color_count != 0 ? state.color_info[0].desc.info.extent
+		                                            : state.depth_info.desc.info.extent;
+		note.target_width  = extent.width;
+		note.target_height = extent.height;
 		VertexExplode::NoteDraw(m_context.GetBufferCache(), note);
 	}
 	LogDrawPhase(draw.Name(), "PrepareBindings");

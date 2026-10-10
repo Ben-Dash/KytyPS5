@@ -442,27 +442,40 @@ void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
 	const auto boolean  = TypeBool(state);
 	const auto booleans = TypeBoolVector(state, 4);
 	const auto f32      = TypeF32(state);
+	std::array<uint32_t, 4> value {};
 	std::array<uint32_t, 4> magnitude {};
 	for (uint32_t i = 0; i < 4; i++) {
-		const auto component = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpCompositeExtract, f32, component, position, i);
-		magnitude[i] = EmitGlsl<GLSLstd450FAbs, IR::Type::F32>(state, component);
+		value[i] = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpCompositeExtract, f32, value[i], position, i);
+		magnitude[i] = EmitGlsl<GLSLstd450FAbs, IR::Type::F32>(state, value[i]);
 	}
+	const auto is_zero = [&](uint32_t i) {
+		return Binary(state, spv::OpFOrdEqual, boolean, value[i], ConstantF32Value(state, 0.0f));
+	};
 	const auto non_finite = Unary(
 	    state, spv::OpAny, boolean,
 	    Binary(state, spv::OpLogicalOr, booleans, Unary(state, spv::OpIsNan, booleans, position),
 	           Unary(state, spv::OpIsInf, booleans, position)));
-	const auto zero = Unary(
-	    state, spv::OpAll, boolean,
-	    Binary(state, spv::OpFOrdEqual, booleans, position,
-	           state.builder.Constant(spv::OpConstantNull, TypeF32Vector(state, 4))));
+	// x, y and w zero (any z): the usual ways to cull a vertex, (0,0,0,0) and (0,0,10,0).
+	const auto zero = Binary(state, spv::OpLogicalAnd, boolean,
+	                         Binary(state, spv::OpLogicalAnd, boolean, is_zero(0), is_zero(1)),
+	                         is_zero(3));
 	const auto w_zero = Binary(state, spv::OpFOrdLessThan, boolean, magnitude[3],
 	                           ConstantF32Value(state, 1e-6f));
+	// Huge: in front of the camera (w > 1e-6) with |x| or |y| above limit * w, or |x|, |y| or |z|
+	// above 1e6. A point behind the camera is clipped correctly.
+	const auto xy_max = EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, magnitude[0], magnitude[1]);
 	const auto huge   = Binary(
-	    state, spv::OpFOrdGreaterThan, boolean,
-	    EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, magnitude[0], magnitude[1]),
-	    Binary(state, spv::OpFMul, f32, magnitude[3],
-	           ConstantF32Value(state, IR::VertexExplodeCheck().limit)));
+	    state, spv::OpLogicalOr, boolean,
+	    Binary(state, spv::OpLogicalAnd, boolean,
+	           Binary(state, spv::OpFOrdGreaterThan, boolean, value[3],
+	                  ConstantF32Value(state, 1e-6f)),
+	           Binary(state, spv::OpFOrdGreaterThan, boolean, xy_max,
+	                  Binary(state, spv::OpFMul, f32, value[3],
+	                         ConstantF32Value(state, IR::VertexExplodeCheck().limit)))),
+	    Binary(state, spv::OpFOrdGreaterThan, boolean,
+	           EmitGlsl<GLSLstd450FMax, IR::Type::F32>(state, xy_max, magnitude[2]),
+	           ConstantF32Value(state, 1e6f)));
 	const auto hit = Binary(state, spv::OpLogicalOr, boolean,
 	                        Binary(state, spv::OpLogicalOr, boolean, non_finite, zero),
 	                        Binary(state, spv::OpLogicalOr, boolean, w_zero, huge));
