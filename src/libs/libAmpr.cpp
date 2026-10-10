@@ -28,6 +28,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -1896,6 +1897,21 @@ static uint32_t KYTY_SYSV_ABI CommandBufferGetNumCommands(void* command_buffer) 
 	return num;
 }
 
+// Every AMPR counter command a game records is printed once per distinct argument set, in red
+// (Ghost of Yotei: whether it uses them at all was unknown; WriteAddressFrom*Counter* still write 0).
+static void TraceCounterCommand(const char* name, uint64_t a, uint64_t b, uint64_t c, uint64_t d) {
+	static std::mutex                                                     mutex;
+	static std::map<std::tuple<std::string, uint64_t, uint64_t, uint64_t, uint64_t>, uint64_t> seen;
+	const std::lock_guard lock(mutex);
+	auto& count = seen[{name, a, b, c, d}];
+	if (count++ == 0 && seen.size() <= 512) {
+		std::printf("\x1b[91mampr: %s(%llx, %llx, %llx, %llx)\x1b[0m\n", name,
+		            static_cast<unsigned long long>(a), static_cast<unsigned long long>(b),
+		            static_cast<unsigned long long>(c), static_cast<unsigned long long>(d));
+		std::fflush(stdout);
+	}
+}
+
 static int AppendNoOpCommand(void* command_buffer, uint64_t size) {
 	if (command_buffer == nullptr) {
 		return LibKernel::KERNEL_ERROR_EINVAL;
@@ -2011,7 +2027,12 @@ static int KYTY_SYSV_ABI CommandBufferWaitOnCounter(void* command_buffer, uint8_
 	if (command_buffer == nullptr || access > 7 || compare > 6 || mask_op > 1 || flush > 1) {
 		return LibKernel::KERNEL_ERROR_EINVAL;
 	}
-	EXIT_NOT_IMPLEMENTED(access != 1 || mask_op != 0 || flush != 0 || value > UINT32_MAX);
+	TraceCounterCommand("WaitOnCounter", index, access, value, compare | (mask_op << 8u) | (flush << 16u));
+	// Other access or mask modes are not emulated yet: the wait is skipped as before (a red line
+	// above names it) instead of ending the session.
+	if (access != 1 || mask_op != 0 || flush != 0 || value > UINT32_MAX) {
+		return AppendNoOpCommand(command_buffer, 0x20);
+	}
 	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
 	                           CommandBufferState::WaitCommand {index, value, compare, true},
 	                           0x20)
@@ -2056,7 +2077,11 @@ static int KYTY_SYSV_ABI CommandBufferWriteCounter(void* command_buffer, uint8_t
 	if (command_buffer == nullptr || index >= 128 || access > 7 || operation > 4 || mode > 1) {
 		return LibKernel::KERNEL_ERROR_EINVAL;
 	}
-	EXIT_NOT_IMPLEMENTED(access != 1 || operation != 0 || mode != 0);
+	TraceCounterCommand("WriteCounter", index, access, value, operation | (mode << 8u));
+	// Other access modes and operations are not emulated yet: skipped as before (red line above).
+	if (access != 1 || operation != 0 || mode != 0) {
+		return AppendNoOpCommand(command_buffer, 0x20);
+	}
 	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
 	                           CommandBufferState::WriteCounterCommand {
 	                               index, static_cast<uint32_t>(value)},
@@ -2065,54 +2090,59 @@ static int KYTY_SYSV_ABI CommandBufferWriteCounter(void* command_buffer, uint8_t
 	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteCounterOnCompletion(void* command_buffer, uint8_t,
-                                                               uint8_t, uint64_t, uint8_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteCounterOnCompletion(void* command_buffer, uint8_t index,
+                                                               uint8_t access, uint64_t value, uint8_t operation) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteCounterOnCompletion (not emulated)", index, access, value, operation);
 
 	return AppendNoOpCommand(command_buffer, 0x20);
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounter(void*              command_buffer,
-                                                                  volatile uint64_t* address,
-                                                                  uint32_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounter(void*              command_buffer, volatile uint64_t* address, uint32_t arg2) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromTimeCounter (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounterOnCompletion(
-    void* command_buffer, volatile uint64_t* address) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounterOnCompletion(void* command_buffer, volatile uint64_t* address) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromTimeCounterOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), 0, 0, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounter(void*              command_buffer,
-                                                              volatile uint64_t* address, uint8_t,
-                                                              uint32_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounter(void*              command_buffer, volatile uint64_t* address, uint8_t arg2, uint32_t arg3) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromCounter (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterOnCompletion(
-    void* command_buffer, volatile uint64_t* address, uint8_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterOnCompletion(void* command_buffer, volatile uint64_t* address, uint8_t arg2) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromCounterOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPair(void*              command_buffer,
-                                                                  volatile uint64_t* address,
-                                                                  uint8_t, uint32_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPair(void*              command_buffer, volatile uint64_t* address, uint8_t arg2, uint32_t arg3) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromCounterPair (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
 
-static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPairOnCompletion(
-    void* command_buffer, volatile uint64_t* address, uint8_t) {
+static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPairOnCompletion(void* command_buffer, volatile uint64_t* address, uint8_t arg2) {
 	PRINT_NAME();
+
+	TraceCounterCommand("WriteAddressFromCounterPairOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
 	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
 }
