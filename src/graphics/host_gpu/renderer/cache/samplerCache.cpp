@@ -39,15 +39,9 @@ vk::Sampler SamplerCache::GetSampler(const ShaderSamplerResource& r, bool intege
 	return sampler;
 }
 
-vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
-                                              const SamplerKey&            key) {
-	Common::LockGuard lock(m_mutex);
-	const bool        integer_border = key[4] != 0;
-
-	if (auto iter = m_samplers.find(key); iter != m_samplers.end()) {
-		return iter->second;
-	}
-
+vk::SamplerCreateInfo SamplerCache::MakeCreateInfo(const ShaderSamplerResource& r,
+                                                   bool integer_border, float max_lod_bias,
+                                                   vk::SamplerReductionModeCreateInfo& reduction) {
 	float      aniso_ratio = 1.0f;
 	const auto mag_filter  = r.XyMagFilter();
 	const auto min_filter  = r.XyMinFilter();
@@ -149,7 +143,6 @@ vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
 	sampler_info.addressModeU = to_vk_address_mode(r.ClampX());
 	sampler_info.addressModeV = to_vk_address_mode(r.ClampY());
 	sampler_info.addressModeW = to_vk_address_mode(r.ClampZ());
-    const auto max_lod_bias = m_graphics.GetPhysicalDeviceProperties().limits.maxSamplerLodBias;
     sampler_info.mipLodBias = std::clamp(
         static_cast<float>(static_cast<int16_t>((r.LodBias() ^ 0x2000u) - 0x2000u)) / 256.0f,
         -max_lod_bias, max_lod_bias
@@ -178,7 +171,7 @@ vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
 
 	// S# FILTER_MODE: 0 blends the filter footprint, 1 takes its minimum, 2 its maximum (RDNA2).
 	// The minimum/maximum filters were applied as a blend before.
-	vk::SamplerReductionModeCreateInfo reduction {};
+	reduction = vk::SamplerReductionModeCreateInfo {};
 	if (const auto mode = r.FilterMode(); mode == 1u || mode == 2u) {
 		reduction.reductionMode =
 		    mode == 1u ? vk::SamplerReductionMode::eMin : vk::SamplerReductionMode::eMax;
@@ -190,6 +183,22 @@ vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
 			std::fflush(stdout);
 		}
 	}
+
+	return sampler_info;
+}
+
+vk::Sampler SamplerCache::FindOrCreateSampler(const ShaderSamplerResource& r,
+                                              const SamplerKey&            key) {
+	Common::LockGuard lock(m_mutex);
+	const bool        integer_border = key[4] != 0;
+
+	if (auto iter = m_samplers.find(key); iter != m_samplers.end()) {
+		return iter->second;
+	}
+
+	vk::SamplerReductionModeCreateInfo reduction {};
+	const auto sampler_info = MakeCreateInfo(
+	    r, integer_border, m_graphics.GetPhysicalDeviceProperties().limits.maxSamplerLodBias, reduction);
 
 	vk::Sampler vk_sampler = nullptr;
 	const auto  result     = m_graphics.device.createSampler(&sampler_info, nullptr, &vk_sampler);

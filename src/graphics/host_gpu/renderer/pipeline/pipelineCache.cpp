@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+#include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
@@ -511,6 +512,8 @@ struct PipelineCache::ProgramCache {
 		ShaderRecompiler::IR::CompiledShaderInfo program;
 		vk::ShaderModule                         module      = nullptr;
 		size_t                                   spirv_words = 0;
+		// KYTY_DISPATCH_SNAPSHOT: the module's SPIR-V, for snapshots.
+		std::vector<uint32_t>                    spirv;
 		// The emitter rejected the planned program: the shader is skipped like an untranslatable one.
 		bool                                     failed      = false;
 	};
@@ -607,6 +610,7 @@ struct PipelineCache::ProgramCache {
 		    .program     = std::move(result.program).TakeCompiledInfo(),
 		    .module      = module,
 		    .spirv_words = result.spirv.size(),
+		    .spirv       = DispatchSnapshot::Enabled() ? std::move(result.spirv) : std::vector<uint32_t> {},
 		};
 	}
 
@@ -1140,6 +1144,7 @@ struct PipelineCache::ProgramCache {
 			EXIT("shader 0x%016llx failed SPIR-V validation (see the warning above)\n",
 			     static_cast<unsigned long long>(params.hash));
 		}
+		auto snapshot_spirv = std::move(compiled->spirv);
 		source.permutations.push_back(
 		    MakePermutation(options, source.specialization, std::move(*compiled)));
 		Outcomes().Works(params.hash);
@@ -1147,6 +1152,13 @@ struct PipelineCache::ProgramCache {
 		source.last_push_cursor = push_data_cursor;
 		auto& permutation = source.permutations.back();
 		input_info.stage = {.program = &permutation.program, .resources = &source.resources};
+		if (DispatchSnapshot::Enabled()) [[unlikely]] {
+			permutation.program.snapshot_source = std::make_shared<const DispatchSnapshot::Source>(
+			    DispatchSnapshot::Source {
+			        ShaderPrecompile::Capture(params, options, permutation.specialization,
+			                                  push_data_cursor, input_info),
+			        std::move(snapshot_spirv)});
+		}
 		if (recording.IsOpen()) {
 			auto record = ShaderPrecompile::Capture(params, options, permutation.specialization,
 			                                        push_data_cursor, input_info);
@@ -1794,9 +1806,15 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 			entry = m_program_cache->programs.try_emplace(std::move(key), std::move(*result.plan))
 			            .first;
 		}
+		auto snapshot_spirv = std::move(result.compiled.spirv);
 		entry->second.permutations.push_back(m_program_cache->MakePermutation(
 		    options, record.specialization, std::move(result.compiled)));
 		++compiled;
+		if (DispatchSnapshot::Enabled()) [[unlikely]] {
+			entry->second.permutations.back().program.snapshot_source =
+			    std::make_shared<const DispatchSnapshot::Source>(
+			        DispatchSnapshot::Source {record, std::move(snapshot_spirv)});
+		}
 		if (ReplayVerifyEnabled()) [[unlikely]] {
 			auto& added         = entry->second.permutations.back();
 			added.replay_source = std::make_shared<const ShaderPrecompile::PermutationRecord>(record);
@@ -3171,5 +3189,10 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	EXIT_IF(!inserted);
 
 	return *iter->second;
+}
+
+// For dispatch snapshots: whether shaders are translated with bindless images.
+bool BindlessImagesActive() {
+	return g_bindless_images;
 }
 } // namespace Libs::Graphics

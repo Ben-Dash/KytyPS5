@@ -27,6 +27,11 @@ public:
 	KYTY_CLASS_NO_COPY(SamplerCache);
 
 	vk::Sampler GetSampler(const ShaderSamplerResource& r, bool integer_border);
+	// The create info GetSampler makes for a descriptor (offline tools use it too). It chains
+	// `reduction` when the descriptor asks for a min/max filter.
+	static vk::SamplerCreateInfo MakeCreateInfo(const ShaderSamplerResource& r, bool integer_border,
+	                                            float                               max_lod_bias,
+	                                            vk::SamplerReductionModeCreateInfo& reduction);
 
 private:
 	using SamplerKey = std::array<uint32_t, 5>;

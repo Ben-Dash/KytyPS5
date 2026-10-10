@@ -10,6 +10,7 @@
 #include "common/virtualMemory.h"
 #include "common/switches.h"
 #include "emulator.h"
+#include "graphics/host_gpu/renderer/pipeline/dispatchReplay.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderBench.h"
 #include "kytyGitVersion.h"
 
@@ -760,6 +761,10 @@ static int Main(int argc, char* argv[]) {
 	// Offline shader bench (no game, no window): see shaderBench.h.
 	if (argc >= 2 && std::string_view(argv[1]) == "--shader-bench") {
 		return Libs::Graphics::ShaderBench::Run(argc - 1, argv + 1);
+	}
+	// Offline compute dispatch replay (no game, no window): see dispatchReplay.h.
+	if (argc >= 2 && std::string_view(argv[1]) == "--dispatch-replay") {
+		return Libs::Graphics::DispatchReplay::Run(argc - 1, argv + 1);
 	}
 	VirtualMemory::Init();
 	InitializeThreads();

@@ -667,6 +667,8 @@ struct CompiledShaderInfo {
 	// The renderer's descriptor commit plan for `bindings`, made on first use by the thread that
 	// commits (see BindingPlan in descriptors.cpp). It moves and copies with the info.
 	mutable std::shared_ptr<const void> binding_plan;
+	// KYTY_DISPATCH_SNAPSHOT: what the permutation was compiled from (DispatchSnapshot::Source).
+	mutable std::shared_ptr<const void> snapshot_source;
 };
 
 struct UniformFillPlan {

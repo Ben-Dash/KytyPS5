@@ -13,6 +13,7 @@
 #include "graphics/guest_gpu/pm4.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/debug.h"
+#include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/imageInfo.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
@@ -960,9 +961,17 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		               input_info.stage.program->shader_hash);
 	}
 	RebindBuffers(bindings);
+	DispatchSnapshot::Pending snapshot;
+	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
+		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings,
+		                                           {thread_group_x, thread_group_y, thread_group_z},
+		                                           m_context.GetGpu().GetFrameNum());
+	}
 
-	// The large shared memory buffer is reused by every dispatch: no chaining past one.
-	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr;
+	// The large shared memory buffer is reused by every dispatch: no chaining past one. A
+	// snapshotted dispatch reads its outputs back right after it.
+	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr &&
+	                   snapshot.id == 0;
 	auto              vk_buffer        = chain ? buffer.ChainHandle() : buffer.Handle();
 	PreparedBindings* descriptor_stage = &bindings;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
@@ -1003,6 +1012,9 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		buffer.ContinueComputeChain();
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	}
+	if (snapshot.id != 0) [[unlikely]] {
+		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
@@ -1086,8 +1098,17 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	    args_addr, sizeof(vk::DispatchIndirectCommand), false);
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
+	DispatchSnapshot::Pending snapshot;
+	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
+		std::array<uint32_t, 3> groups {};
+		LibKernel::Memory::TryReadBacking(args_addr, groups.data(), sizeof(groups));
+		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings, groups,
+		                                           m_context.GetGpu().GetFrameNum(),
+		                                           args_buffer->Handle(), args_offset);
+	}
 	PreparedBindings* descriptor_stage = &bindings;
-	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr;
+	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr &&
+	                   snapshot.id == 0;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
 	               std::span {&descriptor_stage, 1u}, chain);
 	if (DispatchBindingsEnabled()) [[unlikely]] {
@@ -1126,6 +1147,9 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		buffer.ContinueComputeChain();
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	}
+	if (snapshot.id != 0) [[unlikely]] {
+		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
