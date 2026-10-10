@@ -1559,6 +1559,8 @@ struct FallbackHook<Tag, R(VKAPI_PTR*)(VkCommandBuffer, A...)> {
 #define KYTY_HOOK_FUNCTION_vkCmdClearAttachments HookCmdClearAttachments
 #define KYTY_HOOK_FUNCTION_vkCmdWriteTimestamp HookCmdWriteTimestamp
 #define KYTY_HOOK_FUNCTION_vkCmdResetQueryPool HookCmdResetQueryPool
+#define KYTY_HOOK_FUNCTION_vkCmdBeginQuery HookCmdBeginQuery
+#define KYTY_HOOK_FUNCTION_vkCmdEndQuery HookCmdEndQuery
 #define KYTY_HOOK_FUNCTION_vkCmdBeginConditionalRenderingEXT HookCmdBeginConditionalRenderingEXT
 #define KYTY_HOOK_FUNCTION_vkCmdEndConditionalRenderingEXT HookCmdEndConditionalRenderingEXT
 #define KYTY_HOOK_FUNCTION_vkCmdSetViewport HookCmdSetViewport
