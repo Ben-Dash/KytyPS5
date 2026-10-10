@@ -123,17 +123,21 @@ void CommandBuffer::BeginRendering(const RenderState& state) const {
 	rendering.pColorAttachments    = colors.data();
 	rendering.pDepthAttachment     = depth_stencil.has_depth ? &depth : nullptr;
 	rendering.pStencilAttachment   = depth_stencil.has_stencil ? &stencil : nullptr;
-	Handle().beginRendering(rendering);
+	const auto recorder = Handle();
+	recorder.beginRendering(rendering);
 	if (g_render_debug_counters.counting.load(std::memory_order_relaxed)) [[unlikely]] {
 		g_render_debug_counters.render_begins.fetch_add(1, std::memory_order_relaxed);
 	}
 	m_render_state = state;
 	m_rendering    = true;
+	m_context.GetOcclusionQueries().OnBeginRendering(recorder);
 }
 
 void CommandBuffer::EndRendering() const {
 	if (m_rendering) {
-		Handle().endRendering();
+		const auto recorder = Handle();
+		m_context.GetOcclusionQueries().OnEndRendering(recorder);
+		recorder.endRendering();
 		if (g_render_debug_counters.counting.load(std::memory_order_relaxed)) [[unlikely]] {
 			g_render_debug_counters.render_ends.fetch_add(1, std::memory_order_relaxed);
 		}

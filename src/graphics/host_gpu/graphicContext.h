@@ -57,6 +57,8 @@ struct GraphicContext {
 	// KYTY_AFTERMATH=1 (build with KYTY_AFTERMATH): VK_NV_device_diagnostics_config is on, Nsight
 	// Aftermath collects a GPU crash dump when the device is lost (see aftermath.h).
 	bool                               aftermath_enabled                     = false;
+	bool                               occlusion_query_precise               = false;
+	bool                               host_query_reset_enabled              = false;
 	bool                               supports_block_texel_view              = false;
 	// Storage buffer word accesses leave their range check to robustBufferAccess2, and storage
 	// buffer ranges are rounded down to whole dwords (see

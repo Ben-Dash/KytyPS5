@@ -276,6 +276,8 @@ private:
 	std::unique_ptr<DrawSpeculator> m_speculator;
 	// Process is running the constant engine's stream, which has no draws to speculate.
 	bool                            m_constant_stream = false;
+	// A ZPASS predication waits for host occlusion query results it asked for.
+	bool      m_occlusion_wait_requested = false;
 };
 
 } // namespace Libs::Graphics

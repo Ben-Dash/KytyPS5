@@ -66,6 +66,8 @@ namespace {
 	X(vkCmdClearAttachments)                                                                      \
 	X(vkCmdWriteTimestamp)                                                                        \
 	X(vkCmdResetQueryPool)                                                                        \
+	X(vkCmdBeginQuery)                                                                            \
+	X(vkCmdEndQuery)                                                                              \
 	X(vkCmdBeginConditionalRenderingEXT)                                                          \
 	X(vkCmdEndConditionalRenderingEXT)                                                            \
 	X(vkCmdSetViewport)                                                                           \
@@ -99,8 +101,6 @@ namespace {
 // stream holds, recorded directly. None is common enough to be worth copying.
 #define KYTY_FALLBACK_VK_FUNCTIONS(X)                                                             \
 	X(vkCmdUpdateBuffer)                                                                          \
-	X(vkCmdBeginQuery)                                                                            \
-	X(vkCmdEndQuery)                                                                              \
 	X(vkCmdCopyQueryPoolResults)                                                                  \
 	X(vkCmdExecuteCommands)                                                                       \
 	X(vkCmdSetEvent)                                                                              \
@@ -1262,6 +1262,25 @@ void VKAPI_PTR HookCmdResetQueryPool(VkCommandBuffer buffer, VkQueryPool pool, u
 	}
 	BeforeDirect();
 	g_real.vkCmdResetQueryPool(buffer, pool, first, count);
+}
+
+void VKAPI_PTR HookCmdBeginQuery(VkCommandBuffer buffer, VkQueryPool pool, uint32_t query,
+                                 VkQueryControlFlags flags) {
+	if (Routed(buffer)) {
+		Emit([=] { g_real.vkCmdBeginQuery(buffer, pool, query, flags); });
+		return;
+	}
+	BeforeDirect();
+	g_real.vkCmdBeginQuery(buffer, pool, query, flags);
+}
+
+void VKAPI_PTR HookCmdEndQuery(VkCommandBuffer buffer, VkQueryPool pool, uint32_t query) {
+	if (Routed(buffer)) {
+		Emit([=] { g_real.vkCmdEndQuery(buffer, pool, query); });
+		return;
+	}
+	BeforeDirect();
+	g_real.vkCmdEndQuery(buffer, pool, query);
 }
 
 void VKAPI_PTR HookCmdBeginConditionalRenderingEXT(VkCommandBuffer buffer,

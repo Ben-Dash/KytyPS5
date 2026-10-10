@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 14> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 15> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -31,6 +31,13 @@ inline constexpr std::array<EmulatorSwitch, 14> EMULATOR_SWITCHES = {{
      "In our tests clearly faster in Ghost of Yotei and the ASTRO games. If a game shows new "
      "graphics errors, try it off.",
      "PPSA21564,PPSA01325,PPSA26344"},
+    {"KYTY_OCCLUSION_QUERIES", "Real visibility tests (experimental)",
+     "Games ask the graphics card whether an object would be visible at all before they draw it "
+     "in full. The emulator normally answers \"visible\" every time, so hidden things are drawn "
+     "too and lens flares or glows can shine through walls. With this on, the graphics card "
+     "really counts what is visible.",
+     "Not tested in games yet. May save work in games that hide a lot, may show new graphics "
+     "errors."},
     {"KYTY_TRACKING_LOCK_BACKOFF", "Calmer waiting on memory checks (not recommended)",
      "When many game threads touch the same memory at once, they queue up and keep asking whether "
      "it is their turn, which keeps the processor busy with waiting. With this on, waiting threads "
