@@ -271,9 +271,6 @@ void DefineBindlessImages(EmitterState& state) {
 			continue;
 		}
 		const auto type = ImageType(state, image);
-		if (state.bindless_image_variables.contains(type)) {
-			continue;
-		}
 		const uint32_t binding = BindlessArrayBinding(image);
 		// KYTY_BINDLESS_TYPED: the arrays of the other T# kinds this instruction reads.
 		if (ShaderRecompiler::BindlessTyped()) {
@@ -297,6 +294,10 @@ void DefineBindlessImages(EmitterState& state) {
 				                            spv::DecorationBinding, alternate);
 				state.bindless_image_variables[alternate_type] = alternate_variable;
 			}
+		}
+		// Another image of this type declared the rest (its alternates above are its own).
+		if (state.bindless_image_variables.contains(type)) {
+			continue;
 		}
 		// A 3D image's keys may hold 2D textures (BindlessFlat2DInVolume): it also reads the 2D
 		// float array.
