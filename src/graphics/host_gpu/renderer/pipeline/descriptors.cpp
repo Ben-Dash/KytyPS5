@@ -2429,6 +2429,7 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 			continue; // region 0, count 0: every key samples the placeholder
 		}
 		heap->shader_hash = program.shader_hash;
+		heap->valid_keys  = std::max(heap->valid_keys, std::min(entries, heap->entries));
 		// A heap seen in an earlier frame: a record the guest rewrote since (a per-frame table
 		// whose address comes round again, a streamed texture replaced) is resolved again, or
 		// the key would keep showing the earlier frame's texture.

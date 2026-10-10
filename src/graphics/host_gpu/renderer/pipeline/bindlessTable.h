@@ -85,6 +85,10 @@ public:
 		// Keys the region holds. The guest appends textures to a heap as it streams them in and
 		// its descriptor grows; each draw patches its own descriptor's entry count.
 		uint32_t                            entries      = 0;
+		// KYTY_BINDLESS_KEY_BOUNDS: the most keys a draw's descriptor covered (the region holds
+		// more, 16384 at least), and the feedback snapshot count when the region was allocated.
+		uint32_t                            valid_keys   = 0;
+		uint64_t                            region_snapshot = 0;
 		// The last shader that indexed this heap (placeholder reports name it).
 		uint64_t                            shader_hash  = 0;
 		ShaderRecompiler::IR::ImageResource resource;
@@ -205,6 +209,12 @@ private:
 	std::unique_ptr<Buffer> m_feedback;
 	std::unique_ptr<Buffer> m_feedback_snapshot;
 	uint64_t                m_snapshot_tick = 0; // 0 = none recorded
+	// Snapshots recorded so far, and the number of the one waiting to be consumed.
+	uint64_t                m_snapshot_count    = 0;
+	uint64_t                m_snapshot_recorded = 0;
+public:
+	[[nodiscard]] static bool KeyBoundsEnabled();
+private:
 };
 
 } // namespace Libs::Graphics

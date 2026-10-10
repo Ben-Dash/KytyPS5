@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "common/threads.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/cache/samplerCache.h"
@@ -11,7 +12,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cinttypes>
+#include <cstdio>
+#include <cstring>
 #include <array>
 #include <atomic>
 #include <fmt/format.h>
@@ -414,6 +418,7 @@ bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries) {
 	const auto old_entries = heap.entries;
 	heap.region            = m_next_region;
 	heap.entries           = capacity;
+	heap.region_snapshot   = m_snapshot_count;
 	m_next_region += capacity;
 	heap.slots.resize(capacity, 0u);
 	heap.settled.resize(capacity, 0u);
@@ -574,19 +579,56 @@ void BindlessTable::RecordFeedbackSnapshot(CommandScheduler& scheduler) {
 	                        vk::PipelineStageFlagBits::eHost, {}, 0, nullptr, 1,
 	                        &snapshot_written, 0, nullptr);
 	m_snapshot_tick = scheduler.CurrentTick();
+	m_snapshot_recorded = ++m_snapshot_count;
 }
 
 bool BindlessTable::SnapshotReady(CommandScheduler& scheduler) {
 	return m_snapshot_tick != 0 && scheduler.IsFree(m_snapshot_tick);
 }
 
+// KYTY_BINDLESS_KEY_BOUNDS=1: requests only for keys a draw's descriptor covers, and none from a
+// snapshot recorded before the heap's region was allocated: after ResetHeaps a new heap reuses the
+// regions of dropped ones, whose flags the older snapshot still holds (Ghost of Yotei: 6cc64dee's
+// 8-key table got requests for keys near 18000, other data whose resolution lost the device).
+bool BindlessTable::KeyBoundsEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BINDLESS_KEY_BOUNDS");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 void BindlessTable::TakeRequests(const Heap& heap, std::vector<uint32_t>& keys) {
+	if (KeyBoundsEnabled() && heap.region_snapshot >= m_snapshot_recorded) {
+		return; // the snapshot predates this region: its words belong to another heap
+	}
 	const auto* snapshot = reinterpret_cast<const uint32_t*>(m_feedback_snapshot->Mapped().data());
 	auto*       feedback = reinterpret_cast<uint32_t*>(m_feedback->Mapped().data());
 	m_feedback_snapshot->Invalidate(heap.region * sizeof(uint32_t),
 	                                heap.entries * sizeof(uint32_t));
 	bool cleared = false;
-	for (uint32_t key = 0; key < heap.entries; key++) {
+	const auto limit = KeyBoundsEnabled() && heap.valid_keys != 0 ? std::min(heap.valid_keys, heap.entries)
+	                                                              : heap.entries;
+	static uint64_t dropped = 0;
+	static auto     next_report = std::chrono::steady_clock::now();
+	if (limit < heap.entries) {
+		for (uint32_t key = limit; key < heap.entries; key++) {
+			if (snapshot[heap.region + key] != 0) {
+				feedback[heap.region + key] = 0;
+				dropped++;
+			}
+		}
+		if (const auto now = std::chrono::steady_clock::now(); dropped != 0 && now >= next_report) {
+			next_report = now + std::chrono::seconds(30);
+			std::printf("\x1b[91mbindless: %llu requests for keys past their descriptor dropped (heap 0x%llx "
+			            "covers %u keys)\x1b[0m\n",
+			            static_cast<unsigned long long>(dropped),
+			            static_cast<unsigned long long>(heap.base), limit);
+			std::fflush(stdout);
+			dropped = 0;
+		}
+	}
+	for (uint32_t key = 0; key < limit; key++) {
 		if (snapshot[heap.region + key] != 0) {
 			// A flag the GPU sets again after the snapshot may be lost here; a key that is
 			// still pending is flagged again by the next draw that samples it.
