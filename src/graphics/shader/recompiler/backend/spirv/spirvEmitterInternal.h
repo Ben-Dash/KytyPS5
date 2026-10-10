@@ -181,6 +181,10 @@ struct EmitterState {
 	// A 2D float bindless image: whether the key holds a 3D texture (bool) and its 3D slot.
 	uint32_t                                         bindless_volume_in_2d         = 0;
 	uint32_t                                         bindless_volume_slot          = 0;
+	// KYTY_BINDLESS_TYPED: the array kind of the key (IR::BindlessKindMask >> shift, 0 = the
+	// instruction's own array) and its slot in that array.
+	uint32_t                                         bindless_typed_kind           = 0;
+	uint32_t                                         bindless_typed_slot           = 0;
 	uint32_t                                         bindless_sampler_variable     = 0;
 	uint32_t                                         bindless_sampler_slot         = 0;
 	uint32_t                                         sampler_variable          = 0;
@@ -434,6 +438,10 @@ uint32_t ImageVectorType(EmitterState& state, Prospero::TextureNumericClass nume
                          uint32_t components);
 
 uint32_t ImageType(EmitterState& state, const IR::ImageResource& image);
+// The bindless image array (BindlessBindings.h) a bindless image samples, and the image a key of
+// another array is read as under KYTY_BINDLESS_TYPED (dimension and numeric class of that array).
+uint32_t BindlessArrayBinding(const IR::ImageResource& image);
+IR::ImageResource BindlessArrayImage(const IR::ImageResource& image, uint32_t array_binding);
 
 uint32_t ImageViewSizeType(EmitterState& state, ImageDimension dimension);
 

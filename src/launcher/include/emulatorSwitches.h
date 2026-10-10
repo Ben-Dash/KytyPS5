@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 11> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 12> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -80,6 +80,12 @@ inline constexpr std::array<EmulatorSwitch, 11> EMULATOR_SWITCHES = {{
      "that cannot be a texture gets the plain stand-in and a red line instead of reaching the "
      "texture code.",
      "New, under test in Ghost of Yotei. Should only change the console lines."},
+    {"KYTY_BINDLESS_TYPED", "Read each table texture by its own kind (testing)",
+     "A shader reads textures from a table by number. Today the emulator decides once per shader "
+     "which kind of texture (flat, volume, whole numbers) the table holds; every texture of "
+     "another kind shows a plain stand-in. With this on, each texture is read as the kind it is, "
+     "as on the console.",
+     "New, under test in Ghost of Yotei. Shaders are translated anew once."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 

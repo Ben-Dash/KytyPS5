@@ -1,4 +1,5 @@
 #include "graphics/guest_gpu/gpu_format.h"
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ir/BindlessBindings.h"
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
 #include "graphics/shader/recompiler/frontend/decode/ImageOps.h"
@@ -845,6 +846,27 @@ static uint32_t BindlessSlot(ValueEmitContext& ctx, const IR::ImageResource& ima
 	state.bindless_flat_slot      = 0;
 	state.bindless_volume_in_2d   = 0;
 	state.bindless_volume_slot    = 0;
+	state.bindless_typed_kind     = 0;
+	state.bindless_typed_slot     = 0;
+	if (ShaderRecompiler::BindlessTyped()) {
+		// The entry names the array its slot lies in (IR::BindlessKindMask; pending keys hold
+		// slot 2 by now, kind 0). The instruction's own array reads slot 0 for another kind.
+		const auto kind = Binary(state, spv::OpShiftRightLogical, TypeU32(state),
+		                         Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                                ConstantU32(state, IR::BindlessKindMask)),
+		                         ConstantU32(state, IR::BindlessKindShift));
+		const auto other      = Binary(state, spv::OpINotEqual, TypeBool(state), kind, ConstantU32(state, 0u));
+		const auto typed_slot = Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                               ConstantU32(state, ~IR::BindlessSlotFlags));
+		state.builder.AddAnnotation(spv::OpDecorate, typed_slot, spv::DecorationNonUniform);
+		const auto own_slot = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), own_slot, other,
+		                          ConstantU32(state, 0u), slot);
+		state.bindless_typed_kind = kind;
+		state.bindless_typed_slot = typed_slot;
+		state.builder.AddAnnotation(spv::OpDecorate, own_slot, spv::DecorationNonUniform);
+		return own_slot;
+	}
 	if (image.dimension == ImageDimension::Dim2D && !image.cube && !image.depth_compare &&
 	    image.numeric_class == Prospero::TextureNumericClass::Float) {
 		// A 3D texture in a 2D float image's heap (IR::BindlessVolumeIn2D): the 2D array reads the
@@ -1303,6 +1325,166 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 		};
 		if (image.indirect_root != mem.resource || image.bindless) {
 			auto sample = EmitSample(mem.resource);
+			// KYTY_BINDLESS_TYPED: a key whose T# lies in another array (IR::BindlessKindMask) is
+			// read there, as the GPU reads it by its T#: the other dimension at (u, v, 0) or (u, v),
+			// the other numeric classes as raw bits (integer T#s by a point fetch). The branch runs
+			// only for such keys; implicit derivatives are taken before it.
+			const auto alternates =
+			    image.bindless && state.bindless_typed_kind != 0u
+			        ? IR::BindlessTypedAlternates(BindlessArrayBinding(image), dref)
+			        : 0u;
+			if (alternates != 0u && layout.offset == NoImageComponent && !image.cube) {
+				const auto& main_info  = ImageDimensionInfoFor(image.dimension);
+				const auto  main_coord = CoordF32(ctx, mem, *address, layout.coord,
+				                                  main_info.coordinate_components, false);
+				const bool  grad       = (operand_mask & spv::ImageOperandsGradMask) != 0u;
+				const bool  lod        = (operand_mask & spv::ImageOperandsLodMask) != 0u;
+				const auto  spatial    = main_info.spatial_components;
+				uint32_t    grad_x     = grad ? operands[0] : 0u;
+				uint32_t    grad_y     = grad ? operands[1] : 0u;
+				if (!grad && !lod && state.program.stage == ShaderType::Pixel) {
+					const auto spatial_coord =
+					    spatial == main_info.coordinate_components
+					        ? main_coord
+					        : CoordF32(ctx, mem, *address, layout.coord, spatial, false);
+					grad_x = Unary(state, spv::OpDPdx, TypeF32Vector(state, spatial), spatial_coord);
+					grad_y = Unary(state, spv::OpDPdy, TypeF32Vector(state, spatial), spatial_coord);
+				}
+				// A float vector of `from` components as one of `to` (2 <-> 3; z = 0).
+				const auto Reshape = [&](uint32_t value, uint32_t from, uint32_t to) {
+					if (from == to) {
+						return value;
+					}
+					const auto result = state.builder.AllocateId();
+					if (to < from) {
+						state.builder.AddFunction(spv::OpVectorShuffle, TypeF32Vector(state, to),
+						                          result, value, value, 0u, 1u);
+						return result;
+					}
+					const auto x = state.builder.AllocateId();
+					const auto y = state.builder.AllocateId();
+					state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), x, value, 0u);
+					state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), y, value, 1u);
+					state.builder.AddFunction(spv::OpCompositeConstruct, TypeF32Vector(state, 3),
+					                          result, x, y, ZeroF32(state));
+					return result;
+				};
+				const auto Glsl = [&](uint32_t type, uint32_t operation, auto... args) {
+					const auto result = state.builder.AllocateId();
+					state.builder.AddFunction(spv::OpExtInst, type, result, GlslStd450(state),
+					                          operation, args...);
+					return result;
+				};
+				// A float vector of `count` equal components.
+				const auto Splat = [&](uint32_t value, uint32_t count) {
+					std::vector<uint32_t> words {spv::OpCompositeConstruct, TypeF32Vector(state, count),
+					                             state.builder.AllocateId()};
+					words.insert(words.end(), count, value);
+					state.builder.AddFunction(words);
+					return words[2];
+				};
+				const auto ReadAlternate = [&](uint32_t alternate) {
+					const auto alt_image = BindlessArrayImage(image, alternate);
+					const auto alt_type  = ImageType(state, alt_image);
+					const auto variable  = state.bindless_image_variables.find(alt_type);
+					EXIT_IF(variable == state.bindless_image_variables.end());
+					const auto pointer = state.builder.AllocateId();
+					state.builder.AddFunction(
+					    spv::OpAccessChain,
+					    state.builder.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, alt_type),
+					    pointer, variable->second, state.bindless_typed_slot);
+					state.builder.AddAnnotation(spv::OpDecorate, pointer, spv::DecorationNonUniform);
+					const auto alt = state.builder.AllocateId();
+					state.builder.AddFunction(spv::OpLoad, alt_type, alt, pointer);
+					state.builder.AddAnnotation(spv::OpDecorate, alt, spv::DecorationNonUniform);
+					const auto& alt_info = ImageDimensionInfoFor(alt_image.dimension);
+					const auto  comps    = alt_info.coordinate_components;
+					const auto  coord = Reshape(main_coord, main_info.coordinate_components, comps);
+					uint32_t    value = 0;
+					if (alt_image.numeric_class == Prospero::TextureNumericClass::Float) {
+						const auto sampled = state.builder.AllocateId();
+						state.builder.AddFunction(spv::OpSampledImage,
+						                          state.builder.Type(spv::OpTypeSampledImage, alt_type),
+						                          sampled, alt, sampler_id);
+						state.builder.AddAnnotation(spv::OpDecorate, sampled, spv::DecorationNonUniform);
+						value = state.builder.AllocateId();
+						std::vector<uint32_t> words {
+						    ImageVectorType(state, Prospero::TextureNumericClass::Float, 4), value, sampled,
+						    coord};
+						if (grad_x != 0u) {
+							words.push_back(spv::ImageOperandsGradMask);
+							words.push_back(Reshape(grad_x, spatial, alt_info.spatial_components));
+							words.push_back(Reshape(grad_y, spatial, alt_info.spatial_components));
+						} else {
+							words.push_back(spv::ImageOperandsLodMask);
+							words.push_back(lod ? operands[0] : ZeroF32(state));
+						}
+						state.builder.AddFunction(spv::OpImageSampleExplicitLod, words);
+					} else {
+						// Integer T#s have no filtering: the texel under the coordinate (the layer
+						// rounded), clamped to the image, at the rounded level.
+						state.builder.RequireCapability(spv::CapabilityImageQuery);
+						auto level = ConstantU32(state, 0u);
+						if (lod) {
+							level = Unary(state, spv::OpConvertFToU, TypeU32(state),
+							              Glsl(TypeF32(state), GLSLstd450FMax,
+							                   Glsl(TypeF32(state), GLSLstd450RoundEven, operands[0]),
+							                   ZeroF32(state)));
+						}
+						const auto vector = TypeF32Vector(state, comps);
+						const auto size   = state.builder.AllocateId();
+						state.builder.AddFunction(spv::OpImageQuerySizeLod, TypeU32Vector(state, comps),
+						                          size, alt, level);
+						const auto size_f = Unary(state, spv::OpConvertUToF, vector, size);
+						auto       texel  = Glsl(vector, GLSLstd450Floor,
+						                         Binary(state, spv::OpFMul, vector, coord, size_f));
+						if (alt_info.arrayed != 0u) {
+							// The layer is not normalized: rounded, not scaled.
+							const auto layer = Glsl(vector, GLSLstd450RoundEven, coord);
+							const auto mixed = state.builder.AllocateId();
+							state.builder.AddFunction(spv::OpVectorShuffle, vector, mixed, texel, layer, 0u,
+							                          1u, comps + comps - 1u);
+							texel = mixed;
+						}
+						const auto last = Binary(state, spv::OpFSub, vector, size_f,
+						                         Splat(ConstantF32Value(state, 1.0f), comps));
+						texel = Glsl(vector, GLSLstd450FClamp, texel, Splat(ZeroF32(state), comps), last);
+						texel = Unary(state, spv::OpConvertFToU, TypeU32Vector(state, comps), texel);
+						value = state.builder.AllocateId();
+						state.builder.AddFunction(spv::OpImageFetch,
+						                          ImageVectorType(state, alt_image.numeric_class, 4), value,
+						                          alt, texel, spv::ImageOperandsLodMask, level);
+					}
+					if (alt_image.numeric_class != numeric_class) {
+						value = Unary(state, spv::OpBitcast, result_type, value);
+					}
+					return value;
+				};
+				const auto            header = state.current_label;
+				const auto            merge  = state.builder.AllocateId();
+				std::vector<uint32_t> switch_words {spv::OpSwitch, state.bindless_typed_kind, merge};
+				std::vector<std::pair<uint32_t, uint32_t>> cases;
+				for (const auto alternate: IR::BindlessImageArrayBindings) {
+					if ((alternates & (1u << IR::BindlessImageArrayIndex(alternate))) != 0u) {
+						cases.emplace_back(alternate, state.builder.AllocateId());
+						switch_words.push_back(IR::BindlessImageArrayIndex(alternate) + 1u);
+						switch_words.push_back(cases.back().second);
+					}
+				}
+				state.builder.AddFunction(spv::OpSelectionMerge, merge, spv::SelectionControlMaskNone);
+				state.builder.AddFunction(switch_words);
+				std::vector<uint32_t> phi {spv::OpPhi, result_type, state.builder.AllocateId(), sample,
+				                           header};
+				for (const auto& [alternate, label]: cases) {
+					EmitLabel(state, label);
+					phi.push_back(ReadAlternate(alternate));
+					phi.push_back(state.current_label);
+					state.builder.AddFunction(spv::OpBranch, merge);
+				}
+				EmitLabel(state, merge);
+				state.builder.AddFunction(phi);
+				sample = phi[2];
+			}
 			// A 3D bindless sample whose key holds a 2D texture reads it with (u, v).
 			if (image.bindless && state.bindless_flat_in_volume != 0u && !dref &&
 			    !HasFlag(mem, Decoder::ImageSampleFlagDerivative) &&

@@ -55,6 +55,9 @@ void SetHardwareStorageBufferBounds(bool enabled);
 void SetTableMode(bool enabled);
 [[nodiscard]] bool TableMode();
 
+// KYTY_BINDLESS_TYPED=1: bindless keys are read through the array of their T# (BindlessBindings.h).
+[[nodiscard]] bool BindlessTyped();
+
 // Packed FP16 arithmetic runs as native 16-bit float vectors (shaderFloat16 with FP16 denormals
 // and signed zero/Inf/NaN preserved) instead of through F32. Set before any compile, only when the
 // device enables those; KYTY_NATIVE_FP16=0 turns it off.

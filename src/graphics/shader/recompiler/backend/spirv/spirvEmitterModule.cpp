@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInternal.h"
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ir/BindlessBindings.h"
 
 #include <algorithm>
@@ -219,6 +220,49 @@ uint32_t F32ArrayType(EmitterState& state, uint32_t count) {
 	return state.builder.Type(spv::OpTypeArray, TypeF32(state), ConstantU32(state, count));
 }
 
+} // namespace
+
+uint32_t BindlessArrayBinding(const IR::ImageResource& image) {
+	const bool arrayed = image.dimension == ImageDimension::Dim2DArray ||
+	                     image.dimension == ImageDimension::Dim2DMsaaArray;
+	if (image.cube) {
+		return IR::BindlessImagesCube;
+	}
+	if (image.dimension == ImageDimension::Dim3D) {
+		return IR::BindlessImages3D;
+	}
+	if (image.numeric_class == Prospero::TextureNumericClass::Uint) {
+		return arrayed ? IR::BindlessImages2DArrayUint : IR::BindlessImages2DUint;
+	}
+	if (image.numeric_class == Prospero::TextureNumericClass::Sint) {
+		return arrayed ? IR::BindlessImages2DArraySint : IR::BindlessImages2DSint;
+	}
+	return arrayed ? IR::BindlessImages2DArray : IR::BindlessImages2D;
+}
+
+IR::ImageResource BindlessArrayImage(const IR::ImageResource& image, uint32_t array_binding) {
+	auto result = image;
+	result.cube = false;
+	switch (array_binding) {
+		case IR::BindlessImages3D: result.dimension = ImageDimension::Dim3D; break;
+		case IR::BindlessImages2DArray:
+		case IR::BindlessImages2DArrayUint:
+		case IR::BindlessImages2DArraySint: result.dimension = ImageDimension::Dim2DArray; break;
+		case IR::BindlessImagesCube: result.dimension = ImageDimension::Dim2DArray; result.cube = true; break;
+		default: result.dimension = ImageDimension::Dim2D; break;
+	}
+	switch (array_binding) {
+		case IR::BindlessImages2DUint:
+		case IR::BindlessImages2DArrayUint: result.numeric_class = Prospero::TextureNumericClass::Uint; break;
+		case IR::BindlessImages2DSint:
+		case IR::BindlessImages2DArraySint: result.numeric_class = Prospero::TextureNumericClass::Sint; break;
+		default: result.numeric_class = Prospero::TextureNumericClass::Float; break;
+	}
+	return result;
+}
+
+namespace {
+
 // Set 1 (BindlessBindings.h): one runtime array per image type, aliasing the binding of its
 // dimension, and the translation buffer. Declared before the entry point collects globals.
 void DefineBindlessImages(EmitterState& state) {
@@ -230,19 +274,29 @@ void DefineBindlessImages(EmitterState& state) {
 		if (state.bindless_image_variables.contains(type)) {
 			continue;
 		}
-		uint32_t binding = IR::BindlessImages2D;
-		const bool arrayed = image.dimension == ImageDimension::Dim2DArray ||
-		                   image.dimension == ImageDimension::Dim2DMsaaArray;
-		if (image.cube) {
-			binding = IR::BindlessImagesCube;
-		} else if (image.dimension == ImageDimension::Dim3D) {
-			binding = IR::BindlessImages3D;
-		} else if (image.numeric_class == Prospero::TextureNumericClass::Uint) {
-			binding = arrayed ? IR::BindlessImages2DArrayUint : IR::BindlessImages2DUint;
-		} else if (image.numeric_class == Prospero::TextureNumericClass::Sint) {
-			binding = arrayed ? IR::BindlessImages2DArraySint : IR::BindlessImages2DSint;
-		} else if (arrayed) {
-			binding = IR::BindlessImages2DArray;
+		const uint32_t binding = BindlessArrayBinding(image);
+		// KYTY_BINDLESS_TYPED: the arrays of the other T# kinds this instruction reads.
+		if (ShaderRecompiler::BindlessTyped()) {
+			const auto alternates = IR::BindlessTypedAlternates(binding, image.depth_compare);
+			for (const auto alternate: IR::BindlessImageArrayBindings) {
+				if ((alternates & (1u << IR::BindlessImageArrayIndex(alternate))) == 0u) {
+					continue;
+				}
+				const auto alternate_type = ImageType(state, BindlessArrayImage(image, alternate));
+				if (state.bindless_image_variables.contains(alternate_type)) {
+					continue;
+				}
+				const auto alternate_array    = state.builder.Type(spv::OpTypeRuntimeArray, alternate_type);
+				const auto alternate_variable = state.builder.DefineGlobalVariable(
+				    TypePointer(state, spv::StorageClassUniformConstant, alternate_array),
+				    spv::StorageClassUniformConstant);
+				state.builder.AddName(alternate_variable, "bindless_images");
+				state.builder.AddAnnotation(spv::OpDecorate, alternate_variable,
+				                            spv::DecorationDescriptorSet, IR::BindlessDescriptorSet);
+				state.builder.AddAnnotation(spv::OpDecorate, alternate_variable,
+				                            spv::DecorationBinding, alternate);
+				state.bindless_image_variables[alternate_type] = alternate_variable;
+			}
 		}
 		// A 3D image's keys may hold 2D textures (BindlessFlat2DInVolume): it also reads the 2D
 		// float array.

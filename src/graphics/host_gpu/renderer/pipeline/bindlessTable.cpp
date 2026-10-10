@@ -676,12 +676,8 @@ void BindlessTable::OnImageUnregistered(ImageId id) {
 	}
 	for (const auto& [heap, key]: found->second) {
 		if (heap->slots[key] != 0) {
-			// A 2D texture in a 3D heap lives in the 2D float array (IR::BindlessFlat2DInVolume).
-			const bool flat    = (heap->slots[key] & ShaderRecompiler::IR::BindlessFlat2DInVolume) != 0u;
-			const bool volume  = (heap->slots[key] & ShaderRecompiler::IR::BindlessVolumeIn2D) != 0u;
-			const auto binding = flat     ? ShaderRecompiler::IR::BindlessImages2D
-			                     : volume ? ShaderRecompiler::IR::BindlessImages3D
-			                              : heap->binding;
+			// The entry may name another array than the heap's (2D in 3D, 3D in 2D, typed kinds).
+			const auto binding = ShaderRecompiler::IR::BindlessEntryBinding(heap->slots[key], heap->binding);
 			WriteSlot(binding, heap->slots[key] & ~ShaderRecompiler::IR::BindlessSlotFlags,
 			          m_placeholder_views[ShaderRecompiler::IR::BindlessImageArrayIndex(binding)],
 			          vk::ImageLayout::eShaderReadOnlyOptimal);

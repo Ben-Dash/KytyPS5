@@ -27,6 +27,7 @@
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
+#include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/BindingLayout.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
@@ -1929,6 +1930,36 @@ static uint64_t BindlessRecordHash(const BindlessTable::Heap& heap, uint32_t key
 static uint64_t g_bindless_rechecked = 0;
 static uint64_t g_bindless_changed   = 0;
 
+// KYTY_BINDLESS_TYPED: the image array a T# belongs to for an instruction that reads
+// `heap_binding` (its shape: arrayed or not), by the T#'s type and numeric class; UINT32_MAX when
+// no array holds it.
+static uint32_t BindlessArrayForTsharp(const ShaderTextureResource& descriptor, uint32_t heap_binding) {
+	namespace IR       = ShaderRecompiler::IR;
+	const auto numeric = Prospero::SampledTextureNumericClass(descriptor.Format());
+	const bool arrayed = heap_binding == IR::BindlessImages2DArray ||
+	                     heap_binding == IR::BindlessImages2DArrayUint ||
+	                     heap_binding == IR::BindlessImages2DArraySint;
+	switch (descriptor.Type()) {
+		case Prospero::ImageType::kColor3D:
+			return numeric == Prospero::TextureNumericClass::Float ? IR::BindlessImages3D : UINT32_MAX;
+		case Prospero::ImageType::kColor1D:
+		case Prospero::ImageType::kColor1DArray:
+		case Prospero::ImageType::kColor2D:
+		case Prospero::ImageType::kColor2DArray:
+		case Prospero::ImageType::kCube:
+			switch (numeric) {
+				case Prospero::TextureNumericClass::Float:
+					return arrayed ? IR::BindlessImages2DArray : IR::BindlessImages2D;
+				case Prospero::TextureNumericClass::Uint:
+					return arrayed ? IR::BindlessImages2DArrayUint : IR::BindlessImages2DUint;
+				case Prospero::TextureNumericClass::Sint:
+					return arrayed ? IR::BindlessImages2DArraySint : IR::BindlessImages2DSint;
+				default: return UINT32_MAX;
+			}
+		default: return UINT32_MAX;
+	}
+}
+
 bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key) {
 	auto&                                 table = m_context.GetBindlessTable();
 	ShaderRecompiler::IR::DescriptorValue value {};
@@ -1981,17 +2012,50 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	}
 	// A 2D texture in a 3D image's heap: the GPU reads it as 2D, so it goes to the 2D float array
 	// and its translation carries IR::BindlessFlat2DInVolume (the shader samples it with (u, v)).
-	const bool flat_in_volume = heap.binding == ShaderRecompiler::IR::BindlessImages3D &&
+	// KYTY_BINDLESS_TYPED replaces the two cases below with the array of the T# itself.
+	const bool typed          = ShaderRecompiler::BindlessTyped();
+	const bool flat_in_volume = !typed && heap.binding == ShaderRecompiler::IR::BindlessImages3D &&
 	                            descriptor.Type() == Prospero::ImageType::kColor2D &&
 	                            !heap.resource.cube;
 	// A 3D texture in a 2D float image's heap: an explicit-LOD 2D sample reads it at (u, v, 0) from
 	// the 3D array; its translation carries IR::BindlessVolumeIn2D.
-	const bool volume_in_2d = heap.binding == ShaderRecompiler::IR::BindlessImages2D &&
+	const bool volume_in_2d = !typed && heap.binding == ShaderRecompiler::IR::BindlessImages2D &&
 	                          descriptor.Type() == Prospero::ImageType::kColor3D &&
 	                          PlausibleImageDescriptor(descriptor) && PlausibleVolume(descriptor);
+	auto typed_binding = heap.binding;
+	if (typed && !BindlessCompatible(descriptor, heap.binding)) {
+		const auto own = BindlessArrayForTsharp(descriptor, heap.binding);
+		if (own != UINT32_MAX &&
+		    (ShaderRecompiler::IR::BindlessTypedAlternates(heap.binding, heap.resource.depth_compare) &
+		     (1u << ShaderRecompiler::IR::BindlessImageArrayIndex(own))) != 0u) {
+			typed_binding = own;
+		}
+	}
+	const bool typed_other    = typed_binding != heap.binding;
+	const bool typed_volume   = typed_binding == ShaderRecompiler::IR::BindlessImages3D;
+	const bool typed_reshaped = typed_other && (typed_volume || heap.binding == ShaderRecompiler::IR::BindlessImages3D);
 	const auto array_binding  = flat_in_volume ? ShaderRecompiler::IR::BindlessImages2D
 	                            : volume_in_2d ? ShaderRecompiler::IR::BindlessImages3D
-	                                           : heap.binding;
+	                                           : typed_binding;
+	if (typed_other) {
+		// Not yet: a T# of another dimension with color metadata (it stopped the texture cache,
+		// Ghost of Yotei frame 777), a volume the tiler cannot lay out (2217x1x531 records), and
+		// another numeric class on a depth tile: the stencil plane of a depth buffer (reading it
+		// as a color image lost the device at frame 490).
+		const char* refused = typed_reshaped && descriptor.MetaCompress() ? "has color metadata (DCC)"
+		                      : typed_volume && !PlausibleVolume(descriptor) ? "is an implausible volume"
+		                      : !typed_reshaped && descriptor.TileMode() == Prospero::TileMode::kDepth
+		                          ? "lies on a depth tile (stencil plane)"
+		                          : nullptr;
+		if (refused != nullptr) {
+			ReportPlaceholder(fmt::format("T# of another array {} (format {} type {} array {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
+			                              refused, static_cast<uint32_t>(descriptor.Format()),
+			                              static_cast<uint32_t>(descriptor.Type()), typed_binding,
+			                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str());
+			table.SetTranslation(heap, key, 0u);
+			return false;
+		}
+	}
 	// Not yet for a DCC-compressed one: its color metadata stopped the texture cache (Ghost of
 	// Yotei, frame 777 at the Torii). It keeps the placeholder with a red line.
 	if (flat_in_volume && descriptor.MetaCompress()) {
@@ -2035,6 +2099,14 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (volume_in_2d) {
 		resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim3D;
 	}
+	if (typed_other) {
+		if (typed_volume) {
+			resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim3D;
+		} else if (heap.binding == ShaderRecompiler::IR::BindlessImages3D) {
+			resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim2D;
+		}
+		resource.numeric_class = Prospero::SampledTextureNumericClass(descriptor.Format());
+	}
 	auto binding            = ResolveTexture(resource, value);
 	g_soft_texture_failures = false;
 	const bool soft_failed  = g_soft_texture_failed;
@@ -2067,7 +2139,10 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	}
 	heap.slots[key]         = flat_in_volume ? slot | ShaderRecompiler::IR::BindlessFlat2DInVolume
 	                          : volume_in_2d ? slot | ShaderRecompiler::IR::BindlessVolumeIn2D
-	                                         : slot;
+	                          : typed_other
+	                              ? slot | ((ShaderRecompiler::IR::BindlessImageArrayIndex(typed_binding) + 1u)
+	                                        << ShaderRecompiler::IR::BindlessKindShift)
+	                              : slot;
 	image->bindless_pinned  = true;
 	image->usage.texture    = true;
 	heap.resolved.push_back(binding.image_id);

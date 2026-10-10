@@ -507,6 +507,16 @@ bool TableMode() {
 	return g_table_mode.load(std::memory_order_relaxed);
 }
 
+// KYTY_BINDLESS_TYPED=1 (IR::BindlessKindMask): a bindless key is read through the image array
+// its T# belongs to. Off by default.
+bool BindlessTyped() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BINDLESS_TYPED");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 static std::atomic<bool> g_native_float16 {false};
 
 void SetNativeFloat16(bool enabled) {
