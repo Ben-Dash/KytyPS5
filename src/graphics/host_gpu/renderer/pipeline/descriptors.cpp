@@ -269,6 +269,10 @@ bool IsSupportedDepthTextureEncoding(const ShaderTextureResource& descriptor, bo
 	       descriptor.TileMode() == Prospero::TileMode::kDepth;
 }
 
+// A bindless key resolves softly (ResolveBindlessKey): the reason becomes a red placeholder line.
+// Defined with ReportPlaceholder below; false when no soft resolution is running.
+static bool SoftTextureFailure(const char* reason);
+
 static void ValidateSampledDepthBinding(const ShaderRecompiler::IR::ImageResource& resource,
                                         const ShaderTextureResource& descriptor, const Image& image,
                                         vk::Format view_format, uint64_t size) {
@@ -277,6 +281,17 @@ static void ValidateSampledDepthBinding(const ShaderRecompiler::IR::ImageResourc
 	const bool view_ok =
 	    IsSupportedSampledDepthView(image.info.pixel_format, view_format, descriptor.DstSelXYZW());
 	if (resource_ok && encoding_ok && view_ok) {
+		return;
+	}
+	// A bindless key whose T# is a depth surface the shader cannot sample this way (Ghost of Yotei:
+	// a 2D depth T# in a volume heap ended the session at the Torii) keeps the placeholder.
+	if (SoftTextureFailure(fmt::format("unsupported sampled depth image: resource={} encoding={} view={} "
+	                                   "dimension={} guest_format={} type={}\n",
+	                                   resource_ok, encoding_ok, view_ok,
+	                                   static_cast<uint32_t>(resource.dimension),
+	                                   static_cast<uint32_t>(descriptor.Format()),
+	                                   static_cast<uint32_t>(descriptor.Type()))
+	                           .c_str())) {
 		return;
 	}
 	const auto descriptor_pitch =
@@ -575,6 +590,15 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 		std::fflush(stdout);
 	}
 }
+static bool SoftTextureFailure(const char* reason) {
+	if (!g_soft_texture_failures) {
+		return false;
+	}
+	g_soft_texture_failed = true;
+	ReportPlaceholder(reason);
+	return true;
+}
+
 #define KYTY_TEXTURE_FAIL(...)                                                                   \
 	do {                                                                                         \
 		if (g_soft_texture_failures) {                                                           \
@@ -1172,6 +1196,9 @@ void RenderExecutor::ResolveTextureInto(const ShaderRecompiler::IR::ImageResourc
 		}
 		ValidateSampledDepthBinding(resource, descriptor, *image, described.pixel_format,
 		                            described.size);
+		if (g_soft_texture_failures && g_soft_texture_failed) {
+			return; // not cached: the key keeps the placeholder
+		}
 	} else if (storage) {
 		ValidateStorageColorView(image->info.pixel_format, described.view_format,
 		                         descriptor.DstSelXYZW());
