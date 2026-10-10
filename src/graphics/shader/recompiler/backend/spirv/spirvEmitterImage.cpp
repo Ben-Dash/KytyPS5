@@ -1331,7 +1331,7 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			// only for such keys; implicit derivatives are taken before it.
 			const auto alternates =
 			    image.bindless && state.bindless_typed_kind != 0u
-			        ? IR::BindlessTypedAlternates(BindlessArrayBinding(image), dref)
+			        ? IR::BindlessTypedAlternates(BindlessArrayBinding(image), image.depth_compare || dref)
 			        : 0u;
 			if (alternates != 0u && layout.offset == NoImageComponent && !image.cube) {
 				const auto& main_info  = ImageDimensionInfoFor(image.dimension);
