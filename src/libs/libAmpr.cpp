@@ -540,10 +540,28 @@ static int KYTY_SYSV_ABI ResolveFilepathsWithPrefixToIdsAndFileSizesForEach(
 	    AprShared::ResolvePathsCommon(path_list, count, ids, sizes, nullptr, prefix, results));
 }
 
+// Every 30 s, how many APR command buffers the game submitted (shows that the AMPR path runs,
+// next to the per-command lines).
+static void CountAprSubmission() {
+	static std::atomic<uint64_t> count {0};
+	static std::atomic<int64_t>  next {0};
+	const auto total = ++count;
+	const auto now   = std::chrono::duration_cast<std::chrono::seconds>(
+	                     std::chrono::steady_clock::now().time_since_epoch())
+	                     .count();
+	auto due = next.load(std::memory_order_relaxed);
+	if (now >= due && next.compare_exchange_strong(due, now + 30)) {
+		std::printf("\x1b[91mampr: %llu APR command buffers submitted so far\x1b[0m\n",
+		            static_cast<unsigned long long>(total));
+		std::fflush(stdout);
+	}
+}
+
 static int KYTY_SYSV_ABI SubmitCommandBufferAndGetResult(void* command_buffer, uint32_t priority,
                                                          void*     result,
                                                          uint32_t* out_submission_id) {
 	PRINT_NAME();
+	CountAprSubmission();
 	return KernelSyscallResult(LibAmpr::Ampr::QueueCommandBuffer(
 	    LibAmpr::Ampr::Engine::Apr, reinterpret_cast<uint64_t>(command_buffer), 0, priority, result,
 	    out_submission_id));
@@ -551,6 +569,7 @@ static int KYTY_SYSV_ABI SubmitCommandBufferAndGetResult(void* command_buffer, u
 
 static int KYTY_SYSV_ABI SubmitCommandBuffer(void* command_buffer, uint32_t priority) {
 	PRINT_NAME();
+	CountAprSubmission();
 	return KernelSyscallResult(LibAmpr::Ampr::QueueCommandBuffer(
 	    LibAmpr::Ampr::Engine::Apr, reinterpret_cast<uint64_t>(command_buffer), 0, priority,
 	    nullptr, nullptr));
@@ -559,6 +578,7 @@ static int KYTY_SYSV_ABI SubmitCommandBuffer(void* command_buffer, uint32_t prio
 static int KYTY_SYSV_ABI SubmitCommandBufferAndGetId(void* command_buffer, uint32_t priority,
                                                      uint32_t* out_submission_id) {
 	PRINT_NAME();
+	CountAprSubmission();
 	if (out_submission_id == nullptr) {
 		return KernelSyscallResult(LibKernel::KERNEL_ERROR_EINVAL);
 	}
@@ -681,6 +701,14 @@ struct CommandBufferState {
 		uint8_t  index;
 		uint32_t value;
 	};
+	// Writes a value known only when the command runs: the process time counter, one shared
+	// counter, or two consecutive counters as one 64-bit value (low word first).
+	struct WriteAddressFromCounterCommand {
+		enum class Source : uint8_t { TimeCounter, Counter, CounterPair };
+		uint64_t address = 0;
+		Source   source  = Source::TimeCounter;
+		uint8_t  index   = 0;
+	};
 	struct AmmMapCommand {
 		AmmCommandKind kind        = AmmCommandKind::MapAuto;
 		uint64_t       va          = 0;
@@ -691,7 +719,8 @@ struct CommandBufferState {
 		uint8_t        gpu_mask_id = 0;
 	};
 	using CommandData = std::variant<ReadFileCommand, KernelEventCommand, WriteAddressCommand,
-	                                 AmmMapCommand, WaitCommand, WriteCounterCommand>;
+	                                 AmmMapCommand, WaitCommand, WriteCounterCommand,
+	                                 WriteAddressFromCounterCommand>;
 	struct Command {
 		uint64_t record_offset;
 		CommandData data;
@@ -1259,6 +1288,24 @@ static int ExecuteCommand(const CommandBufferState::Command& entry) {
 	} else if (const auto* command =
 	               std::get_if<CommandBufferState::WriteCounterCommand>(&entry.data)) {
 		g_counters[command->index].store(command->value, std::memory_order_release);
+	} else if (const auto* command =
+	               std::get_if<CommandBufferState::WriteAddressFromCounterCommand>(&entry.data)) {
+		using Source   = CommandBufferState::WriteAddressFromCounterCommand::Source;
+		uint64_t value = 0;
+		switch (command->source) {
+			case Source::TimeCounter: value = LibKernel::KernelGetProcessTimeCounter(); break;
+			case Source::Counter:
+				value = g_counters[command->index].load(std::memory_order_acquire);
+				break;
+			case Source::CounterPair:
+				value = g_counters[command->index].load(std::memory_order_acquire) |
+				        (static_cast<uint64_t>(
+				             g_counters[(command->index + 1u) & 0xffu].load(std::memory_order_acquire))
+				         << 32u);
+				break;
+		}
+		std::atomic_ref(*reinterpret_cast<uint64_t*>(command->address))
+		    .store(value, std::memory_order_release);
 	} else if (const auto* payload = std::get_if<CommandBufferState::AmmMapCommand>(&entry.data)) {
 		const auto& command = *payload;
 		int         result  = OK;
@@ -2016,6 +2063,8 @@ static int KYTY_SYSV_ABI CommandBufferWaitOnCounter(void* command_buffer, uint8_
 	// Other access or mask modes are not emulated yet: the wait is skipped as before (a red line
 	// above names it) instead of ending the session.
 	if (access != 1 || mask_op != 0 || flush != 0 || value > UINT32_MAX) {
+		TraceCounterCommand("WaitOnCounter: mode not emulated, wait skipped", index, access, value,
+		                    compare | (mask_op << 8u) | (flush << 16u));
 		return AppendNoOpCommand(command_buffer, 0x20);
 	}
 	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
@@ -2065,6 +2114,8 @@ static int KYTY_SYSV_ABI CommandBufferWriteCounter(void* command_buffer, uint8_t
 	TraceCounterCommand("WriteCounter", index, access, value, operation | (mode << 8u));
 	// Other access modes and operations are not emulated yet: skipped as before (red line above).
 	if (access != 1 || operation != 0 || mode != 0) {
+		TraceCounterCommand("WriteCounter: mode not emulated, skipped", index, access, value,
+		                    operation | (mode << 8u));
 		return AppendNoOpCommand(command_buffer, 0x20);
 	}
 	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
@@ -2079,57 +2130,124 @@ static int KYTY_SYSV_ABI CommandBufferWriteCounterOnCompletion(void* command_buf
                                                                uint8_t access, uint64_t value, uint8_t operation) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteCounterOnCompletion (not emulated)", index, access, value, operation);
-
-	return AppendNoOpCommand(command_buffer, 0x20);
+	TraceCounterCommand("WriteCounterOnCompletion", index, access, value, operation);
+	// Commands of a buffer run in order, so "on completion" of the earlier ones is when it runs.
+	if (command_buffer == nullptr || index >= 128 || access > 7 || operation > 4) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	if (access != 1 || operation != 0) {
+		TraceCounterCommand("WriteCounterOnCompletion: mode not emulated, skipped", index, access, value,
+		                    operation);
+		return AppendNoOpCommand(command_buffer, 0x20);
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteCounterCommand {
+	                               index, static_cast<uint32_t>(value)},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounter(void*              command_buffer, volatile uint64_t* address, uint32_t arg2) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromTimeCounter (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
+	TraceCounterCommand("WriteAddressFromTimeCounter", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::TimeCounter, 0},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromTimeCounterOnCompletion(void* command_buffer, volatile uint64_t* address) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromTimeCounterOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), 0, 0, 0);
+	TraceCounterCommand("WriteAddressFromTimeCounterOnCompletion", reinterpret_cast<uint64_t>(address), 0, 0, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::TimeCounter, 0},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounter(void*              command_buffer, volatile uint64_t* address, uint8_t arg2, uint32_t arg3) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromCounter (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
+	TraceCounterCommand("WriteAddressFromCounter", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::Counter, arg2},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterOnCompletion(void* command_buffer, volatile uint64_t* address, uint8_t arg2) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromCounterOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
+	TraceCounterCommand("WriteAddressFromCounterOnCompletion", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::Counter, arg2},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPair(void*              command_buffer, volatile uint64_t* address, uint8_t arg2, uint32_t arg3) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromCounterPair (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
+	TraceCounterCommand("WriteAddressFromCounterPair", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, uint64_t {arg3}, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::CounterPair, arg2},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI CommandBufferWriteAddressFromCounterPairOnCompletion(void* command_buffer, volatile uint64_t* address, uint8_t arg2) {
 	PRINT_NAME();
 
-	TraceCounterCommand("WriteAddressFromCounterPairOnCompletion (writes 0)", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
+	TraceCounterCommand("WriteAddressFromCounterPairOnCompletion", reinterpret_cast<uint64_t>(address), uint64_t {arg2}, 0, 0);
 
-	return AppendWriteAddressCommand(command_buffer, address, uint64_t {0});
+	if (command_buffer == nullptr || address == nullptr) {
+		return LibKernel::KERNEL_ERROR_EINVAL;
+	}
+	return AppendCommandRecord(reinterpret_cast<uint64_t>(command_buffer),
+	                           CommandBufferState::WriteAddressFromCounterCommand {
+	                               reinterpret_cast<uint64_t>(address),
+	                               CommandBufferState::WriteAddressFromCounterCommand::Source::CounterPair, arg2},
+	                           0x20)
+	           ? OK
+	           : LibKernel::KERNEL_ERROR_EBUSY;
 }
 
 static int KYTY_SYSV_ABI AprCommandBufferReadFileGather(void*    command_buffer, uint64_t, uint64_t,
