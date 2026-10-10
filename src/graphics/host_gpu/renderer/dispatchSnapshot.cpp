@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <deque>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
@@ -48,6 +49,7 @@ struct Settings {
 	std::vector<uint64_t> hashes;
 	int64_t               frame = -1;
 	uint32_t              max   = 0;
+	uint32_t              ring  = 0; // KYTY_DISPATCH_SNAPSHOT_RING: keep only the last n snapshots
 	std::filesystem::path directory;
 };
 
@@ -82,6 +84,9 @@ const Settings& GetSettings() {
 			}
 		}
 		const char* max = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_MAX");
+		if (const char* ring = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_RING"); ring != nullptr) {
+			s.ring = static_cast<uint32_t>(std::strtoul(ring, nullptr, 10));
+		}
 		s.max = max != nullptr ? static_cast<uint32_t>(std::strtoul(max, nullptr, 10))
 		                       : (s.frame >= 0 ? 4000u : 8u);
 		const char* dir = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_DIR");
@@ -425,7 +430,7 @@ bool Wanted(uint64_t shader_hash, uint64_t frame) {
 		return false;
 	}
 	static std::unordered_map<uint64_t, uint32_t> taken;
-	return taken[shader_hash]++ < s.max;
+	return s.ring != 0 || taken[shader_hash]++ < s.max;
 }
 
 Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& input,
@@ -713,6 +718,16 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	std::printf("dispatch-snapshot: %s inputs written\n", name.c_str());
 	std::fflush(stdout);
 	OpenSnapshots()[pending.id] = std::move(meta);
+	// Ring mode (hunting the dispatch before a device loss): only the newest snapshots stay; the
+	// last one without outputs is where the GPU stopped. Blobs stay (shared, content-addressed).
+	if (s.ring != 0) {
+		static std::deque<std::filesystem::path> kept;
+		kept.push_back(folder);
+		while (kept.size() > s.ring) {
+			std::filesystem::remove_all(kept.front(), error);
+			kept.pop_front();
+		}
+	}
 	return pending;
 }
 
