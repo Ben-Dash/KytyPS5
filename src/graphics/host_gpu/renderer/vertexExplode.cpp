@@ -18,6 +18,7 @@
 #include <cinttypes>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -38,6 +39,7 @@ struct DrawInfo {
 	// The first stage's fetch buffers, to print the raw bytes of a reported vertex.
 	std::array<ShaderVertexInputBuffer, 4> buffers {};
 	uint32_t                                buffer_count = 0;
+	uint32_t                                target_width = 0, target_height = 0;
 	// The index buffer, to find a reported vertex index that no index of the buffer can be.
 	uint64_t index_address = 0;
 	uint32_t index_count   = 0;
@@ -339,6 +341,8 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 			info.text = text;
 			const auto& first = note.stages.front();
 			info.buffer_count = static_cast<uint32_t>(std::clamp(first.buffers_num, 0, 4));
+			info.target_width  = note.target_width;
+			info.target_height = note.target_height;
 			info.index_address  = note.indexed && note.index_host == nullptr ? note.index_address : 0;
 			info.index_count    = note.index_count;
 			info.index_size     = note.index_size;
@@ -431,17 +435,26 @@ void Report(const uint32_t* region, uint64_t frame) {
 			continue;
 		}
 		const uint32_t capture_index = record[10] == 1u ? record[3] - record[9] : record[3];
-		// KYTY_VTX_EXPLODE_CAPTURE=<hash> (with --rd): the first huge or non-finite position of that
-		// shader at a vertex index above 65535 requests one RenderDoc capture.
-		static const uint64_t capture_hash = [] {
-			const char* text = KYTY_GETENV("KYTY_VTX_EXPLODE_CAPTURE");
-			return text != nullptr ? std::strtoull(text, nullptr, 16) : uint64_t {0};
-		}();
-		static bool capture_requested = false;
-		if (capture_hash != 0 && hash == capture_hash && !capture_requested && capture_index > 0xffffu &&
-		    (kind == static_cast<uint32_t>(IR::VertexExplodeKind::Huge) ||
-		     kind == static_cast<uint32_t>(IR::VertexExplodeKind::NonFinite))) {
-			capture_requested = true;
+		// KYTY_VTX_EXPLODE_CAPTURE (with --rd) requests RenderDoc captures, at most 3 per run and 300
+		// frames apart: =<hash> at that shader's huge or non-finite positions at a vertex index above
+		// 65535; =any at any shader's huge (w > 0) or non-finite position in a draw to a target of at
+		// least 1280x720 (the main view, not the shadow maps).
+		static const char*    capture_text = KYTY_GETENV("KYTY_VTX_EXPLODE_CAPTURE");
+		static const bool     capture_any  = capture_text != nullptr && std::strcmp(capture_text, "any") == 0;
+		static const uint64_t capture_hash =
+		    capture_text != nullptr && !capture_any ? std::strtoull(capture_text, nullptr, 16) : 0u;
+		static uint32_t       captures      = 0;
+		static uint64_t       capture_frame = 0;
+		const bool spike = kind == static_cast<uint32_t>(IR::VertexExplodeKind::Huge) ||
+		                   kind == static_cast<uint32_t>(IR::VertexExplodeKind::NonFinite);
+		const auto drawn     = state.last_draw.find(hash);
+		const bool main_view = drawn != state.last_draw.end() && drawn->second.target_width >= 1280 &&
+		                       drawn->second.target_height >= 720;
+		if (spike && captures < 3 && (captures == 0 || frame - capture_frame >= 300) &&
+		    ((capture_any && main_view && !mesh) ||
+		     (capture_hash != 0 && hash == capture_hash && capture_index > 0xffffu))) {
+			captures++;
+			capture_frame = frame;
 			std::printf("VtxExplode: requesting a RenderDoc capture for vs=%016" PRIx64 "%s", hash,
 			            "\n");
 			RenderDocRequestCapture();
