@@ -165,10 +165,39 @@ void BufferCache::Unregister(BufferId id) {
 	ChangeRegister<false>(id);
 }
 
+// The last CreateBuffer on this thread: the request and the range after joining overlaps, printed
+// when a buffer with an invalid range reaches ChangeRegister (an EXIT seen while Ghost of Yotei
+// loads).
+struct LastBufferCreate {
+	uint64_t vaddr = 0, size = 0, begin = 0, end = 0;
+	uint32_t joined = 0;
+};
+static thread_local LastBufferCreate t_last_create;
+
 template <bool insert>
 void BufferCache::ChangeRegister(BufferId id) {
 	auto& buffer = m_slot_buffers[id];
 	PageTable::PageRange pages {};
+	if (!(GuestRange {buffer.CpuAddress(), buffer.Size()}.Valid()) ||
+	    !PageTable::TryGetPageRange(buffer.CpuAddress(), buffer.Size(), pages)) [[unlikely]] {
+		void*      frames[8] {};
+		const auto count = RtlCaptureStackBackTrace(1, 8, frames, nullptr);
+		std::printf("\x1b[91mbuffer-register: %s an invalid range: buffer %u address=0x%016llx size=0x%llx; "
+		            "last create on this thread: request 0x%016llx+0x%llx -> joined 0x%016llx..0x%016llx "
+		            "(%u buffers joined); stack",
+		            insert ? "register" : "unregister", static_cast<uint32_t>(id.index),
+		            static_cast<unsigned long long>(buffer.CpuAddress()),
+		            static_cast<unsigned long long>(buffer.Size()),
+		            static_cast<unsigned long long>(t_last_create.vaddr),
+		            static_cast<unsigned long long>(t_last_create.size),
+		            static_cast<unsigned long long>(t_last_create.begin),
+		            static_cast<unsigned long long>(t_last_create.end), t_last_create.joined);
+		for (USHORT i = 0; i < count; i++) {
+			std::printf(" %p", frames[i]);
+		}
+		std::printf("\x1b[0m\n");
+		std::fflush(stdout);
+	}
 	EXIT_IF(!(GuestRange {buffer.CpuAddress(), buffer.Size()}.Valid()) ||
 	        !PageTable::TryGetPageRange(buffer.CpuAddress(), buffer.Size(), pages));
 	for (size_t page = pages.first; page < pages.last_exclusive; ++page) {
@@ -1121,9 +1150,11 @@ BufferId BufferCache::CreateBuffer(uint64_t vaddr, uint64_t size) {
 	SetVulkanObjectNameF(m_graphics.device, buffer.Handle(),
 	                     "Kyty.GameBuffer[guest=0x{:016x} size=0x{:x}]", overlap.begin,
 	                     overlap.end - overlap.begin);
+	t_last_create = {vaddr, size, overlap.begin, overlap.end, 0};
 	for (auto it = overlap.first; it != overlap.last;) {
 		const auto old_id = (it++)->second;
 		JoinOverlap(id, old_id, !overlap.has_stream_leap);
+		t_last_create.joined++;
 	}
 	Register(id);
 	return id;
