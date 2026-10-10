@@ -1,3 +1,4 @@
+#include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
 #include "common/assert.h"
@@ -358,6 +359,9 @@ void RenderContext::RunGarbageCollector() {
 	if (m_fault_process_pending) {
 		m_fault_process_pending = false;
 		m_buffer_cache.ProcessFaultBuffer();
+	}
+	if (VertexExplode::Enabled()) [[unlikely]] {
+		VertexExplode::SampleGpuIndices();
 	}
 	m_buffer_cache.ProcessExplodeLog();
 	m_texture_cache.ProcessDownloadImages();

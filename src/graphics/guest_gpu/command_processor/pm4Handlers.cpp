@@ -2,6 +2,7 @@
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/stringUtils.h"
+#include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/guest_gpu/command_processor/commandProcessor.h"
 #include "graphics/guest_gpu/command_processor/pm4Dispatch.h"
 #include "graphics/guest_gpu/graphicsRun.h"
@@ -1204,6 +1205,9 @@ KYTY_HW_UC_PARSER(HwUcSetIndexType) {
 	EXIT_NOT_IMPLEMENTED(dw < KYTY_PM4_LEN(cmd_id));
 	EXIT_NOT_IMPLEMENTED(cmd_offset != Pm4::VGT_INDEX_TYPE);
 	cp.SetIndexType(buffer[0] & 0x3u);
+	if (VertexExplode::Enabled()) [[unlikely]] {
+		VertexExplode::NoteIndexTypeSource(2);
+	}
 
 	return 1;
 }
@@ -1870,6 +1874,9 @@ KYTY_CP_OP_PARSER(CpOpIndexType) {
 	EXIT_NOT_IMPLEMENTED(cmd_id != 0xC0002A00);
 
 	cp.SetIndexType(buffer[0]);
+	if (VertexExplode::Enabled()) [[unlikely]] {
+		VertexExplode::NoteIndexTypeSource(1);
+	}
 
 	return 1;
 }
@@ -3944,6 +3951,9 @@ void GraphicsInitJmpTablesUcIndirect() {
 	};
 	g_hw_uc_indirect_func[Pm4::VGT_INDEX_TYPE] = [](KYTY_HW_UC_INDIRECT_ARGS) {
 		cp.SetIndexType(value & 0x3u);
+		if (VertexExplode::Enabled()) [[unlikely]] {
+			VertexExplode::NoteIndexTypeSource(3);
+		}
 	};
 	g_hw_uc_indirect_func[Pm4::VGT_OBJECT_ID] = [](KYTY_HW_UC_INDIRECT_ARGS) {
 		cp.GetUcfg().SetObjectId(value);

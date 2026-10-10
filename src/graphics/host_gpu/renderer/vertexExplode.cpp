@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cinttypes>
 #include <cstdio>
@@ -61,6 +62,23 @@ struct FrameIndices {
 };
 constexpr size_t MaxCopiedIndices = 1u << 16u; // per shader and frame
 
+std::atomic<uint32_t> g_index_type_source {0};
+
+const char* IndexTypeSourceName(uint32_t source) {
+	switch (source) {
+		case 1: return "INDEX_TYPE packet";
+		case 2: return "SET_UCONFIG VGT_INDEX_TYPE";
+		case 3: return "SET_UCONFIG_REG_INDIRECT";
+		default: return "unknown";
+	}
+}
+
+// A GPU-written 32-bit index buffer to read back at the next safe point.
+struct PendingSample {
+	uint64_t hash = 0, frame = 0, address = 0;
+	uint32_t count = 0, records = 0, source = 0;
+};
+
 struct State {
 	std::mutex                                 mutex;
 	uint64_t                                   draws = 0;
@@ -69,6 +87,8 @@ struct State {
 	std::unordered_set<uint64_t>               cpu_reported; // hash ^ index address
 	std::unordered_map<uint64_t, uint64_t>     index_checked; // index address ^ count -> frame
 	std::unordered_map<uint64_t, std::array<FrameIndices, 3>> frame_indices; // by shader hash
+	std::vector<PendingSample>                 pending_samples;
+	std::unordered_map<uint64_t, uint64_t>     last_sample; // hash -> frame
 	std::array<uint64_t, 4>                    hits {};      // by kind, all records
 	std::array<uint32_t, 4>                    shaders {};   // distinct shaders by kind
 	uint64_t                                   cpu_hits         = 0;
@@ -273,6 +293,16 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 			const uint64_t bytes = uint64_t {note.index_count} * note.index_size;
 			if (cache.IsRegionGpuModified(note.index_address, bytes)) {
 				slot.gpu_written++;
+				auto& last = state.last_sample[hash];
+				if (note.index_size == 4 && state.pending_samples.size() < 8 &&
+				    (last == 0 || note.frame - last >= 60)) {
+					last = note.frame;
+					const auto& first = note.stages.front();
+					state.pending_samples.push_back(
+					    {hash, note.frame, note.index_address, std::min(note.index_count, 4096u),
+					     first.buffers_num > 0 ? first.buffers[0].num_records : 0u,
+					     g_index_type_source.load(std::memory_order_relaxed)});
+				}
 			} else if (slot.copied + note.index_count > MaxCopiedIndices) {
 				slot.unreadable++;
 			} else if (note.index_size == 4) {
@@ -440,6 +470,55 @@ void Report(const uint32_t* region, uint64_t frame) {
 		            state.shaders[3], state.cpu_hits, state.cpu_gpu_written);
 	}
 	std::fflush(stdout);
+}
+
+void NoteIndexTypeSource(uint32_t source) {
+	g_index_type_source.store(source, std::memory_order_relaxed);
+}
+
+void SampleGpuIndices() {
+	std::vector<PendingSample> samples;
+	{
+		auto&           state = GetState();
+		std::lock_guard lock(state.mutex);
+		samples.swap(state.pending_samples);
+	}
+	for (const auto& s: samples) {
+		std::vector<uint32_t> words(s.count);
+		if (!LibKernel::Memory::TryReadBufferBacking(s.address, words.data(), words.size() * 4u)) {
+			std::printf("VtxExplode GPU-idx32: vs=%016" PRIx64 " idx=0x%" PRIx64 " not readable\n",
+			            s.hash, s.address);
+			continue;
+		}
+		// valid: below the first fetch buffer's records (any value when it has none); pair: two
+		// 16-bit halves that are both small and the high half not zero.
+		uint32_t valid = 0, pairs = 0, other = 0;
+		for (const auto w: words) {
+			const auto lo = w & 0xffffu, hi = w >> 16u;
+			if (s.records != 0 ? w < s.records : hi == 0) {
+				valid++;
+			} else if (hi != 0 && (s.records != 0 ? (lo < s.records && hi < s.records)
+			                                     : (lo < 0x4000u && hi < 0x4000u))) {
+				pairs++;
+			} else {
+				other++;
+			}
+		}
+		std::string first;
+		for (size_t k = 0; k < std::min<size_t>(words.size(), 12); k++) {
+			first += fmt::format(" {:08x}", words[k]);
+		}
+		const bool bad = pairs != 0 || other != 0;
+		std::printf("%sVtxExplode GPU-idx32: vs=%016" PRIx64 " frame %" PRIu64 " idx=0x%" PRIx64
+		            " n=%u type from %s, vb0 records %u: valid %u, two-16-bit-like %u, other %u;"
+		            " first:%s%s\n",
+		            bad ? "\x1b[91m" : "", s.hash, s.frame, s.address, s.count,
+		            IndexTypeSourceName(s.source), s.records, valid, pairs, other, first.c_str(),
+		            bad ? "\x1b[0m" : "");
+	}
+	if (!samples.empty()) {
+		std::fflush(stdout);
+	}
 }
 
 } // namespace Libs::Graphics::VertexExplode

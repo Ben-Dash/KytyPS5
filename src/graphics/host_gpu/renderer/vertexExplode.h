@@ -45,6 +45,14 @@ void NoteDraw(BufferCache& cache, const DrawNote& note);
 // Prints the records of one read-back explode region (IR::ExplodeLogWords words).
 void Report(const uint32_t* region, uint64_t frame);
 
+// Where the command processor last took the index type from: 1 the INDEX_TYPE packet,
+// 2 SET_UCONFIG_REG VGT_INDEX_TYPE, 3 SET_UCONFIG_REG_INDIRECT (register pairs read from memory).
+void NoteIndexTypeSource(uint32_t source);
+
+// Thread_Gpu, outside scheduler callbacks: reads back the GPU-written 32-bit index buffers that
+// NoteDraw queued (a few per frame) and prints what they hold.
+void SampleGpuIndices();
+
 } // namespace Libs::Graphics::VertexExplode
 
 #endif // EMULATOR_SRC_GRAPHICS_HOST_GPU_RENDERER_VERTEXEXPLODE_H_
