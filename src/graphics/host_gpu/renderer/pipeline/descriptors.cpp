@@ -45,10 +45,13 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <new>
 #include <optional>
 #include <span>
+#include <string>
+#include <tuple>
 #include <vector>
 #include <xxhash.h>
 
@@ -1796,6 +1799,94 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 	}
 }
 
+// KYTY_BINDLESS_TSHARP_CHECK=1: a heap record is checked against what a T# can hold before any
+// texture work, so other data in a table (floats, pointers, vertex data) never reaches the tiler
+// or the texture cache. Ghost of Yotei: a 2217x1x531 "volume" stopped the tiler; most of the red
+// placeholder lines were such records.
+static bool TsharpCheckEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BINDLESS_TSHARP_CHECK");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+// Why the record cannot be an image T# (nullptr: it can). Null records are not asked about.
+static const char* TsharpGarbageReason(const ShaderTextureResource& descriptor) {
+	const auto type = descriptor.Type();
+	if (static_cast<uint32_t>(type) < 8u || static_cast<uint32_t>(type) > 13u) {
+		return "type is not a sampled image type";
+	}
+	if (!TextureHasSurfaceFormat(descriptor.Format())) {
+		return "format is no texture format";
+	}
+	if (!IsValidImageSwizzle(descriptor.DstSelXYZW())) {
+		return "reserved component swizzle";
+	}
+	const auto width  = static_cast<uint32_t>(descriptor.Width5()) + 1u;
+	const auto height = static_cast<uint32_t>(descriptor.Height5()) + 1u;
+	const auto depth  = static_cast<uint32_t>(descriptor.Depth()) + 1u;
+	const bool volume = type == Prospero::ImageType::kColor3D;
+	const bool one_d  = type == Prospero::ImageType::kColor1D || type == Prospero::ImageType::kColor1DArray;
+	const bool arrayed = type == Prospero::ImageType::kColor1DArray ||
+	                     type == Prospero::ImageType::kColor2DArray;
+	if (one_d && height != 1u) {
+		return "1D texture with a height";
+	}
+	// 3D textures go up to 2048 on each axis, layers up to 8192.
+	if (volume && (width > 2048u || height > 2048u || depth > 2048u)) {
+		return "volume larger than 2048";
+	}
+	if (arrayed && descriptor.BaseArray5() >= depth) {
+		return "base layer past the last layer";
+	}
+	if (descriptor.BaseLevel() > descriptor.LastLevel()) {
+		return "base level above last level";
+	}
+	const auto largest = std::max({width, height, volume ? depth : 1u});
+	if (descriptor.LastLevel() >= static_cast<uint32_t>(std::bit_width(largest))) {
+		return "last level past the mip chain";
+	}
+	// The texture starts in memory the guest has mapped (the whole range is checked once its size
+	// is known, DescribeTexture).
+	uint8_t probe = 0;
+	if (!GuestRange {descriptor.Base40(), 1u}.Valid() ||
+	    !Libs::LibKernel::Memory::TryReadBacking(descriptor.Base40(), &probe, sizeof(probe))) {
+		return "address outside mapped guest memory";
+	}
+	return nullptr;
+}
+
+// Records rejected by TsharpGarbageReason: the first of each (shader, reason, requested) is printed
+// in red with its dwords, then a red count per shader and reason every 30 seconds (nothing is
+// dropped silently, user 2026-10-09).
+static void ReportGarbageTsharp(const char* reason, const ShaderRecompiler::IR::DescriptorValue& value) {
+	static std::mutex                               mutex;
+	static std::map<std::tuple<uint64_t, std::string, bool>, uint64_t> counts;
+	static auto                                     next = std::chrono::steady_clock::now();
+	const auto&                                     context = g_bindless_fail_context;
+	const std::lock_guard lock(mutex);
+	auto& count = counts[{context.shader, reason, context.requested}];
+	if (count++ == 0) {
+		std::printf("\x1b[91mbindless: record is not an image T# (%s heap=0x%llx binding=%u key=%u "
+		            "shader=%016llx): %s dwords=%08x,%08x,%08x,%08x\x1b[0m\n",
+		            context.requested ? "requested by a shader" : "unrequested slot",
+		            static_cast<unsigned long long>(context.heap_base), context.binding, context.key,
+		            static_cast<unsigned long long>(context.shader), reason, value.dwords[0],
+		            value.dwords[1], value.dwords[2], value.dwords[3]);
+	}
+	if (const auto now = std::chrono::steady_clock::now(); now >= next) {
+		next = now + std::chrono::seconds(30);
+		for (const auto& [where, total]: counts) {
+			std::printf("\x1b[91mbindless: shader %016llx: %llu %s records are not image T#s: %s\x1b[0m\n",
+			            static_cast<unsigned long long>(std::get<0>(where)),
+			            static_cast<unsigned long long>(total),
+			            std::get<2>(where) ? "requested" : "unrequested", std::get<1>(where).c_str());
+		}
+	}
+	std::fflush(stdout);
+}
+
 // A pointer heap with layers (sub_keys): key = record * sub_keys + layer, and the layer's T# lies
 // sub_stride bytes after the previous one behind the record's pointer.
 static uint64_t BindlessPointerAddress(const BindlessTable::Heap& heap, uint32_t key) {
@@ -1881,6 +1972,13 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		std::fill(value.dwords.begin() + 4, value.dwords.begin() + 8, 0u);
 	}
 	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	if (TsharpCheckEnabled() && !descriptor.IsNull()) {
+		if (const char* garbage = TsharpGarbageReason(descriptor); garbage != nullptr) {
+			ReportGarbageTsharp(garbage, value);
+			table.SetTranslation(heap, key, 0u);
+			return false;
+		}
+	}
 	// A 2D texture in a 3D image's heap: the GPU reads it as 2D, so it goes to the 2D float array
 	// and its translation carries IR::BindlessFlat2DInVolume (the shader samples it with (u, v)).
 	const bool flat_in_volume = heap.binding == ShaderRecompiler::IR::BindlessImages3D &&
