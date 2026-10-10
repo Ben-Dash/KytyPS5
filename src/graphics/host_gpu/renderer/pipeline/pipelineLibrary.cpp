@@ -35,7 +35,7 @@ void LowerThreadPriority() {
 
 } // namespace
 
-PipelineLibraryCache::PipelineLibraryCache(GraphicContext& graphics, vk::PipelineCache driver_cache)
+PipelineLibraryCache::PipelineLibraryCache(GraphicContext& graphics, DriverPipelineCache driver_cache)
     : m_graphics(graphics), m_driver_cache(driver_cache),
       m_link_thread([this](const std::stop_token& stop) { LinkThread(stop); }) {
 	for (uint32_t i = 0; i < CompileThreadCount; i++) {
@@ -260,7 +260,7 @@ void PipelineLibraryCache::LinkThread(const std::stop_token& stop) {
 		info.layout = job.layout;
 		vk::Pipeline optimized = nullptr;
 		const auto   result =
-		    m_graphics.device.createGraphicsPipelines(m_driver_cache, 1, &info, nullptr, &optimized);
+		    m_driver_cache.CreateGraphics(m_graphics.device, info, &optimized);
 		if (result != vk::Result::eSuccess) {
 			LOGF("PipelineLibrary: optimized link failed (%s); keeping the fast-linked pipeline\n",
 			     vk::to_string(result).c_str());

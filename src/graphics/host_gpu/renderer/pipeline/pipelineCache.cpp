@@ -1480,7 +1480,7 @@ PipelineCache::PipelineCache(GraphicContext& graphics)
 	// Before the precompile replay, which queues the journal's compute pipelines on it.
 	m_compute_queue = std::make_unique<ComputePipelineQueue>(Config::PipelineCompileThreads(),
 	                                                         Config::PipelineCompileReplayThreads());
-	if (m_driver_cache != nullptr) {
+	if (m_driver_cache) {
 		m_last_save   = std::chrono::steady_clock::now();
 		m_save_thread = std::jthread([this](const std::stop_token& stop) { SaveThread(stop); });
 	}
@@ -1517,8 +1517,8 @@ PipelineCache::~PipelineCache() {
 	}
 	m_compute_queue.reset();
 	m_libraries.reset();
-	if (m_driver_cache != nullptr) {
-		m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
+	for (uint32_t index = 0; index < m_driver_cache.count; index++) {
+		m_graphics.device.destroyPipelineCache(m_driver_cache.shards[index], nullptr);
 	}
 }
 
@@ -1538,9 +1538,59 @@ void PipelineCache::InitializeDriverCache() {
 		return;
 	}
 
-	m_driver_cache_path     = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
-	const auto path         = Common::PathToString(m_driver_cache_path);
-	const bool cache_exists = Common::File::IsFileExisting(m_driver_cache_path);
+	m_driver_cache_path = std::filesystem::path("_PipelineCache") / (title_id + ".bin");
+	// Shard i > 0 is "<title>.<i>.bin". Without pipelineCreationCacheControl only shard 0 is used.
+	const auto shard_path = [&](uint32_t index) {
+		return index == 0 ? m_driver_cache_path
+		                  : std::filesystem::path("_PipelineCache") /
+		                        fmt::format("{}.{}.bin", title_id, index);
+	};
+	const uint32_t max_shards =
+	    m_graphics.pipeline_creation_cache_control ? DriverPipelineCache::kMaxShards : 1;
+	// The driver adds nothing to a cache this large (2831710399 bytes stayed the same across runs
+	// that compiled new pipelines), so a new shard takes the new pipelines.
+	constexpr size_t kShardFull = 2500000000;
+	size_t           last_loaded = 0;
+	for (uint32_t index = 0; index < max_shards; index++) {
+		const auto path = shard_path(index);
+		if (index > 0 && !Common::File::IsFileExisting(path)) {
+			break;
+		}
+		auto cache = LoadDriverCacheShard(path, &last_loaded);
+		if (cache == nullptr) {
+			break;
+		}
+		m_driver_cache.shards[m_driver_cache.count++] = cache;
+		m_driver_cache_write_path                     = path;
+		// An empty (new or invalidated) shard takes the new pipelines; later shards are not used.
+		if (last_loaded == 0) {
+			break;
+		}
+	}
+	if (m_driver_cache.count != 0 && m_driver_cache.count < max_shards && last_loaded >= kShardFull) {
+		const auto path  = shard_path(m_driver_cache.count);
+		size_t     empty = 0;
+		auto cache = LoadDriverCacheShard(path, &empty);
+		if (cache != nullptr) {
+			PipelineCacheLog("Vulkan pipeline cache: shard {} is full ({} bytes); new pipelines go to {}",
+			                 m_driver_cache.count - 1, last_loaded, Common::PathToString(path));
+			m_driver_cache.shards[m_driver_cache.count++] = cache;
+			m_driver_cache_write_path                     = path;
+		}
+	}
+	if (m_driver_cache.count == 0) {
+		PipelineCacheLog("Vulkan pipeline cache: disabled");
+	} else if (m_driver_cache.count > 1) {
+		PipelineCacheLog("Vulkan pipeline cache: {} shards, writing {}", m_driver_cache.count,
+		                 Common::PathToString(m_driver_cache_write_path));
+	}
+}
+
+vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::path& cache_path,
+                                                      size_t*                      loaded) {
+	*loaded                 = 0;
+	const auto path         = Common::PathToString(cache_path);
+	const bool cache_exists = Common::File::IsFileExisting(cache_path);
 	if (cache_exists) {
 		PipelineCacheLog("Vulkan pipeline cache: loading {}", path);
 	} else {
@@ -1548,7 +1598,7 @@ void PipelineCache::InitializeDriverCache() {
 	}
 	std::vector<uint8_t> initial_data;
 	if (cache_exists) {
-		Common::File file(m_driver_cache_path, Common::File::Mode::Read);
+		Common::File file(cache_path, Common::File::Mode::Read);
 		const auto   file_size = file.IsInvalid() ? 0 : file.Size();
 		const auto   signature = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
 		if (file_size >= signature.size() + sizeof(uint64_t) &&
@@ -1582,32 +1632,34 @@ void PipelineCache::InitializeDriverCache() {
 	vk::PipelineCacheCreateInfo create {};
 	create.initialDataSize = initial_data.size();
 	create.pInitialData    = initial_data.empty() ? nullptr : initial_data.data();
-	auto result = m_graphics.device.createPipelineCache(&create, nullptr, &m_driver_cache);
+	vk::PipelineCache cache  = nullptr;
+	auto              result = m_graphics.device.createPipelineCache(&create, nullptr, &cache);
 	if (result != vk::Result::eSuccess && !initial_data.empty()) {
 		PipelineCacheLog("Vulkan pipeline cache: driver rejected {} ({}); starting empty", path,
 		                 vk::to_string(result));
 		initial_data.clear();
 		create.initialDataSize = 0;
 		create.pInitialData    = nullptr;
-		result = m_graphics.device.createPipelineCache(&create, nullptr, &m_driver_cache);
+		result = m_graphics.device.createPipelineCache(&create, nullptr, &cache);
 	}
 	if (result != vk::Result::eSuccess) {
-		PipelineCacheLog("Vulkan pipeline cache: disabled ({})", vk::to_string(result));
-		m_driver_cache = nullptr;
-		return;
+		PipelineCacheLog("Vulkan pipeline cache: {} failed ({})", path, vk::to_string(result));
+		return nullptr;
 	}
 	if (!initial_data.empty()) {
 		PipelineCacheLog("Vulkan pipeline cache: loaded {} bytes from {}", initial_data.size(),
 		                 path);
 	} else {
-		PipelineCacheLog("Vulkan pipeline cache: initialized empty");
+		PipelineCacheLog("Vulkan pipeline cache: initialized empty {}", path);
 	}
+	*loaded = initial_data.size();
+	return cache;
 }
 
 void PipelineCache::InitializeShaderPrecompile() {
 	// Reuse the Release/source-key/driver gate: records from different recompiler or pipeline
 	// sources carry a different key and are discarded.
-	if (!Config::ShaderPrecompileEnabled() || m_driver_cache == nullptr ||
+	if (!Config::ShaderPrecompileEnabled() || !m_driver_cache ||
 	    m_driver_cache_path.empty())
 		return;
 	auto path = m_driver_cache_path;
@@ -1919,12 +1971,14 @@ void PipelineCache::Save() {
 	}
 	Common::LockGuard lock(m_mutex);
 	m_program_cache->recording.Close();
-	if (m_driver_cache == nullptr) {
+	if (!m_driver_cache) {
 		return;
 	}
 	(void)WriteDriverCache();
-	m_graphics.device.destroyPipelineCache(m_driver_cache, nullptr);
-	m_driver_cache = nullptr;
+	for (uint32_t index = 0; index < m_driver_cache.count; index++) {
+		m_graphics.device.destroyPipelineCache(m_driver_cache.shards[index], nullptr);
+	}
+	m_driver_cache = {};
 }
 
 // Writes the driver pipeline cache to disk; called by Save under m_mutex and by the save thread
@@ -1937,13 +1991,13 @@ bool PipelineCache::WriteDriverCache() {
 	std::vector<uint8_t> payload;
 	for (uint32_t attempt = 0; attempt < 3; attempt++) {
 		size   = 0;
-		result = m_graphics.device.getPipelineCacheData(m_driver_cache, &size, nullptr);
+		result = m_graphics.device.getPipelineCacheData(m_driver_cache.Growing(), &size, nullptr);
 		if (result != vk::Result::eSuccess || size == 0 ||
 		    size > std::numeric_limits<uint32_t>::max()) {
 			break;
 		}
 		payload.resize(size);
-		result = m_graphics.device.getPipelineCacheData(m_driver_cache, &size, payload.data());
+		result = m_graphics.device.getPipelineCacheData(m_driver_cache.Growing(), &size, payload.data());
 		if (result != vk::Result::eIncomplete) {
 			break;
 		}
@@ -1958,11 +2012,11 @@ bool PipelineCache::WriteDriverCache() {
 	auto       prefix       = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
 	const auto payload_hash = XXH3_64bits(payload.data(), payload.size());
 	prefix.append(reinterpret_cast<const char*>(&payload_hash), sizeof(payload_hash));
-	if (!Common::File::CreateDirectories(m_driver_cache_path.parent_path())) {
+	if (!Common::File::CreateDirectories(m_driver_cache_write_path.parent_path())) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to create cache directory");
 		return false;
 	}
-	auto temp_path = m_driver_cache_path;
+	auto temp_path = m_driver_cache_write_path;
 	temp_path += ".tmp";
 	Common::File file;
 	uint32_t     prefix_written  = 0;
@@ -1974,13 +2028,13 @@ bool PipelineCache::WriteDriverCache() {
 	const bool flushed = !file.IsInvalid() && file.Flush();
 	file.Close();
 	if (prefix_written != prefix.size() || payload_written != payload.size() || !flushed ||
-	    !Common::File::RenameFile(temp_path, m_driver_cache_path)) {
+	    !Common::File::RenameFile(temp_path, m_driver_cache_write_path)) {
 		PipelineCacheLog("Vulkan pipeline cache: failed to write {}",
-		                 Common::PathToString(m_driver_cache_path));
+		                 Common::PathToString(m_driver_cache_write_path));
 		return false;
 	}
 	PipelineCacheLog("Vulkan pipeline cache: saved {} bytes to {}", payload.size(),
-	                 Common::PathToString(m_driver_cache_path));
+	                 Common::PathToString(m_driver_cache_write_path));
 	return true;
 }
 

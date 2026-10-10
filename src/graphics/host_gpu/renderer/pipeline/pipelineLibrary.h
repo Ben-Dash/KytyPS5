@@ -3,6 +3,7 @@
 
 #include "common/common.h"
 #include "common/uniqueFunction.h"
+#include "graphics/host_gpu/renderer/pipeline/driverPipelineCache.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <array>
@@ -31,7 +32,7 @@ struct GraphicContext;
 // of upcoming draws and compiles them on worker threads, and Find waits for a part still compiling.
 class PipelineLibraryCache {
 public:
-	PipelineLibraryCache(GraphicContext& graphics, vk::PipelineCache driver_cache);
+	PipelineLibraryCache(GraphicContext& graphics, DriverPipelineCache driver_cache);
 	~PipelineLibraryCache();
 	KYTY_CLASS_NO_COPY(PipelineLibraryCache);
 
@@ -106,7 +107,7 @@ private:
 	void EnqueueLocked(CompileJob&& job, bool urgent);
 
 	GraphicContext&                        m_graphics;
-	vk::PipelineCache                      m_driver_cache = nullptr;
+	DriverPipelineCache                    m_driver_cache;
 	std::unordered_map<std::string, Entry> m_libraries;
 	std::vector<vk::PipelineLayout>        m_kept_layouts;
 	std::vector<vk::DescriptorSetLayout>   m_kept_set_layouts;

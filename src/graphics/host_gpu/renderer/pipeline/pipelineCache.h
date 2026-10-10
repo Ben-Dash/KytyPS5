@@ -7,6 +7,7 @@
 #include "common/threads.h"
 #include "common/uniqueFunction.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
+#include "graphics/host_gpu/renderer/pipeline/driverPipelineCache.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/shader.h"
 
@@ -292,8 +293,10 @@ private:
 
 	GraphicContext&               m_graphics;
 	std::unique_ptr<ProgramCache> m_program_cache;
-	vk::PipelineCache             m_driver_cache = nullptr;
+	DriverPipelineCache           m_driver_cache;
 	std::filesystem::path         m_driver_cache_path;
+	// The shard WriteDriverCache saves (m_driver_cache.Growing()).
+	std::filesystem::path         m_driver_cache_write_path;
 	std::unique_ptr<PipelineLibraryCache> m_libraries;
 	uint64_t                              m_graphics_pipelines_created = 0;
 	uint64_t                              m_compute_pipelines_created  = 0;
@@ -338,6 +341,8 @@ private:
 	std::atomic_bool                                        m_precompile_done {true};
 
 	void InitializeDriverCache();
+	// Creates a driver cache from one shard file; `loaded` receives the bytes taken from it.
+	vk::PipelineCache LoadDriverCacheShard(const std::filesystem::path& path, size_t* loaded);
 	void InitializeShaderPrecompile();
 	void InstallOptimizedPipeline(Pipeline& pipeline, CommandBuffer& command);
 	void WaitForPrecompile();
@@ -384,7 +389,7 @@ int CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pi
                            const ShaderPixelInputInfo*            ps_input_info,
                            const PipelineCache::GraphicsPrograms& programs,
                            const PipelineStaticParameters&        static_params,
-                           PipelineLibraryCache* libraries, vk::PipelineCache driver_cache);
+                           PipelineLibraryCache* libraries, DriverPipelineCache driver_cache);
 // Compiles the missing shader library parts of a graphics pipeline on the library cache's worker
 // threads. Returns the number of parts queued. `ready`, when given, receives whether the
 // pipeline can be created without waiting for a shader part to compile.
@@ -394,7 +399,7 @@ uint32_t PrefetchLibraryParts(GraphicContext& graphics, const PipelineRenderingS
                               const ShaderPixelInputInfo*            ps_input_info,
                               const PipelineCache::GraphicsPrograms& programs,
                               const PipelineStaticParameters&        static_params,
-                              PipelineLibraryCache& libraries, vk::PipelineCache driver_cache,
+                              PipelineLibraryCache& libraries, DriverPipelineCache driver_cache,
                               bool* ready = nullptr);
 // Creates a compute pipeline's layouts and returns the call that creates the pipeline itself. That
 // call reads only its own copies, so it may run on another thread; it returns null on failure.
@@ -403,11 +408,11 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
                                                             PipelineCache::Pipeline&      pipeline,
                                                             const ShaderComputeInputInfo& input_info,
                                                             vk::ShaderModule  compute_module,
-                                                            vk::PipelineCache driver_cache,
+                                                            DriverPipelineCache driver_cache,
                                                             bool              prefetch = false);
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
-                            vk::ShaderModule compute_module, vk::PipelineCache driver_cache);
+                            vk::ShaderModule compute_module, DriverPipelineCache driver_cache);
 
 } // namespace Libs::Graphics
 

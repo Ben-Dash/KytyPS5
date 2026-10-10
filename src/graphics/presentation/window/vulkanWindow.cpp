@@ -746,6 +746,9 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	                                           : static_cast<void*>(&fragment_barycentric);
 #endif
 	features13.robustImageAccess   = supported_features13.robustImageAccess;
+	features13.pipelineCreationCacheControl = supported_features13.pipelineCreationCacheControl;
+	graphics.pipeline_creation_cache_control =
+	    supported_features13.pipelineCreationCacheControl == VK_TRUE;
 	features13.subgroupSizeControl =
 	    graphics.compute_subgroup_size_control_enabled ? VK_TRUE : VK_FALSE;
 

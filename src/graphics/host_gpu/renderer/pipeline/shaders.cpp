@@ -655,7 +655,7 @@ void CreateGraphicsLayouts(GraphicContext& graphics, PipelineCache::Pipeline& pi
 }
 
 void CreateMonolithicPipeline(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
-                              const GraphicsPipelineState& state, vk::PipelineCache driver_cache) {
+                              const GraphicsPipelineState& state, DriverPipelineCache driver_cache) {
 	CreateGraphicsLayouts(graphics, pipeline, state, state.graphics_stages);
 	pipeline.push_constant_stages = state.graphics_stages;
 
@@ -677,8 +677,7 @@ void CreateMonolithicPipeline(GraphicContext& graphics, PipelineCache::Pipeline&
 	pipeline_info.basePipelineIndex   = -1;
 
 	EXIT_IF(pipeline.pipeline != nullptr);
-	const auto result = graphics.device.createGraphicsPipelines(driver_cache, 1, &pipeline_info,
-	                                                            nullptr, &pipeline.pipeline);
+	const auto result = driver_cache.CreateGraphics(graphics.device, pipeline_info, &pipeline.pipeline);
 	if (graphics_debug_dump_enabled()) {
 		LOGF("PipelineTrace: vkCreateGraphicsPipelines done result=%s pipeline=%p\n",
 		     vk::to_string(result).c_str(), static_cast<void*>(pipeline.pipeline));
@@ -710,7 +709,7 @@ void AppendBindingsKey(std::string& key, std::span<const vk::DescriptorSetLayout
 vk::Pipeline CreateLibraryPart(GraphicContext& graphics, vk::GraphicsPipelineLibraryFlagsEXT part,
                                vk::GraphicsPipelineCreateInfo         info,
                                const vk::PipelineRenderingCreateInfo& rendering,
-                               vk::PipelineCache driver_cache, bool prefetch = false) {
+                               DriverPipelineCache driver_cache, bool prefetch = false) {
 	vk::GraphicsPipelineLibraryCreateInfoEXT library {};
 	library.pNext = const_cast<vk::PipelineRenderingCreateInfo*>(&rendering);
 	library.flags = part;
@@ -720,7 +719,7 @@ vk::Pipeline CreateLibraryPart(GraphicContext& graphics, vk::GraphicsPipelineLib
 	info.basePipelineIndex = -1;
 	vk::Pipeline pipeline  = nullptr;
 	const auto   result =
-	    graphics.device.createGraphicsPipelines(driver_cache, 1, &info, nullptr, &pipeline);
+	    driver_cache.CreateGraphics(graphics.device, info, &pipeline);
 	if (result != vk::Result::eSuccess) {
 		EXIT_NOT_IMPLEMENTED(!prefetch);
 		LOGF("PipelineLibrary: prefetch compile failed (%s)\n", vk::to_string(result).c_str());
@@ -822,7 +821,7 @@ LibraryPartKeys BuildLibraryPartKeys(const GraphicsPipelineState&           stat
 }
 
 vk::Pipeline CreatePreRasterPart(GraphicContext& graphics, const GraphicsPipelineState& state,
-                                 vk::PipelineLayout layout, vk::PipelineCache driver_cache,
+                                 vk::PipelineLayout layout, DriverPipelineCache driver_cache,
                                  bool prefetch) {
 	const vk::PipelineRenderingCreateInfo shader_rendering {};
 	vk::PipelineDynamicStateCreateInfo    dynamic_state {};
@@ -842,7 +841,7 @@ vk::Pipeline CreatePreRasterPart(GraphicContext& graphics, const GraphicsPipelin
 
 vk::Pipeline CreateFragmentPart(GraphicContext& graphics, const GraphicsPipelineState& state,
                                 const vk::PipelineDepthStencilStateCreateInfo& depth_stencil,
-                                vk::PipelineLayout layout, vk::PipelineCache driver_cache,
+                                vk::PipelineLayout layout, DriverPipelineCache driver_cache,
                                 bool prefetch) {
 	const vk::PipelineRenderingCreateInfo shader_rendering {};
 	vk::PipelineDynamicStateCreateInfo    dynamic_state {};
@@ -875,7 +874,7 @@ vk::Pipeline CreateFragmentPart(GraphicContext& graphics, const GraphicsPipeline
 uint32_t CreateLibraryPipeline(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                                const GraphicsPipelineState&           state,
                                const PipelineCache::GraphicsPrograms& programs,
-                               PipelineLibraryCache& libraries, vk::PipelineCache driver_cache) {
+                               PipelineLibraryCache& libraries, DriverPipelineCache driver_cache) {
 	using Part = vk::GraphicsPipelineLibraryFlagBitsEXT;
 	const vk::PipelineRenderingCreateInfo shader_rendering {};
 	vk::PipelineDynamicStateCreateInfo    shared_dynamic_state {};
@@ -986,7 +985,7 @@ uint32_t PrefetchLibraryParts(GraphicContext& graphics, const PipelineRenderingS
                               const ShaderPixelInputInfo*            ps_input_info,
                               const PipelineCache::GraphicsPrograms& programs,
                               const PipelineStaticParameters&        static_params,
-                              PipelineLibraryCache& libraries, vk::PipelineCache driver_cache,
+                              PipelineLibraryCache& libraries, DriverPipelineCache driver_cache,
                               bool* ready) {
 	// Shared by the two compile jobs, which may outlive this call.
 	auto state = std::make_shared<GraphicsPipelineState>(graphics.device);
@@ -1169,7 +1168,7 @@ int CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pi
                            const ShaderPixelInputInfo*            ps_input_info,
                            const PipelineCache::GraphicsPrograms& programs,
                            const PipelineStaticParameters&        static_params,
-                           PipelineLibraryCache* libraries, vk::PipelineCache driver_cache) {
+                           PipelineLibraryCache* libraries, DriverPipelineCache driver_cache) {
 	GraphicsPipelineState state(graphics.device);
 	BuildGraphicsPipelineState(state, graphics, rendering, vertex_input, vertex_info, ps_input_info,
 	                           programs, static_params);
@@ -1208,7 +1207,7 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
                                                             PipelineCache::Pipeline&      pipeline,
                                                             const ShaderComputeInputInfo& input_info,
                                                             vk::ShaderModule  compute_module,
-                                                            vk::PipelineCache driver_cache,
+                                                            DriverPipelineCache driver_cache,
                                                             bool              prefetch) {
 	EXIT_IF(compute_module == nullptr);
 	// Only the program is read: the precompile replay builds pipelines before any dispatch
@@ -1291,7 +1290,7 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 			}
 		});
 		const auto created =
-		    graphics.device.createComputePipelines(driver_cache, 1, &info, nullptr, &pipeline);
+		    driver_cache.CreateCompute(graphics.device, info, &pipeline);
 		compiled.set_value();
 		watch.wait();
 		if (created != vk::Result::eSuccess) {
@@ -1324,7 +1323,7 @@ Common::UniqueFunction<vk::Pipeline> PrepareComputePipeline(GraphicContext&     
 
 void CreatePipelineInternal(GraphicContext& graphics, PipelineCache::Pipeline& pipeline,
                             const ShaderComputeInputInfo& input_info,
-                            vk::ShaderModule compute_module, vk::PipelineCache driver_cache) {
+                            vk::ShaderModule compute_module, DriverPipelineCache driver_cache) {
 	const auto create =
 	    PrepareComputePipeline(graphics, pipeline, input_info, compute_module, driver_cache);
 	EXIT_IF(pipeline.pipeline != nullptr);
