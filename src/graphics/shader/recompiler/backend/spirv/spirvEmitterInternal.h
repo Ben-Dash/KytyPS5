@@ -198,6 +198,8 @@ struct EmitterState {
 	uint32_t                                         subgroup_local_invocation_id_variable = 0;
 	uint32_t                                         helper_invocation_variable            = 0;
 	uint32_t                                         per_vertex_variable                   = 0;
+	// KYTY_VTX_EXPLODE_CHECK: gl_BaseVertex of a vertex shader (0: none).
+	uint32_t                                         explode_base_vertex_variable          = 0;
 	uint32_t                                         point_size_variable                   = 0;
 	uint32_t                                         clip_distance_variable                = 0;
 	uint32_t                                         invalid_position_clip_distance = UINT32_MAX;

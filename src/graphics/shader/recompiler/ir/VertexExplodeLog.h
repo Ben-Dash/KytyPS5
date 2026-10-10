@@ -50,7 +50,8 @@ enum class VertexExplodeKind : uint32_t {
 // has a hit counter at ExplodeLogCounterWord + s; the hit that finds it 0 writes the slot's
 // record at ExplodeLogRecordWord + s * ExplodeLogRecordWords. Record: marker 0x56580000 | kind |
 // stage << 8, shader hash low and high, vertex index (mesh: local invocation * 2 + lane half),
-// instance index (mesh: workgroup x), position x, y, z, w (float bits).
+// instance index (mesh: workgroup x), position x, y, z, w (float bits), gl_BaseVertex and 1 when
+// word 9 holds it (vertex shaders).
 inline constexpr uint32_t ExplodeLogBaseWord    = 0x300000u;
 inline constexpr uint32_t ExplodeLogHeaderWords = 16;
 inline constexpr uint32_t ExplodeLogBuckets     = 512;

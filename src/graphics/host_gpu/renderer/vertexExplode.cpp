@@ -42,6 +42,9 @@ struct DrawInfo {
 	bool     index_gpu_args = false;
 	// A copy of the 16-bit indices taken at the draw (up to 64Ki indices; empty: not readable).
 	std::vector<uint16_t> indices;
+	// Over all draws of the shader in this frame: draws, vertex offsets, indexed and 32-bit draws.
+	uint32_t frame_draws = 0, indexed_draws = 0, index32_draws = 0, gpu_args_draws = 0;
+	int32_t  min_vertex_offset = 0, max_vertex_offset = 0;
 };
 
 struct State {
@@ -211,6 +214,8 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 		const auto hash = stage.stage.program->shader_hash;
 		auto&      info = state.last_draw[hash];
 		if (info.frame != note.frame || info.draw == 0) {
+			info.frame_draws = info.indexed_draws = info.index32_draws = info.gpu_args_draws = 0;
+			info.min_vertex_offset = info.max_vertex_offset = note.vertex_offset;
 			// Described once per frame and shader: the text costs more than the draw.
 			if (text.empty()) {
 				text = DescribeDraw(note, state.draws);
@@ -237,6 +242,12 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 		}
 		info.frame = note.frame;
 		info.draw  = state.draws;
+		info.frame_draws++;
+		info.indexed_draws += note.indexed ? 1u : 0u;
+		info.index32_draws += note.indexed && note.index_size == 4 ? 1u : 0u;
+		info.gpu_args_draws += note.gpu_args ? 1u : 0u;
+		info.min_vertex_offset = std::min(info.min_vertex_offset, note.vertex_offset);
+		info.max_vertex_offset = std::max(info.max_vertex_offset, note.vertex_offset);
 	}
 	if (!note.stages.empty() && note.stages.front().stage.program != nullptr) {
 		CheckIndices(state, cache, note, note.stages.front().stage.program->shader_hash);
@@ -268,6 +279,12 @@ void Report(const uint32_t* region, uint64_t frame) {
 			continue;
 		}
 		state.shaders[kind]++;
+		std::string base_vertex;
+		if (record[10] == 1u) {
+			const auto base = static_cast<int32_t>(record[9]);
+			base_vertex = fmt::format(" base_vertex={} index={}", base,
+			                          static_cast<int64_t>(record[3]) - base);
+		}
 		const auto  x    = std::bit_cast<float>(record[5]);
 		const auto  y    = std::bit_cast<float>(record[6]);
 		const auto  z    = std::bit_cast<float>(record[7]);
@@ -278,10 +295,10 @@ void Report(const uint32_t* region, uint64_t frame) {
 		const char* on   = cull ? "" : "\x1b[91m";
 		const char* off  = cull ? "" : "\x1b[0m";
 		std::printf("%sVtxExplode: %s=%016" PRIx64 " kind=%s frame=%" PRIu64 " hits=%u %s=%u %s=%u"
-		            " pos=(%g, %g, %g, %g) | last %s%s\n",
+		            "%s pos=(%g, %g, %g, %g) | last %s%s\n",
 		            on, mesh ? "mesh" : "vs", hash, KindName(kind), frame, count,
 		            mesh ? "invocation" : "vertex", record[3], mesh ? "group" : "instance",
-		            record[4], x, y, z, w, text.c_str(), off);
+		            record[4], base_vertex.c_str(), x, y, z, w, text.c_str(), off);
 		// The reported vertex's bytes in each fetch buffer (as the CPU sees them now).
 		if (draw != state.last_draw.end() && !mesh) {
 			for (uint32_t i = 0; i < draw->second.buffer_count; i++) {
@@ -308,15 +325,16 @@ void Report(const uint32_t* region, uint64_t frame) {
 		}
 		// A 16-bit indexed draw whose vertex index is above 65535 (+ the vertex offset in the draw
 		// text): look for the index pair it would be if the GPU read the 16-bit indices as 32-bit.
-		if (draw != state.last_draw.end() && !mesh && record[3] > 0xffffu &&
+		const uint32_t index = record[10] == 1u ? record[3] - record[9] : record[3];
+		if (draw != state.last_draw.end() && !mesh && index > 0xffffu &&
 		    draw->second.index_size == 2 && draw->second.index_address != 0 &&
 		    !draw->second.index_gpu_args) {
 			const auto& info    = draw->second;
 			const auto& indices = info.indices;
 			std::string result;
 			if (!indices.empty()) {
-				const auto low  = record[3] & 0xffffu;
-				const auto high = record[3] >> 16u;
+				const auto low  = index & 0xffffu;
+				const auto high = index >> 16u;
 				uint32_t   even = 0, odd = 0, max_index = 0;
 				for (uint32_t k = 0; k < indices.size(); k++) {
 					max_index = std::max<uint32_t>(max_index, indices[k]);
@@ -330,9 +348,12 @@ void Report(const uint32_t* region, uint64_t frame) {
 			} else {
 				result = "no copy of the indices (GPU-written or more than 64Ki)";
 			}
-			std::printf("%s  index check: vertex %u > 65535 in a 16-bit draw (idx 0x%" PRIx64
-			            " n=%u): %s%s\n",
-			            on, record[3], info.index_address, info.index_count, result.c_str(), off);
+			std::printf("%s  index check: index %u (vertex - base vertex) > 65535 in a 16-bit draw (idx 0x%" PRIx64
+			            " n=%u): %s; this shader's draws in frame %" PRIu64 ": %u (indexed %u, 32-bit %u, "
+			            "gpu-args %u), vertex offsets %d..%d%s\n",
+			            on, index, info.index_address, info.index_count, result.c_str(),
+			            info.frame, info.frame_draws, info.indexed_draws, info.index32_draws,
+			            info.gpu_args_draws, info.min_vertex_offset, info.max_vertex_offset, off);
 		}
 		LOGF("VtxExplode: %s=%016" PRIx64 " kind=%s frame=%" PRIu64 " hits=%u vertex=%u "
 		     "instance=%u pos=(%g, %g, %g, %g) | last %s\n",

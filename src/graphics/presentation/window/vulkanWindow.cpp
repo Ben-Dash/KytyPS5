@@ -23,6 +23,7 @@
 #include "graphics/presentation/window.h"
 #include "graphics/presentation/window/windowInternal.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
+#include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
 #include "kernel/memory.h"
 #include "libs/controller.h"
 #include "loader/systemContent.h"
@@ -572,6 +573,9 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	features12.pNext = workgroup_layout_extension ? static_cast<void*>(&workgroup_layout)
 	                                             : static_cast<void*>(&depth_clip_control);
 	auto features11 = WindowContext::RequiredVulkan11Features();
+	// KYTY_VTX_EXPLODE_CHECK: the explode records hold gl_BaseVertex.
+	features11.shaderDrawParameters =
+	    Libs::Graphics::ShaderRecompiler::IR::VertexExplodeCheck().enabled ? VK_TRUE : VK_FALSE;
 	features11.pNext = features12.pNext;
 	features12.pNext = &features11;
 	if (!features12.shaderSharedInt64Atomics || !workgroup_layout.workgroupMemoryExplicitLayout) {

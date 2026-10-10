@@ -544,6 +544,13 @@ void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
 				state.builder.AddFunction(spv::OpCompositeExtract, f32, component, position, i);
 				store(5 + i, Unary(state, spv::OpBitcast, TypeU32(state), component));
 			}
+			if (state.explode_base_vertex_variable != 0) {
+				const auto base_vertex = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpLoad, TypeI32(state), base_vertex,
+				                          state.explode_base_vertex_variable);
+				store(9, Unary(state, spv::OpBitcast, TypeU32(state), base_vertex));
+				store(10, ConstantU32(state, 1));
+			}
 		});
 	});
 }

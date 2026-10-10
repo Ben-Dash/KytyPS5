@@ -660,6 +660,15 @@ void DefineInputs(EmitterState& state) {
 			state.builder.AddAnnotation(spv::OpDecorate, variable, spv::DecorationFlat);
 		}
 	}
+	if (state.program.stage == ShaderType::Vertex && IR::UsesVertexExplodeLog(state.program)) {
+		// The draw's vertex offset, to tell an index from the offset in an explode record.
+		const auto variable = DefineInterfaceVariable(state, TypeI32(state), spv::StorageClassInput,
+		                                              "gl_BaseVertex");
+		state.builder.AddAnnotation(spv::OpDecorate, variable, spv::DecorationBuiltIn,
+		                            spv::BuiltInBaseVertex);
+		state.builder.RequireCapability(spv::CapabilityDrawParameters);
+		state.explode_base_vertex_variable = variable;
+	}
 	if (state.program.stage == ShaderType::Pixel && state.requirements.subgroup_ballot) {
 		const auto variable = DefineInterfaceVariable(
 		    state, TypeBool(state), spv::StorageClassInput, "gl_HelperInvocation");
