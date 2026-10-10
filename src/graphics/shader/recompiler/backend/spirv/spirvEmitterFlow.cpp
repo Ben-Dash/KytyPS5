@@ -892,7 +892,9 @@ uint32_t EmitConditionRef(ValueEmitContext& ctx, const IR::Inst& inst) {
 	// Argument 1 is the branch's emitted condition; argument 0 is only for analysis.
 	if (ctx.other_half == nullptr) return ctx.Arg(inst, 1);
 	// A native scalar branch makes one decision for both emulated wave halves.
-	if (ctx.half != 0) return ctx.other_half->Def(IR::Value(&inst));
+	// &inst is a const Inst*; without the cast it would pick the explicit Value(bool) constructor
+	// (pointer-to-bool), turning the condition into a constant true for the second half.
+	if (ctx.half != 0) return ctx.other_half->Def(IR::Value(const_cast<IR::Inst*>(&inst)));
 	const auto kind = inst.Flags<CFG::BranchCondition>();
 	if (kind == CFG::BranchCondition::ScalarInstruction) return ctx.Arg(inst, 1);
 	const auto ballot = ctx.Ballot(inst.Arg(1));
