@@ -451,6 +451,7 @@ KYTY_HW_CTX_PARSER(HwCtxSetAlphaToMask) {
 
 	for (uint32_t i = 0; i < num_values; i++) {
 		HwCtxIgnoreAlphaToMaskRegister(buffer[i]);
+		cp.GetCtx().SetAlphaToMaskRaw(buffer[i]);
 	}
 
 	return num_values;
@@ -3605,6 +3606,7 @@ void GraphicsInitJmpTablesCxIndirect() {
 	    [](KYTY_HW_CTX_INDIRECT_ARGS) { HwCtxIgnorePaScExtendedControl(cmd_offset, value); };
 	g_hw_ctx_indirect_func[Pm4::DB_ALPHA_TO_MASK] = [](KYTY_HW_CTX_INDIRECT_ARGS) {
 		HwCtxIgnoreAlphaToMaskRegister(value);
+		cp.GetCtx().SetAlphaToMaskRaw(value);
 	};
 	g_hw_ctx_indirect_func[Pm4::CB_COLOR_CONTROL] = [](KYTY_HW_CTX_INDIRECT_ARGS) {
 		cp.GetCtx().SetColorControl(DecodeColorControl(value));

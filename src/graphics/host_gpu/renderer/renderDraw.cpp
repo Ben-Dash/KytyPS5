@@ -1843,6 +1843,54 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::Targets);
 
+	// KYTY_DEBUG_DEPTHONLY=1: one line per distinct depth-only draw setup (no colour output or no
+	// pixel shader bound on the host): whether the guest set a pixel shader at all, its kill and
+	// export controls, and the alpha-to-mask register (not emulated). Ghost of Yotei: grass tufts
+	// in the sun shadow cascade drawn as solid blocks.
+	static const bool depthonly_log = KYTY_GETENV("KYTY_DEBUG_DEPTHONLY") != nullptr;
+	if (depthonly_log && state.depth_info.image_id && (!state.ps_active || color_output_mask == 0))
+	    [[unlikely]] {
+		const auto& ctx        = buffer.GetRegisters();
+		const auto& db         = shader_regs.db_shader_control;
+		const auto  guest_ps   = buffer.GetShaders().GetPs().ps_regs.data_addr;
+		const auto  ps_hash    = state.ps_active && state.ps_input_info.stage.program != nullptr
+		                             ? state.ps_input_info.stage.program->shader_hash
+		                             : 0;
+		const auto  vs_hash    = state.vertex_info[0].stage.program != nullptr
+		                             ? state.vertex_info[0].stage.program->shader_hash
+		                             : 0;
+		uint32_t    out_modes  = 0;
+		for (uint32_t i = 0; i < 8; i++) {
+			out_modes |= (static_cast<uint32_t>(shader_regs.target_output_mode[i]) & 0xfu) << (i * 4u);
+		}
+		static std::mutex                   depthonly_mutex;
+		static std::unordered_set<uint64_t> depthonly_seen;
+		uint64_t key = 0xcbf29ce484222325ull;
+		for (const uint64_t part: {guest_ps, ps_hash, vs_hash, uint64_t {db.shader_kill_enable},
+		                           uint64_t {db.shader_z_export_enable}, uint64_t {ctx.GetRenderTargetMask()},
+		                           uint64_t {ctx.GetColorControl().mode}, uint64_t {out_modes},
+		                           uint64_t {ctx.GetAlphaToMaskRaw()},
+		                           state.depth_info.desc.info.data.address}) {
+			key = (key ^ part) * 0x100000001b3ull;
+		}
+		const std::lock_guard lock(depthonly_mutex);
+		if (depthonly_seen.size() < 4096 && depthonly_seen.insert(key).second) {
+			std::printf("depthonly: depth=0x%016llx guest_ps=0x%llx host_ps=%016llx ps_active=%d "
+			            "vs=%016llx kill=%d z_export=%d mask_export=%d exec_noop=%d a2m_disable=%d "
+			            "z_behavior=%u cb_target_mask=0x%08x cb_shader_mask=0x%08x color_mode=%u "
+			            "col_format=0x%08x db_alpha_to_mask=0x%08x color_outputs=0x%x\n",
+			            static_cast<unsigned long long>(state.depth_info.desc.info.data.address),
+			            static_cast<unsigned long long>(guest_ps), static_cast<unsigned long long>(ps_hash),
+			            state.ps_active ? 1 : 0, static_cast<unsigned long long>(vs_hash),
+			            db.shader_kill_enable ? 1 : 0, db.shader_z_export_enable ? 1 : 0,
+			            db.shader_mask_export_enable ? 1 : 0, db.shader_execute_on_noop ? 1 : 0,
+			            db.alpha_to_mask_disable ? 1 : 0, static_cast<uint32_t>(db.shader_z_behavior),
+			            ctx.GetRenderTargetMask(), shader_regs.m_cbShaderMask,
+			            static_cast<uint32_t>(ctx.GetColorControl().mode), out_modes,
+			            ctx.GetAlphaToMaskRaw(), color_output_mask);
+			std::fflush(stdout);
+		}
+	}
 	if (state.color_count == 0 && !state.depth_info.image_id && !state.ps_active) {
 		LogFramebufferSkip(draw.Name(), state.color_info[0], state.depth_info, buffer,
 		                   draw.index_count, 0);

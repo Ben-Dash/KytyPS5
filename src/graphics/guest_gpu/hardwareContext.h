@@ -906,6 +906,10 @@ public:
 	void SetStencilMask(const StencilMask& mask) { m_stencil_mask = mask; }
 	[[nodiscard]] const ColorControl& GetColorControl() const { return m_color_control; }
 	void SetColorControl(const ColorControl& control) { m_color_control = control; }
+	// DB_ALPHA_TO_MASK as the guest wrote it (alpha-to-coverage is not emulated; kept for
+	// KYTY_DEBUG_DEPTHONLY).
+	[[nodiscard]] uint32_t GetAlphaToMaskRaw() const { return m_alpha_to_mask_raw; }
+	void SetAlphaToMaskRaw(uint32_t value) { m_alpha_to_mask_raw = value; }
 	[[nodiscard]] const ScanModeControl& GetScanModeControl() const { return m_scan_mode_control; }
 	void SetScanModeControl(const ScanModeControl& control) { m_scan_mode_control = control; }
 	[[nodiscard]] const AaSampleControl& GetAaSampleControl() const { return m_aa_sample_control; }
@@ -980,6 +984,7 @@ private:
 	ScreenViewport  m_screen_viewport;
 	ClipControl     m_clip_control;
 	ColorControl    m_color_control;
+	uint32_t        m_alpha_to_mask_raw = 0;
 	ScanModeControl m_scan_mode_control;
 
 	AaSampleControl m_aa_sample_control;
