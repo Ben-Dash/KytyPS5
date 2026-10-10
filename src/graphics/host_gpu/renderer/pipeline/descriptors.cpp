@@ -1776,7 +1776,9 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 		// A 1D texture is a 2D one of height 1 (sampled through the 2D arrays, see ResolveBindlessKey).
 		case Prospero::ImageType::kColor1D:
 		case Prospero::ImageType::kColor1DArray: return flat;
-		case Prospero::ImageType::kCube: return binding == ShaderRecompiler::IR::BindlessImagesCube;
+		// A cube is a 2D array of its faces (TextureType); shaders also read cube maps through the
+		// 2D tables, which then see the face BASE_ARRAY names (Ghost of Yotei: 29 keys per Torii run).
+		case Prospero::ImageType::kCube: return binding == ShaderRecompiler::IR::BindlessImagesCube || flat;
 		case Prospero::ImageType::kColor3D: return binding == ShaderRecompiler::IR::BindlessImages3D;
 		default: return false;
 	}
