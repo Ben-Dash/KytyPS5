@@ -47,6 +47,20 @@ struct DrawInfo {
 	int32_t  min_vertex_offset = 0, max_vertex_offset = 0;
 };
 
+// The indices of a shader's CPU-args indexed draws in one frame (copies read without faulting),
+// to find where a reported vertex index came from. The last three frames are kept: a record is
+// read back a frame or two after its draw.
+struct FrameIndices {
+	uint64_t                           frame = 0;
+	uint32_t                           draws16 = 0, draws32 = 0;
+	uint32_t                           gpu_written = 0; // indexed draws whose indices the GPU wrote
+	uint32_t                           unreadable  = 0; // other indexed draws not copied
+	std::vector<std::vector<uint16_t>> copies16;
+	std::vector<std::vector<uint32_t>> copies32;
+	size_t                             copied = 0; // indices in the copies
+};
+constexpr size_t MaxCopiedIndices = 1u << 16u; // per shader and frame
+
 struct State {
 	std::mutex                                 mutex;
 	uint64_t                                   draws = 0;
@@ -54,6 +68,7 @@ struct State {
 	std::unordered_set<uint64_t>               reported;    // hash * 4 + kind (GPU records)
 	std::unordered_set<uint64_t>               cpu_reported; // hash ^ index address
 	std::unordered_map<uint64_t, uint64_t>     index_checked; // index address ^ count -> frame
+	std::unordered_map<uint64_t, std::array<FrameIndices, 3>> frame_indices; // by shader hash
 	std::array<uint64_t, 4>                    hits {};      // by kind, all records
 	std::array<uint32_t, 4>                    shaders {};   // distinct shaders by kind
 	uint64_t                                   cpu_hits         = 0;
@@ -248,6 +263,36 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 		info.gpu_args_draws += note.gpu_args ? 1u : 0u;
 		info.min_vertex_offset = std::min(info.min_vertex_offset, note.vertex_offset);
 		info.max_vertex_offset = std::max(info.max_vertex_offset, note.vertex_offset);
+		if (note.indexed && !note.gpu_args && note.index_host == nullptr && note.index_address != 0) {
+			auto& slot = state.frame_indices[hash][note.frame % 3u];
+			if (slot.frame != note.frame) {
+				slot = FrameIndices {};
+				slot.frame = note.frame;
+			}
+			(note.index_size == 4 ? slot.draws32 : slot.draws16)++;
+			const uint64_t bytes = uint64_t {note.index_count} * note.index_size;
+			if (cache.IsRegionGpuModified(note.index_address, bytes)) {
+				slot.gpu_written++;
+			} else if (slot.copied + note.index_count > MaxCopiedIndices) {
+				slot.unreadable++;
+			} else if (note.index_size == 4) {
+				std::vector<uint32_t> copy(note.index_count);
+				if (LibKernel::Memory::TryReadGpuCleanBacking(note.index_address, copy.data(), bytes)) {
+					slot.copied += copy.size();
+					slot.copies32.push_back(std::move(copy));
+				} else {
+					slot.unreadable++;
+				}
+			} else {
+				std::vector<uint16_t> copy(note.index_count);
+				if (LibKernel::Memory::TryReadGpuCleanBacking(note.index_address, copy.data(), bytes)) {
+					slot.copied += copy.size();
+					slot.copies16.push_back(std::move(copy));
+				} else {
+					slot.unreadable++;
+				}
+			}
+		}
 	}
 	if (!note.stages.empty() && note.stages.front().stage.program != nullptr) {
 		CheckIndices(state, cache, note, note.stages.front().stage.program->shader_hash);
@@ -326,6 +371,30 @@ void Report(const uint32_t* region, uint64_t frame) {
 		// A 16-bit indexed draw whose vertex index is above 65535 (+ the vertex offset in the draw
 		// text): look for the index pair it would be if the GPU read the 16-bit indices as 32-bit.
 		const uint32_t index = record[10] == 1u ? record[3] - record[9] : record[3];
+		if (!mesh && index > 0xffffu) {
+			// Every indexed draw of the shader in the last frames: is the index in a 32-bit buffer,
+			// or the pair (low, high) at an even position of a 16-bit buffer?
+			if (auto found = state.frame_indices.find(hash); found != state.frame_indices.end()) {
+				for (const auto& slot: found->second) {
+					if (slot.frame == 0) {
+						continue;
+					}
+					uint32_t in32 = 0, pairs16 = 0;
+					for (const auto& copy: slot.copies32) {
+						in32 += static_cast<uint32_t>(std::count(copy.begin(), copy.end(), index));
+					}
+					for (const auto& copy: slot.copies16) {
+						for (size_t k = 0; k + 1 < copy.size(); k += 2) {
+							pairs16 += copy[k] == (index & 0xffffu) && copy[k + 1] == (index >> 16u) ? 1u : 0u;
+						}
+					}
+					std::printf("%s  frame %" PRIu64 ": indexed draws 16-bit %u, 32-bit %u; GPU-written "
+					            "%u, not copied %u; index found in 32-bit copies %ux, as 16-bit pair %ux%s%c",
+					            on, slot.frame, slot.draws16, slot.draws32, slot.gpu_written,
+					            slot.unreadable, in32, pairs16, off, 10);
+				}
+			}
+		}
 		if (draw != state.last_draw.end() && !mesh && index > 0xffffu &&
 		    draw->second.index_size == 2 && draw->second.index_address != 0 &&
 		    !draw->second.index_gpu_args) {
