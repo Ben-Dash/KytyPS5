@@ -820,7 +820,15 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	// HTile word in place (no address swizzle, one buffer exactly on the metadata). It is not a
 	// proven full overwrite, so it is not consumed, but the clear is recorded for the next draw:
 	// without it the depth target was never cleared and every caster failed the depth test.
+	if (TextureCache::MetaClearLogEnabled()) [[unlikely]] {
+		TextureCache::t_meta_clear_source = {"dispatch rewrite (RecordHtileRewriteClear)",
+		                                     m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed),
+		                                     program.shader_hash};
+	}
 	RecordHtileRewriteClear(input_info);
+	if (TextureCache::MetaClearLogEnabled()) [[unlikely]] {
+		TextureCache::t_meta_clear_source.source = "dispatch fill consumed (TryConsumeComputeMetaClear, 99b6d37d)";
+	}
 	// A fill consumed as a metadata clear may also cover color images over exactly its memory:
 	// Ghost of Yotei's 8-bit shadow mask lives at an address a depth target used once as its HTile
 	// base, so every later "Clear G-Buffer" fill of the mask became an HTile clear only and the

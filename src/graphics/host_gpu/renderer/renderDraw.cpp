@@ -1030,6 +1030,11 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 			acquired.view_meta_generation = meta_generation;
 		}
 		const auto& metadata   = depth.desc.info.metadata;
+		if (TextureCache::MetaClearLogEnabled()) [[unlikely]] {
+			TextureCache::t_meta_clear_source = {
+			    "depth target DB clear", m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed),
+			    0};
+		}
 		if (metadata.kind == ImageMetadataKind::Htile && depth.depth_clear_enable &&
 		    !cache.ClearMeta(metadata.range.address)) {
 			EXIT("failed to acquire HTile metadata for a depth clear\n");
@@ -1038,6 +1043,12 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 		    metadata.kind == ImageMetadataKind::Htile &&
 		    cache.IsMetaCleared(metadata.range.address, depth.desc.view_info.base_layer);
 		depth.depth_load_clear_enable = depth.depth_clear_enable || meta_clear;
+		if (meta_clear && !depth.depth_clear_enable && TextureCache::MetaClearLogEnabled()) [[unlikely]] {
+			TextureCache::t_meta_clear_source.source = "pending metadata clear";
+			TextureCache::LogMetaClear("depth bind becomes LoadOpClear", metadata.range.address,
+			                           static_cast<int32_t>(depth.desc.view_info.base_layer),
+			                           std::bit_cast<uint32_t>(depth.depth_clear_value)); // mask = clear value bits
+		}
 		if (meta_clear &&
 		    !cache.TouchMeta(metadata.range.address, depth.desc.view_info.base_layer, false)) {
 			EXIT("failed to consume HTile clear state\n");

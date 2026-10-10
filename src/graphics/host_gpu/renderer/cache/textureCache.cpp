@@ -3443,6 +3443,34 @@ bool TextureCache::IsMetaCleared(uint64_t address, uint32_t slice) {
 	return memo.found && slice < 32 && (memo.clear_mask & (1u << slice)) != 0;
 }
 
+bool TextureCache::MetaClearLogEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_META_CLEAR") != nullptr;
+	return enabled;
+}
+
+void TextureCache::LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask) {
+	static std::mutex                   mutex;
+	static std::unordered_set<uint64_t> seen;
+	static uint64_t                     seen_frame = UINT64_MAX;
+	const auto&                         source     = t_meta_clear_source;
+	const std::lock_guard               lock(mutex);
+	if (seen_frame != source.frame) {
+		seen_frame = source.frame;
+		seen.clear();
+	}
+	const auto key = address ^ (uint64_t(uint32_t(layer)) << 48u) ^ reinterpret_cast<uint64_t>(what) ^
+	                 (reinterpret_cast<uint64_t>(source.source) << 7u);
+	if (seen.size() < 512 && seen.insert(key).second) {
+		std::printf("\x1b[91mmeta-clear: frame %llu %s address=0x%016llx layer=%d mask=0x%08x source=%s "
+		            "shader=%016llx\x1b[0m\n",
+		            static_cast<unsigned long long>(source.frame), what,
+		            static_cast<unsigned long long>(address), layer, mask,
+		            source.source != nullptr ? source.source : "unknown",
+		            static_cast<unsigned long long>(source.shader));
+		std::fflush(stdout);
+	}
+}
+
 bool TextureCache::ClearMeta(uint64_t address) {
 	std::scoped_lock lock {m_lock};
 	const auto       found = m_surface_metas.find(address);
@@ -3451,6 +3479,9 @@ bool TextureCache::ClearMeta(uint64_t address) {
 	}
 	found->second.clear_mask = UINT32_MAX;
 	m_meta_clear_generation.fetch_add(1, std::memory_order_release);
+	if (MetaClearLogEnabled()) [[unlikely]] {
+		LogMetaClear("recorded clear (all layers)", address, -1, UINT32_MAX);
+	}
 	return true;
 }
 
@@ -3468,6 +3499,10 @@ bool TextureCache::TouchMeta(uint64_t address, uint32_t slice, bool is_clear) {
 	}
 	if (found->second.clear_mask != previous) {
 		m_meta_clear_generation.fetch_add(1, std::memory_order_release);
+		if (is_clear && MetaClearLogEnabled()) [[unlikely]] {
+			LogMetaClear("recorded clear (one layer)", address, static_cast<int32_t>(slice),
+			             found->second.clear_mask);
+		}
 	}
 	return true;
 }

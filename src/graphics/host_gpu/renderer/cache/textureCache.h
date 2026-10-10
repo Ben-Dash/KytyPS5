@@ -169,6 +169,17 @@ public:
 	// checked again.
 	void OnBufferGpuWrite(uint64_t address, uint64_t size);
 	[[nodiscard]] bool IsMetaCleared(uint64_t address, uint32_t slice);
+	// KYTY_DEBUG_META_CLEAR=1: callers name where a metadata clear comes from (and the frame and
+	// shader); ClearMeta, TouchMeta and the draw that turns a pending clear into LoadOpClear print
+	// one red line per address, source and layer per frame.
+	struct MetaClearSource {
+		const char* source;
+		uint64_t    frame;
+		uint64_t    shader;
+	};
+	static inline thread_local MetaClearSource t_meta_clear_source {};
+	[[nodiscard]] static bool MetaClearLogEnabled();
+	static void LogMetaClear(const char* what, uint64_t address, int32_t layer, uint32_t mask);
 	[[nodiscard]] bool ClearMeta(uint64_t address);
 	[[nodiscard]] bool TouchMeta(uint64_t address, uint32_t slice, bool is_clear);
 	// HTile synthesis. On the PS5 the DB keeps a depth target's HTile (min/max depth per 8x8 tile)
