@@ -1,6 +1,7 @@
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
@@ -237,10 +238,77 @@ bool Enabled() {
 	return IR::VertexExplodeCheck().enabled;
 }
 
+// KYTY_VTX_EXPLODE_PROBE=<hash>:<sgpr>:<offset>: for draws of that vertex shader, prints the
+// dword at <offset> of the buffer whose V# the shader gets in s[<sgpr>..<sgpr>+3] (read like the
+// shader's own constant reads, GPU-written bytes read back), with the draw's index size and
+// whether its index buffer is GPU-written. 64 lines, then one per 600 draws.
+struct Probe {
+	uint64_t hash = 0;
+	uint32_t sgpr = 0, offset = 0;
+};
+
+const Probe& GetProbe() {
+	static const Probe probe = [] {
+		Probe result;
+		if (const char* text = KYTY_GETENV("KYTY_VTX_EXPLODE_PROBE"); text != nullptr) {
+			char* end    = nullptr;
+			result.hash  = std::strtoull(text, &end, 16);
+			if (end != nullptr && *end == ':') {
+				result.sgpr = static_cast<uint32_t>(std::strtoul(end + 1, &end, 0));
+			}
+			if (end != nullptr && *end == ':') {
+				result.offset = static_cast<uint32_t>(std::strtoul(end + 1, &end, 0));
+			}
+		}
+		return result;
+	}();
+	return probe;
+}
+
+void RunProbe(BufferCache& cache, const DrawNote& note, const ShaderVertexInputInfo& stage) {
+	const auto& probe = GetProbe();
+	if (probe.hash == 0 || stage.stage.program == nullptr || stage.stage.resources == nullptr ||
+	    stage.stage.program->shader_hash != probe.hash) {
+		return;
+	}
+	static uint32_t count = 0;
+	count++;
+	if (count > 64 && count % 600 != 0) {
+		return;
+	}
+	const auto& program = *stage.stage.program;
+	const auto& data    = stage.stage.resources->user_data;
+	const auto  first   = probe.sgpr - program.user_data_base;
+	if (probe.sgpr < program.user_data_base || first + 4 > data.size()) {
+		std::printf("VtxExplode probe: s%u is not in the user data%s", probe.sgpr, "\n");
+		return;
+	}
+	ShaderBufferResource v;
+	for (uint32_t i = 0; i < 4; i++) {
+		v.fields[i] = data[first + i];
+	}
+	const uint64_t address = v.Base48() + probe.offset;
+	uint32_t       value   = 0xdeadbeefu;
+	const bool     gpu     = cache.IsRegionGpuModified(address, 4);
+	LibKernel::Memory::ReadGuestOnGpuThread(address, &value, sizeof(value));
+	const bool index_gpu = note.indexed && note.index_host == nullptr && note.index_address != 0 &&
+	                       cache.IsRegionGpuModified(note.index_address,
+	                                                 uint64_t {note.index_count} * note.index_size);
+	std::printf("VtxExplode probe #%u: vs=%016" PRIx64 " frame %" PRIu64 " V#(s%u) 0x%" PRIx64
+	            " +%u = 0x%08x (GPU-written %d) | indexed %d isize %u idx 0x%" PRIx64
+	            " n=%u index GPU-written %d gpu-args %d%s",
+	            count, probe.hash, note.frame, probe.sgpr, v.Base48(), probe.offset, value, gpu,
+	            note.indexed, note.index_size, note.index_address, note.index_count, index_gpu,
+	            note.gpu_args, "\n");
+}
+
 void NoteDraw(BufferCache& cache, const DrawNote& note) {
 	auto&           state = GetState();
 	std::lock_guard lock(state.mutex);
 	state.draws++;
+	for (const auto& stage: note.stages) {
+		RunProbe(cache, note, stage);
+	}
 	std::string text;
 	for (const auto& stage: note.stages) {
 		if (stage.stage.program == nullptr) {
