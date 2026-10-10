@@ -1868,7 +1868,22 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		std::fill(value.dwords.begin() + 4, value.dwords.begin() + 8, 0u);
 	}
 	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-	if (!BindlessCompatible(descriptor, heap.binding)) {
+	// A 2D texture in a 3D image's heap: the GPU reads it as 2D, so it goes to the 2D float array
+	// and its translation carries IR::BindlessFlat2DInVolume (the shader samples it with (u, v)).
+	const bool flat_in_volume = heap.binding == ShaderRecompiler::IR::BindlessImages3D &&
+	                            descriptor.Type() == Prospero::ImageType::kColor2D &&
+	                            !heap.resource.cube;
+	const auto array_binding  = flat_in_volume ? ShaderRecompiler::IR::BindlessImages2D : heap.binding;
+	// Not yet for a DCC-compressed one: its color metadata stopped the texture cache (Ghost of
+	// Yotei, frame 777 at the Torii). It keeps the placeholder with a red line.
+	if (flat_in_volume && descriptor.MetaCompress()) {
+		ReportPlaceholder(fmt::format("2D T# in a 3D heap has color metadata (DCC) dwords={:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x},{:08x}\n",
+		                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3],
+		                              value.dwords[4], value.dwords[5], value.dwords[6], value.dwords[7]).c_str());
+		table.SetTranslation(heap, key, 0u);
+		return false;
+	}
+	if (!BindlessCompatible(descriptor, array_binding)) {
 		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
 		                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
 		                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str(),
@@ -1895,7 +1910,11 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	}
 	g_soft_texture_failures = true;
 	g_soft_texture_failed   = false;
-	auto binding            = ResolveTexture(heap.resource, value);
+	auto resource = heap.resource;
+	if (flat_in_volume) {
+		resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim2D;
+	}
+	auto binding            = ResolveTexture(resource, value);
 	g_soft_texture_failures = false;
 	const bool soft_failed  = g_soft_texture_failed;
 	g_soft_texture_failed   = false;
@@ -1919,18 +1938,18 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	// One array slot per (array, view), shared by every heap and key showing that view:
 	// per-frame material tables would otherwise use the array up.
 	const auto slot = image != nullptr && view != nullptr
-	                      ? table.SharedSlot(heap.binding, binding.image_id, view, layout)
+	                      ? table.SharedSlot(array_binding, binding.image_id, view, layout)
 	                      : 0u;
 	if (image == nullptr || view == nullptr || slot == 0) {
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
-	heap.slots[key]         = slot;
+	heap.slots[key]         = flat_in_volume ? slot | ShaderRecompiler::IR::BindlessFlat2DInVolume : slot;
 	image->bindless_pinned  = true;
 	image->usage.texture    = true;
 	heap.resolved.push_back(binding.image_id);
 	table.AddImageReference(binding.image_id, heap, key);
-	table.SetTranslation(heap, key, slot);
+	table.SetTranslation(heap, key, heap.slots[key]);
 	return true;
 }
 

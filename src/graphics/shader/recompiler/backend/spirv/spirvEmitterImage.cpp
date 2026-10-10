@@ -837,10 +837,32 @@ static uint32_t BindlessSlot(ValueEmitContext& ctx, const IR::ImageResource& ima
 		                          index);
 		state.builder.AddFunction(spv::OpStore, pointer, flag);
 	}
-	const auto slot    = state.builder.AllocateId();
+	auto slot = state.builder.AllocateId();
 	// Pending keys sample slot 2 (the blue placeholder) while their texture is loaded.
 	state.builder.AddFunction(spv::OpSelect, TypeU32(state), slot, pending, ConstantU32(state, 2u),
 	                          raw);
+	state.bindless_flat_in_volume = 0;
+	state.bindless_flat_slot      = 0;
+	if (image.dimension == ImageDimension::Dim3D && !image.cube) {
+		// A 2D texture in a 3D image's heap (IR::BindlessFlat2DInVolume): the 3D array reads the
+		// placeholder, the sample reads the 2D array at the flagged slot.
+		const auto flag_bits = Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                              ConstantU32(state, IR::BindlessFlat2DInVolume));
+		const auto flat      = Binary(state, spv::OpINotEqual, TypeBool(state), flag_bits,
+		                              ConstantU32(state, 0u));
+		const auto flat_slot = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), flat_slot, flat,
+		                          Binary(state, spv::OpBitwiseAnd, TypeU32(state), slot,
+		                                 ConstantU32(state, ~IR::BindlessFlat2DInVolume)),
+		                          ConstantU32(state, 0u));
+		state.builder.AddAnnotation(spv::OpDecorate, flat_slot, spv::DecorationNonUniform);
+		const auto volume_slot = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpSelect, TypeU32(state), volume_slot, flat,
+		                          ConstantU32(state, 0u), slot);
+		slot                          = volume_slot;
+		state.bindless_flat_in_volume = flat;
+		state.bindless_flat_slot      = flat_slot;
+	}
 	state.builder.AddAnnotation(spv::OpDecorate, slot, spv::DecorationNonUniform);
 	return slot;
 }
@@ -1257,7 +1279,46 @@ void EmitImage(ValueEmitContext& ctx, const IR::Inst& inst) {
 			return sample;
 		};
 		if (image.indirect_root != mem.resource || image.bindless) {
-			const auto sample = EmitSample(mem.resource);
+			auto sample = EmitSample(mem.resource);
+			// A 3D bindless sample whose key holds a 2D texture reads it with (u, v).
+			if (image.bindless && state.bindless_flat_in_volume != 0u && !dref &&
+			    !HasFlag(mem, Decoder::ImageSampleFlagDerivative) &&
+			    layout.offset == NoImageComponent) {
+				auto flat      = image;
+				flat.dimension = ImageDimension::Dim2D;
+				const auto flat_type = ImageType(state, flat);
+				const auto variable  = state.bindless_image_variables.find(flat_type);
+				EXIT_IF(variable == state.bindless_image_variables.end());
+				const auto pointer = state.builder.AllocateId();
+				state.builder.AddFunction(
+				    spv::OpAccessChain,
+				    state.builder.Type(spv::OpTypePointer, spv::StorageClassUniformConstant, flat_type),
+				    pointer, variable->second, state.bindless_flat_slot);
+				state.builder.AddAnnotation(spv::OpDecorate, pointer, spv::DecorationNonUniform);
+				const auto flat_image = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpLoad, flat_type, flat_image, pointer);
+				state.builder.AddAnnotation(spv::OpDecorate, flat_image, spv::DecorationNonUniform);
+				const auto sampled = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpSampledImage,
+				                          state.builder.Type(spv::OpTypeSampledImage, flat_type),
+				                          sampled, flat_image, sampler_id);
+				state.builder.AddAnnotation(spv::OpDecorate, sampled, spv::DecorationNonUniform);
+				const auto volume_coord = CoordF32(ctx, mem, *address, layout.coord, 3u, false);
+				const auto coord        = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpVectorShuffle, TypeF32Vector(state, 2), coord,
+				                          volume_coord, volume_coord, 0u, 1u);
+				const auto            flat_sample = state.builder.AllocateId();
+				std::vector<uint32_t> words {result_type, flat_sample, sampled, coord};
+				if (operand_mask != 0u) {
+					words.push_back(operand_mask);
+					words.insert(words.end(), operands.begin(), operands.end());
+				}
+				state.builder.AddFunction(opcode, words);
+				const auto selected = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpSelect, result_type, selected,
+				                          state.bindless_flat_in_volume, flat_sample, sample);
+				sample = selected;
+			}
 			auto       result = sample;
 			if (!dref) {
 				result = UnpackImageTexel(ctx, mem, sample);

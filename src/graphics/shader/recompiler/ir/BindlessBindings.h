@@ -41,6 +41,10 @@ constexpr uint32_t BindlessImageArrayIndex(uint32_t binding) {
 }
 // A translation entry for a key whose texture is not resident yet; the shader samples slot 0.
 inline constexpr uint32_t BindlessPending        = 0xffffffffu;
+// A translation entry of a 3D-array key whose T# is a 2D texture: the slot is in the 2D float
+// array. The GPU reads a T# by its own type, so a 3D sample instruction reads a 2D texture as 2D
+// (Ghost of Yotei builds its moon-shadow volumes from 2D shadow maps this way).
+inline constexpr uint32_t BindlessFlat2DInVolume = 0x40000000u;
 // The S# a sampler without a usable heap entry gets: wrap on every axis, trilinear, full LOD range.
 inline constexpr std::array<uint32_t, 4> BindlessDefaultSampler {
     0x00000000u,                             // wrap on every axis
