@@ -2187,7 +2187,11 @@ void RenderExecutor::ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint3
 			            static_cast<double>(t.ns) / 1e6);
 		}
 		std::fflush(stdout);
-		totals.clear();
+		// Reset in place: `charge` holds a reference to this shader's entry, and clear() freed it
+		// under it (its destructor then wrote freed memory: heap corruption c0000374).
+		for (auto& [hash, t]: totals) {
+			t = {};
+		}
 	}
 	std::vector<uint8_t> records(static_cast<size_t>(keys) * 32u);
 	const auto base = heap.base + heap.table_offset;
