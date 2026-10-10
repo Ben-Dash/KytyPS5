@@ -9,6 +9,7 @@
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 #include "graphics/host_gpu/renderer/image/image.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
@@ -412,6 +413,37 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	    {"bindless_images", bindings.bindless_images.size()},
 	    {"table", program.bindings.table},
 	};
+	// The bindless heaps the shader indexes, and how far the host had resolved their keys when it
+	// ran (a key not resolved yet samples the placeholder).
+	meta["bindless_heaps"] = Json::array();
+	for (const auto& use: resources.bindless_heaps) {
+		Json entry = {{"base", use.base},
+		              {"size", use.size},
+		              {"table_offset", use.table_offset},
+		              {"record_stride", use.record_stride},
+		              {"pointer_offset", use.pointer_offset},
+		              {"image", use.image},
+		              {"mapping_offset", use.mapping_offset}};
+		for (const auto& heap: context.GetBindlessTable().Heaps()) {
+			if (heap.base != use.base || heap.table_offset != use.table_offset ||
+			    heap.record_stride != use.record_stride || heap.pointer_offset != use.pointer_offset) {
+				continue;
+			}
+			entry["heap_binding"]  = heap.binding;
+			entry["heap_region"]   = heap.region;
+			entry["heap_entries"]  = heap.entries;
+			entry["keys_settled"]  = std::ranges::count_if(heap.settled, [](uint8_t s) { return s != 0; });
+			entry["keys_with_slot"] = std::ranges::count_if(heap.slots, [](uint32_t s) { return s != 0; });
+			entry["images_resolved"] = heap.resolved.size();
+			entry["checked_frame"] = heap.checked_frame;
+			break;
+		}
+		meta["bindless_heaps"].push_back(std::move(entry));
+	}
+	meta["bindless_patches"] = Json::array();
+	for (const auto& patch: bindings.bindless_patches) {
+		meta["bindless_patches"].push_back({patch[0], patch[1], patch[2]});
+	}
 	meta["push_data_start"] = program.bindings.push_data_start_dword;
 	meta["shader_data"]     = bindings.shader_data;
 	meta["dispatch_thread_dword"] = program.bindings.dispatch_thread_dword;
