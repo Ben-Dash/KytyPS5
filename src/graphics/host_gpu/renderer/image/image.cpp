@@ -565,6 +565,25 @@ void Image::CopyImage(Image& source) {
 	        vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {}, command);
 }
 
+void Image::CopyAliasRegion(Image& source) {
+	EXIT_IF(source.backing.samples != backing.samples || source.backing.format != backing.format);
+	m_scheduler.EndRendering();
+	const auto     aspect = FullAspectMask(backing.format);
+	const uint32_t layers = std::min(source.backing.layers, backing.layers);
+	vk::ImageCopy  copy {};
+	copy.srcSubresource = {aspect, 0, 0, layers};
+	copy.dstSubresource = {aspect, 0, 0, layers};
+	copy.extent         = vk::Extent3D {std::min(source.backing.extent.width, backing.extent.width),
+	                                    std::min(source.backing.extent.height, backing.extent.height), 1};
+	auto command = m_scheduler.Current().Handle();
+	GpuZones::Mark(command, DrainStats::Zone::ImageCopy);
+	const ImageSubresourceRange range {0, 1, 0, layers};
+	source.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, range, command);
+	Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, range, command);
+	command.copyImage(source.backing.image, vk::ImageLayout::eTransferSrcOptimal, backing.image,
+	                  vk::ImageLayout::eTransferDstOptimal, 1, &copy);
+}
+
 void Image::Resolve(Image& source, const ImageSubresourceRange& source_range,
                     const ImageSubresourceRange& destination_range) {
 	NoteNullImage(source, "resolve source");

@@ -77,6 +77,9 @@ public:
 	void Download(std::span<const vk::BufferImageCopy> copies, vk::Buffer buffer, uint64_t offset,
 	              uint64_t size, uint64_t capacity);
 	void CopyImage(Image& source);
+	// KYTY_IMAGE_RESIZE_SYNC: copies the top-left rectangle both images share (level 0, the
+	// layers both have) from `source`, an image of the same format at the same guest address.
+	void CopyAliasRegion(Image& source);
 	void Resolve(Image& source, const ImageSubresourceRange& source_range,
 	             const ImageSubresourceRange& destination_range);
 	void CopyImageWithBuffer(Image& source, Buffer& buffer, TileManager& tiler);
@@ -173,6 +176,11 @@ public:
 	// The stencil plane was filled from a stencil keeper (TextureCache::RestoreStencil) and its
 	// next association record is current without an upload from guest memory.
 	bool             stencil_restored = false;
+	// KYTY_IMAGE_RESIZE_SYNC (TextureCache::SyncResizedImages): another image of a different size
+	// shares this one's guest address, pitch, tiling and format; the write sequence of the
+	// content this image holds.
+	bool             resize_siblings = false;
+	uint64_t         resize_content  = 0;
 	// The current stencil plane's mapping into the depth image, also retained by its association.
 	ImageSubresourceRange stencil_subresources;
 	uint64_t         tick_accessed_last = 0;

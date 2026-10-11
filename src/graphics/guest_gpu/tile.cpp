@@ -4,11 +4,15 @@
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 #include "graphics/guest_gpu/gpu_format.h"
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cstdio>
+#include <cstring>
 #include <bit>
 
 namespace Libs::Graphics {
@@ -299,8 +303,29 @@ bool TileGetTextureBlockLayout(Prospero::BufferFormat format, Prospero::TileMode
 	if (!TileGetTextureElementLayout(format, element)) {
 		return false;
 	}
-	if (family == TileBlockFamily::Depth64KB &&
-	    (element.texel_width != 1 || element.texel_height != 1)) {
+	// KYTY_BC_R64_TILING=1 (upstream b7b335ac): a texture in render-target (R64) tiling may be
+	// block compressed; only depth tiling needs one texel per element. Off: render-target and
+	// depth tiling admit only formats a render target can have (as before).
+	static const bool bc_r64 = [] {
+		const char* text = KYTY_GETENV("KYTY_BC_R64_TILING");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	const bool attachment_format = Prospero::RenderTargetBytesPerElement(format) == element.bytes;
+	if (bc_r64) {
+		if (family == TileBlockFamily::Depth64KB &&
+		    (element.texel_width != 1 || element.texel_height != 1)) {
+			return false;
+		}
+		if (family == TileBlockFamily::RenderTarget64KB && !attachment_format) {
+			static std::atomic<uint32_t> logged {0};
+			if (logged.fetch_add(1, std::memory_order_relaxed) < 16) {
+				std::printf("\x1b[91mbc-r64: format %u (%ux%u texels per element) admitted in render-target tiling\x1b[0m\n",
+				            static_cast<uint32_t>(format), element.texel_width, element.texel_height);
+				std::fflush(stdout);
+			}
+		}
+	} else if ((family == TileBlockFamily::Depth64KB || family == TileBlockFamily::RenderTarget64KB) &&
+	           !attachment_format) {
 		return false;
 	}
 

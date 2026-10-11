@@ -309,6 +309,11 @@ private:
 	                       uint64_t destination_size, ImageDownload transfer);
 	void DownloadDepth(Image& image, Buffer& destination, uint64_t destination_offset);
 	void CommitGpuWrite(Image& image);
+	// KYTY_IMAGE_RESIZE_SYNC=1, caller holds m_lock: before the image is used, the rectangle it
+	// shares with a more recently written image of another size at its address (dynamic
+	// resolution) is copied in; `write`: this use writes the image.
+	void SyncResizedImages(ImageId id, bool write);
+	uint64_t m_resize_sequence = 0;
 	// Caller holds m_lock. Volume layer ranges select depth slices.
 	void ClearImage(CommandBuffer& command, ImageId id, vk::Format format,
 	                const vk::ImageSubresourceRange& range, const vk::ClearValue& clear);

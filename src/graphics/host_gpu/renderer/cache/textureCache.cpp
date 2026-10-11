@@ -35,6 +35,7 @@
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
 #include <tuple>
 #include <unordered_set>
 #include <vulkan/vulkan_format_traits.hpp>
@@ -2420,6 +2421,11 @@ bool TextureCache::IsTextureCurrent(ImageId id, uint64_t generation) const noexc
 
 bool TextureCache::IsTextureClean(ImageId id) const noexcept {
 	const auto& image = m_slot_images[id];
+	// KYTY_IMAGE_RESIZE_SYNC: an image with a sibling of another size goes through Find* on every
+	// use, where SyncResizedImages copies the sibling's newer content in.
+	if (image.resize_siblings) {
+		return false;
+	}
 	// FindTexture's RefreshImage and stencil refresh would do nothing: the image is tracked over
 	// its whole range and neither CPU nor buffer writes made it dirty.
 	return image.registered && !image.depth_id && !image.binding.needs_rebind &&
@@ -2558,6 +2564,9 @@ vk::ImageView TextureCache::FindTexture(ImageId id, const ImageDesc& desc) {
 			}
 		}
 	}
+	if (!image.info.data.Empty()) {
+		SyncResizedImages(id, desc.type == BindingType::Storage);
+	}
 	switch (desc.type) {
 		case BindingType::Texture: break;
 		case BindingType::Storage:
@@ -2585,6 +2594,7 @@ vk::ImageView TextureCache::FindRenderTarget(ImageId id, const ImageDesc& desc) 
 	MarkGpuModified(image);
 	image.usage.render_target = true;
 	RefreshImage(id);
+	SyncResizedImages(id, true);
 	CommitGpuWrite(image);
 	TrackImageDownload(id, image);
 	return image.FindView(desc.view_info);
@@ -2632,6 +2642,7 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 		}
 	}
 	RefreshImage(id);
+	SyncResizedImages(id, true);
 	CommitGpuWrite(image);
 	if (desc.info.HasStencil()) {
 		RefreshImage(AssociateStencil(id, desc.info.stencil));
@@ -2646,6 +2657,10 @@ void TextureCache::MarkGpuWritten(ImageId id) {
 		EXIT("TextureCache: cannot mark an unavailable image GPU-written\n");
 	}
 	TrackImage(id);
+	if (image.resize_siblings) {
+		image.resize_content = ++m_resize_sequence;
+		BumpImageCleanEpoch();
+	}
 	CommitGpuWrite(image);
 	if (image.info.HasStencil()) {
 		const auto stencil_id = AssociateStencil(id, image.info.stencil);
@@ -2663,6 +2678,86 @@ void TextureCache::CommitGpuWrite(Image& image) {
 		image.RefreshComplete();
 	}
 	MarkGpuModified(image);
+}
+
+void TextureCache::SyncResizedImages(ImageId id, bool write) {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_IMAGE_RESIZE_SYNC");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	if (!enabled) [[likely]] {
+		return;
+	}
+	auto& image = m_slot_images[id];
+	if (image.backing.image == nullptr || image.info.IsVolume()) {
+		return;
+	}
+	// Red lines, deduplicated per key: the first three, then every 1000th.
+	static std::map<std::string, uint64_t> logged;
+	const auto log = [&](const std::string& key, const std::string& line) {
+		const auto count = ++logged[key];
+		if (count <= 3 || count % 1000 == 0) {
+			std::printf("\x1b[91mimage-alias: %s (#%llu)\x1b[0m\n", line.c_str(),
+			            static_cast<unsigned long long>(count));
+			std::fflush(stdout);
+		}
+	};
+	const auto& info   = image.info;
+	ImageId     newest {};
+	for (const auto other_id: FindImagesInRegion(info.data.address, 1, false)) {
+		if (other_id == id) continue;
+		auto* other = m_slot_images.try_get(other_id);
+		if (other == nullptr || other->info.data.address != info.data.address ||
+		    other->backing.image == nullptr || other->info.extent == info.extent) {
+			continue;
+		}
+		const auto& o      = other->info;
+		// The pitch follows the width on the PS5 (TileGetRenderTargetPitch), so two sizes never share
+		// rows in guest memory: the copy keeps the picture, as the game sees one target, not bytes.
+		const char* reason = o.tile_mode != info.tile_mode                 ? "tiling differs"
+		                     : o.pixel_format != info.pixel_format         ? "format differs"
+		                     : o.type != info.type || o.IsVolume()         ? "type differs"
+		                     : other->backing.samples != image.backing.samples ? "samples differ"
+		                                                                       : nullptr;
+		if (reason != nullptr) {
+			log(fmt::format("skip {:x} {}x{} {}x{} {}", info.data.address, info.extent.width,
+			                info.extent.height, o.extent.width, o.extent.height, reason),
+			    fmt::format("addr=0x{:x} {}x{} pitch={} tile={} fmt={} vs {}x{} pitch={} tile={} fmt={}: not synced, {}",
+			                info.data.address, info.extent.width, info.extent.height, info.pitch,
+			                static_cast<uint32_t>(info.tile_mode), static_cast<uint32_t>(info.pixel_format),
+			                o.extent.width, o.extent.height, o.pitch, static_cast<uint32_t>(o.tile_mode),
+			                static_cast<uint32_t>(o.pixel_format), reason));
+			continue;
+		}
+		if (!image.resize_siblings || !other->resize_siblings) {
+			// Bindings that kept a view of either (image groups, view reuse) look again.
+			image.resize_siblings  = true;
+			other->resize_siblings = true;
+			BumpImageCleanEpoch();
+		}
+		if (other->resize_content > image.resize_content && other->IsGpuModified() &&
+		    !other->IsBufferModified() && !other->IsCpuDirty() &&
+		    (!newest || other->resize_content > m_slot_images[newest].resize_content)) {
+			newest = other_id;
+		}
+	}
+	if (newest) {
+		auto& source = m_slot_images[newest];
+		log(fmt::format("sync {:x} {}x{} {}x{}", info.data.address, info.extent.width, info.extent.height,
+		                source.info.extent.width, source.info.extent.height),
+		    fmt::format("addr=0x{:x} {}x{} <- copy of {}x{} (pitch={} tile={} fmt={})", info.data.address,
+		                info.extent.width, info.extent.height, source.info.extent.width,
+		                source.info.extent.height, info.pitch, static_cast<uint32_t>(info.tile_mode),
+		                static_cast<uint32_t>(info.pixel_format)));
+		image.CopyAliasRegion(source);
+		image.resize_content = source.resize_content;
+		MarkGpuModified(image);
+	}
+	if (write && image.resize_siblings) {
+		image.resize_content = ++m_resize_sequence;
+		// The siblings' bindings must reach Find* again to copy this write.
+		BumpImageCleanEpoch();
+	}
 }
 
 bool TextureCache::ClearImageFromBuffer(CommandBuffer& command, uint64_t address, uint64_t size,
