@@ -1,5 +1,73 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: unstable world rendering, 2026-10-11 18:03 UTC
+
+- User now identifies periodic disappearance/rebuilding of all textures. Fix
+  lifetime of live bindless mappings; preserve shader collection work.
+- Run `_Build/runs/game-20261011-175232-integration-pointer-provenance-d8addc`
+  tested0c201484 plus scalar-mask/source-identity and bounded provenance diff.
+  Exact private EXE`7198f3f77d362bc5df3dce8c6ba7ce8f2ac73565efd9f2398ec9a39fa7b751eb`;
+  diff/header/provenance retained in `runtime-pointer-provenance` analysis.
+- Owned `window-now-1758.png` visually confirms character and village world
+  with buildings/road/grass/light. `window-now-1756.png` and1800 show severe
+  distorted surfaces. Entry into a world scene is visible; stable rendering,
+  controlled movement and gameplay remain unproved. These images were shown
+  to the user after the explicit screenshot request.
+- Finished18:02:27.725Z after594.952s, graceful exit0 at freeRAM7.89GiB reserve;
+  no timeout, forced cleanup, task32GiB guard or observed GPU reset. Streams
+  drained; native slot idle. No issue108 checkpoint published from this run.
+- New CPU address regressions171311 -> unchanged GREEN172445/172446; final
+  scalar AND/BFE/identity neighbors174703/174704 passed. Vector transforms and
+  host bindless GPU readback remain coverage limits. Existing full suite fails
+  mixed-numeric policy; strict suite fails output-storage reuse. Scoped native
+  0c baseline173620/174835 reproduced both; saved source/test files restored
+  byte-exact. Do not claim either full suite passes.
+-32 provenance chains (8 unavailable/24 readable) captured. All observed masks
+  canonical, hash/actual reads agree, dirty hints zero. Current failure-time SRD
+  and actual GPU issuer are missing. Actual845 artifact causality is not proved
+  by independent mask correction. Artifact `observed-bindless-chains-20261011-175734-7020910.json`.
+- Concrete flicker lead: translation allocation exhaustion calls ResetHeaps,
+  clearing every live settled mapping. Recorded epochs30/57/85/111 show repeated
+  resets; delayed feedback rebuilds mappings. No individual reclaim/fence
+  retirement protects older regions or already prepared patches.
+- Next required RED: actual host-table stable active mapping survives completed
+  temporary-heap churn, prepared-stage pressure and old-feedback ownership.
+  No capacity increase/rejected required work may substitute for safe reclaim.
+  Test/development ownership and native serialization recorded in shared context.
+
+## Latest checkpoint: visual correction requested, 2026-10-11 17:02 UTC
+
+User now requests clear/correct texture rendering. Preserve shader batch work
+and address real resource/graphics defects with regression proof.
+
+- Tested local source`0c2014846dd71e59093289c2f757a9125412c850`; clean native
+  core build/install passed. Private EXE`6dca3051e66d1d160dc7a208665e5ef077eb1a23eaed2c89d5588f8f51e0c76b`
+  in `_Build/analysis/yotei-integration-20261011/runtime-fixed`.
+- Original retry `_Build/runs/game-20261011-165145-integration-fixed-intro-5a4933`
+  used computed cache key (old driver signature was invalidated), codec9 and
+  checked volume admission, same experimental bindless/input settings.
+  Owned1654 shows two names;1657 shows hand tying cloth/intro animation, with
+  visible artifacts. J/Cross sent16:56:11. No character control/world/menu proof.
+- Finished16:59:44.344Z after477.887s at8GiB freeRAM reserve (7.88GiB observed).
+  Graceful close did not finish; owned forced cleanup exit-1, streams drained.
+  No timeout, task32GiB guard, oversized-layout fatal or observed GPU reset.
+  Driver cache saved200,549,514payload bytes; legacy journal retained alongside
+  new14,361,737byte `.v9.shaders`. Native execution slot is idle.
+- Requested bindless failures include repetitive invalid T# words. Existing
+  pointer-record resolver uses plain backing reads; dirty backing, wrong
+  source/offset and feedback epoch need bounded provenance capture.
+- Separate concrete source lead: pointer-record analysis discards AND masks/
+  unsigned extraction widths. Synthetic test-only ResourceTracking regression
+  is prepared; the first build hit an existing missing standalone logging
+  symbol, so this is NOT an intended RED yet. Resolve harness linkage only,
+  run intended failure, then fix shared metadata/resolution and neighbors.
+- Current845 pointer-record sample confirms the`+976` pattern but does not
+  demonstrate destructive masks. Do not claim this independent defect explains
+  its live image until capture/graph evidence proves it. Original failure
+  archive, feedback/ownership GPU proof and final correct rendering are pending.
+- Local commits only:02581d7f journal fields,6345a735 batch/probes,0c201484
+  checked volume rejection. No push or issue108 checkpoint posted.
+
 ## Latest checkpoint: CPU fixes and full batch, 2026-10-11 16:45 UTC
 
 Tested source: HEAD`66e073b2` plus working diff; original retry is next.

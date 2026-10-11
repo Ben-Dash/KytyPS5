@@ -1,5 +1,60 @@
 # Integration test debt
 
+## Periodic texture disappearance / bindless region lifetime (2026-10-11)
+
+User reports all textures disappear and redraw. Run d8addc visibly alternates
+normal world view (`window-now-1758.png`) and severely distorted surfaces
+(`window-now-1756.png`, `window-now-1800.png`). This establishes unstable
+rendering; controlled character movement is not yet proved.
+
+Region exhaustion in FindOrCreateHeap calls ResetHeaps, erasing all settled
+heap mappings/image references and restarting region1. No individual reclaim
+or scheduler retirement protects live mappings; delayed feedback must rebuild
+them. Recorded reset epochs30/57/85/111 confirm repeated resets. Earlier
+prepared.bindless_patches and older recorded GPU references may retain/reuse
+those regions. This is a concrete mechanism lead, not yet RED/GREEN proof.
+
+Required regression against actual host state: stable active heap A's resolved
+mapping must survive bounded unrelated temporary-heap churn, with old temporary
+users completed/inactive. No rejection of required allocations or larger limits
+may substitute for reclaim. Also test allocation pressure within one prepared
+stage, preserving earlier patches, and rejection of epoch-old feedback after
+region reuse. Prefer a behavior-preserving CPU metadata seam; if existing
+Vulkan-backed table setup is used, label incidental device setup and bound it
+without shader dispatch. Preserve real capacity and fence/ownership boundaries.
+
+## Visible texture artifacts and pointer-record provenance (2026-10-11)
+
+Focused native RED171311 -> unchanged GREEN172445/172446 proves scalar
+pointer-mask preservation and distinct pointer-member source identity. Vector
+mask transformations, host/GPU readback and actual845 artifact causality remain
+pending. Final mask/source neighbors and original visual retry are next.
+
+Existing full ResourceTracking default suite172901 failed the invariant
+mixed-numeric-class check. Scoped baseline173620 on0c201484 with the same v2
+fixture failed identically; all five saved files were restored byte-exact.
+This is a pre-existing permissive finite-candidate-to-null policy, controlled by
+KYTY_STRICT_INDIRECT_CANDIDATES; strict-suite validation is still pending.
+Do not suppress this failure, change its oracle or claim the default suite passes.
+
+User requests clear/correct textures. Original retry5a4933 shows calligraphy
+and later hand/cloth animation, with many requested invalid T# records for a
+pointer-record image shader (labels identify artifacts, not behavior guards).
+Repeated81818181/7e7e7e7e values alone do not prove root/address/dirty-memory
+causality. Capture original pointer record/T#, stride/offset/target/bounds,
+dirty state and feedback allocation epoch before attributing the image defect.
+
+Independent source defect lead: TryMakePointerRecordImage strips immediate
+low/high AND and zero-offset BFE without retaining their masks/width, while
+host resolution follows a raw48-bit pointer. Required synthetic CPU regression:
+P differs from Q=P&mask, descriptors at P+976 and Q+976 have different numeric
+classes; require the guest-selected Q read/class. Run intended RED before any
+production metadata/resolver correction, then unchanged GREEN and low/high
+masks, extraction widths, offsets/overflow and supported pointer flavors.
+Signed extraction and later GPU/feedback ownership remain explicit boundaries.
+This regression is a general binding contract, not proof that the current
+visual artifact uses this transformation. Native slot is occupied by5a4933.
+
 ## Pixel permutation journal drops live compiler inputs (2026-10-11)
 
 Native RED162451 -> unchanged GREEN162914 proved the correction; final

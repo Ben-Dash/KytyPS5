@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessProvenance.h"
 
 #include "common/assert.h"
 #include "common/logging/log.h"
@@ -447,7 +448,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
     uint64_t base, uint32_t table_offset, uint32_t record_stride, uint32_t binding,
     uint32_t entries,
     const ShaderRecompiler::IR::ImageResource& resource, uint32_t pointer_offset,
-    uint32_t sub_stride, uint32_t sub_keys) {
+    uint32_t sub_stride, uint32_t sub_keys, uint64_t pointer_mask) {
 	if (entries == 0) {
 		return nullptr;
 	}
@@ -455,7 +456,8 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		if (heap.base == base && heap.table_offset == table_offset &&
 		    heap.record_stride == record_stride && heap.binding == binding &&
 		    heap.resource.r128 == resource.r128 && heap.pointer_offset == pointer_offset &&
-		    heap.sub_stride == sub_stride && heap.sub_keys == sub_keys) {
+		    heap.sub_stride == sub_stride && heap.sub_keys == sub_keys &&
+		    heap.pointer_mask == pointer_mask) {
 			if (entries > heap.entries && !AllocateRegion(heap, entries)) {
 				return nullptr;
 			}
@@ -469,6 +471,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	heap.binding      = binding;
 	heap.resource     = resource;
 	heap.pointer_offset = pointer_offset;
+	heap.pointer_mask   = pointer_mask;
 	heap.sub_stride     = sub_stride;
 	heap.sub_keys       = sub_keys;
 	// A plain T# heap grows as the guest streams textures in; a table of larger records (one
@@ -495,6 +498,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		fresh.binding       = binding;
 		fresh.resource      = resource;
 		fresh.pointer_offset = pointer_offset;
+		fresh.pointer_mask   = pointer_mask;
 		fresh.sub_stride     = sub_stride;
 		fresh.sub_keys       = sub_keys;
 		if (!AllocateRegion(fresh, initial)) {
@@ -507,6 +511,7 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 }
 
 void BindlessTable::ResetHeaps() {
+	if (BindlessProvenance::Enabled()) ++m_diagnostic_reset_epoch;
 	m_heaps.clear();
 	m_image_refs.clear();
 	m_next_region = 1;
@@ -585,6 +590,7 @@ void BindlessTable::RecordFeedbackSnapshot(CommandScheduler& scheduler) {
 	                        &snapshot_written, 0, nullptr);
 	m_snapshot_tick = scheduler.CurrentTick();
 	m_snapshot_recorded = ++m_snapshot_count;
+	if (BindlessProvenance::Enabled()) m_diagnostic_snapshot_tick = m_snapshot_tick;
 }
 
 bool BindlessTable::SnapshotReady(CommandScheduler& scheduler) {

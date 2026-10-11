@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/switches.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessProvenance.h"
 #include "graphics/guest_gpu/gpu_format.h"
 #include "graphics/shader/recompiler/BufferFormat.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
@@ -535,8 +536,8 @@ Prospero::TextureNumericClass ProbeBindlessHeapClass(const SrtRuntime& runtime, 
 				unreadable++; // GPU-written or unbacked: look at the next record
 				continue;
 			}
-			const auto target =
-			    ((static_cast<uint64_t>(pointer[1]) << 32u) | pointer[0]) & AddressMask;
+			const auto target = MaskBindlessPointer(
+			    (static_cast<uint64_t>(pointer[1]) << 32u) | pointer[0], indirect.pointer_mask);
 			if (target == 0u) {
 				nulls++;
 				continue;
@@ -617,6 +618,11 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 		}
 	}
 	const auto mapping_offset = static_cast<uint32_t>(snapshot.flattened_srt.size());
+	if (indirect.pointer_offset != UINT32_MAX) BindlessProvenance::Line(false, "root",
+	    "shader_base=%016llx image=%u mapping=%u base=%016llx bytes=%llu stride=%u table=%u pointer_offset=%u mask=%016llx sub_stride=%u sub_keys=%u stride_from_buffer=%d raw_count=%u raw=%08x,%08x,%08x,%08x",
+	    static_cast<unsigned long long>(runtime.shader_base), image_index, mapping_offset, static_cast<unsigned long long>(heap_base), static_cast<unsigned long long>(heap_size), record_stride,
+	    indirect.table_offset, indirect.pointer_offset, static_cast<unsigned long long>(indirect.pointer_mask), indirect.sub_stride, indirect.sub_keys, indirect.stride_from_buffer,
+	    table_value.dword_count, table_value.dwords[0], table_value.dwords[1], table_value.dword_count == 4u ? table_value.dwords[2] : 0u, table_value.dword_count == 4u ? table_value.dwords[3] : 0u);
 	snapshot.flattened_srt.resize(mapping_offset + 2u, 0u);
 	snapshot.images[image_index] = {.dword_count = 8u};
 	snapshot.bindless_heaps.push_back({.base           = heap_base,
@@ -626,6 +632,7 @@ bool MaterializeBindlessImage(const DescriptorSource::IndirectDescriptor& indire
 	                                   .image          = image_index,
 	                                   .mapping_offset = mapping_offset,
 	                                   .pointer_offset = indirect.pointer_offset,
+	                                   .pointer_mask   = indirect.pointer_mask,
 	                                   .sub_stride     = indirect.sub_stride,
 	                                   .sub_keys       = indirect.sub_keys});
 	auto& root                      = specializations[image_index];

@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessProvenance.h"
 
 #if defined(KYTY_RESOURCE_REGRESSION)
 #include "TextureLayoutRegression.h"
@@ -559,8 +560,29 @@ struct BindlessFailContext {
 	uint64_t diagnostic_descriptor_address = 0;
 	std::array<uint32_t, 8> diagnostic_descriptor_words {};
 	bool diagnostic_descriptor_valid = false;
+	bool provenance = false;
+	BindlessProvenance::ReadTrace hash_read, resolve_read, effective_read;
+	std::array<uint32_t,8> geometry{};
+	std::array<uint64_t,4> epochs{};
+	uint64_t pointer_mask=0, dirty_generation=0, allocation_snapshot=0;
+	std::array<bool,4> dirty_hints{};
 };
 static thread_local BindlessFailContext g_bindless_fail_context;
+
+static void TraceRequestedBindlessFailure(const char* reason) {
+	const auto& c=g_bindless_fail_context; if (!c.provenance || !c.requested) return;
+	char hash_words[80], raw_words[80], effective_words[80], hp[24], rp[24]; BindlessProvenance::Words(hash_words,c.hash_read); BindlessProvenance::Words(raw_words,c.resolve_read); BindlessProvenance::Words(effective_words,c.effective_read);
+	if (c.hash_read.pointer_ok) std::snprintf(hp,sizeof(hp),"%016llx",static_cast<unsigned long long>(c.hash_read.pointer)); else std::strcpy(hp,"unavailable");
+	if (c.resolve_read.pointer_ok) std::snprintf(rp,sizeof(rp),"%016llx",static_cast<unsigned long long>(c.resolve_read.pointer)); else std::strcpy(rp,"unavailable");
+	char identity[512]; std::snprintf(identity,sizeof(identity),"%016llx/%016llx/%u/%u/%u/%u/%u/%u/%016llx/%d/%s/%s/%.160s",static_cast<unsigned long long>(c.shader),static_cast<unsigned long long>(c.heap_base),c.binding,c.geometry[0],c.geometry[1],c.geometry[2],c.geometry[3],c.geometry[4],static_cast<unsigned long long>(c.pointer_mask),c.resolve_read.pointer_ok,rp,raw_words,reason);
+	const bool readable=c.resolve_read.target_ok && std::ranges::any_of(c.resolve_read.words,[](uint32_t w){return w!=0u;});
+	if (!BindlessProvenance::AdmitFailure(identity,readable)) return;
+	BindlessProvenance::Line(true,"requested_failure",
+	    "last_binder=%016llx issuer_proved=0 base=%016llx binding=%u key=%u stride=%u table=%u pointer_offset=%u sub_stride=%u sub_keys=%u capacity=%u valid_keys=%u region=%u mask=%016llx allocation_snapshot=%llu epochs_recorded_count_tick_reset=%llu,%llu,%llu,%llu gpu_dirty_generation=%llu gpu_dirty_hints_ptr_target_first_last=%d,%d,%d,%d cpu_dirty=unknown hash_pointer_address=%016llx hash_pointer=%s hash_target=%016llx hash_read_ok=%d hash_words=%s pointer_address=%016llx pointer=%s target=%016llx target_read_ok=%d original_read_words=%s effective_words=%s reason=%.1024s",
+	    static_cast<unsigned long long>(c.shader),static_cast<unsigned long long>(c.heap_base),c.binding,c.key,c.geometry[0],c.geometry[1],c.geometry[2],c.geometry[3],c.geometry[4],c.geometry[5],c.geometry[6],c.geometry[7],static_cast<unsigned long long>(c.pointer_mask),
+	    static_cast<unsigned long long>(c.allocation_snapshot),static_cast<unsigned long long>(c.epochs[0]),static_cast<unsigned long long>(c.epochs[1]),static_cast<unsigned long long>(c.epochs[2]),static_cast<unsigned long long>(c.epochs[3]),static_cast<unsigned long long>(c.dirty_generation),c.dirty_hints[0],c.dirty_hints[1],c.dirty_hints[2],c.dirty_hints[3],
+	    static_cast<unsigned long long>(c.hash_read.pointer_address),hp,static_cast<unsigned long long>(c.hash_read.target),c.hash_read.target_ok,hash_words,static_cast<unsigned long long>(c.resolve_read.pointer_address),rp,static_cast<unsigned long long>(c.resolve_read.target),c.resolve_read.target_ok,raw_words,effective_words,reason);
+}
 
 static bool TextureLayoutDiagnosticsEnabled() {
 	static const bool enabled = [] {
@@ -573,6 +595,7 @@ static bool TextureLayoutDiagnosticsEnabled() {
 // 2026-10-09); the same texture failing again in later frames is not repeated.
 // KYTY_STRICT_TEXTURES=1 (test runs) ends the session at the first one a shader asked for.
 static void ReportPlaceholder(const char* reason, bool quiet = false) {
+	TraceRequestedBindlessFailure(reason);
 	static std::mutex                      mutex;
 	static std::unordered_set<std::string> seen;
 	static const bool strict   = KYTY_GETENV("KYTY_STRICT_TEXTURES") != nullptr;
@@ -1998,6 +2021,7 @@ static const char* TsharpGarbageReason(const ShaderTextureResource& descriptor) 
 // in red with its dwords, then a red count per shader and reason every 30 seconds (nothing is
 // dropped silently, user 2026-10-09).
 static void ReportGarbageTsharp(const char* reason, const ShaderRecompiler::IR::DescriptorValue& value) {
+	TraceRequestedBindlessFailure(reason);
 	static std::mutex                               mutex;
 	static std::map<std::tuple<uint64_t, std::string, bool>, uint64_t> counts;
 	static auto                                     next = std::chrono::steady_clock::now();
@@ -2037,21 +2061,25 @@ static uint64_t BindlessLayerOffset(const BindlessTable::Heap& heap, uint32_t ke
 
 // The record of `key` as ResolveBindlessKey reads it (the pointer and the 32 descriptor bytes),
 // hashed; distinct values for an unreadable record, a null pointer and an unreadable target.
-static uint64_t BindlessRecordHash(const BindlessTable::Heap& heap, uint32_t key) {
+static uint64_t BindlessRecordHash(const BindlessTable::Heap& heap, uint32_t key, BindlessProvenance::ReadTrace* trace=nullptr) {
 	std::array<uint64_t, 5> words {};
 	auto address = heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	if (heap.pointer_offset != UINT32_MAX) {
-		if (!Libs::LibKernel::Memory::TryReadBacking(BindlessPointerAddress(heap, key), &words[4],
-		                                             sizeof(uint64_t))) {
+		const auto pointer_address=BindlessPointerAddress(heap,key);
+		const bool ok=Libs::LibKernel::Memory::TryReadBacking(pointer_address,&words[4],sizeof(uint64_t));
+		if (trace) { trace->pointer_address=pointer_address; trace->pointer_ok=ok; if (ok) trace->pointer=words[4]; }
+		if (!ok) {
 			return 1;
 		}
-		if ((words[4] & 0x0000ffffffffffffull) == 0) {
+		const auto pointer = ShaderRecompiler::IR::MaskBindlessPointer(words[4], heap.pointer_mask);
+		if (pointer == 0) {
 			return 2;
 		}
-		address = (words[4] & 0x0000ffffffffffffull) + heap.table_offset +
-		          BindlessLayerOffset(heap, key);
+		address = pointer + heap.table_offset + BindlessLayerOffset(heap, key);
 	}
-	if (!Libs::LibKernel::Memory::TryReadBacking(address, words.data(), 32u)) {
+	const bool ok=Libs::LibKernel::Memory::TryReadBacking(address,words.data(),32u);
+	if (trace) { trace->target=address; trace->target_ok=ok; if (ok) std::memcpy(trace->words.data(),words.data(),32u); }
+	if (!ok) {
 		return 3;
 	}
 	uint64_t hash = 0xcbf29ce484222325ull;
@@ -2103,7 +2131,10 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	auto address =
 	    heap.base + heap.table_offset + static_cast<uint64_t>(key) * heap.record_stride;
 	heap.settled[key]  = 1;
-	heap.record_hash[key] = BindlessRecordHash(heap, key);
+	auto& trace=g_bindless_fail_context;
+	trace.provenance=BindlessProvenance::Enabled() && trace.requested && heap.pointer_offset!=UINT32_MAX;
+	if (trace.provenance) { trace.hash_read={}; trace.resolve_read={}; trace.effective_read={}; trace.geometry={heap.record_stride,heap.table_offset,heap.pointer_offset,heap.sub_stride,heap.sub_keys,heap.entries,heap.valid_keys,heap.region}; trace.epochs=table.ProvenanceEpochs(); trace.allocation_snapshot=heap.region_snapshot; trace.pointer_mask=heap.pointer_mask; trace.dirty_hints={}; trace.dirty_generation=m_context.GetBufferCache().GpuDirtyGeneration(); }
+	heap.record_hash[key] = BindlessRecordHash(heap, key,trace.provenance ? &trace.hash_read : nullptr);
 	g_bindless_fail_context.heap_base = heap.base;
 	g_bindless_fail_context.binding   = heap.binding;
 	g_bindless_fail_context.key       = key;
@@ -2118,9 +2149,11 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (heap.pointer_offset != UINT32_MAX) {
 		// The record holds a pointer to the structure that contains the T#.
 		uint64_t pointer = 0;
-		if (!Libs::LibKernel::Memory::TryReadBacking(BindlessPointerAddress(heap, key), &pointer,
-		                                             sizeof(pointer)) ||
-		    (pointer & 0x0000ffffffffffffull) == 0) {
+		const auto pointer_address=BindlessPointerAddress(heap,key);
+		const bool ok=Libs::LibKernel::Memory::TryReadBacking(pointer_address,&pointer,sizeof(pointer));
+		if (trace.provenance) { trace.resolve_read.pointer_address=pointer_address; trace.resolve_read.pointer_ok=ok; if (ok) trace.resolve_read.pointer=pointer; const auto& buffers=m_context.GetBufferCache(); trace.dirty_hints[0]=buffers.IsPageGpuDirtyHint(pointer_address); if (pointer_address<=UINT64_MAX-7u) trace.dirty_hints[1]=buffers.IsPageGpuDirtyHint(pointer_address+7u); }
+		if (!ok ||
+		    ShaderRecompiler::IR::MaskBindlessPointer(pointer, heap.pointer_mask) == 0) {
 			// A null record pointer is the game's own empty slot (reads zero on the GPU too);
 			// it only counts when a shader asked for it.
 			if (g_bindless_fail_context.requested) {
@@ -2129,10 +2162,12 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 			table.SetTranslation(heap, key, 0u);
 			return false;
 		}
-		address = (pointer & 0x0000ffffffffffffull) + heap.table_offset +
-		          BindlessLayerOffset(heap, key);
+		address = ShaderRecompiler::IR::MaskBindlessPointer(pointer, heap.pointer_mask) +
+		          heap.table_offset + BindlessLayerOffset(heap, key);
 	}
-	if (!Libs::LibKernel::Memory::TryReadBacking(address, value.dwords.data(), 32u)) {
+	const bool target_ok=Libs::LibKernel::Memory::TryReadBacking(address,value.dwords.data(),32u);
+	if (trace.provenance) { trace.resolve_read.target=address; trace.resolve_read.target_ok=target_ok; if (target_ok) trace.resolve_read.words=value.dwords; const auto& buffers=m_context.GetBufferCache(); trace.dirty_hints[2]=buffers.IsPageGpuDirtyHint(address); if (address<=UINT64_MAX-31u) trace.dirty_hints[3]=buffers.IsPageGpuDirtyHint(address+31u); }
+	if (!target_ok) {
 		ReportPlaceholder(fmt::format("T# at 0x{:x} is unreadable\n", address).c_str(), true);
 		table.SetTranslation(heap, key, 0u);
 		return false;
@@ -2146,6 +2181,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	if (heap.resource.r128) {
 		std::fill(value.dwords.begin() + 4, value.dwords.begin() + 8, 0u);
 	}
+	if (trace.provenance) { trace.effective_read=trace.resolve_read; trace.effective_read.words=value.dwords; }
 	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
 	if (TsharpCheckEnabled() && !descriptor.IsNull()) {
 		if (const char* garbage = TsharpGarbageReason(descriptor); garbage != nullptr) {
@@ -2234,6 +2270,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
 		value.dwords[3] += 1u << 28u;
 	}
+	if (trace.provenance) trace.effective_read.words=value.dwords;
 	g_soft_texture_failures = true;
 	g_soft_texture_failed   = false;
 	auto resource = heap.resource;
@@ -2539,11 +2576,15 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		const auto entries   = static_cast<uint32_t>(std::min<uint64_t>(layered, 1u << 18u));
 		auto* heap = table.FindOrCreateHeap(use.base, use.table_offset, use.record_stride,
 		                                    BindlessBindingFor(resource), entries, resource,
-		                                    use.pointer_offset, use.sub_stride, use.sub_keys);
+		                                    use.pointer_offset, use.sub_stride, use.sub_keys,
+		                                    use.pointer_mask);
 		if (heap == nullptr) {
 			continue; // region 0, count 0: every key samples the placeholder
 		}
 		heap->shader_hash = program.shader_hash;
+		if (use.pointer_offset!=UINT32_MAX) BindlessProvenance::Line(false,"link",
+		    "last_binder=%016llx stage=%u base=%016llx bytes=%llu stride=%u table=%u pointer_offset=%u mask=%016llx sub_stride=%u sub_keys=%u image=%u mapping=%u region=%u capacity=%u valid_keys=%u allocation_snapshot=%llu",
+		    static_cast<unsigned long long>(program.shader_hash),static_cast<uint32_t>(program.stage),static_cast<unsigned long long>(use.base),static_cast<unsigned long long>(use.size),use.record_stride,use.table_offset,use.pointer_offset,static_cast<unsigned long long>(use.pointer_mask),use.sub_stride,use.sub_keys,use.image,use.mapping_offset,heap->region,heap->entries,heap->valid_keys,static_cast<unsigned long long>(heap->region_snapshot));
 		heap->valid_keys  = std::max(heap->valid_keys, std::min(entries, heap->entries));
 		// A heap seen in an earlier frame: a record the guest rewrote since (a per-frame table
 		// whose address comes round again, a streamed texture replaced) is resolved again, or

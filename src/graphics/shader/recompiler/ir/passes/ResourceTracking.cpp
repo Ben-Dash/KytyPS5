@@ -921,6 +921,9 @@ private:
 				    a.selector_stride != b.selector_stride || a.selector_offset != b.selector_offset ||
 				    a.selector_shift != b.selector_shift || a.selector_bits != b.selector_bits ||
 				    a.table_offset != b.table_offset || a.table_stride != b.table_stride ||
+				    a.bindless != b.bindless || a.pointer_offset != b.pointer_offset ||
+				    a.pointer_mask != b.pointer_mask || a.stride_from_buffer != b.stride_from_buffer ||
+				    a.sub_stride != b.sub_stride || a.sub_keys != b.sub_keys ||
 				    a.workgroup_axis != b.workgroup_axis || a.sources != b.sources ||
 				    !EquivalentValue(m_program, a.key_count, b.key_count) ||
 				    a.selector_first.IsEmpty() != b.selector_first.IsEmpty() ||
@@ -1826,6 +1829,36 @@ private:
 		return true;
 	}
 
+	// Only fixed ANDs and unsigned extracts at bit zero reduce to a pointer mask.
+	// Other value-changing operations remain unsupported by this scalar-record matcher.
+	bool StripPointerTransforms(Value value, uint32_t& mask, Value& origin) {
+		const auto resolve = [&](Value current) {
+			const auto resolved = ResolveInvariantPhi(m_program, current);
+			return resolved.IsEmpty() ? current.Resolve() : resolved;
+		};
+		value = resolve(value);
+		while (const auto* inst = value.TryInstruction()) {
+			if (inst->GetOpcode() == ValueOpcode::BitwiseAnd32) {
+				uint32_t left = 0, right = 0;
+				const bool left_immediate  = ImmediateU32(inst->Arg(0), left);
+				const bool right_immediate = ImmediateU32(inst->Arg(1), right);
+				if (left_immediate == right_immediate) return false;
+				mask &= left_immediate ? left : right;
+				value = resolve(inst->Arg(left_immediate ? 1u : 0u));
+			} else if (inst->GetOpcode() == ValueOpcode::BitFieldUExtract) {
+				uint32_t offset = 0, width = 0;
+				if (!ImmediateU32(inst->Arg(1), offset) || offset != 0u ||
+				    !ImmediateU32(inst->Arg(2), width) || width > 32u) return false;
+				mask &= width == 32u ? UINT32_MAX : (uint32_t {1} << width) - 1u;
+				value = resolve(inst->Arg(0));
+			} else {
+				break;
+			}
+		}
+		origin = value;
+		return true;
+	}
+
 	// A T# read through a 64-bit pointer the shader loads from a record of a table it indexes
 	// with a GPU-computed key (Yotei's instance culling 8457901d80b91921: batch record +0 ->
 	// view structure, T# at +976):
@@ -1878,17 +1911,11 @@ private:
 			return false;
 		}
 		// The pointer: two consecutive dwords of one record, the high one maybe masked to 48 bits.
-		const auto record_read = [&](Value value, Value& key, uint32_t& offset, uint32_t& stride,
-		                             const Inst*& read) {
-			const auto* inst      = resolve(value).TryInstruction();
-			uint32_t    immediate = 0;
-			while (inst != nullptr && inst->NumArgs() >= 2u &&
-			       ((inst->GetOpcode() == ValueOpcode::BitwiseAnd32 &&
-			         ImmediateU32(inst->Arg(1), immediate)) ||
-			        (inst->GetOpcode() == ValueOpcode::BitFieldUExtract && inst->NumArgs() == 3u &&
-			         ImmediateU32(inst->Arg(1), immediate) && immediate == 0u))) {
-				inst = resolve(inst->Arg(0)).TryInstruction();
-			}
+		const auto record_read = [&](Value value, uint32_t& mask, Value& key,
+		                             uint32_t& offset, uint32_t& stride, const Inst*& read) {
+			Value origin;
+			if (!StripPointerTransforms(value, mask, origin)) return false;
+			const auto* inst = origin.TryInstruction();
 			uint32_t    memory_index = 0;
 			const auto* memory = inst != nullptr ? ScalarReadMemory(*inst, memory_index) : nullptr;
 			if (memory == nullptr || memory->kind != ResourceKind::ScalarBuffer ||
@@ -1913,8 +1940,9 @@ private:
 		uint32_t    high_stride    = 0;
 		const Inst* low_read       = nullptr;
 		const Inst* high_read      = nullptr;
-		if (!record_read(address_handle->Arg(0), key, pointer_offset, stride, low_read) ||
-		    !record_read(address_handle->Arg(1), high_key, high_offset, high_stride, high_read) ||
+		uint32_t low_mask = UINT32_MAX, high_mask = UINT32_MAX;
+		if (!record_read(address_handle->Arg(0), low_mask, key, pointer_offset, stride, low_read) ||
+		    !record_read(address_handle->Arg(1), high_mask, high_key, high_offset, high_stride, high_read) ||
 		    high_stride != stride || stride < 8u || high_offset != pointer_offset + 4u ||
 		    WorkgroupAxis(key) != UINT32_MAX || !EquivalentValue(m_program, key, high_key) ||
 		    !EquivalentValue(m_program, low_read->Arg(0), high_read->Arg(0))) {
@@ -1933,6 +1961,8 @@ private:
 		indirect.table_stride   = stride;
 		indirect.bindless       = true;
 		indirect.pointer_offset = pointer_offset;
+		indirect.pointer_mask   = MaskBindlessPointer(
+		    low_mask | (static_cast<uint64_t>(high_mask) << 32u), BindlessPointerAddressMask);
 		indirect.table_source   = InternSource(table_source);
 		DescriptorSource image_source;
 		image_source.dword_count = 8u;

@@ -8,6 +8,12 @@
 
 namespace Libs::Graphics::ShaderRecompiler::IR {
 
+inline constexpr uint64_t BindlessPointerAddressMask = 0x0000ffffffffffffull;
+
+[[nodiscard]] inline constexpr uint64_t MaskBindlessPointer(uint64_t raw, uint64_t mask) {
+	return raw & mask & BindlessPointerAddressMask;
+}
+
 struct DescriptorValue {
 	std::array<uint32_t, 8> dwords      = {};
 	uint32_t                dword_count = 0;
@@ -45,6 +51,8 @@ struct BindlessHeapUse {
 	// The record holds a pointer at this offset; the T# is at pointer + table_offset
 	// (UINT32_MAX: the T# is in the record).
 	uint32_t pointer_offset = UINT32_MAX;
+	// The pointer halves' guest AND/BFE transformations, within the 48-bit address.
+	uint64_t pointer_mask   = BindlessPointerAddressMask;
 	// Keys per record (0: one); key k reads record k / sub_keys and the T# at
 	// pointer + table_offset + (k % sub_keys) * sub_stride.
 	uint32_t sub_stride     = 0;

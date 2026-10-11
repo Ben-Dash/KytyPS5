@@ -76,6 +76,8 @@ public:
 		uint32_t                            record_stride = 32;
 		// The record holds a pointer here; the T# is at pointer + table_offset (UINT32_MAX: none).
 		uint32_t                            pointer_offset = UINT32_MAX;
+		// The shader's low/high pointer transforms, including canonical 48-bit addressing.
+		uint64_t                            pointer_mask = 0x0000ffffffffffffull;
 		// Pointer heaps with layers: key = record * sub_keys + layer, T# at
 		// pointer + table_offset + layer * sub_stride (sub_keys 0: none).
 		uint32_t                            sub_stride   = 0;
@@ -111,7 +113,8 @@ public:
 	                                     uint32_t record_stride, uint32_t binding, uint32_t entries,
 	                                     const ShaderRecompiler::IR::ImageResource& resource,
 	                                     uint32_t pointer_offset = UINT32_MAX,
-	                                     uint32_t sub_stride = 0, uint32_t sub_keys = 0);
+	                                     uint32_t sub_stride = 0, uint32_t sub_keys = 0,
+	                                     uint64_t pointer_mask = 0x0000ffffffffffffull);
 	[[nodiscard]] std::deque<Heap>& Heaps() noexcept { return m_heaps; }
 	// 0 when the array is full (slots are not reused yet).
 	[[nodiscard]] uint32_t AllocateSlot(uint32_t binding);
@@ -126,6 +129,7 @@ public:
 	// Whether the GPU has executed the recorded copy; never waits.
 	[[nodiscard]] bool SnapshotReady(CommandScheduler& scheduler);
 	void               ConsumeSnapshot() noexcept { m_snapshot_tick = 0; }
+	[[nodiscard]] std::array<uint64_t,4> ProvenanceEpochs() const noexcept { return {m_snapshot_recorded,m_snapshot_count,m_diagnostic_snapshot_tick,m_diagnostic_reset_epoch}; }
 	// Pending keys flagged in the snapshot; their flags are cleared.
 	void TakeRequests(const Heap& heap, std::vector<uint32_t>& keys);
 	// Logs the loop-watchdog trip reports shaders appended since the last call
@@ -212,6 +216,7 @@ private:
 	// Snapshots recorded so far, and the number of the one waiting to be consumed.
 	uint64_t                m_snapshot_count    = 0;
 	uint64_t                m_snapshot_recorded = 0;
+	uint64_t                m_diagnostic_snapshot_tick = 0, m_diagnostic_reset_epoch = 0;
 public:
 	[[nodiscard]] static bool KeyBoundsEnabled();
 private:

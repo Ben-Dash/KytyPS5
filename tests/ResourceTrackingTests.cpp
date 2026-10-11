@@ -10,6 +10,7 @@
 
 #include <array>
 #include <bit>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <limits>
@@ -203,6 +204,382 @@ bool ReadLinearTestMemory(void *userdata, uint64_t address, std::span<uint32_t> 
     memory->watched_dwords = values.size();
   }
   return true;
+}
+
+void TestMaskedBindlessPointerRecord() {
+  Fixture fixture;
+  fixture.program.bindless_images = true;
+  const auto table = fixture.Buffer({fixture.UserData(0u), fixture.UserData(1u),
+                                    fixture.UserData(2u), fixture.UserData(3u)});
+  const auto invocation = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::GlobalInvocationId)), Value(0u)});
+  const auto key = fixture.Emit(ValueOpcode::ReadFirstLane, {invocation, Value(true)});
+  const auto offset = fixture.Emit(ValueOpcode::IMul32, {key, Value(16u)});
+  MemoryInfo pointer_word;
+  pointer_word.kind = ResourceKind::ScalarBuffer;
+  const auto low = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                                fixture.AddMemory(pointer_word, 0x100u));
+  pointer_word.offset = 4u;
+  const auto high = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                                 fixture.AddMemory(pointer_word, 0x104u));
+  const auto masked_low = fixture.Emit(ValueOpcode::BitwiseAnd32,
+                                       {low, Value(0xffffff00u)});
+  const auto address = fixture.Address(masked_low, high, 0x108u);
+  constexpr uint32_t descriptor_offset = 976u;
+  std::array<Value, 8> image_words;
+  for (uint32_t dword = 0; dword < image_words.size(); ++dword) {
+    MemoryInfo descriptor_word;
+    descriptor_word.kind = ResourceKind::ScalarAddress;
+    descriptor_word.offset = descriptor_offset + dword * 4u;
+    image_words[dword] = fixture.Emit(
+        ValueOpcode::LoadAddressU32, {address, Value(0u), Value(0u), Value(true)},
+        fixture.AddMemory(descriptor_word, 0x110u + dword * 4u));
+  }
+  const auto image = fixture.Image(image_words, 0x140u);
+  const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)});
+  MemoryInfo sample;
+  sample.kind = ResourceKind::Image;
+  sample.image_dimension = Decoder::ImageDimension::Dim2D;
+  const auto sampled = fixture.Emit(
+      ValueOpcode::ImageSampleRaw, {image, sampler, fixture.ImageAddress()},
+      fixture.AddMemory(sample, 0x140u));
+  const auto sampled_x = fixture.Emit(ValueOpcode::CompositeExtractU32x4,
+                                      {sampled, Value(0u)});
+  fixture.Emit(ValueOpcode::ReferenceU32, {sampled_x});
+  fixture.PlanAndTrack();
+  auto plan = ExtractResourcePlan(fixture.program);
+  Check(plan.resource_tracking_complete && plan.info.images.size() == 1u,
+        "masked pointer record must retain one complete bindless image plan");
+
+  LinearTestMemory memory;
+  memory.base = 0x100000u;
+  const auto write_descriptor = [&](uint64_t target,
+                                    Libs::Graphics::Prospero::BufferFormat format) {
+    std::array<uint32_t, 8> words{};
+    words[0] = 0x200u;
+    words[1] = static_cast<uint32_t>(format) << 20u;
+    words[2] = 3u | (3u << 14u);
+    words[3] = Libs::Graphics::DstSel(4, 5, 6, 7) |
+        (static_cast<uint32_t>(Libs::Graphics::Prospero::ImageType::kColor2D) << 28u);
+    std::copy(words.begin(), words.end(), memory.words.begin() + (target - memory.base) / 4u);
+  };
+  for (uint32_t record = 0; record != 4u; ++record) {
+    // The mask changes the address by 140 bytes; both locations hold valid, different T#s.
+    const uint32_t raw_pointer = 0x10018cu + record * 0x100u;
+    const uint32_t masked_pointer = raw_pointer & 0xffffff00u;
+    memory.words[record * 4u] = raw_pointer;
+    memory.words[record * 4u + 1u] = 0u;
+    write_descriptor(masked_pointer + descriptor_offset,
+                     Libs::Graphics::Prospero::BufferFormat::k8UInt);
+    write_descriptor(raw_pointer + descriptor_offset,
+                     Libs::Graphics::Prospero::BufferFormat::k32_32_32_32Float);
+  }
+  const std::array<uint32_t, 4> user_data{static_cast<uint32_t>(memory.base),
+                                       16u << 16u, 4u, 0u};
+  const SrtRuntime runtime{.user_data = user_data,
+                           .read_memory = ReadLinearTestMemory,
+                           .userdata = &memory,
+                           .read_specialization_memory = ReadLinearTestMemory};
+  ResourceSnapshot snapshot;
+  ResourceSpecialization specialization;
+  ReadLog reads;
+  Check(MaterializeResourcesLogged(plan, runtime, snapshot, specialization, reads),
+        "masked pointer-record materialization must succeed");
+  for (uint32_t record = 0; record != 4u; ++record) {
+    const uint64_t expected = 0x100100u + record * 0x100u + descriptor_offset;
+    const uint64_t discarded = 0x10018cu + record * 0x100u + descriptor_offset;
+    Check(std::ranges::any_of(reads.entries, [&](const ReadLog::Entry &entry) {
+            return entry.reader == ReadLog::Reader::Specialization && entry.ok &&
+                   entry.address == expected && entry.count == 4u;
+          }) && std::ranges::none_of(reads.entries, [&](const ReadLog::Entry &entry) {
+            return entry.reader == ReadLog::Reader::Specialization && entry.address == discarded;
+          }),
+          "bindless pointer-record probe must read the masked target, never the raw pointer target");
+  }
+  Check(specialization.images.size() == 1u &&
+            specialization.images[0].numeric_class ==
+                Libs::Graphics::Prospero::TextureNumericClass::Uint,
+        "masked pointer-record probe must use the integer descriptor at the exact target");
+  Check(snapshot.bindless_heaps.size() == 1u &&
+            snapshot.bindless_heaps[0].base == memory.base &&
+            snapshot.bindless_heaps[0].size == 64u &&
+            snapshot.bindless_heaps[0].record_stride == 16u &&
+            snapshot.bindless_heaps[0].pointer_offset == 0u &&
+            snapshot.bindless_heaps[0].table_offset == descriptor_offset,
+        "masked pointer-record snapshot must preserve table bounds, stride and offsets");
+}
+
+void TestDistinctBindlessPointerSources() {
+  Fixture fixture;
+  fixture.program.bindless_images = true;
+  const auto table = fixture.Buffer({fixture.UserData(0u), fixture.UserData(1u),
+                                    fixture.UserData(2u), fixture.UserData(3u)});
+  const auto invocation = fixture.Emit(
+      ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::GlobalInvocationId)), Value(0u)});
+  const auto key = fixture.Emit(ValueOpcode::ReadFirstLane, {invocation, Value(true)});
+  const auto offset = fixture.Emit(ValueOpcode::IMul32, {key, Value(16u)});
+  for (uint32_t member : {0u, 8u}) {
+    MemoryInfo pointer_word;
+    pointer_word.kind = ResourceKind::ScalarBuffer;
+    pointer_word.offset = member;
+    const auto low = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                                  fixture.AddMemory(pointer_word, 0x200u + member));
+    pointer_word.offset = member + 4u;
+    const auto high = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                                   fixture.AddMemory(pointer_word, 0x204u + member));
+    const auto address = fixture.Address(low, high);
+    std::array<Value, 8> image_words;
+    for (uint32_t dword = 0; dword < image_words.size(); ++dword) {
+      MemoryInfo descriptor_word;
+      descriptor_word.kind = ResourceKind::ScalarAddress;
+      descriptor_word.offset = 976u + dword * 4u;
+      image_words[dword] = fixture.Emit(
+          ValueOpcode::LoadAddressU32, {address, Value(0u), Value(0u), Value(true)},
+          fixture.AddMemory(descriptor_word, 0x220u + member + dword * 4u));
+    }
+    const auto image = fixture.Image(image_words);
+    const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)});
+    MemoryInfo sample;
+    sample.kind = ResourceKind::Image;
+    sample.image_dimension = Decoder::ImageDimension::Dim2D;
+    const auto sampled = fixture.Emit(
+        ValueOpcode::ImageSampleRaw, {image, sampler, fixture.ImageAddress()},
+        fixture.AddMemory(sample, 0x260u + member));
+    fixture.Emit(ValueOpcode::ReferenceU32,
+                  {fixture.Emit(ValueOpcode::CompositeExtractU32x4, {sampled, Value(0u)})});
+  }
+  fixture.PlanAndTrack();
+  auto plan = ExtractResourcePlan(fixture.program);
+  Check(plan.resource_tracking_complete && plan.info.images.size() == 2u,
+        "different pointer members of one table must retain distinct bindless image sources");
+  const auto first = plan.info.images[0].source;
+  const auto second = plan.info.images[1].source;
+  Check(first != second &&
+            plan.descriptor_sources[first].indirect_descriptor->pointer_offset == 0u &&
+            plan.descriptor_sources[second].indirect_descriptor->pointer_offset == 8u,
+        "source interning must preserve each pointer member offset");
+}
+
+enum class PointerTransform { And, ReversedAnd, NestedAnd, UnsignedExtract,
+                              DynamicExtract, OffsetExtract, SignedExtract };
+
+Value TransformPointerHalf(Fixture &fixture, Value input, PointerTransform transform,
+                           uint32_t operand) {
+  switch (transform) {
+  case PointerTransform::And:
+    return fixture.Emit(ValueOpcode::BitwiseAnd32, {input, Value(operand)});
+  case PointerTransform::ReversedAnd:
+    return fixture.Emit(ValueOpcode::BitwiseAnd32, {Value(operand), input});
+  case PointerTransform::NestedAnd:
+    return fixture.Emit(ValueOpcode::BitwiseAnd32,
+                         {fixture.Emit(ValueOpcode::BitwiseAnd32,
+                                         {input, Value(0xfffff0ffu)}), Value(operand)});
+  case PointerTransform::UnsignedExtract:
+    return fixture.Emit(ValueOpcode::BitFieldUExtract, {input, Value(0u), Value(operand)});
+  case PointerTransform::DynamicExtract:
+    return fixture.Emit(ValueOpcode::BitFieldUExtract, {input, Value(0u), fixture.UserData(4u)});
+  case PointerTransform::OffsetExtract:
+    return fixture.Emit(ValueOpcode::BitFieldUExtract, {input, Value(1u), Value(operand)});
+  case PointerTransform::SignedExtract:
+    return fixture.Emit(ValueOpcode::BitFieldSExtract, {input, Value(0u), Value(operand)});
+  }
+  throw std::runtime_error("unknown synthetic pointer transform");
+}
+
+void AddPointerRecordSample(Fixture &fixture, Value table, Value offset,
+                            PointerTransform transform, uint32_t operand, bool high_half = false) {
+  MemoryInfo pointer_word;
+  pointer_word.kind = ResourceKind::ScalarBuffer;
+  auto low = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                           fixture.AddMemory(pointer_word, 0x300u));
+  pointer_word.offset = 4u;
+  auto high = fixture.Emit(ValueOpcode::ReadConstBuffer, {table, offset},
+                            fixture.AddMemory(pointer_word, 0x304u));
+  if (high_half) high = TransformPointerHalf(fixture, high, transform, operand);
+  else low = TransformPointerHalf(fixture, low, transform, operand);
+  const auto address = fixture.Address(low, high);
+  std::array<Value, 8> words;
+  for (uint32_t dword = 0; dword < words.size(); ++dword) {
+    MemoryInfo memory;
+    memory.kind = ResourceKind::ScalarAddress;
+    memory.offset = 976u + dword * 4u;
+    words[dword] = fixture.Emit(ValueOpcode::LoadAddressU32,
+                                 {address, Value(0u), Value(0u), Value(true)},
+                                 fixture.AddMemory(memory, 0x310u + dword * 4u));
+  }
+  const auto image = fixture.Image(words);
+  const auto sampler = fixture.Sampler({Value(0u), Value(0u), Value(0u), Value(0u)});
+  MemoryInfo sample;
+  sample.kind = ResourceKind::Image;
+  sample.image_dimension = Decoder::ImageDimension::Dim2D;
+  const auto sampled = fixture.Emit(ValueOpcode::ImageSampleRaw,
+                                     {image, sampler, fixture.ImageAddress()},
+                                     fixture.AddMemory(sample, 0x340u));
+  fixture.Emit(ValueOpcode::ReferenceU32,
+                {fixture.Emit(ValueOpcode::CompositeExtractU32x4, {sampled, Value(0u)})});
+}
+
+std::unique_ptr<Fixture> MakePointerTransformFixture(PointerTransform transform,
+                                                    uint32_t operand, bool high_half = false) {
+  auto fixture = std::make_unique<Fixture>();
+  fixture->program.bindless_images = true;
+  const auto table = fixture->Buffer({fixture->UserData(0u), fixture->UserData(1u),
+                                    fixture->UserData(2u), fixture->UserData(3u)});
+  const auto invocation = fixture->Emit(ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::GlobalInvocationId)), Value(0u)});
+  const auto key = fixture->Emit(ValueOpcode::ReadFirstLane, {invocation, Value(true)});
+  const auto offset = fixture->Emit(ValueOpcode::IMul32, {key, Value(16u)});
+  AddPointerRecordSample(*fixture, table, offset, transform, operand, high_half);
+  return fixture;
+}
+
+struct PointerProbeMemory {
+  static constexpr uint64_t Base = 0x100000u;
+  std::array<uint32_t, 16> table{};
+  struct Descriptor { uint64_t address; std::array<uint32_t, 8> words; };
+  std::vector<Descriptor> descriptors;
+
+  void AddDescriptor(uint64_t address, Libs::Graphics::Prospero::BufferFormat format) {
+    if (std::ranges::any_of(descriptors, [&](const auto &entry) {
+          return entry.address == address;
+        })) return;
+    Descriptor descriptor{address, {}};
+    descriptor.words[0] = 0x200u;
+    descriptor.words[1] = static_cast<uint32_t>(format) << 20u;
+    descriptor.words[2] = 3u | (3u << 14u);
+    descriptor.words[3] = Libs::Graphics::DstSel(4, 5, 6, 7) |
+        (static_cast<uint32_t>(Libs::Graphics::Prospero::ImageType::kColor2D) << 28u);
+    descriptors.push_back(descriptor);
+  }
+
+  static bool Read(void *userdata, uint64_t address, std::span<uint32_t> words) {
+    const auto &memory = *static_cast<const PointerProbeMemory *>(userdata);
+    const auto copy = [&](uint64_t base, const auto &source) {
+      if (address < base || (address & 3u) != 0u || words.size() > source.size() ||
+          address - base > (source.size() - words.size()) * 4u) return false;
+      std::copy_n(source.begin() + (address - base) / 4u, words.size(), words.begin());
+      return true;
+    };
+    if (copy(Base, memory.table)) return true;
+    for (const auto &descriptor : memory.descriptors)
+      if (copy(descriptor.address, descriptor.words)) return true;
+    return false;
+  }
+};
+
+void TestPointerMaskNeighbors() {
+  using Format = Libs::Graphics::Prospero::BufferFormat;
+  struct Case { PointerTransform transform; uint32_t operand; bool high_half = false;
+                uint32_t raw_high = 0x1201u; };
+  const std::array cases{
+      Case{PointerTransform::And, 0xffffff00u},
+      Case{PointerTransform::ReversedAnd, 0xffffff00u},
+      Case{PointerTransform::NestedAnd, 0xffffff00u},
+      Case{PointerTransform::And, 0x00ffu, true},
+      Case{PointerTransform::And, 0xffffu, true},
+      Case{PointerTransform::UnsignedExtract, 1u},
+      Case{PointerTransform::UnsignedExtract, 8u},
+      Case{PointerTransform::UnsignedExtract, 16u},
+      Case{PointerTransform::UnsignedExtract, 32u},
+      Case{PointerTransform::UnsignedExtract, 1u, true},
+      Case{PointerTransform::UnsignedExtract, 8u, true},
+      Case{PointerTransform::UnsignedExtract, 16u, true},
+      Case{PointerTransform::UnsignedExtract, 32u, true},
+      Case{PointerTransform::UnsignedExtract, 0u, false, 0u}};
+  for (const auto &test : cases) {
+    auto fixture = MakePointerTransformFixture(test.transform, test.operand, test.high_half);
+    fixture->PlanAndTrack();
+    auto plan = ExtractResourcePlan(fixture->program);
+    uint32_t half_mask = test.operand;
+    if (test.transform == PointerTransform::UnsignedExtract)
+      half_mask = test.operand == 32u ? UINT32_MAX : (uint32_t{1} << test.operand) - 1u;
+    if (test.transform == PointerTransform::NestedAnd) half_mask &= 0xfffff0ffu;
+    const uint32_t low_mask = test.high_half ? UINT32_MAX : half_mask;
+    const uint32_t high_mask = test.high_half ? half_mask : UINT32_MAX;
+    const uint64_t expected_mask = low_mask | (uint64_t{high_mask & 0xffffu} << 32u);
+    PointerProbeMemory memory;
+    std::array<uint64_t, 4> targets{};
+    for (uint32_t record = 0; record != 4u; ++record) {
+      const uint32_t low = 0x0010018cu + record * 0x100u;
+      const uint64_t raw = low | (uint64_t{test.raw_high} << 32u);
+      // Independent guest-half calculation; do not use the production mask helper as oracle.
+      const uint64_t target = uint64_t{low & low_mask} |
+          (uint64_t{test.raw_high & high_mask & 0xffffu} << 32u);
+      targets[record] = target;
+      memory.table[record * 4u] = low;
+      memory.table[record * 4u + 1u] = test.raw_high;
+      if (target != 0u) memory.AddDescriptor(target + 976u, Format::k8UInt);
+      if (raw != target) memory.AddDescriptor(raw + 976u, Format::k32_32_32_32Float);
+    }
+    const std::array<uint32_t, 4> userdata{static_cast<uint32_t>(PointerProbeMemory::Base),
+                                         16u << 16u, 4u, 0u};
+    const SrtRuntime runtime{.user_data = userdata, .read_memory = PointerProbeMemory::Read,
+                             .userdata = &memory,
+                             .read_specialization_memory = PointerProbeMemory::Read};
+    ResourceSnapshot snapshot;
+    ResourceSpecialization specialization;
+    ReadLog log;
+    Check(MaterializeResourcesLogged(plan, runtime, snapshot, specialization, log),
+          "supported scalar pointer mask neighbor must materialize");
+    Check(snapshot.bindless_heaps.size() == 1u &&
+              snapshot.bindless_heaps[0].pointer_mask == expected_mask,
+          "effective low/high pointer mask must survive into the host snapshot");
+    if (targets[0] == 0u) {
+      Check(std::ranges::none_of(log.entries, [](const auto &entry) {
+              return entry.ok && entry.count == 4u;
+            }), "zero-width extract producing null must never read a descriptor target");
+    } else {
+      for (const auto target : targets)
+        Check(std::ranges::any_of(log.entries, [&](const auto &entry) {
+                return entry.reader == ReadLog::Reader::Specialization && entry.ok &&
+                       entry.address == target + 976u && entry.count == 4u;
+              }), "scalar AND/BFE neighbor must read each exact transformed target");
+      Check(specialization.images.size() == 1u &&
+                specialization.images[0].numeric_class == Libs::Graphics::Prospero::TextureNumericClass::Uint,
+            "scalar AND/BFE neighbor must derive class from the transformed targets");
+    }
+  }
+  for (const auto transform : {PointerTransform::DynamicExtract, PointerTransform::OffsetExtract,
+                               PointerTransform::SignedExtract}) {
+    auto fixture = MakePointerTransformFixture(transform, 16u);
+    bool rejected = false;
+    try {
+      fixture->PlanAndTrack();
+      rejected = !fixture->program.resource_tracking_complete;
+    } catch (const std::runtime_error &error) {
+      Check(std::string_view(error.what()).find("not a valid runtime value") != std::string_view::npos,
+            "unsupported pointer form must fail for descriptor provenance, not fixture construction");
+      rejected = true;
+    }
+    Check(rejected, "dynamic/nonzero/signed scalar pointer transforms must remain unsupported");
+  }
+  auto oversized = MakePointerTransformFixture(PointerTransform::UnsignedExtract, 33u);
+  CheckFatal([&] { oversized->PlanAndTrack(); }, "not a valid runtime value",
+             "unsigned pointer extract wider than32 must remain unsupported");
+}
+
+void TestPointerMaskSourceIdentity() {
+  Fixture fixture;
+  fixture.program.bindless_images = true;
+  const auto table = fixture.Buffer({fixture.UserData(0u), fixture.UserData(1u),
+                                    fixture.UserData(2u), fixture.UserData(3u)});
+  const auto invocation = fixture.Emit(ValueOpcode::GetBuiltin,
+      {Value(static_cast<uint32_t>(StageInputKind::GlobalInvocationId)), Value(0u)});
+  const auto key = fixture.Emit(ValueOpcode::ReadFirstLane, {invocation, Value(true)});
+  const auto offset = fixture.Emit(ValueOpcode::IMul32, {key, Value(16u)});
+  AddPointerRecordSample(fixture, table, offset, PointerTransform::And, 0xfffffff0u);
+  AddPointerRecordSample(fixture, table, offset, PointerTransform::And, 0xffffff00u);
+  fixture.PlanAndTrack();
+  Check(fixture.program.info.images.size() == 2u,
+        "different effective masks of the same table must retain distinct image sources");
+  const auto first = fixture.program.info.images[0].source;
+  const auto second = fixture.program.info.images[1].source;
+  Check(first != second &&
+            fixture.program.descriptor_sources[first].indirect_descriptor->pointer_mask == 0x0000fffffffffff0ull &&
+            fixture.program.descriptor_sources[second].indirect_descriptor->pointer_mask == 0x0000ffffffffff00ull,
+        "source identity must include the complete effective pointer mask");
 }
 
 std::unique_ptr<Fixture>
@@ -3618,9 +3995,23 @@ void TestMalformedMemoryKindsRejected() {
 
 } // namespace
 
-int main() {
+int main(int argc, char *argv[]) {
+  const std::string_view selected = argc == 2 ? argv[1] : "";
+  if (argc > 2 || (!selected.empty() && selected != "--masked-pointer-record-only" &&
+                   selected != "--pointer-source-identity-only" &&
+                   selected != "--pointer-mask-neighbors-only")) {
+    std::cerr << "Usage: resource_tracking_tests [--masked-pointer-record-only | "
+                 "--pointer-source-identity-only | --pointer-mask-neighbors-only]\n";
+    return 2;
+  }
   try {
-    const auto Run = [](const char *name, auto test) {
+    const auto Run = [&](const char *name, auto test) {
+      if ((selected == "--masked-pointer-record-only" &&
+           std::string_view(name) != "masked bindless pointer record") ||
+          (selected == "--pointer-source-identity-only" &&
+           std::string_view(name) != "distinct bindless pointer sources") ||
+          (selected == "--pointer-mask-neighbors-only" &&
+           !std::string_view(name).starts_with("pointer mask "))) return;
       try {
         test();
       } catch (const std::exception &exception) {
@@ -3640,6 +4031,10 @@ int main() {
     Run("guarded direct image table", TestGuardedDirectImageTable);
     Run("bounded compute image loop", TestBoundedComputeImageLoop);
     Run("uniformized material image keys", TestUniformizedMaterialImageKeys);
+    Run("masked bindless pointer record", TestMaskedBindlessPointerRecord);
+    Run("distinct bindless pointer sources", TestDistinctBindlessPointerSources);
+    Run("pointer mask neighbors", TestPointerMaskNeighbors);
+    Run("pointer mask source identity", TestPointerMaskSourceIdentity);
     Run("image descriptor fields", TestImageDescriptorFields);
     Run("draw-uniform scalar image", TestUniformScalarBufferImage);
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);
@@ -3675,6 +4070,13 @@ int main() {
 // The full emulator supplies these assertion hooks through common. This focused
 // target links only fmt; keep assertion failures observable without widening
 // its focused build manifest.
+namespace Log {
+void WriteToConsoleAndLog(std::string_view text) {
+  std::fwrite(text.data(), 1u, text.size(), stderr);
+  std::fflush(stderr);
+}
+} // namespace Log
+
 namespace Common {
 int DbgExitHandler(const char *, int, std::string_view text) {
   throw std::runtime_error(std::string(text));
