@@ -30,6 +30,31 @@ with a direct-binding positive control. Ordinary GC is already blocked by the
 successful-resolution pin; ResolveOverlap uses access age and can retire a
 pinned resource. Prove intended access-age RED before any shared correction;
 held-GPU descriptor-slot retirement needs separate bounded coverage.
+Manual comparison185229 with autoswipe0/chain0 still shows covering stretched
+surfaces at frames512/704; ended18:54:28 gracefully exit0. Controller log is
+neutral only. An access-age oracle must inspect raw image metadata; GetImage
+refreshes access and cannot be used as the observation that proves this RED.
+First native attempt185759 failed fixture preparation, not a semantic RED.
+Tracked direct-memory backing and cold-insertion generation setup were fixed
+in the test alone. Native build190102 passed; intended RED190144 now observes
+actual bindless use initial1/current34/observed1 and GC33/LRU0, while direct
+RefindImage control observes34. Actual CommitBindings/cache/views and raw
+PeekImage observations; no shader dispatch/timeout. Same unchanged oracle is
+required for GREEN before further neighboring or visual claims.
+The same unchanged age fixture passed190356 and191046 after one shared
+commit-path MarkImagesAccessed call: observed34/LRU33. Actual compute/graphics
+duplicate/repeated/already-read-only/target/null/unregistered/stale-ID cases
+passed191010/191011 under binding-plan1/0, including zero-write early returns.
+User permits tests only; no further game launches. This does not prove sampled
+pixels, preparation overlap or pending old-consumer descriptor lifetime.
+
+Fork-derived required regression: a recorded or pending native shader sampling
+consumer must retain its original image/descriptor slot through actual image
+invalidation until its owning GPU tick completes. Sharp926 queues null-write
+and slot reuse at completion; our OnImageUnregistered rewrites shared slots
+immediately despite deferred native-image deletion. Use real sampled readback,
+positive controls and bounded ownership; do not claim a metadata tick test
+proves old pixels or defer arbitrary callbacks without generation checks.
 
 User reports all textures disappear and redraw. Run d8addc visibly alternates
 normal world view (`window-now-1758.png`) and severely distorted surfaces

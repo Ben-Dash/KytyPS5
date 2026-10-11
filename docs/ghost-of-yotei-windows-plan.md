@@ -1,5 +1,87 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: access-age correction and neighbors verified, 2026-10-11 19:11 UTC
+
+Tests only remain authorized; game launches are forbidden until the user
+explicitly asks. Native slot idle, all owned processes and streams drained.
+
+- Source: local parent6d08d859 plus one-line shared CommitBindings access stamp,
+  the unchanged age oracle and separate neighbor fixtures. Intended RED190144
+  → unchanged GREEN190356; final unchanged age oracle191046 also passes.
+- Native neighbor build190905 passed. Actual compute/graphics commit cases
+  pass191010/191011 with binding-plan1/0: duplicate/shared image IDs, repeat
+  same tick, next tick with already-read-only layout, genuine unregistered
+  and later stale generational ID, existing target/null-data skip behavior,
+  and zero-write descriptor payload early returns. No shader dispatch.
+- Final native test EXE
+  `eb86c7c482d3327a891e17d6e68a6f99f7d674f2a374e5199fa0713712921ea7`.
+  Earlier actual-table lifecycle191047, preparation/growth191049 and feedback
+  key-bounds-off191050 also pass this artifact. This is metadata/binding and
+  actual feedback-copy validation, not sampled-pixel or cross-game proof.
+- [Fork research and next plan](yotei-texture-lifetime-research.md) preserve
+  exact primary revisions/links and identify completion-delayed descriptor
+  retirement as the next independent regression. Earlier-stage overlap and
+  pending old descriptor/translation consumers remain unproved.
+- No game retry after the second correction, no push or issue108 comment.
+  Old installed private game EXE still lacks the access-age correction.
+  Only after explicit game authorization build latest core into another
+  private runtime, retain source/EXE proof and use manual input.
+
+## Latest checkpoint: bindless image access-age RED to GREEN; tests only, 2026-10-11 19:04 UTC
+
+User now permits tests but explicitly forbids game launches until further
+instruction. No game has run since the manual retry ended18:54:28.
+
+- Native build190102 passed. Real tracked direct-memory texels, registered
+  cache images/views,33 actual scheduler submissions and the direct reuse
+  positive control passed. Intended RED190144 on local6d08 observes bindless
+  access1 at current34, GC33/LRU0, while direct reuse is34. This is the actual
+  public CommitBindings path without shader dispatch; PeekImage does not
+  refresh the observation. First185759 attempt was unrelated fixture failure.
+- Minimal shared correction adds one MarkImagesAccessed call after existing
+  valid-image filters and before layout transition in CommitBindings. Native
+  build190308 and the SAME unchanged oracle190356 pass: observed34 and LRU33.
+  RED test EXE `16915ba8e3fd5cc3f62f8883dc3734368f2583e3f8cd6c42d7fd93412895df10`;
+  GREEN `de560b6eff7842e24a2d551cea73fc2ea92405e1d28f78e39d131df87035f901`.
+  Original age fixture SHA256 `476879b3e6f865d5dfb87e966754568fbe724e89b66b0d2c04d7558f87f90e2b`.
+- Actual graphics/compute variants, duplicates, unchanged layout, skipped IDs
+  and descriptor payload early-return neighbors are next. No original visual
+  retry is authorized; this independently proven correction is not proof that
+  stretched surfaces or all texture flicker are fixed.
+- The installed game EXE `runtime-bindless-lifecycle/ac945386...` predates
+  the new access-age correction. When the user authorizes a game retry, build
+  current native core into another private runtime and capture exact source,
+  EXE hash and manual-input settings; do not reuse the older binary as proof.
+- Fork comparison: the verified peepo6d041035 has the same access-age omission.
+  Sharp926 delays descriptor nulling/reuse to queue completion, unlike our
+  immediate OnImageUnregistered slot rewrite. Pending-consumer sampling and
+  preparation overlap need separate bounded regressions before porting this
+  behavior. Preserve actual bounds, masks, failures and GPU lifetime checks.
+
+## Latest checkpoint: manual synchronization comparison still corrupt, 2026-10-11 18:55 UTC
+
+Completed lifecycle correction is local commit
+`6d08d859c0026c3ba4609ace74a61be96dec9598`; installed core is the equivalent
+precommit source2a599092 plus archived lifecycle diff, EXE `ac945386...`.
+Do not claim visual correctness from its passing mapping tests.
+
+- Retry `_Build/runs/game-20261011-185229-integration-manual-conservative-8902fe`
+  used autoswipe0/compute-chain0, no autopress/replay or synthetic root keys.
+  `pad-input.txt` contains only neutral buttons0/sticks128. Screenshots
+  `window-manual-1853.png` (frame512,4FPS) and1854 (frame704,4.2FPS) show
+  character/world and then severe covering stretched surfaces. User confirms
+  textures still jump. This comparison does not resolve the artifact or prove
+  synchronization is correct generally.
+- Owned PID43444 was closed gracefully for the next regression; finished
+  18:54:28.883Z, exit0, no timeout/forced cleanup/memory guard, streams drained.
+  Native slot idle. Automatic controller injection remains disabled.
+- Next required RED exercises actual public RenderExecutor::CommitBindings
+  with a registered native bindless image and no ordinary image descriptors,
+  after advancing actual scheduler ticks. Observe access age without a getter
+  that refreshes it; use direct-binding positive control. Production is still
+  committed6d08 and must not change before intended RED. Native test agent
+  owns only the new fixture/mode; shared fix owner waits for regression proof.
+
 ## Latest checkpoint: artifacts remain; automatic input removed, 2026-10-11 18:50 UTC
 
 User confirms disappearing/redrawing textures remain and asks about unsolicited

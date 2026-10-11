@@ -4023,6 +4023,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 			    image->info.data.Empty()) {
 				continue;
 			}
+			m_context.GetTextureCache().MarkImagesAccessed(std::span {&id, 1u});
 			const auto layout = image->info.IsDepth() ? vk::ImageLayout::eDepthStencilReadOnlyOptimal
 			                                          : vk::ImageLayout::eShaderReadOnlyOptimal;
 			if (image->backing.state.layout != layout) {

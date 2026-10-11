@@ -282,6 +282,8 @@ private:
 
 #include "BindlessLifecycleTests.inc"
 #include "BindlessLifecycleNeighborTests.inc"
+#include "BindlessImageAccessAgeTests.inc"
+#include "BindlessImageAccessNeighborTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -289,8 +291,10 @@ int main(int argc, char **argv) {
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0 ||
-                            std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors]");
+                            std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0 ||
+                            std::strcmp(argv[1], "--bindless-image-access-age") == 0 ||
+                            std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors]");
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -307,6 +311,10 @@ int main(int argc, char **argv) {
     CheckBindlessPreparationNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)
     CheckBindlessFeedbackNeighbors(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--bindless-image-access-age") == 0)
+    CheckBindlessImageAccessAge(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0)
+    CheckBindlessImageAccessNeighbors(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;
