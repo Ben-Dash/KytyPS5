@@ -980,8 +980,37 @@ RenderState RenderExecutor::AcquireRenderTargets(CommandBuffer& buffer, RenderCo
 		auto& image = cache.GetImage(target.image_id);
 		EXIT_IF(image.backing.samples != target.desc.info.samples || image_view == nullptr);
 		const auto& view   = target.desc.view_info;
-		const auto  layout = image.binding.is_bound ? vk::ImageLayout::eGeneral
-		                                            : vk::ImageLayout::eColorAttachmentOptimal;
+		auto layout = image.binding.is_bound ? vk::ImageLayout::eGeneral
+		                                     : vk::ImageLayout::eColorAttachmentOptimal;
+		// KYTY_COLOR_FEEDBACK_LAYOUT=1: a colour target this draw also samples renders in the
+		// attachment feedback loop layout with the colour feedback flag (VK_EXT_attachment_feedback_
+		// loop_layout, as the depth path and shadPS4 do), not in GENERAL without one.
+		static const bool color_feedback_layout = [] {
+			const char* text = KYTY_GETENV("KYTY_COLOR_FEEDBACK_LAYOUT");
+			return text != nullptr && std::strcmp(text, "0") != 0;
+		}();
+		if (color_feedback_layout && image.binding.is_bound &&
+		    m_context.GetGraphics().attachment_feedback_loop_enabled) {
+			bool sampled = false;
+			for (const auto* stage: stages) {
+				for (const auto& binding: stage->images) {
+					sampled = sampled || (binding.image_id == target.image_id &&
+					                      binding.desc.type == TextureCache::BindingType::Texture);
+				}
+			}
+			if (sampled) {
+				layout = vk::ImageLayout::eAttachmentFeedbackLoopOptimalEXT;
+				feedback_aspects |= vk::ImageAspectFlagBits::eColor;
+				static std::atomic<uint64_t> feedback_draws {0};
+				const auto count = feedback_draws.fetch_add(1, std::memory_order_relaxed) + 1;
+				if (count == 1 || count % 10000 == 0) {
+					std::printf("\x1b[91mcolor-feedback-layout: %llu draws so far (image 0x%016llx)\x1b[0m\n",
+					            static_cast<unsigned long long>(count),
+					            static_cast<unsigned long long>(image.info.data.address));
+					std::fflush(stdout);
+				}
+			}
+		}
 		image.binding.attachment_layout = layout;
 		image.binding.attachment_access =
 		    vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite;

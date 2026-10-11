@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 15> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 26> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -108,6 +108,39 @@ inline constexpr std::array<EmulatorSwitch, 15> EMULATOR_SWITCHES = {{
      "another kind shows a plain stand-in. With this on, each texture is read as the kind it is, "
      "as on the console.",
      "New, under test in Ghost of Yotei. Shaders are translated anew once."},
+    {"KYTY_BINDLESS_KEY_BOUNDS", "Ignore stale texture-table requests",
+     "Texture tables only load the entries a shader can really reach, and requests left over from an older table are dropped. On by default; uncheck to turn it off.",
+     "Fixed a GPU crash at the Torii in Ghost of Yotei (4 of 4 runs stable).", "*"},
+    {"KYTY_COLOR_FEEDBACK_COPY", "Copy a picture a draw reads and paints at once (testing)",
+     "When a draw reads the same picture it paints into (decals on walls), it reads a copy taken just before instead. Costs a copy per such draw.",
+     "New, under test in Ghost of Yotei (smeared interior walls)."},
+    {"KYTY_COLOR_FEEDBACK_LAYOUT", "Read-while-painting mode for pictures (testing)",
+     "A picture a draw reads and paints at the same time is set up in the graphics driver's special read-while-painting mode instead of a general one.",
+     "New, under test in Ghost of Yotei (smeared interior walls)."},
+    {"KYTY_META_CLEAR_ZMASK", "Check depth-clear fills before clearing (testing)",
+     "A fill over depth-buffer bookkeeping memory only counts as a depth clear when its values really mean cleared.",
+     "New, under test in Ghost of Yotei (depth wiped every frame for two targets)."},
+    {"KYTY_BC_BUFFER_WRITES", "Compressed textures take GPU buffer writes (testing)",
+     "A compressed texture the game fills piece by piece through a buffer gets those pieces; before only writes starting at its first byte counted.",
+     "New, under test in Ghost of Yotei (empty reflection cubes at the Torii)."},
+    {"KYTY_BINDLESS_REFRESH", "Refresh table textures the game rewrites (testing)",
+     "A texture from a texture table is checked once per frame for new contents written by the game and uploaded again when it changed.",
+     "New, under test in Ghost of Yotei."},
+    {"KYTY_WAVE_BRANCH_FULL", "Shader branches over the whole wave (testing)",
+     "Shader branches decide over all 64 lanes of a wave, including switched-off lanes, as an upstream change does. Shaders are translated anew.",
+     "New, under test in Ghost of Yotei cutscenes."},
+    {"KYTY_PIXEL_PROVOKING_VERTEX", "Flat pixel inputs from the provoking vertex (testing)",
+     "Flat values in pixel shaders come from the vertex the game marks as provoking, not always the first.",
+     "Tested in Ghost of Yotei: no visible difference."},
+    {"KYTY_DEBUG_FEEDBACK_LOOP", "Log pictures read and painted in one draw (diagnostics)",
+     "Prints a red line for each picture a draw reads and paints at the same time.",
+     "Diagnostics only."},
+    {"KYTY_DEBUG_META_CLEAR", "Log depth-buffer clears (diagnostics)",
+     "Prints a red line for each recorded depth-buffer clear and each draw that clears a depth buffer because of one.",
+     "Diagnostics only."},
+    {"KYTY_DEBUG_DEPTHONLY", "Log depth-only draws (diagnostics)",
+     "Prints a line for each kind of draw that only writes depth: whether the game set a pixel shader, its kill and export settings.",
+     "Diagnostics only."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 

@@ -3474,6 +3474,166 @@ bool RecordPlannedBindings(vk::CommandBuffer buffer, vk::Device device,
 
 } // namespace
 
+// KYTY_DEBUG_FEEDBACK_LOOP=1: a colour target the same draw also samples (Ghost of Yotei's decals
+// read and write the G-buffer) gets one red line per image, view and shaders.
+static bool FeedbackLoopLogEnabled() {
+	static const bool enabled = KYTY_GETENV("KYTY_DEBUG_FEEDBACK_LOOP") != nullptr;
+	return enabled;
+}
+
+// KYTY_COLOR_FEEDBACK_COPY=1: such a draw samples a copy of the view taken right before it, so
+// reads never race with the draw's own colour writes (Vulkan leaves sampling a colour attachment
+// in GENERAL layout undefined; NVIDIA can return garbage or black).
+static bool ColorFeedbackCopyEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_COLOR_FEEDBACK_COPY");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+static void LogColorFeedbackLoop(const Image& image, const TextureBinding& binding,
+                                 std::span<PreparedBindings* const> stages) {
+	uint64_t vs = 0, ps = 0;
+	for (const auto* stage: stages) {
+		const auto& program = *stage->runtime->program;
+		if (program.stage == ShaderType::Pixel) {
+			ps = program.shader_hash;
+		} else if (vs == 0) {
+			vs = program.shader_hash;
+		}
+	}
+	static std::mutex                   mutex;
+	static std::unordered_set<uint64_t> seen;
+	const auto& view = binding.desc.view_info;
+	uint64_t    key  = 0xcbf29ce484222325ull;
+	for (const uint64_t part: {image.info.data.address, uint64_t {view.base_level}, uint64_t {view.base_layer},
+	                           uint64_t {static_cast<uint32_t>(view.format)}, vs, ps}) {
+		key = (key ^ part) * 0x100000001b3ull;
+	}
+	const std::lock_guard lock(mutex);
+	if (seen.size() < 4096 && seen.insert(key).second) {
+		std::printf("\x1b[91mfeedback-loop: rt==sampled image=0x%016llx %ux%u slot=%s format=%d view_format=%d "
+		            "mip=%u+%u layer=%u+%u layout=%d ps=%016llx vs=%016llx\x1b[0m\n",
+		            static_cast<unsigned long long>(image.info.data.address), image.info.extent.width,
+		            image.info.extent.height, "target", static_cast<int>(image.backing.format),
+		            static_cast<int>(view.format), view.base_level, view.level_count, view.base_layer,
+		            view.layer_count, static_cast<int>(image.binding.attachment_layout),
+		            static_cast<unsigned long long>(ps), static_cast<unsigned long long>(vs));
+		std::fflush(stdout);
+	}
+}
+
+// The copy a colour feedback draw samples (KYTY_COLOR_FEEDBACK_COPY): one image per format,
+// extent, mips and layers, reused draw after draw behind barriers, and its views.
+struct FeedbackCopy {
+	VulkanImage                                image {};
+	vk::ImageLayout                            layout = vk::ImageLayout::eUndefined;
+	std::vector<std::pair<ImageViewInfo, vk::ImageView>> views;
+};
+
+// Copies the sampled view of `image` (a colour target of this draw) into a scratch image and
+// returns the scratch view, or nullptr when the view is not a plain 2D (array) colour view.
+static vk::ImageView CopyColorFeedbackSource(GraphicContext& graphics, CommandBuffer& buffer,
+                                             Image& image, const TextureBinding& binding) {
+	const auto& view = binding.desc.view_info;
+	if (!binding.mip_views.empty() || image.backing.samples != 1 || image.info.IsDepth() ||
+	    image.backing.extent.depth != 1 ||
+	    (view.type != vk::ImageViewType::e2D && view.type != vk::ImageViewType::e2DArray) ||
+	    view.aspect != vk::ImageAspectFlags(vk::ImageAspectFlagBits::eColor) || view.level_count == 0 ||
+	    view.layer_count == 0) {
+		return nullptr;
+	}
+	static std::map<std::tuple<int, uint32_t, uint32_t, uint32_t, uint32_t, bool>, FeedbackCopy> copies;
+	const auto width  = std::max(image.backing.extent.width >> view.base_level, 1u);
+	const auto height = std::max(image.backing.extent.height >> view.base_level, 1u);
+	const bool mutable_format = view.format != image.backing.format;
+	auto&      copy = copies[{static_cast<int>(image.backing.format), width, height, view.level_count,
+	                          view.layer_count, mutable_format}];
+	if (copy.image.image == nullptr) {
+		vk::ImageCreateInfo info {};
+		info.flags         = mutable_format ? vk::ImageCreateFlagBits::eMutableFormat : vk::ImageCreateFlags {};
+		info.imageType     = vk::ImageType::e2D;
+		info.format        = image.backing.format;
+		info.extent        = vk::Extent3D {width, height, 1};
+		info.mipLevels     = view.level_count;
+		info.arrayLayers   = view.layer_count;
+		info.samples       = vk::SampleCountFlagBits::e1;
+		info.tiling        = vk::ImageTiling::eOptimal;
+		info.usage         = vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst;
+		info.initialLayout = vk::ImageLayout::eUndefined;
+		EXIT_IF(!graphics.CreateImage(info, copy.image));
+	}
+	ImageViewInfo scratch_view = view;
+	scratch_view.base_level    = 0;
+	scratch_view.base_layer    = 0;
+	scratch_view.min_lod       = 0;
+	vk::ImageView sampled      = nullptr;
+	for (const auto& [info, handle]: copy.views) {
+		if (info == scratch_view) {
+			sampled = handle;
+		}
+	}
+	if (sampled == nullptr) {
+		vk::ImageViewCreateInfo create {};
+		create.image            = copy.image.image;
+		create.viewType         = scratch_view.type;
+		create.format           = scratch_view.format;
+		create.components       = scratch_view.mapping;
+		create.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, scratch_view.level_count, 0,
+		                           scratch_view.layer_count};
+		RequireVulkanSuccess(graphics.device.createImageView(&create, nullptr, &sampled),
+		                     "create colour feedback copy view");
+		copy.views.emplace_back(scratch_view, sampled);
+	}
+	buffer.EndRendering();
+	auto command = buffer.Handle();
+	const ImageSubresourceRange range {view.base_level, view.level_count, view.base_layer, view.layer_count};
+	image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, range, command);
+	vk::ImageMemoryBarrier to_destination {};
+	to_destination.srcAccessMask       = vk::AccessFlagBits::eShaderRead;
+	to_destination.dstAccessMask       = vk::AccessFlagBits::eTransferWrite;
+	to_destination.oldLayout           = copy.layout;
+	to_destination.newLayout           = vk::ImageLayout::eTransferDstOptimal;
+	to_destination.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_destination.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_destination.image               = copy.image.image;
+	to_destination.subresourceRange    = {vk::ImageAspectFlagBits::eColor, 0, view.level_count, 0, view.layer_count};
+	command.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer,
+	                        {}, 0, nullptr, 0, nullptr, 1, &to_destination);
+	std::vector<vk::ImageCopy> regions;
+	for (uint32_t level = 0; level < view.level_count; level++) {
+		vk::ImageCopy region {};
+		region.srcSubresource = {vk::ImageAspectFlagBits::eColor, view.base_level + level, view.base_layer,
+		                         view.layer_count};
+		region.dstSubresource = {vk::ImageAspectFlagBits::eColor, level, 0, view.layer_count};
+		region.extent         = vk::Extent3D {std::max(width >> level, 1u), std::max(height >> level, 1u), 1};
+		regions.push_back(region);
+	}
+	command.copyImage(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, copy.image.image,
+	                  vk::ImageLayout::eTransferDstOptimal, static_cast<uint32_t>(regions.size()),
+	                  regions.data());
+	auto to_sampled          = to_destination;
+	to_sampled.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+	to_sampled.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+	to_sampled.oldLayout     = vk::ImageLayout::eTransferDstOptimal;
+	to_sampled.newLayout     = vk::ImageLayout::eShaderReadOnlyOptimal;
+	command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
+	                        {}, 0, nullptr, 0, nullptr, 1, &to_sampled);
+	copy.layout = vk::ImageLayout::eShaderReadOnlyOptimal;
+	// Back to what the draw renders with.
+	image.Transit(image.binding.attachment_layout, image.binding.attachment_access, {}, command);
+	static std::atomic<uint64_t> copies_made {0};
+	const auto count = copies_made.fetch_add(1, std::memory_order_relaxed) + 1;
+	if (count == 1 || count % 10000 == 0) {
+		std::printf("\x1b[91mcolor-feedback-copy: %llu copies so far (image 0x%016llx %ux%u)\x1b[0m\n",
+		            static_cast<unsigned long long>(count),
+		            static_cast<unsigned long long>(image.info.data.address), width, height);
+		std::fflush(stdout);
+	}
+	return sampled;
+}
+
 void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     vk::PipelineBindPoint              pipeline_bind_point,
                                     const PipelineCache::Pipeline&     pipeline,
@@ -3497,6 +3657,17 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 	// With every stage planned, the payload is filled from the plans (RecordPlannedBindings).
 	std::array<const BindingPlan*, 4> plans {};
 	bool planned = BindingPlanEnabled() && prepared_bindings.size() <= plans.size();
+	// KYTY_COLOR_FEEDBACK_COPY: bindings pointed at a copy for this call, restored when it returns
+	// (the prepared bindings outlive the draw).
+	struct FeedbackRestore {
+		std::vector<std::tuple<TextureBinding*, vk::ImageView, vk::ImageLayout>> bindings;
+		~FeedbackRestore() {
+			for (auto& [binding, view, layout]: bindings) {
+				binding->image_view = view;
+				binding->layout     = layout;
+			}
+		}
+	} feedback_restore;
 	for (size_t s = 0; s < prepared_bindings.size(); s++) {
 		const auto* prepared = prepared_bindings[s];
 		EXIT_IF(prepared == nullptr || prepared->runtime == nullptr || !*prepared->runtime);
@@ -3711,6 +3882,22 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 				                      : vk::AccessFlagBits2::eShaderRead,
 				              range, vk_buffer);
 			} else if (image.binding.is_target) {
+				if (!image.info.IsDepth() && !storage &&
+				    pipeline_bind_point == vk::PipelineBindPoint::eGraphics) {
+					if (FeedbackLoopLogEnabled()) [[unlikely]] {
+						LogColorFeedbackLoop(image, binding, prepared_bindings);
+					}
+					if (ColorFeedbackCopyEnabled()) [[unlikely]] {
+						if (const auto copied =
+						        CopyColorFeedbackSource(m_context.GetGraphics(), buffer, image, binding)) {
+							feedback_restore.bindings.emplace_back(&binding, binding.image_view, binding.layout);
+							binding.image_view = copied;
+							binding.layout     = vk::ImageLayout::eShaderReadOnlyOptimal;
+							vk_buffer          = compute_chain ? buffer.ChainHandle() : buffer.Handle();
+							continue;
+						}
+					}
+				}
 				const auto layout = image.binding.attachment_layout;
 				EXIT_IF(layout == vk::ImageLayout::eUndefined);
 				if (image.info.IsDepth()) {
