@@ -1,5 +1,138 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: all unchanged frontend regressions GREEN, 2026-10-11 22:05 UTC
+
+- Native build220439/run220533 pass all nine original cases and twelve
+  neighbors on EXE97f31b90c688b88dec33c3f6d0fcffd81f46a12c6c156c33baeb2bdf773a5d36,
+  exit0/no timeout. Original semantic functions127fa0cc and frozen neighbor
+  oracles538e6908 are unchanged across the offset correction. Genuine CFG
+  join/backedge decoder gates are included, not the former mistaken SOPC.
+- Shared frontend patch4f0c1f9d tracks selected/ABI index provenance and
+  offset pairs per current register value, invalidates actual write widths,
+  rejects unproved CFG transforms, and retains both guest loads when native
+  fetches would need incompatible draw offsets. Raw VertexID/high bits and
+  ordinary once-only Vertex/Instance/Local controls remain intact in CPU IR.
+- Intended REDs:212841 transformed indices;214615/214616 repeated add/wide
+  overwrite;215803/220004 discarded offsets;220005 incompatible two-fetch
+  offsets. These establish shared frontend defects, not original-game cause.
+  shader_cfg empty-types budget fails identically with frontend patch absent
+  (baseline215846), so no broad/full-suite pass is claimed.
+- Opt-in draw snapshot diagnostic083aaeae separately saves exact prepared
+  non-table descriptor buffer ranges and shader-data/layout metadata, with
+  explicit32MiB aggregate new-copy cap and skip reasons. Existing refound
+  observations remain separately labelled. This is instrumentation, not a fix;
+  table BDA pointers are explicitly unavailable and first-match attribution
+  plus FlushAndWait timing perturbation remain limitations.
+- Fresh runtime-embedded-fetch-offsets native build/install and original
+  bounded game retry are next. Earlier runtime-embedded-fetch-final is
+  preserved/not executed and predates the offset-lifetime correction.
+  GPU numeric vertex/readback and Vulkan builtin/draw-offset equivalence
+  remain pending. Tests and game are authorized, automatic input OFF.
+
+## Latest checkpoint: provenance neighbors and remaining offset proof, 2026-10-11 21:57 UTC
+
+- Current branch yotei-integration-native, HEAD6ba0a504 plus frontend/test WIP.
+  Build215358 and run215406 prove canonical/VertexOffset/InstanceOffset/Local,
+  single/Local offsets, repeated same offset, wide second-DWORD overwrite,
+  relative write and identity cases on EXE3dad51e2. Original nine cases already
+  pass215045 on the same frozen production correction (EXE242eb8a6).
+- The last neighbor failed due to a test-only SOPC/SOPP encoding mistake;
+  corrected branch fixtures now require public decoder branch/target checks.
+  Earlier join PASS did not exercise a CFG join. Corrected joins/backedges
+  are pending; no production branch failure is claimed from that error.
+- Independent review found a possible discarded-offset metadata leak. A new
+  pre-CNDMASK add/overwrite regression is frozen, awaiting intended RED. Also
+  inspect resetting an already selected/offset index and multiple fetches.
+  Do not run the original game as a completed correction before these checks.
+- Fresh native configure215424/build215431/install215528 passed. Private
+  runtime-embedded-fetch-final EXE849dd11d7848bb0b7ced3dc48776254283263a9e1c511fb41547cb6e6904000f
+  is preserved but NOT game-executed; it predates any discarded-offset fix.
+  Actual GPU vertex-result equivalence and original geometry remain pending.
+- Requested screenshots remain run205728/window-request-1.png and
+  window-request-2.png, inspected/displayed at frames1006/1109. Game/test
+  execution is authorized. Automatic input remains OFF; no root-sent keys.
+  Native slot currently occupied by affected shader_cfg target build.
+
+## Latest checkpoint: unchanged embedded-fetch CPU GREEN, 2026-10-11 21:40 UTC
+
+- Native build213825 and SAME original fixture213941 pass all nine cases:
+  canonical/VertexOffset/InstanceOffset/Local remain native controls, while
+  masked/overwritten/noncanonical-CNDMASK/ABI-shift/ABI-mask fetches preserve
+  their actual shader-buffer index expressions. Raw001d0001/high29 remain
+  unchanged. CPU planning/IR proof, not GPU vertex-result proof.
+- Original fixture127fa0cc remains byte-identical; GREEN EXE
+  `7ef93f2bcb114d70842db04050eb08c87705fff1e4e86b82dd79ae7d14fba750`.
+  Shared correction is ShaderRecompiler.cpp only: invalidate stale selected
+  and ABI index provenance, preserve existing proved prolog offsets, reject
+  unproved CFG branches conservatively while retaining Local terminal handoff.
+- Focused neighbors for wider writes/relative indexing/repeated offsets/CFG
+  boundaries follow. Do not extend FP64 semantics or change draw indices.
+  Native core inputs frozen for fresh runtime-embedded-fetch build.
+- Fresh v9 journal extraction for targeted snapshot is verified separately:
+  `_Build/analysis/yotei-integration-20261011/journal-v9-targeted-210717`.
+  All1960 envelopes/full records/checksums/tail verified. Current2a6a primary
+  is8016bytes, db7a2240bytes, both match registered-code SHA. Earlier private
+  attribution of v8 rows451/1416 to2a was wrong (those are fe3); no code-size
+  regression is established from those rows. Snapshot record=false/liveSPV
+  and first-match specialization remain coverage limits.
+- Refound2a stage-buffer blob differs from same-address native VBO, but the
+  collector refinds before final NativeStorageBuffer resynchronization; this
+  is not proof of wrong final shader data. Actual geometry cause still needs
+  verification with current correction and eventual committed-binding capture.
+
+## Latest checkpoint: embedded-fetch eligibility intended CPU RED, 2026-10-11 21:29 UTC
+
+- Targeted capture retry210717 ended21:12:23Z, exit0/graceful close at300s
+  bound, no forced cleanup/RAM guard; streams drained. Two candidate draw
+  inputs are saved at frame305, first-match snapshots (not exact-failure
+  guarantees). Their metadata lacks fresh shader code/SPIR-V (`record=false`).
+  Shader-byte provenance and the failing real-game variant remain unproved.
+- Independent synthetic public TranslateProgram fixture
+  `tests/EmbeddedFetchIndexTests.cpp`, original SHA256
+  `127fa0ccf08edee1dca176f80ecf6c0fd0a1c4e0f5b048a68540eed916f56259`.
+  Native build212514 and controls212814 pass: canonical GetAttribute4,
+  supported Vertex/Instance offsets18 and actual Local handoff/ABI.
+- Intended RED212841 for mask-dst and ABI-instance-shift: actual native
+  GetAttribute4/shader-fetch0 incorrectly replaces a transformed guest index.
+  Raw001d0001 and its high29 are preserved; expected guest fetch indices1/29
+  cannot be represented by that native fixed-function attribute selection.
+  Both fail exactly eligibility, no timeout; test EXE
+  `b70ac1a0a0691f6f04bf334f735b9e286734a2ca4accb7e14fd778c11fd5fb17`.
+- Shared frontend correction now authorized after RED. Track actual index
+  provenance and overwrites, preserve proved offsets/Local, reject unproved
+  CFG transforms conservatively. Never globally mask/change draw indices.
+  The same tests must pass unchanged before neighbors and game retry.
+  This is an independent correctness defect, not established original-game
+  causality. Production owner limited to ShaderRecompiler.cpp; native slot idle.
+
+## Latest checkpoint: requested screenshots and actual invalid VS positions, 2026-10-11 21:05 UTC
+
+- Recorded-consumer correction is local commit6ba0a504, with actual native
+  sampled RED/GREEN and neighbors. Original retry205728 on equivalent private
+  EXE49d31a... still fails visually. User-requested owned screenshots:
+  `window-request-1.png` frame1006/5FPS shows character/torii/building fragments
+  with terrain missing; `window-request-2.png` frame1109/4.4FPS again shows
+  covering stretched surfaces. Both were inspected and displayed. First
+  foreground-capture attempt was withheld, then safely retried; no other
+  application's image was captured.
+- Run finished21:02:32.392Z, exit0/graceful close at300s bound, timedOut=true,
+  no forced cleanup/RAM guard, streams drained. No stable gameplay milestone.
+- Existing VTX_EXPLODE_CHECK startup/emission/cache separation proved active.
+  Frame600 summary:8,344,554 events,3,853,828 NaN/Inf,984,924 WZero,199,779 huge;
+  final distinct NaN/Inf report kinds cover68 VS. Legitimate cull/clip events
+  must be kept separate. This is actual exported-position evidence, not a
+  texture-only hypothesis or proof of a particular shader/input defect.
+- Candidate direct32-bit index sample for VSdb7a7e115b3004a2 reads
+  001d0000/001d0001/001d0002 with a six-record VBO. Other32-bit index controls
+  are normal; do not change widths or mask all indices. Need actual guest
+  fetch/index-expression contract and capture before synthetic RED/fix.
+- Targeted capture retry now active: PID47580,
+  `_Build/runs/game-20261011-210717-integration-retirement-geometry-2e5002`,
+  same EXE/switches,300s bound, hashes db7a7e115b3004a2 and2a6a418c0787e9b9,
+  MAX1 per hash. It captures first matches and synchronizes readbacks; this
+  can perturb timing and may not be the exact failing draw. No behavior guard.
+  Production/CMake frozen; native slot occupied by this game.
+
 ## Latest checkpoint: sampled-retirement neighbors pass; retry ready, 2026-10-11 20:56 UTC
 
 - Intended native pixel RED203642 → SAME GREEN204246. Neighbor build205500

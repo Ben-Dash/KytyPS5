@@ -132,7 +132,26 @@ uint32_t DecodedDstSize(const Decoder::Instruction& inst) {
 }
 
 uint32_t EmbeddedFetchDstSize(const Decoder::Instruction& inst) {
-	return inst.opcode == Decoder::Opcode::V_MAD_U64_U32 ? 2u : DecodedDstSize(inst);
+	// These existing translator operations write a complete 64-bit VGPR pair.
+	switch (inst.opcode) {
+		case Decoder::Opcode::V_MAD_U64_U32:
+		case Decoder::Opcode::V_CVT_F64_I32:
+		case Decoder::Opcode::V_CVT_F64_F32:
+		case Decoder::Opcode::V_CVT_F64_U32:
+		case Decoder::Opcode::V_ADD_F64:
+		case Decoder::Opcode::V_MUL_F64:
+		case Decoder::Opcode::V_MIN_F64:
+		case Decoder::Opcode::V_MAX_F64:
+		case Decoder::Opcode::V_FMA_F64:
+		case Decoder::Opcode::V_RCP_F64:
+		case Decoder::Opcode::V_FRACT_F64:
+		case Decoder::Opcode::V_TRUNC_F64:
+		case Decoder::Opcode::V_CEIL_F64:
+		case Decoder::Opcode::V_FLOOR_F64:
+		case Decoder::Opcode::V_LSHLREV_B64:
+		case Decoder::Opcode::V_LSHRREV_B64: return 2u;
+		default: return DecodedDstSize(inst);
+	}
 }
 
 void ClearEmbeddedFetchSgprs(std::array<EmbeddedFetchSgprInfo, 108>& sgprs,
@@ -215,15 +234,20 @@ int BufferTableAttribFromOffset(uint32_t raw_offset, int dword) {
 
 Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
     const Decoder::Program& decoded, const ShaderVertexInputInfo* input_info,
-    uint32_t user_data_base, uint32_t user_data_count, uint32_t wave_size) {
+    uint32_t user_data_base, uint32_t user_data_count, uint32_t wave_size,
+    const CFG::Graph& native_cfg) {
 	const uint32_t    vertex_index_reg   = input_info->logical_stage == ShaderType::Local ? 2u : 5u;
 	const uint32_t    instance_index_reg = input_info->logical_stage == ShaderType::Local ? 5u : 8u;
 	Frontend::EmbeddedFetchPlan data;
+	// Linear provenance cannot prove a join or a load re-entered through a backedge.
+	if (native_cfg.blocks.size() != 1 ||
+	    std::any_of(decoded.instructions.begin(), decoded.instructions.end(), [&](const auto& inst) {
+		    return Decoder::IsDirectBranch(inst.opcode) ||
+		           (inst.opcode == Decoder::Opcode::S_SETPC_B64 &&
+		            !(input_info->logical_stage == ShaderType::Local &&
+		              &inst == &decoded.instructions.back()));
+	    })) return data;
 	data.loads.reserve(input_info->resources_num);
-	int32_t vertex_offset_candidate   = -1;
-	int32_t instance_offset_candidate = -1;
-	bool    vertex_offset_conflict    = false;
-	bool    instance_offset_conflict  = false;
 
 	const int shift_regs = 8;
 	const int attrib_reg = input_info->fetch_attrib_reg + shift_regs;
@@ -231,6 +255,12 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 
 	std::array<EmbeddedFetchSgprInfo, 108> sgprs {};
 	std::array<bool, 256>                 vgpr_is_index {};
+	std::array<bool, 256>                 abi_index_representable {};
+	// Offsets belong to a particular proved register value, not to the whole prolog.
+	std::array<std::array<int32_t, 2>, 256> index_offsets;
+	for (auto& offsets: index_offsets) offsets = {-1, -1};
+	abi_index_representable[vertex_index_reg] = true;
+	abi_index_representable[instance_index_reg] = true;
 	EmbeddedFetchVectorLanes               vector_lanes;
 	const bool                             track_vector_lanes =
 	    std::none_of(decoded.instructions.begin(), decoded.instructions.end(),
@@ -253,6 +283,26 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 	}
 
 	for (const auto& inst: decoded.instructions) {
+		const auto plain = [](const Decoder::Operand& operand) {
+			return operand.sdwa_sel == 6u && !operand.sdwa_sext && !operand.negate &&
+			       !operand.negate_hi && !operand.absolute && !operand.clamp && operand.omod == 0u &&
+			       !operand.dpp && !operand.dpp8 && !operand.op_sel && !operand.op_sel_hi;
+		};
+		const bool vector_destination = IsDecodedVgpr(inst.dst) && inst.dst.reg < vgpr_is_index.size();
+		const bool old_index = vector_destination && vgpr_is_index[inst.dst.reg];
+		const bool old_abi = vector_destination && abi_index_representable[inst.dst.reg];
+		auto next_offsets = vector_destination ? index_offsets[inst.dst.reg]
+		                                       : std::array<int32_t, 2> {-1, -1};
+		const bool canonical_index_select =
+		    inst.opcode == Decoder::Opcode::V_CNDMASK_B32 && vector_destination &&
+		    IsDecodedVgpr(inst.src0) && inst.src0.reg == instance_index_reg &&
+		    IsDecodedVgpr(inst.src1) && inst.src1.reg == vertex_index_reg &&
+		    abi_index_representable[instance_index_reg] && abi_index_representable[vertex_index_reg] &&
+		    plain(inst.dst) && plain(inst.src0) && plain(inst.src1);
+		if (canonical_index_select) {
+			next_offsets = {index_offsets[vertex_index_reg][0],
+			                index_offsets[instance_index_reg][1]};
+		}
 		// Fetch shaders accumulate the draw's vertex offset in v0. The PS5 NGG ABI
 		// seeds S_NGG_VERTEX_INDEX in v5 and S_NGG_INSTANCE_INDEX in v8, then applies the
 		// corresponding direct-draw offsets before fetching.
@@ -272,17 +322,16 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 		      inst.opcode == Decoder::Opcode::V_SAD_U32 && IsDecodedVgpr(inst.src2) &&
 		      inst.src2.reg == inst.dst.reg &&
 		      TryDecodedOperandConstant(sgprs, inst.src1, sad_zero) && sad_zero == 0));
-		if (data.loads.empty() && index_offset_add) {
+		bool preserve_index_provenance = false;
+		if (data.loads.empty() && index_offset_add && (old_index || old_abi)) {
 			const auto reg = DecodedSgprReg(inst.src0);
 			if (reg >= user_data_base && reg - user_data_base < user_data_count) {
-				auto& candidate = vertex_index_accumulator ? vertex_offset_candidate
-				                                           : instance_offset_candidate;
-				auto& conflict  = vertex_index_accumulator ? vertex_offset_conflict
-				                                           : instance_offset_conflict;
-				if (candidate >= 0 && candidate != static_cast<int32_t>(reg)) {
-					conflict = true;
-				} else {
+				auto& candidate = next_offsets[vertex_index_accumulator ? 0u : 1u];
+				// One native draw offset cannot represent two guest additions, even of one SGPR.
+				if (candidate < 0 && plain(inst.dst) && plain(inst.src0) &&
+				    plain(inst.src1) && plain(inst.src2)) {
 					candidate = static_cast<int32_t>(reg);
+					preserve_index_provenance = true;
 				}
 			}
 		}
@@ -392,9 +441,7 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 					if (IsDecodedVgpr(inst.dst) && inst.dst.reg < vgpr_is_index.size()) {
 						ClearEmbeddedFetchVectorLanes(&vector_lanes, inst.dst.reg);
 					}
-					if (IsDecodedVgpr(inst.dst) && inst.dst.reg < vgpr_is_index.size() &&
-					    IsDecodedVgpr(inst.src0) && inst.src0.reg == instance_index_reg &&
-					    IsDecodedVgpr(inst.src1) && inst.src1.reg == vertex_index_reg) {
+					if (canonical_index_select) {
 						vgpr_is_index[inst.dst.reg] = true;
 					}
 				} else if (IsEmbeddedFetchAttribPropagationAlu(inst)) {
@@ -429,13 +476,15 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 					    IsDecodedSgpr(inst.src1) && DecodedSgprReg(inst.src1) < sgprs.size() &&
 					    sgprs[DecodedSgprReg(inst.src1)].type == EmbeddedFetchValueType::Buffer) {
 						const auto& buffer = sgprs[DecodedSgprReg(inst.src1)];
+						const auto& offsets = index_offsets[inst.src0.reg];
 						if (data.loads.empty()) {
-							if (!vertex_offset_conflict) {
-								data.vertex_offset_sgpr = vertex_offset_candidate;
-							}
-							if (!instance_offset_conflict) {
-								data.instance_offset_sgpr = instance_offset_candidate;
-							}
+							data.vertex_offset_sgpr = offsets[0];
+							data.instance_offset_sgpr = offsets[1];
+						} else if (data.vertex_offset_sgpr != offsets[0] ||
+						           data.instance_offset_sgpr != offsets[1]) {
+							// All native attributes share one draw-wide offset. Keep the original
+							// shader loads when their selected index values need different offsets.
+							return {};
 						}
 						auto& load        = data.loads.emplace_back();
 						load.pc           = inst.pc;
@@ -447,11 +496,26 @@ Frontend::EmbeddedFetchPlan DetectEmbeddedVertexFetch(
 		}
 		if (inst.opcode == Decoder::Opcode::V_MOVRELD_B32) {
 			vector_lanes.clear();
-		} else if (inst.opcode != Decoder::Opcode::V_WRITELANE_B32 && IsDecodedVgpr(inst.dst)) {
+			vgpr_is_index.fill(false);
+			abi_index_representable.fill(false);
+			for (auto& offsets: index_offsets) offsets = {-1, -1};
+		} else if (IsDecodedVgpr(inst.dst)) {
 			for (uint32_t i = 0;
 			     i < EmbeddedFetchDstSize(inst) && inst.dst.reg + i < vgpr_is_index.size();
 			     i++) {
-				ClearEmbeddedFetchVectorLanes(&vector_lanes, inst.dst.reg + i);
+				vgpr_is_index[inst.dst.reg + i] = false;
+				abi_index_representable[inst.dst.reg + i] = false;
+				index_offsets[inst.dst.reg + i] = {-1, -1};
+				if (inst.opcode != Decoder::Opcode::V_WRITELANE_B32)
+					ClearEmbeddedFetchVectorLanes(&vector_lanes, inst.dst.reg + i);
+			}
+			if (vector_destination) {
+				vgpr_is_index[inst.dst.reg] = canonical_index_select ||
+				                                  (preserve_index_provenance && old_index);
+				abi_index_representable[inst.dst.reg] = preserve_index_provenance && old_abi;
+				if (canonical_index_select || preserve_index_provenance) {
+					index_offsets[inst.dst.reg] = next_offsets;
+				}
 			}
 		}
 	}
@@ -672,7 +736,7 @@ static TranslateResult TranslateProgramChecked(std::span<const uint32_t> code,
 	    options.input_info.vertex != nullptr && options.input_info.vertex->fetch_embedded) {
 		embedded_fetch = DetectEmbeddedVertexFetch(
 		    decoded, options.input_info.vertex, options.user_data_base,
-		    static_cast<uint32_t>(options.user_data.size()), options.wave_size);
+		    static_cast<uint32_t>(options.user_data.size()), options.wave_size, native_cfg);
 		if (!embedded_fetch.loads.empty()) {
 			LOGF("%s embedded vertex fetch plan: detected=%" PRIu64 "\n", GetDumpLabel(options),
 			     static_cast<uint64_t>(embedded_fetch.loads.size()));

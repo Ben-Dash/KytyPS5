@@ -482,6 +482,9 @@ target_compile_definitions(shader_batch_audit PRIVATE KYTY_RESOURCE_REGRESSION=1
 add_kyty_full_emulator_test(bindless_lifecycle_tests "${KYTY_TESTS_DIR}/BindlessLifecycleTests.cpp")
 target_compile_definitions(bindless_lifecycle_tests PRIVATE KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS=1)
 
+# Public frontend translation regression for embedded vertex-fetch eligibility.
+add_kyty_full_emulator_test(embedded_fetch_index_tests "${KYTY_TESTS_DIR}/EmbeddedFetchIndexTests.cpp")
+
 add_executable(scalar_provenance_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/ScalarProvenanceTests.cpp"
 	"${KYTY_SOURCE_DIR}/graphics/host_gpu/hostMemory.cpp"
@@ -737,6 +740,11 @@ if(BUILD_TESTING)
 	set_tests_properties(emulator_shader_precompile_invalid PROPERTIES WILL_FAIL TRUE)
 	add_test(NAME ime_dialog COMMAND $<TARGET_FILE:ime_dialog_tests>)
 	add_test(NAME shader_cfg COMMAND $<TARGET_FILE:shader_cfg_tests>)
+	add_test(NAME embedded_fetch_index COMMAND $<TARGET_FILE:embedded_fetch_index_tests>)
+	add_test(NAME embedded_fetch_index_neighbors
+	         COMMAND $<TARGET_FILE:embedded_fetch_index_tests> neighbors)
+	set_tests_properties(embedded_fetch_index embedded_fetch_index_neighbors
+	                     PROPERTIES TIMEOUT 30)
 	add_test(NAME scalar_provenance COMMAND $<TARGET_FILE:scalar_provenance_tests>)
 	add_test(NAME image_page_table COMMAND $<TARGET_FILE:image_page_table_tests>)
 	add_test(NAME memory_tracker COMMAND $<TARGET_FILE:memory_tracker_tests>)
@@ -828,6 +836,7 @@ if(BUILD_TESTING)
 	add_custom_target(kyty_tests DEPENDS
 		ime_dialog_tests
 		shader_cfg_tests
+		embedded_fetch_index_tests
 		scalar_provenance_tests
 		image_page_table_tests
 		memory_tracker_tests

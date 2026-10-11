@@ -1,5 +1,112 @@
 # Integration test debt
 
+## Discarded embedded-fetch offset (2026-10-11 21:56 UTC)
+
+Independent review found a possible stale offset candidate: add s18 to v0
+before the canonical CNDMASK overwrites v0, then fetch with the raw vertex
+index. The discarded addition must not publish vertex_offset_sgpr=18.
+Required synthetic public-translation RED checks the actual final fetch and
+exact offset metadata (-1), with ordinary once-only offset controls retained.
+Intended RED215803 now confirms actual raw index with native4 attributes but
+incorrect offset18; exact metadata assertion fails, no timeout. Test EXE
+A2EDDF4B20DE6F9FBED2BE1BF7BED92F10067D94AE2067A6CDC6C6FF8A2BE336.
+Selected-offset/reselection and multiple-fetch variations are being added
+before correcting the shared lifetime. No production offset-lifetime fix yet.
+
+The neighbor branch encodings were corrected from SOPC bf05 to SOPP bf85;
+the earlier join result did not exercise a CFG join. A public decoder gate
+now checks the actual conditional branch/target/end instruction before the
+eligibility oracle. The former boundary error was a fixture error, not a
+production native-substitution failure. Corrected actual join and finite
+backedge both pass215806, retaining guest fetches.
+
+Affected shader_cfg215732 fails the empty-shader unused-types budget. A
+scoped byte-preserving frontend reversal to6ba and native rebuild215829/run
+215846 reproduce the SAME failure; restored WIP SHA d1a604 byte-exact.
+This is an existing independent baseline failure, not a full-suite pass.
+Current corrected target must be rebuilt before any future cfg execution.
+
+Additional intended RED220004: canonical selection, valid once-only add,
+then reselection discards it but publishes offset18. RED220005: two live
+fetches need raw+7 and raw respectively, yet both become native attributes
+under offset18 (attributes8/no shader loads). Exact metadata/second-consumer
+assertions fail with EXEAB2BFC4AD7AD9F91F6D9626D47E747FF3D8A2D6BBA8FA3488015D3A2EFEE025C,
+no timeout. Shared per-register offset-lifetime patch is frozen4f0c1f9d,
+and unchanged all-neighbor GREEN220533 now passes: both discarded offsets
+publish -1; the incompatible two-fetch case retains both actual buffer loads
+and their raw+7/raw expressions. All nine original and twelve neighboring
+cases pass on EXE97f31b90. No original-game causality established.
+
+Required GPU follow-up: actual graphics pipeline with distinct synthetic
+vertex records, transformed guest fetch and independent raw/high-ID exports.
+Include host ResolveDrawOffsets/native baseVertex plus guest prolog offset
+and mixed native/manual reads; CPU expression evaluation supplies raw input
+independently and cannot prove Vulkan builtin/native-offset equivalence.
+Derive guest register initialization and host addressing separately before
+any new ABI correction. No numerical GPU vertex proof is currently claimed.
+
+## Exported-position / transformed-index investigation (2026-10-11 21:05 UTC)
+
+The original retry after6ba0a504 still has dispersed objects/covering surfaces.
+VTX diagnostic reports actual exported NaN/Inf in68 VS at finalrun; screenshots
+1006/1109 confirm visualfailure. A few finite huge/cull/zeroW events can be
+legitimate clipping, and attribution to the last draw is approximate.
+
+Before any geometry fix, capture actual buffers/index type/native fetch layout
+and live shader for db7a7e115b3004a2 and2a6a418c0787e9b9. Draw snapshot MAX1
+matches first occurrence and forces readback synchronization; retain this
+coverage limit. Suspect32-bit index words001d0000/1/2 alone do not prove wrong
+width. Valid32-bit examples also exist. Packed game metadata is not ISA proof.
+
+Conditional required synthetic regression if transformed-fetch eligibility
+is wrong: real decoded guest fetch explicitly uses index=(raw_index&ffff),
+with raw001d0001. Independent memory oracle selects vertex1 while raw index
+and its upper29 remain available for other guest expressions. Native fixed
+attribute fetch must represent that computation or preserve a shader fetch;
+never globally strip indices/change widths. Cover ordinary16/32-bit indices,
+mask/BFE and supported offsets/instance cases. Prove intended RED first.
+Source gap has not been established yet; no production fix is authorized by
+these logs alone. Other transform/buffer/ISA causes remain open.
+
+Read-only frontend review now establishes an independent eligibility gap:
+ordinary VGPR writes do not clear vgpr_is_index, and canonical CNDMASK trusts
+ABI register numbers after prior transformations. Native GetAttribute then
+omits the guest index expression. Per-PC replacement exists; do not describe
+it as destination-only matching. A standalone public TranslateProgram CPU
+test is being constructed with canonical/offset/Local controls and explicit
+masked/overwritten/ABI-transformed index variants. No intended RED or production
+fix yet. Captured current-game cause remains unproved; first masked db7a loads
+precede tagging and may correctly remain buffer pulls.
+
+Native public TranslateProgram build212514 and canonical/supported-offset/
+Local controls212814 passed. Intended RED212841 mask-dst and ABI-instance-shift
+now prove incorrect GetAttribute substitution for transformed indices while
+raw001d0001/high29 remain intact. Original immutable fixture127fa0cc is the
+unchanged GREEN oracle. Shared provenance correction is in progress; actual
+real-game cause and GPU-readback equivalence remain unproved. Neighbor widths,
+CFG joins/branches, identity and repeated-offset boundaries remain needed.
+
+Same original fixture213941 is GREEN for all nine cases after shared index
+provenance/native-eligibility correction. CPU public translation and index
+expression evaluation only; actual GPU vertex/readback remains unproved.
+Extra widths/repeated-offset/control-flow neighbors are in construction.
+Fresh v9 verification resolves code identity:2a primary8016/db7a2240 match
+registered code. Legacy rows451/1416 are fe3, not2a; discard that earlier
+misattribution. The snapshot's refound-stage/native-VB bytes can differ before
+final storage synchronization; do not treat this as a proved binding bug.
+
+Neighbor build214551 passed. Single and Local offsets214614/214615, relative
+write/identity/join214617–214618 pass. Two additional intended CPU REDs:
+repeated same offset214615-8640752 emits native4 for two guest additions that
+one native base offset cannot represent; wide ABI214616-6579370 emits native4
+after V_ADD_F64 overwrites both v4/v5 but provenance clears only v4. Eligibility
+failure occurs before F64 numerical evaluation; no new FP64 semantics claim.
+Shared once-only offset and actual destination-width corrections are now
+authorized by these REDs. Preserve unchanged eligibility oracles.
+Backedge214619 emits no native attributes and no retained fetch at expectedPC;
+that failure is not proof of incorrect native substitution. Diagnose fixture/
+CFG reachability independently before making any production claim or change.
+
 ## Active descriptor-retirement pixel regression (2026-10-11 20:32 UTC)
 
 User explicitly reauthorizes game execution and tests. The fresh d7895a56
