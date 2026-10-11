@@ -416,6 +416,15 @@ Json StageGuestJson(const ShaderStageRuntime& stage) {
 	return guest;
 }
 
+Json PreparedBufferJson(const vk::DescriptorBufferInfo& view) {
+	const auto handle = static_cast<VkBuffer>(view.buffer);
+	uint64_t opaque = 0;
+	static_assert(sizeof(handle) <= sizeof(opaque));
+	std::memcpy(&opaque, &handle, sizeof(handle));
+	return {{"buffer_handle", fmt::format("{:016x}", opaque)},
+	        {"offset", view.offset}, {"range", view.range}, {"null", view.buffer == nullptr}};
+}
+
 void WriteStageSource(const ShaderStageRuntime& stage, const std::filesystem::path& folder,
                       const std::string& prefix, Json& entry) {
 	const auto& program = *stage.program;
@@ -535,6 +544,11 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 		meta["vertex_buffers"].push_back({{"index", i}});
 	}
 	meta["stages"] = Json::array();
+	constexpr uint64_t PreparedCaptureBudget = 32ull * 1024u * 1024u;
+	meta["prepared_descriptor_capture"] = {
+	    {"schema", 1}, {"origin", "prepared bindings before graphics commit"},
+	    {"scheduler_tick", context.GetCommandScheduler().CurrentTick()},
+	    {"budget_bytes", PreparedCaptureBudget}, {"captured_bytes", 0}, {"skipped_ranges", 0}};
 	auto& buffers  = context.GetBufferCache();
 	for (uint32_t st = 0; st < draw.binding_count; st++) {
 		const auto* prepared = draw.bindings[st];
@@ -544,6 +558,7 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 		stage["kind"]    = pixel ? "pixel" : (st == 0 ? "vertex" : "vertex-stage");
 		stage["shader"]  = fmt::format("{:016x}", runtime.program->shader_hash);
 		stage["guest"]   = StageGuestJson(runtime);
+		stage["buffers_origin"] = "refound guest cache owner; not the prepared descriptor";
 		stage["buffers"] = Json::array();
 		for (size_t i = 0; i < prepared->buffer_sources.size(); i++) {
 			const auto& src = prepared->buffer_sources[i];
@@ -552,6 +567,56 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 			                            {"size", src.size},
 			                            {"written", i < runtime.program->info.buffers.size() &&
 			                                            runtime.program->info.buffers[i].written}});
+		}
+		const auto& program = *prepared->runtime->program;
+		const auto& layout = program.bindings;
+		stage["prepared_program_shader"] = fmt::format("{:016x}", program.shader_hash);
+		stage["prepared_program_matches_stage"] = prepared->runtime->program == runtime.program;
+		stage["shader_data"] = prepared->shader_data;
+		stage["prepared_shader_data_buffer"] = PreparedBufferJson(prepared->shader_data_buffer);
+		stage["binding_layout"] = {
+		    {"table", layout.table}, {"table_srt_dword", layout.table_srt_dword},
+		    {"push_data_start_dword", layout.push_data_start_dword},
+		    {"memory_offset_dword", layout.memory_offset_dword},
+		    {"memory_offset_count", layout.memory_offset_count},
+		    {"buffer_stride_dword", layout.BufferStrideDword()},
+		    {"buffer_format_dword", layout.BufferFormatDword()},
+		    {"buffer_strides", layout.buffer_strides}, {"buffer_formats", layout.buffer_formats},
+		    {"user_data_registers", layout.user_data_registers},
+		    {"reserve_object_id", layout.reserve_object_id},
+		    {"shader_data_dwords", layout.ShaderDataDwords()}, {"descriptors", Json::array()}};
+		for (size_t i = 0; i < layout.descriptors.size(); i++) {
+			const auto& binding = layout.descriptors[i];
+			stage["binding_layout"]["descriptors"].push_back(
+			    {{"layout_index", i}, {"kind", static_cast<uint32_t>(binding.kind)},
+			     {"resources", binding.resources}});
+		}
+		stage["prepared_descriptor_buffers_status"] =
+		    layout.table ? "unavailable: table BDA ranges are not retained here" : "prepared ranges";
+		stage["prepared_descriptor_buffers"] = Json::array();
+		for (size_t i = 0; !layout.table && i < prepared->buffers.size(); i++) {
+			auto entry = PreparedBufferJson(prepared->buffers[i]);
+			entry["index"] = i;
+			const auto dword = static_cast<uint64_t>(layout.memory_offset_dword) + i / 4u;
+			entry["memory_adjustment_bytes"] = nullptr;
+			if (i < layout.memory_offset_count && dword < prepared->shader_data.size()) {
+				entry["memory_adjustment_bytes"] =
+				    (prepared->shader_data[dword] >> ((i % 4u) * 8u)) & 0xffu;
+			}
+			if (i < prepared->buffer_sources.size()) {
+				const auto& source = prepared->buffer_sources[i];
+				entry["guest_source"] = {{"address", source.address}, {"size", source.size}};
+			}
+			if (i < program.info.buffers.size()) {
+				const auto& resource = program.info.buffers[i];
+				entry["resource"] = {{"source", resource.source},
+				                     {"packed_stride", resource.packed_stride},
+				                     {"descriptor_format", static_cast<uint32_t>(resource.descriptor_format)},
+				                     {"descriptor_swizzle", resource.descriptor_swizzle},
+				                     {"read", resource.read}, {"written", resource.written},
+				                     {"formatted", resource.formatted}};
+			}
+			stage["prepared_descriptor_buffers"].push_back(std::move(entry));
 		}
 		stage["flattened_srt"] = Json::object();
 		WriteStageSource(runtime, folder, pixel ? std::string("ps") : fmt::format("vs{}", st), stage);
@@ -568,6 +633,33 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 	for (uint32_t i = 0; i < draw.vertex_buffer_count; i++) {
 		collector.AddBuffer(draw.vertex_buffers[i], draw.vertex_offsets[i], draw.vertex_sizes[i],
 		                    meta["vertex_buffers"][i]);
+	}
+	uint64_t prepared_bytes = 0;
+	uint32_t prepared_skipped = 0;
+	for (uint32_t st = 0; st < draw.binding_count; st++) {
+		const auto* prepared = draw.bindings[st];
+		auto&       stage    = meta["stages"][st];
+		// Copy the exact prepared ranges before the legacy refound observations can discover
+		// another owner. No cache lookup, upload or resynchronization selects these bytes.
+		for (size_t i = 0; i < stage["prepared_descriptor_buffers"].size(); i++) {
+			const auto& view = prepared->buffers[i];
+			auto& entry = stage["prepared_descriptor_buffers"][i];
+			entry["size"] = view.range;
+			const char* skipped = nullptr;
+			if (view.buffer == nullptr) skipped = "null descriptor";
+			else if (view.range == VK_WHOLE_SIZE) skipped = "whole size";
+			else if (view.range == 0) skipped = "empty";
+			else if (view.offset > UINT64_MAX - view.range) skipped = "offset/range overflow";
+			else if (view.range > PreparedCaptureBudget - prepared_bytes)
+				skipped = "prepared descriptor capture budget";
+			if (skipped != nullptr) {
+				entry["skipped"] = skipped;
+				prepared_skipped++;
+				continue;
+			}
+			collector.AddBuffer(view.buffer, view.offset, view.range, entry);
+			prepared_bytes += view.range;
+		}
 	}
 	for (uint32_t st = 0; st < draw.binding_count; st++) {
 		const auto* prepared = draw.bindings[st];
@@ -592,6 +684,8 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 			                    prepared->flattened_srt.range, stage["flattened_srt"]);
 		}
 	}
+	meta["prepared_descriptor_capture"]["captured_bytes"] = prepared_bytes;
+	meta["prepared_descriptor_capture"]["skipped_ranges"] = prepared_skipped;
 	collector.Finish(s.directory / "blobs");
 	WriteJson(folder / "meta.json", meta);
 	std::printf("draw-snapshot: %s written\n", name.c_str());

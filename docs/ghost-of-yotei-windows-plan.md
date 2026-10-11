@@ -1,5 +1,38 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: requested fresh screenshots and exact input agreement, 2026-10-11 22:14 UTC
+
+- Source f2593c61 plus opt-in diagnostic083aaeae; private EXE680632d7.
+  Run220706 ended22:12:16.612Z, exit0/graceful300s bound, streams drained,
+  no forced cleanup or memory guard, minimum free22.78GiB. No native process
+  remains from this game. Pad recording contains only neutral input; automatic
+  input OFF and root sent no keys.
+- Fresh owned screenshots inspected/displayed: window-after-fetch-1.png
+  frame299 is black, -2.png frame482 heavily streaked/blurred, -3.png frame673
+  shows character/ground/buildings, -4.png frame1038 still shows partial world
+  objects. Use -3/-4 as the requested later-scene comparison pair. Individual
+  rendered frames do not prove stable visual quality or completed gameplay.
+- Current exact-input review:
+  `_Build/analysis/yotei-integration-20261011/prepared-input-review-220706`.
+  All96 blob references/checksums/lengths and32MiB new-copy budget accounting
+  verify, zero new skips.2a actual prepared source6 (range1228,adjust12) guest
+  window1216bytes matches nativeVB0 EXACTLY. All10 prepared/native overlaps
+  for2a and6 fordb7a agree, as do refound comparisons. Prior210717 divergence
+  is absent here; synchronized first-match capture can hide a race. No buffer
+  binding-byte defect is proved by the current capture.
+- Actual2a NaNxyzw remains frame299/vertex14 with matching last-draw frame298
+  metadata; attribution remains approximate. Its declared packed vertex inputs
+  are finite; follow signed/packed addressing into stride48 input and actual
+  Position dependency before any arithmetic fix. Do not interpret every raw
+  DWORD as float or treat negative packed fields as invalid bone indices.
+  Finalframe1200 diagnostic reports12,054,372 NaN/Inf events across68VS;
+  counts are observations, not proof of one common cause or worse rendering.
+- Completed frontend CPU correction remains f2593c61 (9+12 unchanged cases).
+  Actual numerical GPU vertex oracle is drafted; first native compile221315
+  failed test-only API setup (not RED), refinement pending. Fresh v9 replay/IR
+  workflow is also drafted; neither has a native pass yet. Native slot idle;
+  root owns execution. No push or issue milestone publication.
+
 ## Latest checkpoint: all unchanged frontend regressions GREEN, 2026-10-11 22:05 UTC
 
 - Native build220439/run220533 pass all nine original cases and twelve
@@ -23,8 +56,13 @@
   observations remain separately labelled. This is instrumentation, not a fix;
   table BDA pointers are explicitly unavailable and first-match attribution
   plus FlushAndWait timing perturbation remain limitations.
-- Fresh runtime-embedded-fetch-offsets native build/install and original
-  bounded game retry are next. Earlier runtime-embedded-fetch-final is
+- Local completed frontend commit f2593c61336d387e01cb6bc9bbd2958a78405e78.
+  Native configure220612/build220619/install220658 passed. New private
+  runtime-embedded-fetch-offsets EXE680632d783966cdfedc41dabde870042f887c0f22b7fd459215a396304b668bf
+  includes the separately uncommitted opt-in diagnostic083aaeae.
+  Original300s run220706 is ACTIVE, owned PID25136, session17063, directory
+  `_Build/runs/game-20261011-220706-integration-embedded-fetch-offsets-geometry-847f15`.
+  No current visual outcome yet. Earlier runtime-embedded-fetch-final is
   preserved/not executed and predates the offset-lifetime correction.
   GPU numeric vertex/readback and Vulkan builtin/draw-offset equivalence
   remain pending. Tests and game are authorized, automatic input OFF.
