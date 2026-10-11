@@ -350,6 +350,254 @@ std::unordered_map<uint32_t, Json>& OpenSnapshots() {
 
 } // namespace
 
+namespace {
+struct DrawSettings {
+	bool                  enabled = false;
+	std::vector<uint64_t> hashes;
+	int64_t               frame = -1;
+	uint32_t              max   = 0;
+	std::filesystem::path directory;
+};
+
+const DrawSettings& GetDrawSettings() {
+	static const DrawSettings settings = [] {
+		DrawSettings s;
+		const char*  text = KYTY_GETENV("KYTY_DRAW_SNAPSHOT");
+		if (text == nullptr || *text == '\0' || std::strcmp(text, "0") == 0) {
+			return s;
+		}
+		// "1" (the launcher's check box): what draw_snapshot.txt names, else frame 600.
+		static std::string from_file;
+		if (std::strcmp(text, "1") == 0) {
+			std::ifstream file("draw_snapshot.txt");
+			std::getline(file, from_file);
+			while (!from_file.empty() && std::isspace(static_cast<unsigned char>(from_file.back()))) {
+				from_file.pop_back();
+			}
+			if (from_file.empty()) from_file = "frame:600";
+			text = from_file.c_str();
+		}
+		const std::string_view value(text);
+		if (value.starts_with("frame:")) {
+			s.frame = std::strtoll(text + 6, nullptr, 10);
+		} else {
+			for (const char* p = text; p != nullptr && *p != '\0';) {
+				char*      end  = nullptr;
+				const auto hash = std::strtoull(p, &end, 16);
+				if (end == p) break;
+				s.hashes.push_back(hash);
+				p = *end == ',' ? end + 1 : nullptr;
+			}
+		}
+		const char* max = KYTY_GETENV("KYTY_DRAW_SNAPSHOT_MAX");
+		s.max = max != nullptr ? static_cast<uint32_t>(std::strtoul(max, nullptr, 10))
+		                       : (s.frame >= 0 ? 3000u : 4u);
+		const char* dir = KYTY_GETENV("KYTY_DRAW_SNAPSHOT_DIR");
+		s.directory     = dir != nullptr && *dir != '\0' ? dir : "_draw_snapshots";
+		s.enabled       = s.frame >= 0 || !s.hashes.empty();
+		std::printf("draw-snapshot: on (%s), max %u, dir %s\n", text, s.max, s.directory.string().c_str());
+		std::fflush(stdout);
+		return s;
+	}();
+	return settings;
+}
+
+Json StageGuestJson(const ShaderStageRuntime& stage) {
+	const auto& resources = *stage.resources;
+	Json        guest;
+	guest["user_data"]     = resources.user_data;
+	guest["flattened_srt"] = resources.flattened_srt;
+	guest["buffers"]       = Json::array();
+	for (const auto& value: resources.buffers) guest["buffers"].push_back(DescriptorJson(value));
+	guest["images"] = Json::array();
+	for (const auto& value: resources.images) guest["images"].push_back(DescriptorJson(value));
+	guest["samplers"] = Json::array();
+	for (const auto& value: resources.samplers) guest["samplers"].push_back(DescriptorJson(value));
+	return guest;
+}
+
+void WriteStageSource(const ShaderStageRuntime& stage, const std::filesystem::path& folder,
+                      const std::string& prefix, Json& entry) {
+	const auto& program = *stage.program;
+	const auto* source  = static_cast<const Source*>(program.snapshot_source.get());
+	entry["record"]     = source != nullptr;
+	if (source == nullptr) {
+		return;
+	}
+	std::vector<uint8_t> bytes;
+	if (ShaderPrecompile::Encode(source->record, bytes)) {
+		std::ofstream(folder / (prefix + "_record.bin"), std::ios::binary)
+		    .write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+	}
+	std::ofstream(folder / (prefix + "_live.spv"), std::ios::binary)
+	    .write(reinterpret_cast<const char*>(source->spirv.data()),
+	           static_cast<std::streamsize>(source->spirv.size() * sizeof(uint32_t)));
+}
+} // namespace
+
+bool DrawWanted(uint64_t vertex_hash, uint64_t pixel_hash, uint64_t frame) {
+	const auto& s = GetDrawSettings();
+	if (!s.enabled) [[likely]] {
+		return false;
+	}
+	if (s.frame >= 0) {
+		static uint32_t taken  = 0;
+		static int64_t  chosen = -1;
+		if (chosen < 0 && frame >= static_cast<uint64_t>(s.frame)) {
+			chosen = static_cast<int64_t>(frame);
+		}
+		return chosen >= 0 && frame == static_cast<uint64_t>(chosen) && taken++ < s.max;
+	}
+	uint64_t key = 0;
+	if (std::ranges::find(s.hashes, vertex_hash) != s.hashes.end()) {
+		key = vertex_hash;
+	} else if (pixel_hash != 0 && std::ranges::find(s.hashes, pixel_hash) != s.hashes.end()) {
+		key = pixel_hash;
+	} else {
+		return false;
+	}
+	static std::unordered_map<uint64_t, uint32_t> taken;
+	return taken[key]++ < s.max;
+}
+
+void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
+	static uint32_t next_id = 0;
+	const auto&     s       = GetDrawSettings();
+	const auto&     vs      = draw.vertex_stages[0];
+	const uint64_t  vs_hash = vs.stage.program->shader_hash;
+	const uint64_t  ps_hash =
+	    draw.pixel != nullptr && draw.pixel->program != nullptr ? draw.pixel->program->shader_hash : 0;
+	const auto      id     = ++next_id;
+	const auto      name   = fmt::format("{:05}_{:016x}_{:016x}_f{}", id, vs_hash, ps_hash, draw.frame);
+	const auto      folder = s.directory / name;
+	std::error_code error;
+	std::filesystem::create_directories(folder, error);
+	if (error) {
+		std::printf("draw-snapshot: cannot create %s\n", folder.string().c_str());
+		return;
+	}
+	Json meta;
+	meta["version"] = 1;
+	meta["frame"]   = draw.frame;
+	meta["vs"]      = fmt::format("{:016x}", vs_hash);
+	meta["ps"]      = fmt::format("{:016x}", ps_hash);
+	meta["draw"]    = {{"primitive", draw.primitive},
+	                   {"topology", draw.topology},
+	                   {"indexed", draw.indexed},
+	                   {"gpu_args", draw.gpu_args},
+	                   {"restart", draw.restart},
+	                   {"index_count", draw.index_count},
+	                   {"instance_count", draw.instance_count},
+	                   {"first_instance", draw.first_instance},
+	                   {"vertex_offset", draw.vertex_offset},
+	                   {"first_vertex", draw.first_vertex}};
+	meta["targets"] = {{"colors", Json::array()}};
+	for (const auto& c: draw.colors) {
+		meta["targets"]["colors"].push_back(
+		    {{"address", c[0]}, {"format", c[1]}, {"width", c[2]}, {"height", c[3]}});
+	}
+	meta["targets"]["depth"] = {{"address", draw.depth[0]},
+	                            {"format", draw.depth[1]},
+	                            {"width", draw.depth[2]},
+	                            {"height", draw.depth[3]}};
+	// The fetch: guest vertex buffers the fetch reads and its attributes.
+	Json fetch;
+	fetch["buffers"] = Json::array();
+	for (int i = 0; i < vs.buffers_num && i < ShaderVertexInputInfo::RES_MAX; i++) {
+		const auto& b = vs.buffers[i];
+		fetch["buffers"].push_back({{"address", b.addr},
+		                            {"stride", b.stride},
+		                            {"num_records", b.num_records},
+		                            {"fetch_index", b.fetch_index}});
+	}
+	fetch["attributes"] = Json::array();
+	for (int i = 0; i < vs.resources_num && i < ShaderVertexInputInfo::RES_MAX; i++) {
+		const auto& r = vs.resources[i];
+		const auto& d = vs.resources_dst[i];
+		fetch["attributes"].push_back({{"words", {r.fields[0], r.fields[1], r.fields[2], r.fields[3]}},
+		                               {"address", r.Base48()},
+		                               {"stride", r.Stride()},
+		                               {"num_records", r.NumRecords()},
+		                               {"format", static_cast<uint32_t>(r.Format())},
+		                               {"register_start", d.register_start},
+		                               {"registers", d.registers_num},
+		                               {"attr_id", d.attr_id},
+		                               {"buffer_index", d.buffer_index}});
+	}
+	meta["fetch"] = std::move(fetch);
+	// Every key the readbacks fill exists before the first one: they keep pointers into meta.
+	meta["index_buffer"]   = {{"address", draw.index_address},
+	                          {"guest_size", draw.index_guest_size},
+	                          {"guest_index_size", draw.guest_index_size},
+	                          {"host_index_size", draw.host_index_size}};
+	meta["vertex_buffers"] = Json::array();
+	for (uint32_t i = 0; i < draw.vertex_buffer_count; i++) {
+		meta["vertex_buffers"].push_back({{"index", i}});
+	}
+	meta["stages"] = Json::array();
+	auto& buffers  = context.GetBufferCache();
+	for (uint32_t st = 0; st < draw.binding_count; st++) {
+		const auto* prepared = draw.bindings[st];
+		const bool  pixel    = st >= draw.vertex_count;
+		const auto& runtime  = pixel ? *draw.pixel : draw.vertex_stages[st].stage;
+		Json        stage;
+		stage["kind"]    = pixel ? "pixel" : (st == 0 ? "vertex" : "vertex-stage");
+		stage["shader"]  = fmt::format("{:016x}", runtime.program->shader_hash);
+		stage["guest"]   = StageGuestJson(runtime);
+		stage["buffers"] = Json::array();
+		for (size_t i = 0; i < prepared->buffer_sources.size(); i++) {
+			const auto& src = prepared->buffer_sources[i];
+			stage["buffers"].push_back({{"index", i},
+			                            {"address", src.address},
+			                            {"size", src.size},
+			                            {"written", i < runtime.program->info.buffers.size() &&
+			                                            runtime.program->info.buffers[i].written}});
+		}
+		stage["flattened_srt"] = Json::object();
+		WriteStageSource(runtime, folder, pixel ? std::string("ps") : fmt::format("vs{}", st), stage);
+		meta["stages"].push_back(std::move(stage));
+	}
+
+	Collector collector(context);
+	if (draw.indexed && draw.index_buffer != nullptr && draw.host_index_size != 0) {
+		const uint64_t count = draw.gpu_args ? draw.index_guest_size / std::max(draw.guest_index_size, 1u)
+		                                     : draw.index_count;
+		collector.AddBuffer(draw.index_buffer, draw.index_offset, count * draw.host_index_size,
+		                    meta["index_buffer"]);
+	}
+	for (uint32_t i = 0; i < draw.vertex_buffer_count; i++) {
+		collector.AddBuffer(draw.vertex_buffers[i], draw.vertex_offsets[i], draw.vertex_sizes[i],
+		                    meta["vertex_buffers"][i]);
+	}
+	for (uint32_t st = 0; st < draw.binding_count; st++) {
+		const auto* prepared = draw.bindings[st];
+		auto&       stage    = meta["stages"][st];
+		for (size_t i = 0; i < prepared->buffer_sources.size(); i++) {
+			const auto& src   = prepared->buffer_sources[i];
+			auto&       entry = stage["buffers"][i];
+			if (src.address == 0 || src.size == 0) {
+				entry["skipped"] = "empty";
+				continue;
+			}
+			const auto found = buffers.RefindBuffer(src.id, src.address, src.size);
+			auto&      host  = buffers.GetBuffer(found);
+			if (!host.IsInBounds(src.address, src.size)) {
+				entry["skipped"] = "not in one buffer";
+				continue;
+			}
+			collector.AddBuffer(host.Handle(), host.Offset(src.address), src.size, entry);
+		}
+		if (prepared->flattened_srt.buffer != nullptr) {
+			collector.AddBuffer(prepared->flattened_srt.buffer, prepared->flattened_srt.offset,
+			                    prepared->flattened_srt.range, stage["flattened_srt"]);
+		}
+	}
+	collector.Finish(s.directory / "blobs");
+	WriteJson(folder / "meta.json", meta);
+	std::printf("draw-snapshot: %s written\n", name.c_str());
+	std::fflush(stdout);
+}
+
 bool Enabled() {
 	return GetSettings().enabled;
 }

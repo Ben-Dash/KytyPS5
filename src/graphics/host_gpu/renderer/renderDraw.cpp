@@ -17,6 +17,7 @@
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
+#include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
 #include "graphics/host_gpu/renderer/meshDispatch.h"
@@ -2762,6 +2763,50 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		index_binding   = PrepareIndexBuffer(buffer, index_source);
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::GraphicsBindings);
+	if (const auto frame = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
+	    DispatchSnapshot::DrawWanted(state.vertex_info[0].stage.program->shader_hash,
+	                                 state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0,
+	                                 frame)) [[unlikely]] {
+		// KYTY_DRAW_SNAPSHOT: inputs as the draw will read them, before the targets are acquired.
+		DispatchSnapshot::DrawCapture capture;
+		capture.frame            = frame;
+		capture.primitive        = static_cast<uint32_t>(ucfg.GetPrimType());
+		capture.topology         = static_cast<uint32_t>(topology);
+		capture.indexed          = draw.IsIndexed();
+		capture.gpu_args         = gpu_args;
+		capture.restart          = primitive_restart_enable;
+		capture.index_count      = draw.index_count;
+		capture.instance_count   = draw.instance_count;
+		capture.first_instance   = emit.first_instance;
+		capture.vertex_offset    = emit.vertex_offset;
+		capture.first_vertex     = emit.first_vertex;
+		capture.index_address    = index_source.address;
+		capture.index_guest_size = index_source.size;
+		capture.guest_index_size = index_source.guest_element_size;
+		capture.host_index_size  = index_binding.type == vk::IndexType::eUint32 ? 4u : 2u;
+		capture.index_buffer     = index_binding.buffer;
+		capture.index_offset     = index_binding.offset;
+		capture.vertex_stages    = vertex_stages.data();
+		capture.vertex_count     = static_cast<uint32_t>(vertex_stages.size());
+		capture.pixel            = state.ps_active ? &state.ps_input_info.stage : nullptr;
+		capture.bindings         = stages.data();
+		capture.binding_count    = static_cast<uint32_t>(stages.size());
+		capture.vertex_buffers      = vertex_bindings.buffers.data();
+		capture.vertex_offsets      = vertex_bindings.offsets.data();
+		capture.vertex_sizes        = vertex_bindings.sizes.data();
+		capture.vertex_buffer_count = vertex_bindings.count;
+		for (uint32_t i = 0; i < state.color_count; i++) {
+			const auto& info = state.color_info[i].desc.info;
+			capture.colors.push_back({info.data.address, static_cast<uint64_t>(info.pixel_format),
+			                          info.extent.width, info.extent.height});
+		}
+		if (state.depth_info.image_id) {
+			const auto& info = state.depth_info.desc.info;
+			capture.depth    = {info.data.address, static_cast<uint64_t>(info.pixel_format),
+			                    info.extent.width, info.extent.height};
+		}
+		DispatchSnapshot::CaptureDraw(m_context, capture);
+	}
 	vk::ImageAspectFlags feedback_aspects;
 	const auto rendering = AcquireRenderTargets(buffer, state.color_info, state.color_count,
 	                                            state.depth_info, feedback_aspects, stages);

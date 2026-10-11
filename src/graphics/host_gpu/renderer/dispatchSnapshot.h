@@ -26,6 +26,8 @@ namespace Libs::Graphics {
 class RenderContext;
 struct PreparedBindings;
 struct ShaderComputeInputInfo;
+struct ShaderVertexInputInfo;
+struct ShaderStageRuntime;
 
 namespace DispatchSnapshot {
 
@@ -55,6 +57,57 @@ struct Pending {
 // After the dispatch was recorded: reads back what it wrote and completes meta.json.
 void CaptureOutputs(RenderContext& context, const Pending& pending,
                     const ShaderComputeInputInfo& input, const PreparedBindings& bindings);
+
+// KYTY_DRAW_SNAPSHOT (diagnostic, off by default): writes draws to disk for offline reading
+// (G:/dev/_notes/draw_snapshot_check.py checks indices against the vertex buffers and scans vertex
+// data for NaN or huge values, the vertex-explosion case).
+//   KYTY_DRAW_SNAPSHOT=<hash>[,<hash>...]  draws whose vertex or pixel shader has one of these
+//   KYTY_DRAW_SNAPSHOT=frame:<n>           every draw of the first frame >= n
+//   KYTY_DRAW_SNAPSHOT=1                   what draw_snapshot.txt names, else frame:600
+//   KYTY_DRAW_SNAPSHOT_MAX=<n>             snapshots per shader (4) or per frame (3000)
+//   KYTY_DRAW_SNAPSHOT_DIR=<dir>           where they go (_draw_snapshots)
+// A snapshot holds each stage's journal record and SPIR-V (when kept), guest user data and
+// descriptors, the host contents of the index buffer, the vertex buffers and every buffer the
+// stages bind, the draw parameters and the targets. Images are not captured. Each snapshot
+// drains the GPU once.
+[[nodiscard]] bool DrawWanted(uint64_t vertex_hash, uint64_t pixel_hash, uint64_t frame);
+
+struct DrawCapture {
+	uint64_t frame          = 0;
+	uint32_t primitive      = 0; // guest VGT primitive type
+	uint32_t topology       = 0; // vk::PrimitiveTopology
+	bool     indexed        = false;
+	bool     gpu_args       = false;
+	bool     restart        = false;
+	uint32_t index_count    = 0;
+	uint32_t instance_count = 0;
+	uint32_t first_instance = 0;
+	int32_t  vertex_offset  = 0;
+	uint32_t first_vertex   = 0;
+	// The guest index buffer and the host one the draw reads.
+	uint64_t   index_address    = 0;
+	uint64_t   index_guest_size = 0; // bytes the guest buffer spans (GPU args: the whole buffer)
+	uint32_t   guest_index_size = 0;
+	uint32_t   host_index_size  = 0; // 2 or 4
+	vk::Buffer index_buffer     = nullptr;
+	uint64_t   index_offset     = 0;
+	// Vertex stages (vertex_count of them, the first fetches) and the pixel stage (may be null);
+	// `bindings` holds the stages' prepared bindings in the same order, pixel last.
+	const ShaderVertexInputInfo* vertex_stages = nullptr;
+	uint32_t                     vertex_count  = 0;
+	const ShaderStageRuntime*    pixel         = nullptr;
+	PreparedBindings* const*     bindings      = nullptr;
+	uint32_t                     binding_count = 0;
+	// Host vertex buffers bound for the fetch.
+	const vk::Buffer*     vertex_buffers      = nullptr;
+	const vk::DeviceSize* vertex_offsets      = nullptr;
+	const vk::DeviceSize* vertex_sizes        = nullptr;
+	uint32_t              vertex_buffer_count = 0;
+	// Targets: guest address, host format, width, height; depth address 0: none.
+	std::vector<std::array<uint64_t, 4>> colors;
+	std::array<uint64_t, 4>              depth {};
+};
+void CaptureDraw(RenderContext& context, const DrawCapture& draw);
 
 // KYTY_WRITE_WATCH=<hex address>[+<hex size>][,...] (diagnostic, off by default): one red line per
 // write that reaches a watched range, naming its source: the command processor's WRITE_DATA,
