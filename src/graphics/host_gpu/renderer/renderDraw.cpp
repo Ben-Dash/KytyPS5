@@ -2708,6 +2708,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		    gpu_args ? index_source.size
 		             : static_cast<uint64_t>(draw.index_count) * index_source.guest_element_size);
 	}
+	uint64_t vertex_value_trace_token = 0;
 	if (VertexExplode::Enabled()) [[unlikely]] {
 		VertexExplode::DrawNote note;
 		note.frame          = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
@@ -2735,6 +2736,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		note.target_width  = extent.width;
 		note.target_height = extent.height;
 		VertexExplode::NoteDraw(m_context.GetBufferCache(), note);
+		vertex_value_trace_token = VertexExplode::RegisterValueTrace(m_context, note, submit_id);
 	}
 	LogDrawPhase(draw.Name(), "PrepareBindings");
 	auto&                            bindings = m_graphics_bindings;
@@ -2756,7 +2758,11 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::StageBindings);
 	const auto stages = std::span {descriptor_stages.data(), stage_count};
+	for (auto* stage: stages)
+		stage->vertex_value_trace_token = stage->runtime->program->bindings.vertex_value_trace
+		                                     ? vertex_value_trace_token : 0;
 	PrepareGraphicsBindings(stages, std::span {state.color_info, state.color_count});
+	VertexExplode::NoteValueTraceBindings(vertex_value_trace_token, stages);
 	PreparedVertexBuffers vertex_bindings;
 	PreparedIndexBuffer   index_binding;
 	if (!mesh_active) {

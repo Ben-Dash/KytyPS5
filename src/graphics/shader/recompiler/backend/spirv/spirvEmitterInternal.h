@@ -153,6 +153,8 @@ struct EmitterState {
 	std::array<GenericBufferFormatValues, IR::ShaderInfo::MaxBuffers> generic_buffer_formats {};
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
+	std::array<uint32_t, 2>                           value_trace_claimed {};
+	std::array<uint32_t, 2>                           value_trace_owner {};
 	uint32_t                                         bda_pointer_function    = 0;
 	// get_bda_load_pointer and the zero page's address read at entry (KYTY_BDA_ZERO_PAGE).
 	uint32_t                                         bda_load_pointer_function = 0;

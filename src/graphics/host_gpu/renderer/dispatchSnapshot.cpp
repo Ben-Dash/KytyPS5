@@ -573,9 +573,11 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw) {
 		stage["prepared_program_shader"] = fmt::format("{:016x}", program.shader_hash);
 		stage["prepared_program_matches_stage"] = prepared->runtime->program == runtime.program;
 		stage["shader_data"] = prepared->shader_data;
+		stage["vertex_value_trace_token"] = prepared->vertex_value_trace_token;
 		stage["prepared_shader_data_buffer"] = PreparedBufferJson(prepared->shader_data_buffer);
 		stage["binding_layout"] = {
 		    {"table", layout.table}, {"table_srt_dword", layout.table_srt_dword},
+		    {"vertex_value_trace", layout.vertex_value_trace}, {"vertex_trace_dword", layout.VertexTraceDword()},
 		    {"push_data_start_dword", layout.push_data_start_dword},
 		    {"memory_offset_dword", layout.memory_offset_dword},
 		    {"memory_offset_count", layout.memory_offset_count},

@@ -3,9 +3,11 @@
 
 #include "common/logging/log.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
+#include "graphics/shader/recompiler/ir/VertexValueTrace.h"
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
@@ -568,6 +570,10 @@ void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
 				                          state.explode_base_vertex_variable);
 				store(9, Unary(state, spv::OpBitcast, TypeU32(state), base_vertex));
 				store(10, ConstantU32(state, 1));
+				if (state.program.bindings.vertex_value_trace) {
+					store(11, EmitShaderDataDwordLoad(state, state.program.bindings.VertexTraceDword()));
+					store(12, EmitShaderDataDwordLoad(state, state.program.bindings.VertexTraceDword() + 1u));
+				}
 			}
 		});
 	});
@@ -593,6 +599,212 @@ uint32_t EmitWqmU64(EmitterState& state, uint32_t value) {
 	state.builder.AddFunction(spv::OpIMul, TypeU64(state), result, quad_bits,
 	                          ConstantU64(state, 0x0000000f0000000full));
 	return result;
+}
+
+void EmitVertexValueTrace(ValueEmitContext& ctx, uint32_t kind, uint32_t pc,
+                         uint32_t predicate, uint32_t predicate_origin,
+                         uint32_t resource, uint32_t sampler,
+                         const std::array<uint32_t, 12>& payload) {
+	auto& state = ctx.state;
+	if (!state.program.bindings.vertex_value_trace || state.fault_buffer_variable == 0) return;
+	const auto zero = ConstantU32(state, 0);
+	const auto one = ConstantU32(state, 1);
+	const auto u32 = TypeU32(state);
+	const auto boolean = TypeBool(state);
+	const auto lo = EmitShaderDataDwordLoad(state, state.program.bindings.VertexTraceDword());
+	const auto hi = EmitShaderDataDwordLoad(state, state.program.bindings.VertexTraceDword() + 1u);
+	const auto vertex = EmitGetBuiltin(ctx, IR::Value(static_cast<uint32_t>(IR::StageInputKind::VertexIndex)), IR::Value(0u));
+	const auto instance = EmitGetBuiltin(ctx, IR::Value(static_cast<uint32_t>(IR::StageInputKind::InstanceIndex)), IR::Value(0u));
+	const auto and_bool = [&](uint32_t a, uint32_t b) { return Binary(state, spv::OpLogicalAnd, boolean, a, b); };
+	auto selected = and_bool(predicate, Binary(state, spv::OpIEqual, boolean, hi, zero));
+	selected = and_bool(selected, Binary(state, spv::OpUGreaterThan, boolean, lo, zero));
+	selected = and_bool(selected, Binary(state, spv::OpULessThanEqual, boolean, lo,
+	                                      ConstantU32(state, IR::VertexTraceDrawSlots)));
+	selected = and_bool(selected, Binary(state, spv::OpIEqual, boolean, vertex,
+	                                      ConstantU32(state, IR::VertexValueTrace().vertex)));
+	selected = and_bool(selected, Binary(state, spv::OpIEqual, boolean, instance,
+	                                      ConstantU32(state, IR::VertexValueTrace().instance)));
+	const auto base = EmitBinaryU32(state, spv::OpIAdd,
+	    ConstantU32(state, IR::VertexTraceBaseWord),
+	    EmitBinaryU32(state, spv::OpIMul, EmitBinaryU32(state, spv::OpISub, lo, one),
+	                  ConstantU32(state, IR::VertexTraceSlotWords)));
+	const auto element = [&](uint32_t index) {
+		const auto pointer = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpAccessChain, TypeStorageBufferElementPointer(state),
+		                          pointer, state.fault_buffer_variable, zero, index);
+		return pointer;
+	};
+	const auto header = [&](uint32_t word) { return element(EmitBinaryU32(state, spv::OpIAdd, base, ConstantU32(state, word))); };
+	const auto load = [&](uint32_t pointer) {
+		const auto value = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpLoad, u32, value, pointer);
+		return value;
+	};
+	const auto store = [&](uint32_t pointer, uint32_t value) { state.builder.AddFunction(spv::OpStore, pointer, value); };
+	const auto half = ctx.half;
+	if (state.value_trace_claimed[half] == 0) {
+		const auto pointer = TypePointer(state, spv::StorageClassPrivate, u32);
+		state.value_trace_claimed[half] = state.builder.DefineGlobalVariable(pointer, spv::StorageClassPrivate, zero);
+		state.value_trace_owner[half] = state.builder.DefineGlobalVariable(pointer, spv::StorageClassPrivate, zero);
+	}
+	EmitIfCondition(state, selected, [&] {
+		EmitIfCondition(state, Binary(state, spv::OpIEqual, boolean,
+		                              load(state.value_trace_claimed[half]), zero), [&] {
+			store(state.value_trace_claimed[half], one);
+			const auto previous = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpAtomicCompareExchange, u32, previous, header(0),
+			                          ConstantU32(state, spv::ScopeDevice), zero, zero, one, zero);
+			const auto owner = Binary(state, spv::OpIEqual, boolean, previous, zero);
+			store(state.value_trace_owner[half], Select(state, u32, owner, one, zero));
+		});
+		EmitIfCondition(state, Binary(state, spv::OpIEqual, boolean,
+		                              load(state.value_trace_owner[half]), one), [&] {
+			store(header(1), lo); store(header(2), hi);
+			const bool image = kind == static_cast<uint32_t>(IR::VertexTraceKind::Image);
+			const bool pre = kind == static_cast<uint32_t>(IR::VertexTraceKind::PreClip);
+			const bool post = kind == static_cast<uint32_t>(IR::VertexTraceKind::PostClip);
+			const auto count_pointer = header(image ? 4u : 3u);
+			const auto count = pre || post ? zero : load(count_pointer);
+			const auto capacity = ConstantU32(state, image ? 6u : 24u);
+			const auto available = pre || post ? state.builder.Constant(spv::OpConstantTrue, boolean)
+			                                      : Binary(state, spv::OpULessThan, boolean, count, capacity);
+			EmitIfCondition(state, available, [&] {
+				if (!pre && !post) store(count_pointer, EmitBinaryU32(state, spv::OpIAdd, count, one));
+				const auto index = pre || post ? ConstantU32(state, pre ? 30u : 31u)
+				                                    : EmitBinaryU32(state, spv::OpIAdd, count, ConstantU32(state, image ? 24u : 0u));
+				const auto record = EmitBinaryU32(state, spv::OpIAdd, base,
+				    EmitBinaryU32(state, spv::OpIAdd, ConstantU32(state, IR::VertexTraceHeaderWords),
+				                  EmitBinaryU32(state, spv::OpIMul, index, ConstantU32(state, IR::VertexTraceEventWords))));
+				const auto put = [&](uint32_t word, uint32_t value) {
+					store(element(EmitBinaryU32(state, spv::OpIAdd, record, ConstantU32(state, word))), value);
+				};
+				const auto sequence = load(header(6));
+				store(header(6), EmitBinaryU32(state, spv::OpIAdd, sequence, one));
+				put(1, ConstantU32(state, kind)); put(2, ConstantU32(state, pc)); put(3, sequence);
+				put(4, vertex); put(5, instance); put(6, ConstantU32(state, half));
+				put(7, ConstantU32(state, predicate_origin)); put(8, ConstantU32(state, resource));
+				put(9, ConstantU32(state, sampler)); put(10, one);
+				uint32_t physical_lane = ConstantU32(state, UINT32_MAX);
+				if (state.subgroup_local_invocation_id_variable != 0) {
+					physical_lane = state.builder.AllocateId();
+					state.builder.AddFunction(spv::OpLoad, u32, physical_lane,
+					                          state.subgroup_local_invocation_id_variable);
+				}
+				put(11, physical_lane);
+				for (uint32_t i = 0; i < payload.size(); ++i) put(12u + i, payload[i]);
+				put(0, ConstantU32(state, IR::VertexTraceMarker));
+				if (pre || post) store(header(pre ? 7u : 8u), one);
+			});
+			EmitIfCondition(state, Unary(state, spv::OpLogicalNot, boolean, available), [&] {
+				// Saturated counts never wrap back into a live record slot.
+				store(header(5), one);
+			});
+		});
+	});
+}
+
+namespace {
+std::optional<IR::Value> ImageSelectedUsePredicate(const IR::Inst& image) {
+	std::optional<IR::Value> condition;
+	for (const auto& use: image.Uses()) {
+		if (use.user->GetOpcode() != IR::ValueOpcode::CompositeExtractU32x4) continue;
+		for (const auto& extract_use: use.user->Uses()) {
+			const auto* select = extract_use.user;
+			if (select->GetOpcode() != IR::ValueOpcode::SelectU32 ||
+			    select->Arg(1).ResolveInstruction() != use.user) continue;
+			if (condition && *condition != select->Arg(0)) return std::nullopt;
+			condition = select->Arg(0);
+		}
+	}
+	return condition;
+}
+}
+
+void EmitVertexTraceLiveResult(ValueEmitContext& ctx, const IR::Inst& inst) {
+	auto& state = ctx.state;
+	if (!state.program.bindings.vertex_value_trace) return;
+	const auto opcode = inst.GetOpcode();
+	const bool image = opcode == IR::ValueOpcode::ImageSampleRaw;
+	const bool buffer = IR::BufferAccessOf(opcode) == IR::BufferAccess::Read;
+	if (!image && !buffer) return;
+	const auto flags = inst.Flags<IR::MemoryFlags>();
+	if (!IR::VertexTracePcWanted(flags.pc)) return;
+	const auto& mem = ctx.Memory(inst);
+	std::array<uint32_t, 12> payload;
+	payload.fill(ConstantU32(state, 0));
+	uint32_t predicate = 0, origin = 1;
+	if (image) {
+		// Initial collection understands only the decoded 32-bit red D3 sample_lz shape.
+		// A materialized D2 placeholder is still recorded, with both dimensions below.
+		if (mem.image_dimension != Decoder::ImageDimension::Dim3D ||
+		    mem.image_sample_flags != Decoder::ImageSampleFlagLevelZero || mem.dmask != 1u ||
+		    mem.image_address_components != 3u || mem.data_bits != 32u || mem.data_dwords != 1u ||
+		    mem.image_has_mip || mem.image_r128) {
+			std::printf("VertexValueTrace: pc=0x%08x image skipped: diagnostic requires decoded D3 sample_lz dmask1/32-bit/plain xyz (dimension=%u flags=0x%x dmask=0x%x components=%u bits=%u r128=%u mip=%u)\n",
+			            flags.pc, static_cast<uint32_t>(mem.image_dimension), mem.image_sample_flags,
+			            mem.dmask, mem.image_address_components, mem.data_bits,
+			            uint32_t(mem.image_r128), uint32_t(mem.image_has_mip));
+			return;
+		}
+		auto condition = ImageSelectedUsePredicate(inst);
+		if (!condition) {
+			// An adjacent sample's selected-use condition is only a diagnostic filter.
+			// Neither this fallback nor a direct selected use proves the image's guest EXEC.
+			for (const auto& neighbor: *state.current_block) {
+				if (neighbor.GetOpcode() != IR::ValueOpcode::ImageSampleRaw) continue;
+				const auto pc = neighbor.Flags<IR::MemoryFlags>().pc;
+				if (uint64_t(pc) + 8u != flags.pc && uint64_t(flags.pc) + 8u != pc) continue;
+				if (auto found = ImageSelectedUsePredicate(neighbor)) { condition = found; origin = 2; break; }
+			}
+		}
+		if (!condition) {
+			std::printf("VertexValueTrace: pc=0x%08x image skipped: selected-use predicate unavailable (guest EXEC unknown)\n", flags.pc);
+			return;
+		}
+		if (const auto* producer = condition->ResolveInstruction();
+		    producer != nullptr && !ctx.definitions.contains(producer)) {
+			std::printf("VertexValueTrace: pc=0x%08x image skipped: selected-use predicate not emitted yet (guest EXEC unknown)\n", flags.pc);
+			return;
+		}
+		predicate = ctx.Def(*condition);
+		const auto* address = ctx.ImageAddress(inst.Arg(2));
+		if (address == nullptr || address->NumArgs() < 3u || mem.image_address_components != 3u) {
+			std::printf("VertexValueTrace: pc=0x%08x image skipped: initial trace supports 3-component addresses\n", flags.pc);
+			return;
+		}
+		for (uint32_t i = 0; i < 3u; ++i) payload[i] = ctx.Def(address->Arg(i));
+		const auto result = ctx.Result(inst);
+		const auto red = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), red, result, 0u);
+		payload[3] = red;
+		payload[4] = ConstantU32(state, mem.image_sample_flags);
+		payload[5] = ConstantU32(state, mem.dmask);
+		payload[6] = ConstantU32(state, static_cast<uint32_t>(mem.image_dimension));
+		payload[7] = ConstantU32(state, static_cast<uint32_t>(state.program.info.images.at(mem.resource).dimension));
+	} else {
+		if (inst.NumArgs() != 5u || inst.Arg(4).GetType() != IR::Type::U1) return;
+		predicate = ctx.Arg(inst, 4);
+		payload[0] = ctx.Arg(inst, 1); payload[1] = ctx.Arg(inst, 2); payload[2] = ctx.Arg(inst, 3);
+		payload[3] = ConstantU32(state, mem.offset);
+		const auto result = ctx.Result(inst);
+		uint32_t components = inst.GetType() == IR::Type::U32x4 ? 4u :
+		                      inst.GetType() == IR::Type::U32x3 ? 3u :
+		                      inst.GetType() == IR::Type::U32x2 ? 2u : 1u;
+		for (uint32_t i = 0; i < components; ++i) {
+			payload[4u + i] = result;
+			if (components != 1u) {
+				payload[4u + i] = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), payload[4u + i], result, i);
+			}
+		}
+		payload[8] = ConstantU32(state, components);
+		payload[9] = ConstantU32(state, mem.data_bits);
+		payload[10] = ConstantU32(state, uint32_t(mem.idxen) | (uint32_t(mem.offen) << 1u) |
+		                                     (uint32_t(mem.formatted) << 2u) | (uint32_t(mem.typed) << 3u));
+		payload[11] = ConstantU32(state, mem.data_dwords);
+	}
+	EmitVertexValueTrace(ctx, static_cast<uint32_t>(image ? IR::VertexTraceKind::Image : IR::VertexTraceKind::Buffer),
+	                     flags.pc, predicate, origin, mem.resource, mem.sampler, payload);
 }
 
 void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {
@@ -699,10 +911,25 @@ void EmitSetAttribute(ValueEmitContext& ctx, const IR::Inst& inst) {
 				value = mapped;
 			}
 		}
+		const auto trace_position = [&](IR::VertexTraceKind kind) {
+			if (!state.program.bindings.vertex_value_trace ||
+			    exp.kind != IR::ExportTargetKind::Position || exp.index != 0) return;
+			std::array<uint32_t, 12> payload;
+			payload.fill(ConstantU32(state, 0));
+			for (uint32_t i = 0; i < 4; ++i) {
+				const auto component = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpCompositeExtract, TypeF32(state), component, value, i);
+				payload[i] = Unary(state, spv::OpBitcast, TypeU32(state), component);
+			}
+			EmitVertexValueTrace(ctx, static_cast<uint32_t>(kind), inst.Flags<IR::ExportFlags>().pc,
+			                     exec, 1, UINT32_MAX, UINT32_MAX, payload);
+		};
+		trace_position(IR::VertexTraceKind::PreClip);
 		if (exp.kind == IR::ExportTargetKind::Position &&
 		    state.input_info.vertex->clip_space.enabled) {
 			value = ConvertPositionToClipSpace(state, value);
 		}
+		trace_position(IR::VertexTraceKind::PostClip);
 		if (state.program.stage == ShaderType::Mesh) {
 			const auto kind = exp.kind == IR::ExportTargetKind::Position
 			                      ? IR::StageOutputKind::Position

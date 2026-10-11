@@ -3,13 +3,19 @@
 #include "common/logging/log.h"
 #include "common/switches.h"
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
+#include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/dispatchSnapshot.h"
+#include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/presentation/renderDoc.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
+#include "graphics/shader/recompiler/ir/VertexValueTrace.h"
 #include "graphics/shader/shader.h"
 #include "kernel/memory.h"
 
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
+#include <xxhash.h>
 
 #include <algorithm>
 #include <array>
@@ -19,6 +25,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -83,6 +91,15 @@ struct PendingSample {
 	uint32_t count = 0, records = 0, source = 0;
 };
 
+struct ValueTraceDraw {
+	uint64_t token = 0;
+	uint64_t submit = 0;
+	uint64_t frame = 0;
+	uint32_t last_sequence = 0;
+	bool reported = false;
+	nlohmann::json metadata;
+};
+
 struct State {
 	std::mutex                                 mutex;
 	uint64_t                                   draws = 0;
@@ -99,6 +116,9 @@ struct State {
 	uint64_t                                   cpu_gpu_written  = 0;
 	uint64_t                                   total            = 0;
 	uint64_t                                   last_summary     = 0;
+	std::array<ValueTraceDraw, IR::VertexTraceDrawSlots> value_traces;
+	uint32_t value_trace_count = 0;
+	bool value_trace_limit_reported = false;
 };
 
 State& GetState() {
@@ -411,6 +431,206 @@ void NoteDraw(BufferCache& cache, const DrawNote& note) {
 	}
 	if (!note.stages.empty() && note.stages.front().stage.program != nullptr) {
 		CheckIndices(state, cache, note, note.stages.front().stage.program->shader_hash);
+	}
+}
+
+namespace {
+std::filesystem::path ValueTraceDirectory() {
+	const char* value = KYTY_GETENV("KYTY_VS_VALUE_TRACE_DIR");
+	return value != nullptr && *value != '\0' ? value : "_vertex_value_traces";
+}
+
+void SaveValueTrace(const ValueTraceDraw& draw) {
+	try {
+		const auto directory = ValueTraceDirectory();
+		std::filesystem::create_directories(directory);
+		std::ofstream file(directory / fmt::format("draw-{}.json", draw.token), std::ios::binary);
+		file << draw.metadata.dump(2) << '\n';
+		if (!file) std::printf("VertexValueTrace: token=%llu metadata write failed\n", draw.token);
+	} catch (const std::exception& error) {
+		std::printf("VertexValueTrace: metadata write failed: %s\n", error.what());
+	}
+}
+} // namespace
+
+uint64_t RegisterValueTrace(RenderContext& context, const DrawNote& note, uint64_t submit) {
+	const auto& settings = IR::VertexValueTrace();
+	if (!settings.enabled) return 0;
+	static const uint64_t first_frame = [] {
+		const char* text = KYTY_GETENV("KYTY_VS_VALUE_TRACE_FRAME");
+		return text != nullptr ? std::strtoull(text, nullptr, 0) : 0ull;
+	}();
+	if (note.frame < first_frame) return 0;
+	bool selected = false;
+	for (const auto& stage: note.stages)
+		selected |= stage.stage.program != nullptr && stage.stage.program->bindings.vertex_value_trace;
+	if (!selected) return 0;
+	auto& state = GetState();
+	std::lock_guard lock(state.mutex);
+	if (state.value_trace_count == state.value_traces.size()) {
+		if (!state.value_trace_limit_reported) {
+			state.value_trace_limit_reported = true;
+			std::printf("VertexValueTrace: draw budget exhausted (2 immutable slots); later draws have token=0\n");
+		}
+		return 0;
+	}
+	auto& draw = state.value_traces[state.value_trace_count++];
+	draw.token = state.value_trace_count;
+	draw.submit = submit;
+	draw.frame = note.frame;
+	draw.metadata = {
+	    {"schema", 1}, {"token", draw.token}, {"submit", submit}, {"frame", note.frame},
+	    {"draw", DescribeDraw(note, state.draws)}, {"selected_shader", fmt::format("{:016x}", settings.hash)},
+	    {"selected_vertex", settings.vertex}, {"selected_instance", settings.instance},
+	    {"first_admitted_frame", first_frame},
+	    {"selected_pcs", std::vector<uint32_t>(settings.pcs.begin(), settings.pcs.begin() + settings.pc_count)},
+	    {"events", nlohmann::json::array()}, {"stages", nlohmann::json::array()},
+	    {"coverage", "live selected loads, 3D sample coordinates/red, pre/post clip Position; no arithmetic trace or dead-load resurrection"},
+	    {"image_predicate_contract", "selected_use or adjacent_selected_use filter; guest EXEC provenance is unknown"},
+	    {"missing_event_interpretation", "missing event does not prove guest inactivity: absent index/instance, branch, selected-use filter, dead/unsupported hook or budget may explain it"},
+	    {"half_coverage", "one invocation/half claims the slot; each event names that half; other half is not traced"},
+	    {"status", "pending: selected vertex/instance may be absent or branch may not execute"}};
+	// Each region is cleared once, before its draw; never reused or cleared by frame readback.
+	auto* buffer = context.GetBufferCache().GetFaultBuffer();
+	EXIT_IF(buffer == nullptr);
+	const uint64_t offset = (uint64_t {IR::VertexTraceBaseWord} +
+	                         (draw.token - 1u) * IR::VertexTraceSlotWords) * 4u;
+	const uint64_t size = uint64_t {IR::VertexTraceSlotWords} * 4u;
+	EXIT_IF(offset + size > buffer->Size());
+	auto& scheduler = context.GetCommandScheduler();
+	scheduler.EndRendering();
+	const auto command = scheduler.Current().Handle();
+	vk::BufferMemoryBarrier2 barrier;
+	barrier.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+	barrier.srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+	barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	barrier.buffer = buffer->Handle(); barrier.offset = offset; barrier.size = size;
+	vk::DependencyInfo dependency;
+	dependency.bufferMemoryBarrierCount = 1; dependency.pBufferMemoryBarriers = &barrier;
+	command.pipelineBarrier2(dependency);
+	command.fillBuffer(buffer->Handle(), offset, size, 0);
+	barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+	barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+	barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+	barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
+	command.pipelineBarrier2(dependency);
+	SaveValueTrace(draw);
+	std::printf("VertexValueTrace: token=%llu submit=%llu %s selected vertex=%u instance=%u; immutable slot initialized\n",
+	            draw.token, submit, draw.metadata["draw"].get<std::string>().c_str(), settings.vertex, settings.instance);
+	return draw.token;
+}
+
+void NoteValueTraceBindings(uint64_t token, std::span<PreparedBindings* const> stages) {
+	if (token == 0 || token > IR::VertexTraceDrawSlots) return;
+	auto& state = GetState();
+	std::lock_guard lock(state.mutex);
+	auto& draw = state.value_traces[token - 1u];
+	for (const auto* stage: stages) {
+		if (stage == nullptr || stage->runtime == nullptr || stage->runtime->program == nullptr) continue;
+		const auto& program = *stage->runtime->program;
+		nlohmann::json entry = {
+		    {"shader", fmt::format("{:016x}", program.shader_hash)},
+		    {"token", stage->vertex_value_trace_token}, {"table", program.bindings.table},
+		    {"token_dword", program.bindings.VertexTraceDword()}, {"shader_data", stage->shader_data},
+		    {"push_data_start_dword", program.bindings.push_data_start_dword},
+		    {"memory_offset_dword", program.bindings.memory_offset_dword},
+		    {"memory_offset_count", program.bindings.memory_offset_count},
+		    {"buffer_strides", program.bindings.buffer_strides},
+		    {"buffer_formats", program.bindings.buffer_formats},
+		    {"buffer_stride_dword", program.bindings.BufferStrideDword()},
+		    {"buffer_format_dword", program.bindings.BufferFormatDword()},
+		    {"buffers", nlohmann::json::array()}, {"source_present", bool(program.snapshot_source)}};
+		for (size_t i = 0; i < stage->buffers.size(); ++i) {
+			const auto& buffer = stage->buffers[i];
+			const auto handle = static_cast<VkBuffer>(buffer.buffer);
+			uint64_t opaque = 0;
+			static_assert(sizeof(handle) <= sizeof(opaque));
+			std::memcpy(&opaque, &handle, sizeof(handle));
+			entry["buffers"].push_back({{"index", i}, {"buffer_handle", fmt::format("{:016x}", opaque)},
+			                              {"offset", buffer.offset}, {"range", buffer.range}});
+		}
+		if (stage->runtime->resources != nullptr) {
+			const auto& inputs = *stage->runtime->resources;
+			entry["user_data_base"] = program.user_data_base;
+			entry["user_data"] = inputs.user_data;
+			entry["image_descriptors"] = nlohmann::json::array();
+			entry["buffer_descriptors"] = nlohmann::json::array();
+			entry["sampler_descriptors"] = nlohmann::json::array();
+			for (const auto& descriptor: inputs.buffers)
+				entry["buffer_descriptors"].push_back(descriptor.dwords);
+			for (const auto& descriptor: inputs.images)
+				entry["image_descriptors"].push_back(descriptor.dwords);
+			for (const auto& descriptor: inputs.samplers)
+				entry["sampler_descriptors"].push_back(descriptor.dwords);
+		}
+		if (program.bindings.vertex_value_trace && program.snapshot_source) {
+			const auto source = std::static_pointer_cast<const DispatchSnapshot::Source>(program.snapshot_source);
+			entry["spirv_words"] = source->spirv.size();
+			entry["spirv_xxh3_64"] = fmt::format("{:016x}", XXH3_64bits(source->spirv.data(), source->spirv.size() * 4u));
+			try {
+				const auto directory = ValueTraceDirectory();
+				std::filesystem::create_directories(directory);
+				const auto name = fmt::format("draw-{}-{}.spv", token, entry["shader"].get<std::string>());
+				std::ofstream file(directory / name, std::ios::binary);
+				file.write(reinterpret_cast<const char*>(source->spirv.data()), source->spirv.size() * 4u);
+				entry["spirv_file"] = name; entry["spirv_saved"] = bool(file);
+			} catch (const std::exception& error) { entry["spirv_error"] = error.what(); }
+		}
+		draw.metadata["stages"].push_back(std::move(entry));
+	}
+	SaveValueTrace(draw);
+}
+
+void ReportValueTrace(const uint32_t* region, uint64_t frame) {
+	auto& state = GetState();
+	std::lock_guard lock(state.mutex);
+	for (uint32_t slot = 0; slot < state.value_trace_count; ++slot) {
+		auto& draw = state.value_traces[slot];
+		const auto* header = region + slot * IR::VertexTraceSlotWords;
+		if (header[0] == 0 || header[1] != draw.token || header[2] != 0) {
+			if (!draw.reported) {
+				draw.reported = true;
+				draw.metadata["status"] = "no recorded event yet: selected index/instance absent, branch not reached, selected-use filter false, or untraced path; guest inactivity is not proved";
+				SaveValueTrace(draw);
+			}
+			continue;
+		}
+		if (draw.last_sequence == header[6]) continue;
+		draw.last_sequence = header[6];
+		draw.metadata["readback_frame"] = frame;
+		draw.metadata["truncated"] = header[5] != 0;
+		draw.metadata["preclip_ready"] = header[7] != 0;
+		draw.metadata["postclip_ready"] = header[8] != 0;
+		draw.metadata["events"] = nlohmann::json::array();
+		std::unordered_set<uint32_t> observed;
+		for (uint32_t i = 0; i < IR::VertexTraceEvents; ++i) {
+			const auto* event = header + IR::VertexTraceHeaderWords + i * IR::VertexTraceEventWords;
+			if (event[0] != IR::VertexTraceMarker) continue;
+			observed.insert(event[2]);
+			const bool image = event[1] == static_cast<uint32_t>(IR::VertexTraceKind::Image);
+			const char* predicate_origin = image
+			    ? (event[7] == 1u ? "selected_use" : event[7] == 2u ? "adjacent_selected_use" : "unknown")
+			    : "guest_exec_operand";
+			draw.metadata["events"].push_back({{"kind", event[1]}, {"pc", event[2]}, {"sequence", event[3]},
+			    {"vertex", event[4]}, {"instance", event[5]}, {"half", event[6]},
+			    {"predicate_origin", predicate_origin}, {"predicate_origin_code", event[7]},
+			    {"guest_exec_proven", !image},
+			    {"guest_exec_active", image ? nlohmann::json(nullptr) : nlohmann::json(event[10] != 0)},
+			    {"resource", event[8]}, {"sampler", event[9]}, {"predicate_selected", event[10] != 0},
+			    {"physical_subgroup_invocation", event[11]},
+			    {"payload_bits", std::vector<uint32_t>(event + 12, event + 24)}});
+		}
+		draw.metadata["missing_selected_pcs"] = nlohmann::json::array();
+		const auto& settings = IR::VertexValueTrace();
+		for (uint32_t i = 0; i < settings.pc_count; ++i)
+			if (!observed.contains(settings.pcs[i])) draw.metadata["missing_selected_pcs"].push_back(settings.pcs[i]);
+		draw.metadata["status"] = header[8] != 0 ? "stored Position observed" : "partial: Position export not yet observed";
+		SaveValueTrace(draw);
+		std::printf("VertexValueTrace: token=%llu frame=%llu events=%zu preclip=%u postclip=%u truncated=%u half=%u (other half not traced)\n",
+		            draw.token, frame, draw.metadata["events"].size(), header[7], header[8], header[5],
+		            draw.metadata["events"].empty() ? UINT32_MAX : draw.metadata["events"][0]["half"].get<uint32_t>());
+		std::fflush(stdout);
 	}
 }
 

@@ -3,6 +3,7 @@
 #include "common/assert.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
+#include "graphics/shader/recompiler/ir/VertexValueTrace.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 
 #include <algorithm>
@@ -179,6 +180,8 @@ void AllocateBindings(Program& program, uint32_t push_data_start_dword, bool lds
 			next.buffer_strides.push_back(i);
 		}
 	}
+	next.vertex_value_trace = program.stage == ShaderType::Vertex && !next.table &&
+	                          VertexTraceWanted(program.shader_hash) && UsesVertexExplodeLog(program);
 	next.reserve_object_id     = program.stage != ShaderType::Compute;
 	next.push_data_start_dword = next.PushStartFor(push_data_start_dword);
 

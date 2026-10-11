@@ -7,6 +7,8 @@
 namespace Libs::Graphics {
 struct ShaderVertexInputInfo;
 class BufferCache;
+class RenderContext;
+struct PreparedBindings;
 } // namespace Libs::Graphics
 
 // Diagnostics, KYTY_VTX_EXPLODE_CHECK=1: reports exploded vertex positions (records the shaders
@@ -41,6 +43,11 @@ struct DrawNote {
 	uint32_t                            target_height  = 0;
 };
 void NoteDraw(BufferCache& cache, const DrawNote& note);
+
+// Optional bounded value trace: each token owns a distinct region for the process lifetime.
+uint64_t RegisterValueTrace(RenderContext& context, const DrawNote& note, uint64_t submit);
+void NoteValueTraceBindings(uint64_t token, std::span<PreparedBindings* const> stages);
+void ReportValueTrace(const uint32_t* region, uint64_t frame);
 
 // Prints the records of one read-back explode region (IR::ExplodeLogWords words).
 void Report(const uint32_t* region, uint64_t frame);

@@ -3032,7 +3032,20 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	}
 	if (ShaderRecompiler::IR::FindBinding(
 	        program.bindings, ShaderRecompiler::IR::DescriptorBindingKind::ShaderData) != nullptr) {
+		// Filled after the final packing clear, before either storage upload or push commitment.
+		if (layout.vertex_value_trace) {
+			prepared.shader_data[layout.VertexTraceDword()] =
+			    static_cast<uint32_t>(prepared.vertex_value_trace_token);
+			prepared.shader_data[layout.VertexTraceDword() + 1u] =
+			    static_cast<uint32_t>(prepared.vertex_value_trace_token >> 32u);
+		}
 		prepared.shader_data_buffer = NativeUpload(m_context, prepared.shader_data);
+	}
+	if (layout.vertex_value_trace && layout.UsesPushData()) {
+		prepared.shader_data[layout.VertexTraceDword()] =
+		    static_cast<uint32_t>(prepared.vertex_value_trace_token);
+		prepared.shader_data[layout.VertexTraceDword() + 1u] =
+		    static_cast<uint32_t>(prepared.vertex_value_trace_token >> 32u);
 	}
 }
 

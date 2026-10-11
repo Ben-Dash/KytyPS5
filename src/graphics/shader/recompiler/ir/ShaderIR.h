@@ -540,6 +540,7 @@ struct BindingLayout {
 	// flattened SRT's DWORD count first), then the flattened SRT from table_srt_dword on.
 	bool                           table           = false;
 	uint32_t                       table_srt_dword = 0;
+	bool                           vertex_value_trace = false;
 	std::vector<uint32_t>          user_data_registers;
 	std::vector<DescriptorBinding> descriptors;
 
@@ -552,7 +553,10 @@ struct BindingLayout {
 	[[nodiscard]] uint32_t TableDword() const {
 		return BufferFormatDword() + static_cast<uint32_t>(buffer_formats.size());
 	}
-	[[nodiscard]] uint32_t ShaderDataDwords() const { return TableDword() + (table ? 2u : 0u); }
+	[[nodiscard]] uint32_t VertexTraceDword() const { return TableDword() + (table ? 2u : 0u); }
+	[[nodiscard]] uint32_t ShaderDataDwords() const {
+		return VertexTraceDword() + (vertex_value_trace ? 2u : 0u);
+	}
 	// Where the shader data goes in push data from `cursor` on, or PushData::NoStart (storage).
 	[[nodiscard]] uint32_t PushStartFor(uint32_t cursor) const {
 		return PushData::StartFor(cursor, ShaderDataDwords(),

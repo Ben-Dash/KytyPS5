@@ -29,6 +29,7 @@
 #include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
+#include "graphics/shader/recompiler/ir/VertexValueTrace.h"
 #include "graphics/shader/shaderCompiler.h"
 #include "kernel/memory.h"
 #include "kytyGitVersion.h"
@@ -138,12 +139,13 @@ std::string DriverCacheSignature(const vk::PhysicalDeviceProperties& properties)
 
 // The driver cache file's signature. KYTY_VTX_EXPLODE_CHECK changes every vertex and mesh shader:
 // its pipelines go to an own file with an own key, so the regular driver cache stays untouched.
-// The shader journal (.shaders) records only guest permutations and keeps the regular key.
+// The value trace adds internal push words; its journal and key are also isolated.
 std::string DriverBinarySignature(const vk::PhysicalDeviceProperties& properties) {
 	auto signature = DriverCacheSignature(properties);
 	if (ShaderRecompiler::IR::VertexExplodeCheck().enabled) {
 		signature += "vtxexplode=1\n";
 	}
+	signature += ShaderRecompiler::IR::VertexTraceCacheSignature();
 	return signature;
 }
 
@@ -606,11 +608,12 @@ struct PipelineCache::ProgramCache {
 
 		const auto module = CompileSPV(result.spirv, device);
 		EXIT_IF(module == nullptr);
+		const bool keep_spirv = DispatchSnapshot::Enabled() || result.program.bindings.vertex_value_trace;
 		return {
 		    .program     = std::move(result.program).TakeCompiledInfo(),
 		    .module      = module,
 		    .spirv_words = result.spirv.size(),
-		    .spirv       = DispatchSnapshot::Enabled() ? std::move(result.spirv) : std::vector<uint32_t> {},
+		    .spirv       = keep_spirv ? std::move(result.spirv) : std::vector<uint32_t> {},
 		};
 	}
 
@@ -1152,7 +1155,7 @@ struct PipelineCache::ProgramCache {
 		source.last_push_cursor = push_data_cursor;
 		auto& permutation = source.permutations.back();
 		input_info.stage = {.program = &permutation.program, .resources = &source.resources};
-		if (DispatchSnapshot::Enabled()) [[unlikely]] {
+		if (DispatchSnapshot::Enabled() || permutation.program.bindings.vertex_value_trace) [[unlikely]] {
 			permutation.program.snapshot_source = std::make_shared<const DispatchSnapshot::Source>(
 			    DispatchSnapshot::Source {
 			        ShaderPrecompile::Capture(params, options, permutation.specialization,
@@ -1564,7 +1567,9 @@ void PipelineCache::InitializeDriverCache() {
 
 	// KYTY_VTX_EXPLODE_CHECK changes every vertex shader: its pipelines go to own files.
 	const bool        explode    = ShaderRecompiler::IR::VertexExplodeCheck().enabled;
-	const std::string cache_name = explode ? title_id + ".vtxexplode" : title_id;
+	const std::string cache_name = ShaderRecompiler::IR::VertexValueTrace().enabled
+	                                 ? title_id + ".vtxtrace"
+	                                 : explode ? title_id + ".vtxexplode" : title_id;
 	if (explode) {
 		PipelineCacheLog("Vulkan pipeline cache: KYTY_VTX_EXPLODE_CHECK uses its own files");
 	}
@@ -1693,10 +1698,13 @@ void PipelineCache::InitializeShaderPrecompile() {
 	    m_driver_cache_path.empty())
 		return;
 	// Keep older journals intact: legacy pixel records omit compiler-affecting inputs.
+	const auto journal_title = PipelineCacheTitleId() +
+	                           (ShaderRecompiler::IR::VertexValueTrace().enabled ? ".vtxtrace" : "");
 	auto path = m_driver_cache_path.parent_path() /
-	            fmt::format("{}.v{}.shaders", PipelineCacheTitleId(),
+	            fmt::format("{}.v{}.shaders", journal_title,
 	                        ShaderPrecompile::CurrentRecordVersion);
 	auto        key = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
+	key += ShaderRecompiler::IR::VertexTraceCacheSignature();
 	std::string app_version;
 	(void)Loader::SystemContentParamSfoGetString("APP_VER", &app_version);
 	key += app_version;
@@ -1813,7 +1821,7 @@ void PipelineCache::ReplayPrecompiled(std::vector<ShaderPrecompile::PermutationR
 		entry->second.permutations.push_back(m_program_cache->MakePermutation(
 		    options, record.specialization, std::move(result.compiled)));
 		++compiled;
-		if (DispatchSnapshot::Enabled()) [[unlikely]] {
+		if (DispatchSnapshot::Enabled() || entry->second.permutations.back().program.bindings.vertex_value_trace) [[unlikely]] {
 			entry->second.permutations.back().program.snapshot_source =
 			    std::make_shared<const DispatchSnapshot::Source>(
 			        DispatchSnapshot::Source {record, std::move(snapshot_spirv)});

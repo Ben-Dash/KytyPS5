@@ -287,6 +287,7 @@ private:
 #include "BindlessDescriptorRetirementTests.inc"
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
+#include "VertexValueTraceGpuTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -299,8 +300,11 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-descriptor-retirement-readback") == 0 ||
                             std::strcmp(argv[1], "--bindless-descriptor-retirement-neighbors") == 0 ||
-                            std::strcmp(argv[1], "--embedded-fetch-gpu-readback") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback]");
+                            std::strcmp(argv[1], "--embedded-fetch-gpu-readback") == 0 ||
+                            std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback]");
+  if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
+    ConfigureVertexTraceGpuEnvironment();
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -327,6 +331,8 @@ int main(int argc, char **argv) {
     CheckBindlessDescriptorRetirementNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--embedded-fetch-gpu-readback") == 0)
     CheckEmbeddedFetchGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
+    CheckVertexValueTraceGpu(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;

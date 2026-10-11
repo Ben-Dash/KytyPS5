@@ -1,5 +1,33 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: trace GPU protocol and selected shader validation pass, 2026-10-11 23:27 UTC
+
+- GraphicsCLAMP correction is local699ececf, portable numerical RED231105 ->
+  unchangedGREEN231751. Stable image/~60FPS still unachieved; no new runtime
+  claim follows from that correction. All prior code/artifacts preserved.
+- Native build232153 and real RTX5060Ti protocol232328 pass on EXE
+  da3209491f4f574bf787c904f4892537b840a775651364c175441cbfa9d68851:
+  six loop-free single-point draws compare trace-off/on payload/raw/high,
+  token0/wrongvertex/directEXEC0 filters, two independent token slots through
+  a reused pipeline, exact load index1/result11223344, distinct pre/postclip
+  (0,0,0,1)/(+.5,-.5,0,1) and boundary sentinels. SPIR-V validates before
+  execution; exit0/no timeout. This does not cover image predicate semantics,
+  host admission/Rebind/FaultManager transport, cap overflow or virtualhalf1.
+- Native worker build232533 and current2a818 trace-profile232704 also pass
+  through SPIR-V validation (71688words). Original body preserved; selected
+  live samples/loads instrumented without output substitution. Profile remains
+  reconstructed; no materialization/live-module/GPU equivalence is claimed.
+- Trace scope/labels are restricted: original decodedD3/LZ/red/32-bit plainXYZ
+  only; original and effective dimensions both retained (2D placeholders
+  allowed). Other shapes skip explicitly. Selected-use image filters do not
+  prove guestEXEC, absent events do not prove inactivity. Exactly two immutable
+  tokens/6272 appended bytes, no guestSRT/ObjectID overwrite, trace driver and
+  journal names/signatures separate from normal caches.
+- Next: native core build into new private runtime, explicit synchronous
+  pipelines/manual input, bounded original retry and actual per-draw trace
+  readback. Verify live pre/post position and sample/address results before
+  further semantic corrections. Root owns all execution; no active native job.
+
 ## Latest checkpoint: instruction CLAMP portable GREEN; trace GPU validation next, 2026-10-11 23:22 UTC
 
 - Intended CPU/SPIR-V numerical RED231105 on EXE1157b225: all10 finite and

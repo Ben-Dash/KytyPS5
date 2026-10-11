@@ -799,11 +799,12 @@ void EmitDirectInstruction(ValueEmitContext& ctx, const IR::Inst& inst) {
 	}
 	switch (inst.GetOpcode()) {
 #define VALUE_OPCODE(name, ...)                                                                    \
-	case IR::ValueOpcode::name: return Invoke(Emit##name, ctx, inst);
+	case IR::ValueOpcode::name: Invoke(Emit##name, ctx, inst); break;
 #include "graphics/shader/recompiler/ir/opcodes/ValueOpcodes.inc"
 #undef VALUE_OPCODE
 		default: ctx.Fail(inst, "has no direct SPIR-V emitter");
 	}
+	EmitVertexTraceLiveResult(ctx, inst);
 }
 
 void EmitStructuredInstruction(ValueEmitContext& ctx, StructuredFunctionState& structured,

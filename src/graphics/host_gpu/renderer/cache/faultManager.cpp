@@ -11,6 +11,7 @@
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/shader/recompiler/ir/VertexExplodeLog.h"
+#include "graphics/shader/recompiler/ir/VertexValueTrace.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <bit>
@@ -36,19 +37,23 @@ constexpr uint64_t ExplodeLogSize   = uint64_t {IR::ExplodeLogWords} * sizeof(ui
 // Header and counters: cleared after each copy (the records are only read where a counter is set).
 constexpr uint64_t ExplodeLogClearSize = uint64_t {IR::ExplodeLogRecordWord} * sizeof(uint32_t);
 
+uint64_t DiagnosticLogSize() {
+	return ExplodeLogSize + (IR::VertexValueTrace().enabled ? uint64_t {IR::VertexTraceWords} * 4u : 0u);
+}
+
 } // namespace
 
 FaultManager::FaultManager(GraphicContext& graphics, CommandScheduler& scheduler,
                            BufferCache& buffer_cache)
     : m_graphics(graphics), m_scheduler(scheduler), m_buffer_cache(buffer_cache),
       m_fault_buffer(graphics, scheduler, MemoryUsage::DeviceLocal, 0, AllFlags,
-                     FaultBitmapSize + (VertexExplode::Enabled() ? ExplodeLogSize : 0)),
+                     FaultBitmapSize + (VertexExplode::Enabled() ? DiagnosticLogSize() : 0)),
       m_download_buffer(graphics, scheduler, MemoryUsage::Download, 0, AllFlags,
                         MaxPendingFaults * PageFaultAreaSize) {
 	SetVulkanObjectNameF(m_graphics.device, m_fault_buffer.Handle(), "Fault Buffer");
 	if (VertexExplode::Enabled()) {
 		m_explode_download = std::make_unique<Buffer>(graphics, scheduler, MemoryUsage::Download, 0,
-		                                              AllFlags, MaxPendingFaults * ExplodeLogSize);
+		                                              AllFlags, MaxPendingFaults * DiagnosticLogSize());
 		std::printf("VtxExplode: KYTY_VTX_EXPLODE_CHECK active: vertex and mesh shaders check their "
 		            "positions (nan/inf, |w| < 1e-6, w > 0 and |x/w| or |y/w| > %g), CPU check of index "
 		            "ranges, %u log bytes after the fault bitmap\n",
@@ -209,7 +214,7 @@ void FaultManager::ProcessExplodeLog() {
 	    vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
 	pre_barrier.buffer = m_fault_buffer.Handle();
 	pre_barrier.offset = ExplodeLogOffset;
-	pre_barrier.size   = ExplodeLogSize;
+	pre_barrier.size   = DiagnosticLogSize();
 	auto post_barrier          = pre_barrier;
 	post_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
 	post_barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
@@ -228,8 +233,8 @@ void FaultManager::ProcessExplodeLog() {
 		command.pipelineBarrier2(dependency);
 		return;
 	}
-	const auto       offset = m_explode_area * ExplodeLogSize;
-	const vk::BufferCopy copy {ExplodeLogOffset, offset, ExplodeLogSize};
+	const auto       offset = m_explode_area * DiagnosticLogSize();
+	const vk::BufferCopy copy {ExplodeLogOffset, offset, DiagnosticLogSize()};
 	command.copyBuffer(m_fault_buffer.Handle(), m_explode_download->Handle(), 1, &copy);
 	command.fillBuffer(m_fault_buffer.Handle(), ExplodeLogOffset, ExplodeLogClearSize, 0);
 	dependency.pBufferMemoryBarriers = &post_barrier;
@@ -238,8 +243,10 @@ void FaultManager::ProcessExplodeLog() {
 	const auto area   = m_explode_area;
 	auto*      mapped = m_explode_download->Mapped().data() + offset;
 	m_scheduler.DeferOperation([this, mapped, offset, area, frame] {
-		m_explode_download->Invalidate(offset, ExplodeLogSize);
+		m_explode_download->Invalidate(offset, DiagnosticLogSize());
 		VertexExplode::Report(std::bit_cast<const uint32_t*>(mapped), frame);
+		if (IR::VertexValueTrace().enabled)
+			VertexExplode::ReportValueTrace(std::bit_cast<const uint32_t*>(mapped) + IR::ExplodeLogWords, frame);
 		m_explode_areas[area] = 0;
 	});
 	m_explode_areas[m_explode_area++] = m_scheduler.CurrentTick();
