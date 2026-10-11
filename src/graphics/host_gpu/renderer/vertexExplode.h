@@ -41,6 +41,19 @@ struct DrawNote {
 	uint64_t                            depth_address  = 0;
 	uint32_t                            target_width   = 0;
 	uint32_t                            target_height  = 0;
+	// Copied diagnostic inputs; the parser does not retain the complete raw clip word.
+	uint32_t                            shader_stages = 0;
+	uint32_t                            device_default_subgroup_size = 0;
+	struct ClipState {
+		uint8_t user_clip_planes = 0, user_clip_plane_mode = 0;
+		bool dx_clip_space = false, vertex_kill_any = false;
+		bool min_z_clip_disable = false, max_z_clip_disable = false;
+		bool user_clip_plane_negate_y = false, clip_disable = false;
+		bool user_clip_plane_cull_only = false, cull_on_clipping_error_disable = false;
+		bool linear_attribute_clip_enable = false, force_viewport_index_from_vs_enable = false;
+	} clip;
+	bool                                effective_depth_clip_enable = true;
+	bool                                native_depth_clamp_enable = false;
 };
 void NoteDraw(BufferCache& cache, const DrawNote& note);
 

@@ -2735,6 +2735,22 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		                                            : state.depth_info.desc.info.extent;
 		note.target_width  = extent.width;
 		note.target_height = extent.height;
+		const auto& ctx = buffer.GetRegisters();
+		note.shader_stages = ctx.GetShaderStages();
+		note.device_default_subgroup_size = m_context.GetGraphics().subgroup_size;
+		const auto& clip = ctx.GetClipControl();
+		note.clip = {clip.user_clip_planes, clip.user_clip_plane_mode,
+		             clip.dx_clip_space, clip.vertex_kill_any,
+		             clip.min_z_clip_disable, clip.max_z_clip_disable,
+		             clip.user_clip_plane_negate_y, clip.clip_disable,
+		             clip.user_clip_plane_cull_only, clip.cull_on_clipping_error_disable,
+		             clip.linear_attribute_clip_enable, clip.force_viewport_index_from_vs_enable};
+		// Exact current pipeline inputs/policy (pipelineCache.cpp / shaders.cpp),
+		// not a query of an already-recorded Vulkan pipeline.
+		note.effective_depth_clip_enable = clip.IsZClipEnabled();
+#if !defined(__APPLE__)
+		note.native_depth_clamp_enable = true;
+#endif
 		VertexExplode::NoteDraw(m_context.GetBufferCache(), note);
 		vertex_value_trace_token = VertexExplode::RegisterValueTrace(m_context, note, submit_id);
 	}

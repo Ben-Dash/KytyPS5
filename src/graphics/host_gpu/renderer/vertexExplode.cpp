@@ -490,6 +490,39 @@ uint64_t RegisterValueTrace(RenderContext& context, const DrawNote& note, uint64
 	    {"missing_event_interpretation", "missing event does not prove guest inactivity: absent index/instance, branch, selected-use filter, dead/unsupported hook or budget may explain it"},
 	    {"half_coverage", "one invocation/half claims the slot; each event names that half; other half is not traced"},
 	    {"status", "pending: selected vertex/instance may be absent or branch may not execute"}};
+	draw.metadata["clip_control"] = {
+	    {"raw_pa_cl_clip_cntl_available", false}, {"raw_pa_cl_clip_cntl", nullptr},
+	    {"user_clip_planes", note.clip.user_clip_planes},
+	    {"user_clip_plane_mode", note.clip.user_clip_plane_mode},
+	    {"dx_clip_space", note.clip.dx_clip_space}, {"vertex_kill_any", note.clip.vertex_kill_any},
+	    {"min_z_clip_disable", note.clip.min_z_clip_disable},
+	    {"max_z_clip_disable", note.clip.max_z_clip_disable},
+	    {"user_clip_plane_negate_y", note.clip.user_clip_plane_negate_y},
+	    {"clip_disable", note.clip.clip_disable},
+	    {"user_clip_plane_cull_only", note.clip.user_clip_plane_cull_only},
+	    {"cull_on_clipping_error_disable", note.clip.cull_on_clipping_error_disable},
+	    {"linear_attribute_clip_enable", note.clip.linear_attribute_clip_enable},
+	    {"force_viewport_index_from_vs_enable", note.clip.force_viewport_index_from_vs_enable}};
+	draw.metadata["rasterization_policy"] = {
+	    {"effective_depth_clip_enable", note.effective_depth_clip_enable},
+	    {"native_depth_clamp_enable", note.native_depth_clamp_enable},
+	    {"negative_one_to_one", !note.clip.dx_clip_space},
+	    {"source", "copied context getter and current native pipeline construction policy; readiness/recording not implied"}};
+	draw.metadata["hardware_wave_flags"] = {
+	    {"raw_vgt_shader_stages_en", note.shader_stages},
+	    {"gs_w32_en", (note.shader_stages & 0x00400000u) != 0u},
+	    {"es_uses_gs_wave_flag", true},
+	    {"vs_w32_en", (note.shader_stages & 0x00800000u) != 0u},
+	    {"hs_w32_en", (note.shader_stages & 0x00200000u) != 0u},
+	    {"device_default_subgroup_size", note.device_default_subgroup_size},
+	    {"vertex_stages", nlohmann::json::array()}};
+	for (const auto& stage: note.stages) {
+		draw.metadata["hardware_wave_flags"]["vertex_stages"].push_back({
+		    {"logical_stage", static_cast<uint32_t>(stage.logical_stage)},
+		    {"input_wave_size", stage.wave_size}, {"mesh_wave_size", stage.mesh.wave_size},
+		    {"compiled_wave_size", stage.stage.program != nullptr
+		                               ? nlohmann::json(stage.stage.program->wave_size) : nlohmann::json(nullptr)}});
+	}
 	// Each region is cleared once, before its draw; never reused or cleared by frame readback.
 	auto* buffer = context.GetBufferCache().GetFaultBuffer();
 	EXIT_IF(buffer == nullptr);
@@ -653,6 +686,44 @@ void Report(const uint32_t* region, uint64_t frame) {
 		const auto hash = uint64_t {record[1]} | (uint64_t {record[2]} << 32u);
 		if (kind >= 4) {
 			continue;
+		}
+		// Trace-layout vertex shaders write this immutable draw token into otherwise unused
+		// record words. Report valid joins before the older per-hash/kind suppression: a
+		// token0 hit can precede an admitted draw. Never interpret another stage/hash's words.
+		static std::array<std::array<bool, 4>, IR::VertexTraceDrawSlots> joined_reported {};
+		const auto trace_token = uint64_t {record[11]} | (uint64_t {record[12]} << 32u);
+		if ((record[0] & 0xff00u) == 0u && IR::VertexTraceWanted(hash) && trace_token != 0u &&
+		    trace_token <= state.value_trace_count && trace_token <= IR::VertexTraceDrawSlots) {
+			auto& traced = state.value_traces[trace_token - 1u];
+			const auto shader = fmt::format("{:016x}", hash);
+			const bool stage_matches = traced.metadata.contains("stages") &&
+			    std::any_of(traced.metadata["stages"].begin(), traced.metadata["stages"].end(),
+			                [&](const auto& stage) {
+				                return stage.value("shader", std::string {}) == shader &&
+				                       stage.value("token", uint64_t {0}) == trace_token;
+			                });
+			if (traced.token == trace_token && stage_matches &&
+			    traced.metadata.value("selected_shader", std::string {}) == shader &&
+			    !joined_reported[trace_token - 1u][kind]) {
+				joined_reported[trace_token - 1u][kind] = true;
+				if (!traced.metadata.contains("legacy_position_reports"))
+					traced.metadata["legacy_position_reports"] = nlohmann::json::array();
+				traced.metadata["legacy_position_reports"].push_back({
+				    {"draw_token", trace_token}, {"shader", shader}, {"stage", "vertex"},
+				    {"kind", KindName(kind)}, {"readback_frame", frame}, {"hits", count},
+				    {"vertex", record[3]}, {"instance", record[4]},
+				    {"position_bits", std::vector<uint32_t>(record + 5, record + 9)},
+				    {"base_vertex_present", record[10] == 1u}, {"base_vertex_bits", record[9]},
+				    {"scope", "exact recorded draw token; first bucket writer, not all failing invocations"}});
+				SaveValueTrace(traced);
+				std::printf("VtxExplode trace join: token=%llu shader=%016" PRIx64
+				            " stage=vertex kind=%s readback_frame=%llu vertex=%u instance=%u "
+				            "position_bits=%08x,%08x,%08x,%08x | exact %s\n",
+				            trace_token, hash, KindName(kind), frame, record[3], record[4],
+				            record[5], record[6], record[7], record[8],
+				            traced.metadata.value("draw", std::string("unknown")).c_str());
+				std::fflush(stdout);
+			}
 		}
 		const uint32_t capture_index = record[10] == 1u ? record[3] - record[9] : record[3];
 		// KYTY_VTX_EXPLODE_CAPTURE (with --rd) requests RenderDoc captures, at most 3 per run and 300
