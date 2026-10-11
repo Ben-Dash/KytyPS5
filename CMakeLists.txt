@@ -743,7 +743,10 @@ if(BUILD_TESTING)
 	add_test(NAME embedded_fetch_index COMMAND $<TARGET_FILE:embedded_fetch_index_tests>)
 	add_test(NAME embedded_fetch_index_neighbors
 	         COMMAND $<TARGET_FILE:embedded_fetch_index_tests> neighbors)
+	add_test(NAME shader_dx10_clamp_portable
+	         COMMAND $<TARGET_FILE:embedded_fetch_index_tests> dx10-clamp-spirv)
 	set_tests_properties(embedded_fetch_index embedded_fetch_index_neighbors
+	                     shader_dx10_clamp_portable
 	                     PROPERTIES TIMEOUT 30)
 	add_test(NAME scalar_provenance COMMAND $<TARGET_FILE:scalar_provenance_tests>)
 	add_test(NAME image_page_table COMMAND $<TARGET_FILE:image_page_table_tests>)

@@ -1,5 +1,77 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: instruction CLAMP portable GREEN; trace GPU validation next, 2026-10-11 23:22 UTC
+
+- Intended CPU/SPIR-V numerical RED231105 on EXE1157b225: all10 finite and
+  unclamped controls pass, but clamped qNaN exports7fc12345 instead of+0 under
+  a Khronos-permitted NaN-propagating FClamp choice. Native build231607 and
+  SAME oracle231751 GREEN all14 cases (EXE9c62ecbda2bd257c0af985d4b17cd4fba6ec25aab02ab30a8c974769e2b05a3a).
+  Generated modules validate; this is a portable host model, NOT a failing
+  RTX hardware result or an established original-game cause.
+- Eight-line shared EmitFPSaturate32 correction guarantees NaN+0 ONLY for
+  Vertex/Pixel, whose accepted guest graphics mode assertsDX10_CLAMPtrue.
+  Ordinary arithmetic/unclamped NaNs and other stage modes remain unchanged.
+  Original9+12 frontend tests also passed trace-disabled231105. Other stage
+  mode metadata and numerical GPU CLAMP coverage are explicitly pending.
+- Existing format-specialization2 A/B trials are measurements, not fixes:
+ 225304 ended22:56:18Z exit0/graceful180s bound; warm230409 ended23:07:28Z
+  after timeout/owned forced cleanup(-1), noRAMguard. New variants repeatedly
+  compiled~30s; no valid steady-scene FPS comparison or stable picture proved.
+  Keep default format mode for next correctness retry. Real-device-selected
+  hash-only dumps in runtime-formats-baked are overwritten by variants/startup
+  replay; do not equate them with a uniquely identified dispatched module.
+- Source-frozen opt-in value trace: exact2 immutable draw tokens, bounded6272
+  appended bytes, live buffer results, decodedD3/LZ/red sample coords/results,
+  separate pre/postclip exports. Images' selected-use filter is NOT proven
+  guest EXEC; missing events are not inactivity proof. Effective2D placeholders
+  are labelled separately from originalD3. Explicit --async-pipelines false
+  prevents unused asynchronous preparations exhausting the admission slots.
+- Native target bindless_lifecycle_tests build is ACTIVE since23:21:53,
+  root session17571. New loop-free real-GPU trace fixture covers output
+  preservation/token0/wrongvertex/EXEC0/tokens1/2/prepost/sentinels; validation
+  is pending. No original trace game run before that check. Source inputs
+  frozen. Stable picture/~60FPS remain NOT achieved; root continues work.
+
+## Latest checkpoint: stable-picture and ~60FPS objective, 2026-10-11 22:43 UTC
+
+- User explicitly requests continued work until stable picture and stable
+  approximately60FPS. Correctness and speed are separate acceptance checks:
+  inspect repeated rendered frames for missing/stretched objects, and measure
+  actual warm-cache game frame intervals (16.7ms is60FPS). Never count passed
+  shader tests, presentations, diagnostic fallback or display size as that result.
+  Resolution preference was asked asynchronously; provisional target1080p,
+  pending reply. Current guest targets reach3840x2160 despite1280x720 window.
+- Native source clean cf882c52 at start; existing private EXE680632d7 is
+  source-equivalent to its core, no rebuild needed for measurement. Run222854
+  (240s, drain-stats10/GPUzones1, VTX/layout/provenance/snapshotsOFF) ended
+  22:32:59.378Z exit0/gracefulbound/noRAMguard,min23.83GiB. Latewindows4.6–5FPS:
+  compute77–93ms/frame, buffer-copy19–22ms, draw17–18ms, imagecopy~6ms;
+  totalGPUbusy125–142ms, gap~74–76ms. CPU fault waits overlap these times;
+  do not add them. Histogram>=100ms bucket is saturated, not true p95/max.
+- Warm clean run223508 (180s, no VTX/zones/drain/layout/provenance/snapshots,
+  same private regular cache, eager1/keybounds1/chain0/manual) loaded173.6MiB
+  driver cache and replayed1971 records in~5s. Observed frame802 title5.1FPS;
+  ended22:38:13.144Z exit0/gracefulbound/noRAMguard,min25.3GiB. This rules out
+  cold startup or VTX checks alone as the speed explanation, not all profiler
+  overhead or all scenes. Both native sessions drained; no game remains.
+- Top measured compute shaders map to frozen v9 records215/214/213:
+  fc6f8c56eb7e168f,1158e78fa2c7a20e,da4ff1222c09f131. All use guestwave64
+  on host32 with12 generic formats and dynamic strides; older conservative
+  modules~0.8M SPIR-Vwords are not current live-module proof. Need fresh
+  module/dispatch measurements and independent format/stride/bounds/EXEC
+  regressions before changing codegen. BDA_FAST_DWORD already defaultsON.
+- Correctness follow-up: captured2a T#0 isR8UNorm8x11x23 volume; T#1/2
+  are1x1RGBA8 placeholders, all normalized textures cannot encodeNaN texels.
+  Check actual sample coordinates/results and executed branches. IEEE_MODE0
+  does not authorize blanket zero-timesInf or NaN sanitation. A decoded CLAMP
+  has an opcode-specific DX10 contract; its current runtime role is unproved.
+- A staged opt-in bounded value trace is authorized as DIAGNOSTIC ONLY:
+  selected live samples/loads and preclip export, exact immutable drawtoken
+  via internal shader data, no guestSRT/ObjectID overwrite, bounded faultbuffer
+  transport and cache separation. Production behavior fixes still require RED.
+  Source tracing work is in progress; all native execution belongs to root.
+  Automatic input staysOFF, no push or public progress milestone claimed.
+
 ## Latest checkpoint: actual masked-fetch GPU RED/GREEN and current v9 IR, 2026-10-11 22:21 UTC
 
 - Same synthetic `--embedded-fetch-gpu-readback` on real RTX5060Ti:

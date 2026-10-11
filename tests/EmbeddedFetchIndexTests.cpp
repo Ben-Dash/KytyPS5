@@ -247,6 +247,7 @@ void Controls() {
 } // namespace Libs::Graphics
 
 #include "EmbeddedFetchIndexNeighborTests.inc"
+#include "Dx10ClampSpirvTests.inc"
 
 int main(int argc, char** argv) {
   using namespace Libs::Graphics;
@@ -264,6 +265,7 @@ int main(int argc, char** argv) {
   Controls();
   if (argc == 2 && std::strcmp(argv[1], "controls") == 0) return 0;
   const std::string_view selected = argc == 1 ? "all" : argv[1];
+  if (selected == "dx10-clamp-spirv") return RunDx10ClampSpirvTests();
   if (selected == "neighbors" || selected.starts_with("neighbor-")) {
     CheckEmbeddedFetchIndexNeighbors(selected);
     return 0;

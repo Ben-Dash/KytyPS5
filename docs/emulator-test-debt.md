@@ -1,5 +1,54 @@
 # Integration test debt
 
+## DX10 instruction CLAMP portability (2026-10-11 22:49 UTC)
+
+Primary AMD ISA defines NaN-to-zero for the decoded instruction CLAMP under
+the accepted DX10_CLAMP graphics mode; ordinary IEEE RCP/RSQ/MUL must not be
+globally sanitized. Existing FPSaturate32 emits GLSL FClamp, whose NaN choice
+does not guarantee that guest result on all conforming hosts. RTX may already
+choose zero, so a passing hardware case is not an intended failure.
+
+Required independent regression: wholly synthetic decoded clamped MUL/ADD
+with NaN and finite/unclamped controls, actual public CompileProgram output,
+SPIR-V validation and observable export evaluation under an explicitly
+Khronos-permitted NaN-propagating host choice. Check numerical exported value,
+not a preferred opcode pattern; accept any equivalent correct backend. A
+fixture/evaluator unsupported operation is not semantic RED. Only after the
+intended failure may the shared saturate mechanism change. Actual2a cause
+remains unproved; its three CLAMP PCs are not all known executed for vertex14.
+
+Intended portable numerical RED231105 is now proved after ten passing finite/
+unclamped controls: clamped qNaN exported7fc12345 under the allowed host model
+instead of+0. SAME frozen oracle617b09fa passes all14 cases231751 after the
+shared accepted-Vertex/Pixel saturate correctionCEFDE8E5. No GPU execution
+or original2a causality is claimed by this proof. Other stage DX10 metadata
+and GPU runtime-value saturation remain separate unproved cases.
+
+## Stable picture and frame-time investigation (2026-10-11 22:43 UTC)
+
+User target is stable image and approximately60FPS after warmup. Current
+clean warm-cache observation is~5FPS, not achieved. Keep resolution/internal
+render size and instrumentation explicit. Profiled frame histogram saturates
+at100ms; use true intervals for60FPS acceptance, not its clipped quantiles.
+
+Next diagnostic only: exact drawtoken, actual selected vertex/instance/EXEC,
+sample coordinates and returned bits, live original buffer indices/results,
+preclip Position. Bound records and memory, preserve outputs, do not use the
+existing PS/CS taps that replace MRT/IMAGE_STORE payloads. Probe missing PCs,
+dead loads or unobserved branches must be explicit rather than invented values.
+
+Before a codegen optimization, use independent varied format/stride/alignment/
+bounds/half-EXEC numeric cases for the actual generic buffer mechanism; prove
+the intended failure or cost invariant on the existing implementation. TopCS
+215/214/213 emitted large older reconstructed modules but current live-module
+equivalence is unproved. Do not specialize a per-lane varying format by hash.
+
+Before reducing coherence waits/readbacks, exercise actual tracked GPU writes
+and host publication: repeated read with no new write needs no redundant copy;
+newer overlapping write must invalidate it; unrelated pending ticks must not
+drain all work. Preserve ordered bytes/lifetimes, never return stale data to
+meet a frame-rate target. Existing required synthetic ownership tests apply.
+
 ## Discarded embedded-fetch offset (2026-10-11 21:56 UTC)
 
 Independent review found a possible stale offset candidate: add s18 to v0

@@ -466,8 +466,16 @@ uint32_t EmitFPSaturateF16x2(EmitterState& state, uint32_t value) {
 }
 
 uint32_t EmitFPSaturate32(EmitterState& state, uint32_t arg0) {
-	return EmitExt(state, TypeF32(state), GLSLstd450FClamp,
-	               {arg0, ConstantF32(state, 0), ConstantF32(state, 0x3f800000u)});
+	const auto zero = ConstantF32(state, 0);
+	const auto clamped = EmitExt(state, TypeF32(state), GLSLstd450FClamp,
+	                             {arg0, zero, ConstantF32(state, 0x3f800000u)});
+	// The accepted VS/PS register contract requires DX10_CLAMP=1 (shader.cpp).
+	// FClamp alone permits propagating NaN; this instruction's CLAMP must return +0.
+	// Other stages do not yet carry a proved DX10 mode contract here.
+	if (state.program.stage != ShaderType::Vertex && state.program.stage != ShaderType::Pixel)
+		return clamped;
+	return Select(state, TypeF32(state), Unary(state, spv::OpIsNan, TypeBool(state), arg0),
+	              zero, clamped);
 }
 
 uint32_t EmitSMulHi(EmitterState& state, uint32_t arg0, uint32_t arg1) {
