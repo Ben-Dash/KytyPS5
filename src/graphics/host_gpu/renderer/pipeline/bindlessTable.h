@@ -234,6 +234,8 @@ private:
 	std::vector<Region*>    m_prepared_regions;
 	uint64_t               m_next_heap_identity = 0, m_next_region_generation = 0;
 	uint64_t               m_preparation_serial = 0;
+	// The whole descriptor set can be read without a translation-region lease.
+	uint64_t               m_last_recorded_use_tick = 0;
 	uint32_t               m_preparation_depth = 0;
 	bool                   m_preparation_used = false;
 	std::unordered_map<uint64_t, std::vector<std::pair<Heap*, uint32_t>>> m_image_refs;

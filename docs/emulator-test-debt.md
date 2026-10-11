@@ -1,5 +1,47 @@
 # Integration test debt
 
+## Active descriptor-retirement pixel regression (2026-10-11 20:32 UTC)
+
+User explicitly reauthorizes game execution and tests. The fresh d7895a56
+retry202640 has severe covering stretched surfaces at frame414 and missing
+world/body with floating items at frame1180. This is not fixed by the earlier
+table-retention and access-age corrections.
+
+Required minimal RED: wholly synthetic loop-free native compute shader reads
+a real registered red texture through both the actual translation-selected
+slot and the original fixed sampled-array slot. Positive control must read
+red. Record the old consumer without submitting, tag its actual ownership,
+invoke actual cache invalidation/FreeImage, then submit and read back both
+pixels. Expected earlier guest use retains red; host Vulkan UAB behavior
+alone does not preserve the old descriptor. No GPU semaphore gate or unsafe
+hang is needed. Bound the harness and retain native image/view lifetime.
+Test-only construction is in progress; no production fix or intended RED
+has been obtained yet. Deferred slot clearing alone is insufficient if the
+translation word or physical image ownership changes first.
+
+Construction and native build203417 completed. Intended GPU RED203642 now
+passes actual opaque-red positive control, then reads RGBA0 from both old
+translation-selected and direct slots after actual cache invalidation. Exact
+recorded tick2 ownership assertion, no timeout/GPU gate/reset. The immutable
+test is the GREEN oracle. Shared recorded-consumer completion ordering is in
+progress; preparation-before-recording, batching and replacement neighbors
+remain pending. Real game geometry causality is still unproved.
+
+Unchanged native sampled oracle GREEN204246 now returns original opaque red
+from both paths. Eleven-line shared whole-set use-tick/scheduler.Wait ordering
+correction protects recorded consumers before descriptor AND translation
+mutation. General callbacks are not drained by Wait. Batching/replacement,
+no-region-use and completed/no-use boundaries are next; preparation-only and
+actual original-world rendering remain unproved.
+
+Native neighboring sampled cases205604 passed: red/green batch ownership with
+only first incomplete-use wait, no-ref/complete fast paths, callback sentinel,
+fresh green replacement after old physical deletes, and fixed-only blue shader
+without translation/region leases. Existing affected cases205215–205220 pass.
+Preparation-only and original geometry causality remain unproved. Whole-set
+wait is conservative; original retry must measure behavior/performance before
+claiming that current flicker is resolved.
+
 ## Periodic texture disappearance / bindless region lifetime (2026-10-11)
 
 Native actual-table RED181957 reproduced active mapping loss at temporary30

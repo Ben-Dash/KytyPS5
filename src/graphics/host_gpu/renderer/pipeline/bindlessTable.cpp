@@ -427,6 +427,8 @@ void BindlessTable::BeginPreparation() {
 void BindlessTable::EndPreparation() {
 	EXIT_IF(m_preparation_depth == 0);
 	if (--m_preparation_depth != 0) return;
+	if (m_preparation_used)
+		m_last_recorded_use_tick = std::max(m_last_recorded_use_tick, m_scheduler.CurrentTick());
 	for (auto* region: m_prepared_regions) {
 		// A ring wrap may have advanced the recording tick since descriptor commit.
 		if (m_preparation_used)
@@ -452,6 +454,7 @@ void BindlessTable::PinRegion(const Heap& heap) {
 
 void BindlessTable::MarkPreparationUsed(uint64_t tick) {
 	EXIT_IF(tick > m_scheduler.CurrentTick());
+	m_last_recorded_use_tick = std::max(m_last_recorded_use_tick, tick);
 	for (auto* region: m_prepared_regions)
 		region->last_gpu_tick = std::max(region->last_gpu_tick, tick);
 	m_preparation_used = true;
@@ -857,6 +860,12 @@ void BindlessTable::AddImageReference(ImageId id, Heap& heap, uint32_t key) {
 }
 
 void BindlessTable::OnImageUnregistered(ImageId id) {
+	const auto image_key = ImageKey(id);
+	if (!m_image_shared_slots.contains(image_key) && !m_image_refs.contains(image_key)) return;
+	// Preserve recorded consumers before changing their descriptors or translation words.
+	// Wait submits the current tick if needed, without draining resource callbacks mid-prepare.
+	if (m_last_recorded_use_tick != 0 && !m_scheduler.IsFree(m_last_recorded_use_tick))
+		m_scheduler.Wait(m_last_recorded_use_tick);
 	if (const auto shared = m_image_shared_slots.find(ImageKey(id));
 	    shared != m_image_shared_slots.end()) {
 		for (const auto& [binding, slot, key]: shared->second) {

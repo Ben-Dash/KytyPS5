@@ -284,6 +284,8 @@ private:
 #include "BindlessLifecycleNeighborTests.inc"
 #include "BindlessImageAccessAgeTests.inc"
 #include "BindlessImageAccessNeighborTests.inc"
+#include "BindlessDescriptorRetirementTests.inc"
+#include "BindlessDescriptorRetirementNeighborTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -293,8 +295,10 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-image-access-age") == 0 ||
-                            std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors]");
+                            std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0 ||
+                            std::strcmp(argv[1], "--bindless-descriptor-retirement-readback") == 0 ||
+                            std::strcmp(argv[1], "--bindless-descriptor-retirement-neighbors") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors]");
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -315,6 +319,10 @@ int main(int argc, char **argv) {
     CheckBindlessImageAccessAge(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-image-access-neighbors") == 0)
     CheckBindlessImageAccessNeighbors(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--bindless-descriptor-retirement-readback") == 0)
+    CheckBindlessDescriptorRetirementReadback(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--bindless-descriptor-retirement-neighbors") == 0)
+    CheckBindlessDescriptorRetirementNeighbors(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;

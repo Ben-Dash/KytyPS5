@@ -1,5 +1,98 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: sampled-retirement neighbors pass; retry ready, 2026-10-11 20:56 UTC
+
+- Intended native pixel RED203642 → SAME GREEN204246. Neighbor build205500
+  passed; actual sampled red/green/blue neighbor test205604 passed exit0/no
+  timeout: same-batch invalidation waits once, unrelated no-ref images avoid
+  waiting, general deferred callbacks remain pending during the cache wait,
+  fresh green replacement survives old deletion callbacks/repeated old-ID
+  events, completed use avoids a wait, fixed-slot-only blue survives without
+  translation/region leases. Both shaders validate Vulkan1.3 before dispatch.
+- Final native test EXE
+  `2d4a3943467491a9f1db6b13258ddec7bbee2046822aa6064ddb8b206a4a762f`.
+  Earlier affected lifecycle/preparation/feedback/access/plan1/0 cases all
+  passed205215 through205220 on the same production correction. No broad
+  full-suite pass is claimed; existing resource-tracker baseline failures
+  and absent cross-game workloads remain coverage limits.
+- Current core configure204426/build204433/install204558 passed. New private
+  `runtime-bindless-retirement` EXE
+  `49d31a724d6c6d7917813af574ac2517e59cfb0ec4d9af6e5093a1fee1f8fa63`;
+  source90c5820e plus archived11-line engine diff, computed/unpinned cache key.
+  Exact patch SHA256 `62b390e81b057297fa89383a4146d4f7c87f8753d63b7952302a6b2f08e9c4cd`.
+- Next original retry retains manual input and adds existing bounded exported
+  vertex-position diagnostics. Its separate .vtxexplode cache avoids reusing
+  unchecked shaders, but instrumentation can perturb timing. Position checks
+  are a diagnostic lead; they do not clamp outputs or prove visible quality.
+  Production frozen, native slot idle; preserve old installed runtimes.
+
+## Latest checkpoint: recorded-consumer sampled-pixel GREEN, 2026-10-11 20:43 UTC
+
+The SAME immutable native sampled-readback oracle now retains opaque red in
+both the translation-selected and fixed sampled-array slot paths.
+
+- RED203642 → native build204103 → unchanged GREEN204246, exit0/no timeout,
+  no GPU gate/reset. GREEN EXE
+  `6d28ef3d678e9d706b3ad67942b2ca24495036c44fbf8fe52d48ff19b0f7cf8e`.
+  Original fixture `968bb009...` remains byte-identical.
+- Shared correction is11 production lines in BindlessTable.cpp/.h: track
+  actual whole-set recorded-use tick at commit and final preparation tick;
+  before unregistering referenced images, wait only an incomplete recorded
+  use via existing scheduler.Wait, then mutate descriptors/translation.
+  This submits a current pending tick when necessary and does not drain
+  general resource callbacks while cache/preparation references are held.
+  Unknown images and already completed uses avoid this wait.
+- Scope is recorded consumers. Earlier-stage preparation before recording
+  remains unproved and is not fixed by this test. Original geometry causality
+  is also unproved. Neighbor tests cover batching/replacement/no-region use
+  next; then retry original game with bounded vertex-output diagnostics.
+- Production/CMake inputs frozen for new native core build; test-only neighbor
+  work is parallel. No native build/test/game overlap. Preserve old runtimes.
+
+## Latest checkpoint: recorded-consumer sampled-pixel RED, 2026-10-11 20:37 UTC
+
+- Original fresh two-fix retry202640 finished20:32:45Z, exit0 after reaching
+  the360s bound (timedOut=true), graceful close, no forced cleanup/RAM guard.
+  Owned414/1180 screenshots still show covering surfaces and missing world/body.
+  Streams drained. Actual controller log has a brief mask4 host event; root
+  injected no keys and auto swipe/press/replay remain off. No stable gameplay
+  or new public milestone proved.
+- Native synthetic sampling target build203417 passed. Raw SPIR-V validation
+  against Vulkan1.3 and genuine opaque-red cache-image positive control passed.
+  Actual FreeImage then OnImageUnregistered changed both old translation and
+  sampled descriptor before a recorded consumer ran: both RGBA reads returned
+  zero rather than red. Intended GPU RED203642, no timeout, two loop-free
+  bounded dispatches, no GPU gate/reset. Test EXE
+  `e2986bdaf2a85ed07055eac4dbcb5344da162bdb40c8e3a7d736ac0caabbf26b`.
+- Unchanged oracle `BindlessDescriptorRetirementTests.inc`
+  SHA256 `968bb009b3a91a7b6c82a078fa67541bff21284dcfb5d552a89f8d3d36f8f610`.
+  Reproduction is actual sampled pixels and recording ownership; it does not
+  establish that this defect alone caused the original stretched geometry.
+- Shared production correction authorized after intended RED: protect recorded
+  consumers via existing scheduler completion ordering before both descriptor
+  and translation mutation. Avoid async stale heap callbacks or speculative
+  rewrites. Unchanged GREEN, neighboring lifetime cases and game retry follow.
+  Earlier-stage preparation ownership remains separate unproved coverage.
+
+## Latest checkpoint: game retry reauthorized and active, 2026-10-11 20:27 UTC
+
+Latest user instruction explicitly allows game launches and tests again.
+Keep manual input: automatic swipe/press/replay and root synthetic keys remain off.
+
+- Verified branch `yotei-integration-native`, clean engine diff, latest local
+  documentation HEAD90c5820e. Current installed source is d7895a56; exact
+  EXE `ad1e1c7d0d14170fa8b33dae2e265c235dfc9a7d0aba0b348896e27bcd38ee2c`.
+  No native emulator/test/compiler was active before this launch.
+- Bounded original retry started20:26:40 UTC, PID31996,
+  `_Build/runs/game-20261011-202640-integration-access-age-manual-d22388`,
+ 360s limit, same private saves/cache,1280x720, autoswipe0/compute-chain0.
+  This is the first game retry of BOTH completed lifecycle/access-age fixes.
+  Visual correctness remains pending until owned-window captures are inspected.
+- Native slot is occupied by the game. Production/CMake sources frozen;
+  parallel work is limited to read-only diagnosis and test-only construction.
+  Next required test is actual sampled readback across descriptor/translation
+  invalidation with completion ownership, not another metadata-only claim.
+
 ## Latest checkpoint: both fixes committed; fresh EXE ready, game held, 2026-10-11 19:16 UTC
 
 Latest user instruction: tests are allowed; **do not launch the game until the
