@@ -1,9 +1,11 @@
 #include "graphics/guest_gpu/gpu_format.h"
 
+#include "common/switches.h"
 #include "graphics/guest_gpu/gpu_defs.h"
 
 #include <array>
 #include <bit>
+#include <cstring>
 
 namespace Libs::Graphics::Prospero {
 namespace {
@@ -227,6 +229,14 @@ bool IsFmaskTextureFormat(BufferFormat format) {
 
 TextureNumericClass SampledTextureNumericClass(BufferFormat format) {
 	const auto* info = FindFormatInfo(format);
+	// KYTY_R8_SNORM_SAMPLING=1 (upstream 7e4e142a): R8 SNORM textures are sampled natively.
+	static const bool r8_snorm = [] {
+		const char* text = KYTY_GETENV("KYTY_R8_SNORM_SAMPLING");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	if (r8_snorm && format == BufferFormat::k8SNorm) {
+		return TextureNumericClass::Float;
+	}
 	if (info == nullptr || !info->sampled_texture) {
 		return TextureNumericClass::Unsupported;
 	}
