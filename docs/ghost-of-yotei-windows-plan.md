@@ -1,5 +1,33 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: both fixes committed; fresh EXE ready, game held, 2026-10-11 19:16 UTC
+
+Latest user instruction: tests are allowed; **do not launch the game until the
+user explicitly says to launch it**. Automatic pad swipe/press/replay stays off.
+
+- Branch `yotei-integration-native`. Separate local fixes: `6d08d859` preserves
+  live translation mappings; `d7895a56f34f1db10e3602490fc26019105327e5` refreshes
+  actual bindless image access ownership. Both have intended native RED/GREEN;
+  final neighbor scope and limitations are recorded below. No push.
+- Native current-source configure191412, core build191425 and install191523
+  passed. New private runtime:
+  `_Build/analysis/yotei-integration-20261011/runtime-bindless-access-age`.
+  Actual EXE SHA256
+  `ad1e1c7d0d14170fa8b33dae2e265c235dfc9a7d0aba0b348896e27bcd38ee2c`.
+  Exact source commit d7895a56, clean engine diff, computed/unpinned cache key,
+  private saves/cache copied; old runtimes and original game data preserved.
+- Prepared `run-bindless-access-age-manual.ps1` checks exact EXE/game/source
+  and uses autoswipe0/compute-chain0 with no inherited autopress/replay. Only
+  its nonexecuting DryRun preflight was performed; no game process started.
+- Visual result remains unresolved: earlier first-fix manual comparison had
+  severe covering stretched surfaces. The second correction has not been
+  retried in the game. Current tests prove host binding/access and feedback
+  behavior; they do not prove sampled pixels, a stable menu or gameplay.
+- [Fork comparison and next work](yotei-texture-lifetime-research.md): bounded
+  recorded/pending consumer sampling regression for descriptor/translation
+  retirement, then separate protection during earlier-stage preparation.
+  Native slot idle; no task-owned emulator/test/compiler remains running.
+
 ## Latest checkpoint: access-age correction and neighbors verified, 2026-10-11 19:11 UTC
 
 Tests only remain authorized; game launches are forbidden until the user
