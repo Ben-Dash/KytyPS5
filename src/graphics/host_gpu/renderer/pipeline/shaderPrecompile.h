@@ -4,6 +4,7 @@
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/shaderCompiler.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <span>
@@ -13,6 +14,9 @@
 #include <vector>
 
 namespace Libs::Graphics::ShaderPrecompile {
+
+inline constexpr uint32_t CurrentRecordVersion = 9;
+inline constexpr uint32_t LegacyRecordVersion  = 8;
 
 // Recompile from code and module-affecting metadata, without reading guest memory. User SGPR
 // contents and resource addresses are runtime inputs; the compiler needs only the SGPR count.
@@ -50,14 +54,20 @@ PermutationRecord Capture(const ShaderParams&                                 pa
 }
 
 // The codec writes individual scalars in little-endian order. It never copies a C++ object's
-// representation, padding, runtime pointers, or vertex descriptor/buffer addresses.
-bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes);
-bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record);
+// representation, padding, runtime pointers, or vertex descriptor/buffer addresses. Version 8
+// is explicit offline reconstruction only: it lacks pixel sample input, target mask and provoking
+// vertex mode. Encoding version 8 refuses nondefault values it cannot preserve.
+bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes,
+            uint32_t record_version = CurrentRecordVersion);
+bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record,
+            uint32_t record_version = CurrentRecordVersion);
 
 // Reads every valid record of a journal without opening it for appending or checking its key
-// (offline tools); `key` receives the journal's key. Stops at the first damaged record.
+// (offline tools); `key` receives the journal's key. Stops at the first damaged record. Legacy
+// journals require an explicit LegacyRecordVersion; their omitted pixel inputs are defaults.
 std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path,
-                                           std::string*                 key = nullptr);
+                                         std::string* key = nullptr,
+                                         uint32_t record_version = CurrentRecordVersion);
 
 // A journal belongs to one PipelineCache; its caller serializes Append/Close with that cache.
 // Open validates the header/checksums and repairs a torn tail before permitting appends. A

@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
 
+#include <array>
 #include <bit>
 #include <chrono>
 #include <cstdio>
@@ -7,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <xxhash.h>
 
 using namespace Libs::Graphics;
 using namespace Libs::Graphics::ShaderPrecompile;
@@ -64,8 +66,11 @@ PermutationRecord MakeRecord(ShaderType stage) {
     i.interpolator_settings[0] = 0x01234567;
     i.interpolator_settings[1] = 0x76543210;
     i.ps_perspective_center_vgpr = 2;
+    i.ps_perspective_sample_vgpr = 8;
     i.ps_perspective_centroid_vgpr = 4;
     i.ps_system_input_base = 6;
+    i.target_shader_mask = 0x000f000fu;
+    i.parameter_mode = ShaderPixelParameterMode::LastVertex;
     i.dual_source_blending = true;
     i.ps_sample_shading = true;
     i.ps_execute_on_noop = true;
@@ -183,6 +188,12 @@ void TestAllStagesRoundTrip() {
             "floating metadata preserves NaN payloads and negative zero");
     } else if (const auto *i =
                    std::get_if<ShaderPixelInputInfo>(&result.info)) {
+      Check(i->ps_perspective_sample_vgpr == 8,
+            "pixel sample interpolation VGPR survives the journal round trip");
+      Check(i->target_shader_mask == 0x000f000fu,
+            "pixel target shader mask survives the journal round trip");
+      Check(i->parameter_mode == ShaderPixelParameterMode::LastVertex,
+            "pixel provoking vertex mode survives the journal round trip");
       Check(i->ps_perspective_centroid_vgpr == 4 && i->dual_source_blending &&
                 i->target_export_mapping[3].packed == 0xc6 &&
                 i->ps_sample_shading &&
@@ -277,6 +288,158 @@ void TestInvalidRecords() {
         "live record limits are checked before array access");
 }
 
+PermutationRecord MakeLegacyPixelRecord() {
+  auto record = MakeRecord(ShaderType::Pixel);
+  auto &pixel = std::get<ShaderPixelInputInfo>(record.info);
+  pixel.ps_perspective_sample_vgpr = UINT32_MAX;
+  pixel.target_shader_mask = UINT32_MAX;
+  pixel.parameter_mode = ShaderPixelParameterMode::FirstVertex;
+  return record;
+}
+
+void TestPixelFieldBoundariesAndMalformedTail() {
+  for (uint32_t sample : std::array<uint32_t, 3>{0u, 254u, UINT32_MAX}) {
+    auto source = MakeLegacyPixelRecord();
+    std::get<ShaderPixelInputInfo>(source.info).ps_perspective_sample_vgpr = sample;
+    std::vector<uint8_t> bytes;
+    PermutationRecord decoded;
+    Check(Encode(source, bytes) && Decode(bytes, decoded),
+          "pixel sample VGPR boundaries encode and decode");
+    const auto &pixel = std::get<ShaderPixelInputInfo>(decoded.info);
+    Check(pixel.ps_perspective_sample_vgpr == sample &&
+              pixel.target_shader_mask == UINT32_MAX &&
+              pixel.parameter_mode == ShaderPixelParameterMode::FirstVertex,
+          "sample boundaries and default mask/FirstVertex survive");
+  }
+  for (uint32_t mask : std::array<uint32_t, 3>{0u, 0x000f000fu, UINT32_MAX}) {
+    auto source = MakeRecord(ShaderType::Pixel);
+    std::get<ShaderPixelInputInfo>(source.info).target_shader_mask = mask;
+    std::vector<uint8_t> bytes;
+    PermutationRecord decoded;
+    Check(Encode(source, bytes) && Decode(bytes, decoded) &&
+              std::get<ShaderPixelInputInfo>(decoded.info).target_shader_mask == mask,
+          "empty, sparse and full target masks survive");
+  }
+  for (uint32_t sample : std::array<uint32_t, 2>{255u, UINT32_MAX - 1u}) {
+    auto invalid = MakeRecord(ShaderType::Pixel);
+    std::get<ShaderPixelInputInfo>(invalid.info).ps_perspective_sample_vgpr = sample;
+    std::vector<uint8_t> bytes{0x7fu};
+    Check(!Encode(invalid, bytes) && bytes.empty(),
+          "invalid live sample VGPR is rejected without encoded output");
+  }
+  auto invalid_mode = MakeRecord(ShaderType::Pixel);
+  std::get<ShaderPixelInputInfo>(invalid_mode.info).parameter_mode =
+      static_cast<ShaderPixelParameterMode>(2u);
+  std::vector<uint8_t> bytes;
+  Check(!Encode(invalid_mode, bytes), "unknown live provoking vertex mode is rejected");
+  Check(Encode(MakeRecord(ShaderType::Pixel), bytes), "make complete pixel tail");
+  for (size_t remove : std::array<size_t, 4>{1u, 4u, 8u, 12u}) {
+    PermutationRecord output;
+    output.hash = 99;
+    Check(!Decode(std::span(bytes).first(bytes.size() - remove), output) && output.hash == 99,
+          "missing pixel tail fields are rejected without changing output");
+  }
+  for (size_t offset : std::array<size_t, 2>{bytes.size() - 12u, bytes.size() - 4u}) {
+    auto malformed = bytes;
+    SetWord(malformed, offset, offset == bytes.size() - 12u ? 255u : 2u);
+    PermutationRecord output;
+    output.hash = 99;
+    Check(!Decode(malformed, output) && output.hash == 99,
+          "malformed encoded sample VGPR or provoking mode is rejected");
+  }
+}
+
+void TestExplicitLegacyCodec() {
+  const auto source = MakeLegacyPixelRecord();
+  std::vector<uint8_t> legacy, current;
+  Check(Encode(source, legacy, LegacyRecordVersion) && Encode(source, current),
+        "legacy defaults encode only with an explicit legacy version");
+  Check(current.size() == legacy.size() + 12u,
+        "complete pixel records include all three additional scalar fields");
+  PermutationRecord decoded;
+  Check(Decode(legacy, decoded, LegacyRecordVersion), "explicit v8 decode remains available");
+  const auto &pixel = std::get<ShaderPixelInputInfo>(decoded.info);
+  Check(pixel.ps_perspective_sample_vgpr == UINT32_MAX &&
+            pixel.target_shader_mask == UINT32_MAX &&
+            pixel.parameter_mode == ShaderPixelParameterMode::FirstVertex,
+        "legacy decode explicitly reconstructs omitted pixel defaults");
+  std::vector<uint8_t> canonical;
+  Check(Encode(decoded, canonical, LegacyRecordVersion) && canonical == legacy,
+        "legacy default reconstruction preserves canonical v8 body bytes");
+  decoded.hash = 99;
+  Check(!Decode(legacy, decoded) && decoded.hash == 99,
+        "default current decoder never treats a legacy pixel body as complete");
+  Check(!Decode(current, decoded, LegacyRecordVersion) && decoded.hash == 99,
+        "legacy decoder rejects a complete pixel body with an unconsumed tail");
+  for (unsigned field = 0; field != 3; ++field) {
+    auto nondefault = source;
+    auto &info = std::get<ShaderPixelInputInfo>(nondefault.info);
+    if (field == 0) info.ps_perspective_sample_vgpr = 0u;
+    if (field == 1) info.target_shader_mask = 0u;
+    if (field == 2) info.parameter_mode = ShaderPixelParameterMode::LastVertex;
+    canonical.assign(1u, 0x7fu);
+    Check(!Encode(nondefault, canonical, LegacyRecordVersion) && canonical.empty(),
+          "legacy encoding refuses each known nondefault omitted field");
+  }
+  for (uint32_t version : std::array<uint32_t, 4>{0u, 7u, 10u, UINT32_MAX}) {
+    canonical.assign(1u, 0x7fu);
+    Check(!Encode(source, canonical, version) && canonical.empty() &&
+              !Decode(current, decoded, version) && decoded.hash == 99,
+          "unsupported explicit versions cannot encode or modify decoded output");
+  }
+}
+
+void TestJournalVersionSeparation() {
+  TestDirectory directory;
+  const auto legacy_path = directory.path / "legacy-v8.shaders";
+  const auto current_path = directory.path / "current-v9.shaders";
+  const std::string key = "synthetic-version-key";
+  std::vector<uint8_t> body;
+  Check(Encode(MakeLegacyPixelRecord(), body, LegacyRecordVersion),
+        "make a synthetic legacy record body");
+  std::vector<uint8_t> blob{'K', 'Y', 'T', 'Y', 'S', 'H', 'D', 'R'};
+  const auto word = [&](uint32_t value) {
+    const auto offset = blob.size();
+    blob.resize(offset + 4u);
+    SetWord(blob, offset, value);
+  };
+  word(LegacyRecordVersion);
+  word(static_cast<uint32_t>(key.size()));
+  blob.insert(blob.end(), key.begin(), key.end());
+  word(static_cast<uint32_t>(body.size()));
+  const auto checksum = XXH3_64bits(body.data(), body.size());
+  word(static_cast<uint32_t>(checksum));
+  word(static_cast<uint32_t>(checksum >> 32u));
+  blob.insert(blob.end(), body.begin(), body.end());
+  {
+    std::ofstream out(legacy_path, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(blob.data()),
+              static_cast<std::streamsize>(blob.size()));
+    out.close();
+    Check(static_cast<bool>(out), "write synthetic v8 journal");
+  }
+  Check(ReadJournal(legacy_path).empty(), "default offline reader does not accept legacy journals");
+  std::string read_key;
+  auto legacy = ReadJournal(legacy_path, &read_key, LegacyRecordVersion);
+  Check(legacy.size() == 1u && read_key == key,
+        "explicit offline v8 reader validates its header and checksum");
+  Journal journal;
+  Check(journal.Open(current_path, key).empty() && journal.IsOpen() &&
+            journal.Append(MakeRecord(ShaderType::Pixel)),
+        "runtime journal writes a separate current-version record");
+  journal.Close();
+  auto current = ReadJournal(current_path);
+  Check(current.size() == 1u &&
+            std::get<ShaderPixelInputInfo>(current[0].info).parameter_mode ==
+                ShaderPixelParameterMode::LastVertex,
+        "default reader preserves complete current journal metadata");
+  Check(ReadJournal(current_path, nullptr, LegacyRecordVersion).empty(),
+        "explicit legacy reader cannot relabel a current journal");
+  Check(std::filesystem::file_size(legacy_path) == blob.size() &&
+            ReadJournal(legacy_path, nullptr, LegacyRecordVersion).size() == 1u,
+        "current journal work leaves the legacy corpus intact");
+}
+
 void TestJournalRepairAndKeys() {
   TestDirectory directory;
   const auto path =
@@ -350,6 +513,9 @@ int main() {
   TestAllStagesRoundTrip();
   TestRuntimeInputsDoNotChangeRecords();
   TestInvalidRecords();
+  TestPixelFieldBoundariesAndMalformedTail();
+  TestExplicitLegacyCodec();
+  TestJournalVersionSeparation();
   TestJournalRepairAndKeys();
   TestGenericBufferKeysRoundTrip();
   std::printf("ShaderPrecompileRecordTests: all passed\n");

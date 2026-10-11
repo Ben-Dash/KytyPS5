@@ -12,7 +12,9 @@ namespace Libs::Graphics::ShaderPrecompile {
 namespace {
 
 constexpr std::array<uint8_t, 8> Magic {'K', 'Y', 'T', 'Y', 'S', 'H', 'D', 'R'};
-constexpr uint32_t               FormatVersion  = 8; // 4: vertex buffer_index, pixel alpha_blend_source_remap; 5: pixel alpha_blend_source; 6: bindless images; 7: pixel id_buffer_slot; 8: compute float_mode and lds_storage, mesh fast_launch, indirect buffers.
+constexpr uint32_t               FormatVersion  = CurrentRecordVersion;
+// 8: compute float_mode/lds_storage, mesh fast_launch, indirect buffers.
+// 9: pixel sample VGPR, target shader mask and provoking vertex mode.
 constexpr uint32_t               MaxCodeWords   = 256u * 1024u;
 constexpr uint32_t               MaxRecordBytes = 4u * 1024u * 1024u;
 constexpr uint64_t               MaxFileBytes   = 256u * 1024u * 1024u;
@@ -128,7 +130,7 @@ void Fields(Archive& a, ShaderWorkgroupInputInfo& i) {
 }
 
 template <typename Archive>
-void Fields(Archive& a, ShaderVertexInputInfo& i) {
+void Fields(Archive& a, ShaderVertexInputInfo& i, uint32_t /*record_version*/) {
 	a(i.logical_stage, i.resources_num, i.fetch_attrib_reg, i.fetch_buffer_reg, i.buffers_num,
 	  i.wave_size, i.scratch_size_dwords, i.pa_cl_vs_out_cntl);
 	if (i.resources_num < 0 || i.resources_num > ShaderVertexInputInfo::RES_MAX ||
@@ -163,7 +165,7 @@ void Fields(Archive& a, ShaderVertexInputInfo& i) {
 }
 
 template <typename Archive>
-void Fields(Archive& a, ShaderPixelInputInfo& i) {
+void Fields(Archive& a, ShaderPixelInputInfo& i, uint32_t record_version) {
 	a(i.interpolator_settings, i.input_num, i.wave_size, i.ps_system_input_base,
 	  i.custom_interpolation_mask, i.ps_perspective_center_vgpr, i.ps_perspective_centroid_vgpr,
 	  i.target_output_mode);
@@ -173,10 +175,13 @@ void Fields(Archive& a, ShaderPixelInputInfo& i) {
 	  i.ps_ancillary, i.ps_no_perspective, i.ps_pixel_kill_enable, i.ps_depth_export_enable,
 	  i.ps_sample_mask_export_enable, i.ps_sample_shading, i.dual_source_blending, i.ps_early_z,
 	  i.ps_execute_on_noop, i.alpha_blend_source, i.id_buffer_slot);
+	if (record_version == CurrentRecordVersion) {
+		a(i.ps_perspective_sample_vgpr, i.target_shader_mask, i.parameter_mode);
+	}
 }
 
 template <typename Archive>
-void Fields(Archive& a, ShaderComputeInputInfo& i) {
+void Fields(Archive& a, ShaderComputeInputInfo& i, uint32_t /*record_version*/) {
 	Fields(a, static_cast<ShaderWorkgroupInputInfo&>(i));
 	// Dispatch sizes are runtime-only; the module uses declared threads_num.
 	// float_mode is part of the program key; lds_storage is decided by the live path from the
@@ -216,7 +221,11 @@ bool IsVertexStage(ShaderType stage) {
 	       stage == ShaderType::TessellationControl || stage == ShaderType::TessellationEvaluation;
 }
 
-bool Valid(const PermutationRecord& r) {
+bool SupportedRecordVersion(uint32_t version) {
+	return version == LegacyRecordVersion || version == CurrentRecordVersion;
+}
+
+bool Valid(const PermutationRecord& r, uint32_t record_version) {
 	if (r.code.empty() || r.code.size() > MaxCodeWords || r.back_code.size() > MaxCodeWords ||
 	    r.user_data_count > ShaderParams {}.user_data.size() || r.user_data_base > 64u ||
 	    (r.wave_size != 32u && r.wave_size != 64u) ||
@@ -262,6 +271,17 @@ bool Valid(const PermutationRecord& r) {
 		return true;
 	}
 	if (const auto* i = std::get_if<ShaderPixelInputInfo>(&r.info)) {
+		if (record_version == LegacyRecordVersion) {
+			// A legacy body cannot carry these fields; never silently discard a known live value.
+			if (i->ps_perspective_sample_vgpr != UINT32_MAX || i->target_shader_mask != UINT32_MAX ||
+			    i->parameter_mode != ShaderPixelParameterMode::FirstVertex)
+				return false;
+		} else if ((i->ps_perspective_sample_vgpr != UINT32_MAX &&
+			        i->ps_perspective_sample_vgpr >= 255u) ||
+			       (i->parameter_mode != ShaderPixelParameterMode::FirstVertex &&
+			        i->parameter_mode != ShaderPixelParameterMode::LastVertex)) {
+			return false;
+		}
 		return r.stage == ShaderType::Pixel && i->input_num <= 32u && i->wave_size == r.wave_size &&
 		       i->ps_system_input_base <= 255u &&
 		       (i->ps_perspective_center_vgpr == UINT32_MAX ||
@@ -283,9 +303,10 @@ bool Write(std::ofstream& out, std::span<const uint8_t> bytes) {
 
 } // namespace
 
-bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes) {
+bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes,
+            uint32_t record_version) {
 	bytes.clear();
-	if (!Valid(record)) return false;
+	if (!SupportedRecordVersion(record_version) || !Valid(record, record_version)) return false;
 	// Fields is shared by reader and writer. The writer changes only this temporary's
 	// runtime address fields, ensuring those cannot accidentally enter the persistent format.
 	auto    r = record;
@@ -296,14 +317,16 @@ bool Encode(const PermutationRecord& record, std::vector<uint8_t>& bytes) {
 	a.Words(r.code);
 	a.Words(r.back_code);
 	Specialization(a, r.specialization);
-	std::visit([&](auto& i) { Fields(a, i); }, r.info);
+	std::visit([&](auto& i) { Fields(a, i, record_version); }, r.info);
 	if (!a.ok || a.bytes.size() > MaxRecordBytes) return false;
 	bytes = std::move(a.bytes);
 	return true;
 }
 
-bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record) {
-	if (bytes.empty() || bytes.size() > MaxRecordBytes) return false;
+bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record,
+            uint32_t record_version) {
+	if (!SupportedRecordVersion(record_version) || bytes.empty() || bytes.size() > MaxRecordBytes)
+		return false;
 	Decoder           a {bytes};
 	PermutationRecord r;
 	a(r.stage);
@@ -320,8 +343,8 @@ bool Decode(std::span<const uint8_t> bytes, PermutationRecord& record) {
 		r.info = ShaderComputeInputInfo {};
 	else
 		return false;
-	std::visit([&](auto& i) { Fields(a, i); }, r.info);
-	if (!a.ok || a.Remaining() != 0 || !Valid(r)) return false;
+	std::visit([&](auto& i) { Fields(a, i, record_version); }, r.info);
+	if (!a.ok || a.Remaining() != 0 || !Valid(r, record_version)) return false;
 	record = std::move(r);
 	return true;
 }
@@ -400,8 +423,10 @@ std::vector<PermutationRecord> Journal::Open(const std::filesystem::path& path,
 	return records;
 }
 
-std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path, std::string* key) {
+std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path, std::string* key,
+                                          uint32_t record_version) {
 	std::vector<PermutationRecord> records;
+	if (!SupportedRecordVersion(record_version)) return records;
 	std::error_code                ec;
 	const auto                     size = std::filesystem::file_size(path, ec);
 	if (ec || size > MaxFileBytes) return records;
@@ -414,7 +439,7 @@ std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path, st
 	Decoder envelope {blob, Magic.size()};
 	const auto version    = envelope.Word();
 	const auto key_length = envelope.Word();
-	if (!envelope.ok || version != FormatVersion || key_length > MaxKeyBytes ||
+	if (!envelope.ok || version != record_version || key_length > MaxKeyBytes ||
 	    key_length > envelope.Remaining())
 		return records;
 	if (key != nullptr) {
@@ -428,7 +453,8 @@ std::vector<PermutationRecord> ReadJournal(const std::filesystem::path& path, st
 			break;
 		const auto        body = std::span(blob).subspan(envelope.offset, bytes);
 		PermutationRecord record;
-		if (XXH3_64bits(body.data(), body.size()) != checksum || !Decode(body, record)) break;
+		if (XXH3_64bits(body.data(), body.size()) != checksum ||
+		    !Decode(body, record, record_version)) break;
 		records.push_back(std::move(record));
 		envelope.offset += bytes;
 	}

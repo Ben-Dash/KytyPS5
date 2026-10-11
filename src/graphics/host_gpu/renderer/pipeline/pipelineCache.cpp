@@ -1692,7 +1692,10 @@ void PipelineCache::InitializeShaderPrecompile() {
 	if (!Config::ShaderPrecompileEnabled() || !m_driver_cache ||
 	    m_driver_cache_path.empty())
 		return;
-	auto path = m_driver_cache_path.parent_path() / (PipelineCacheTitleId() + ".shaders");
+	// Keep older journals intact: legacy pixel records omit compiler-affecting inputs.
+	auto path = m_driver_cache_path.parent_path() /
+	            fmt::format("{}.v{}.shaders", PipelineCacheTitleId(),
+	                        ShaderPrecompile::CurrentRecordVersion);
 	auto        key = DriverCacheSignature(m_graphics.GetPhysicalDeviceProperties());
 	std::string app_version;
 	(void)Loader::SystemContentParamSfoGetString("APP_VER", &app_version);

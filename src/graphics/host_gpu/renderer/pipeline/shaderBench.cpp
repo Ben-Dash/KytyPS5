@@ -769,6 +769,14 @@ int Run(int argc, char* argv[]) {
 	std::string key;
 	auto        records = ShaderPrecompile::ReadJournal(o.journal, &key);
 	if (records.empty()) {
+		records = ShaderPrecompile::ReadJournal(o.journal, &key,
+		                                       ShaderPrecompile::LegacyRecordVersion);
+		if (!records.empty()) {
+			std::printf("journal: format 8, reconstructed defaults; omitted pixel metadata "
+			            "prevents original-input equivalence\n");
+		}
+	}
+	if (records.empty()) {
 		records = ReadLegacyComputeRecords(o.journal, key);
 		if (!records.empty()) {
 			std::printf("journal: format 7, compute records only\n");
