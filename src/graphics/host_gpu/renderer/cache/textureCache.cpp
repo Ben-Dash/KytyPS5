@@ -963,6 +963,10 @@ void TextureCache::CopyImage(ImageId destination_id, ImageId source_id) {
 		MarkGpuModified(destination);
 	}
 	destination.ClearBufferModified();
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		PixelHistoryProbe(m_graphics, m_scheduler, destination, 0, 0, "copy", 0, 0,
+		                  fmt::format("from image 0x{:x}", source.info.data.address), true);
+	}
 }
 
 void TextureCache::CopyImageMip(ImageId destination_id, ImageId source_id, uint32_t mip,
@@ -976,6 +980,10 @@ void TextureCache::CopyImageMip(ImageId destination_id, ImageId source_id, uint3
 		EXIT("TextureCache: invalid mip-copy ownership or sample count\n");
 	}
 	destination.CopyMip(source, mip, layer);
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		PixelHistoryProbe(m_graphics, m_scheduler, destination, 0, 0, "copy-mip", 0, 0,
+		                  fmt::format("from image 0x{:x} mip {} layer {}", source.info.data.address, mip, layer), true);
+	}
 	if (source.IsGpuModified()) {
 		MarkGpuModified(destination);
 	}
@@ -1444,6 +1452,11 @@ void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_off
 		}
 	}
 	upload(copies, linear);
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		PixelHistoryProbe(m_graphics, m_scheduler, destination, 0, 0,
+		                  image.depth_id ? "upload-stencil" : "upload", 0, 0,
+		                  fmt::format("from guest 0x{:x}", image.info.data.address), true);
+	}
 }
 
 void TextureCache::InitializeImage(ImageId id) {
@@ -2007,6 +2020,11 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	keeper.pitch  = info.pitch;
 	keeper.size   = size;
 	depth.Download(copies, keeper.buffer->Handle(), 0, size, keeper.buffer->Size());
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		// The value kept: the depth image's stencil plane as it is copied out.
+		PixelHistoryProbe(m_graphics, m_scheduler, depth, 0, record.stencil_subresources.base_layer,
+		                  "keep-stencil", 0, 0, "copied to keeper", true);
+	}
 }
 
 // A keeper's buffer is the source of RestoreStencil's upload and the target of KeepStencil's
@@ -2067,6 +2085,10 @@ bool TextureCache::RestoreStencil(Image& image, bool stencil_aspect) {
 	                     stencil_aspect ? vk::ImageAspectFlagBits::eStencil
 	                                    : vk::ImageAspectFlagBits::eColor);
 	image.Upload(copies, keeper.buffer->Handle(), 0, keeper.size, keeper.buffer->Size());
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		PixelHistoryProbe(m_graphics, m_scheduler, image, 0, 0, "restore-stencil", 0, 0,
+		                  stencil_aspect ? "into depth stencil plane" : "into 8-bit texture", true);
+	}
 	return true;
 }
 
@@ -2953,6 +2975,14 @@ void TextureCache::ClearImage(CommandBuffer& command, ImageId id, vk::Format for
 		                                        &clear.depthStencil, 1, &native_range);
 	}
 	CommitGpuWrite(image);
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		PixelHistoryProbe(m_graphics, m_scheduler, image, range.baseMipLevel, range.baseArrayLayer, "clear", 0, 0,
+		                  range.aspectMask == vk::ImageAspectFlagBits::eColor
+		                      ? fmt::format("color {:08x}", clear.color.uint32[0])
+		                      : fmt::format("depth {} stencil {:02x} aspects {:x}", clear.depthStencil.depth,
+		                                    clear.depthStencil.stencil, static_cast<uint32_t>(range.aspectMask)),
+		                  true);
+	}
 }
 
 void TextureCache::InvalidateMemory(uint64_t address, uint64_t size) {

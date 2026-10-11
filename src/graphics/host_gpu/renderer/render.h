@@ -48,6 +48,12 @@ struct RenderExecutorTestAccess;
 [[nodiscard]] bool ImageUsersEnabled();
 // KYTY_PIXEL_HISTORY (renderDraw.cpp).
 [[nodiscard]] bool PixelHistoryEnabled();
+class Image;
+// Copies the watched texel of `image` (level, layer) after a command that may have written it;
+// the texture cache calls it after clears, copies and stencil keep/restore.
+void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Image& image, uint32_t level,
+                       uint32_t layer, const char* kind, uint64_t first_hash, uint64_t second_hash,
+                       const std::string& detail, bool new_call);
 void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stages,
                     std::span<const RenderColorInfo> colors, const RenderDepthInfo* depth,
                     uint64_t pixel_hash, uint64_t vertex_hash);
@@ -254,7 +260,7 @@ public:
 	// just wrote, and prints the writes that changed it once the GPU has run them.
 	void PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,
 	                        const char* kind, uint64_t first_hash, uint64_t second_hash,
-	                        bool new_call);
+	                        bool new_call, const std::string& detail = {});
 	bool ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key);
 	// KYTY_BINDLESS_EAGER: resolves every image T# key of a heap nothing has resolved yet.
 	void ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint32_t entries, uint64_t shader_hash);

@@ -3296,6 +3296,12 @@ struct PixelHistoryConfig {
 	uint64_t address     = 0;
 	uint64_t first_frame = 0;
 	uint64_t last_frame  = UINT64_MAX;
+	// KYTY_PIXEL_HISTORY_STENCIL=1: a depth target or depth texture with stencil is sampled in its
+	// stencil plane (one byte) instead of its depth.
+	bool     stencil     = false;
+	// KYTY_PIXEL_HISTORY_STENCIL=<address> (or line 3 of pixel_history.txt): the stencil at that
+	// guest address, in depth images' stencil planes and in images placed there.
+	uint64_t stencil_address = 0;
 };
 
 static const PixelHistoryConfig& GetPixelHistoryConfig() {
@@ -3310,10 +3316,12 @@ static const PixelHistoryConfig& GetPixelHistoryConfig() {
 		// 3840x2160 target.
 		static std::string from_file;
 		static std::string frames_from_file;
+		static std::string stencil_from_file;
 		if (std::strcmp(text, "1") == 0) {
 			std::ifstream file("pixel_history.txt");
 			std::getline(file, from_file);
 			std::getline(file, frames_from_file);
+			std::getline(file, stencil_from_file);
 			if (from_file.empty()) {
 				from_file = "1920,1080";
 			}
@@ -3330,6 +3338,14 @@ static const PixelHistoryConfig& GetPixelHistoryConfig() {
 		result.x       = x;
 		result.y       = y;
 		result.address = fields >= 3 ? address : 0;
+		const char* stencil = KYTY_GETENV("KYTY_PIXEL_HISTORY_STENCIL");
+		if (stencil == nullptr && !stencil_from_file.empty()) {
+			stencil = stencil_from_file.c_str();
+		}
+		if (stencil != nullptr && *stencil != '\0' && std::strcmp(stencil, "0") != 0) {
+			result.stencil         = true;
+			result.stencil_address = std::strcmp(stencil, "1") == 0 ? 0 : std::strtoull(stencil, nullptr, 16);
+		}
 		const char* frames = KYTY_GETENV("KYTY_PIXEL_HISTORY_FRAMES");
 		if (frames == nullptr && !frames_from_file.empty()) {
 			frames = frames_from_file.c_str();
@@ -3367,35 +3383,40 @@ struct PixelHistorySampleRecord {
 	uint32_t    bytes  = 0;
 	int         format = 0;
 	const char* kind   = "";
+	std::string detail;
 };
 
-void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,
-                                        const char* kind, uint64_t first_hash, uint64_t second_hash,
-                                        bool new_call) {
+namespace {
+std::mutex                                             g_pixel_history_mutex;
+uint64_t                                               g_pixel_history_frame = UINT64_MAX;
+uint64_t                                               g_pixel_history_call  = 0;
+} // namespace
+
+void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Image& image, uint32_t level,
+                       uint32_t layer, const char* kind, uint64_t first_hash, uint64_t second_hash,
+                       const std::string& detail, bool new_call) {
 	const auto& config = GetPixelHistoryConfig();
 	if (!config.enabled) {
 		return;
 	}
 	constexpr uint32_t Slots     = 4096;
 	constexpr uint32_t SlotBytes = 16;
-	static std::unique_ptr<Buffer>               readback;
-	static std::deque<PixelHistorySampleRecord>  pending;
+	static std::unique_ptr<Buffer>                               readback;
+	static std::deque<PixelHistorySampleRecord>                  pending;
 	static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last_value;
-	static uint32_t next_slot   = 0;
-	static uint64_t draw_frame  = UINT64_MAX;
-	static uint64_t draw_number = 0;
-	auto&           scheduler   = m_context.GetCommandScheduler();
+	static uint32_t                                              next_slot = 0;
+	std::lock_guard                                              lock(g_pixel_history_mutex);
 	if (readback == nullptr) {
-		readback = std::make_unique<Buffer>(m_context.GetGraphics(), scheduler, MemoryUsage::Download, 0,
+		readback = std::make_unique<Buffer>(graphics, scheduler, MemoryUsage::Download, 0,
 		                                    vk::BufferUsageFlagBits::eTransferDst, Slots * SlotBytes);
 	}
-	const auto frame = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
-	if (frame != draw_frame) {
-		draw_frame  = frame;
-		draw_number = 0;
+	const auto frame = graphics.presented_frames.load(std::memory_order_relaxed);
+	if (frame != g_pixel_history_frame) {
+		g_pixel_history_frame = frame;
+		g_pixel_history_call  = 0;
 	}
 	if (new_call) {
-		draw_number++;
+		g_pixel_history_call++;
 	}
 	// Print what the GPU has run.
 	while (!pending.empty() && scheduler.IsFree(pending.front().tick)) {
@@ -3407,70 +3428,96 @@ void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const
 		std::array<uint32_t, 4> value {};
 		std::memcpy(value.data(), readback->Mapped().data() + sample.slot * SlotBytes, sample.bytes);
 		const auto previous = last_value.find(sample.image);
-		const bool changed  = previous == last_value.end() || previous->second != value;
-		if (changed) {
-			const auto words = [&](const std::array<uint32_t, 4>& v) {
-				std::string out;
-				for (uint32_t i = 0; i < (sample.bytes + 3u) / 4u; i++) {
-					out += fmt::format("{}{:08x}", i == 0 ? "" : ",", v[i]);
-				}
-				return out;
-			};
-			std::printf("\x1b[91mpixel-history: frame %llu draw %llu %s image=0x%016llx format=%d %s=%016llx %s=%016llx "
-			            "before=%s after=%s\x1b[0m\n",
-			            static_cast<unsigned long long>(sample.frame), static_cast<unsigned long long>(sample.draw),
-			            sample.kind, static_cast<unsigned long long>(sample.image), sample.format,
-			            std::strcmp(sample.kind, "dispatch") == 0 ? "cs" : "vs",
-			            static_cast<unsigned long long>(sample.first),
-			            std::strcmp(sample.kind, "dispatch") == 0 ? "--" : "ps",
-			            static_cast<unsigned long long>(sample.second),
-			            previous == last_value.end() ? "(first)" : words(previous->second).c_str(),
-			            words(value).c_str());
-			std::fflush(stdout);
-			last_value[sample.image] = value;
+		if (previous != last_value.end() && previous->second == value) {
+			continue;
 		}
+		const auto words = [&](const std::array<uint32_t, 4>& v) {
+			std::string out;
+			for (uint32_t i = 0; i < (sample.bytes + 3u) / 4u; i++) {
+				out += fmt::format("{}{:0{}x}", i == 0 ? "" : ",", v[i], sample.bytes == 1 ? 2 : 8);
+			}
+			return out;
+		};
+		const bool dispatch = std::strcmp(sample.kind, "dispatch") == 0;
+		std::printf("\x1b[91mpixel-history: frame %llu call %llu %s image=0x%016llx format=%d %s=%016llx %s=%016llx%s%s "
+		            "before=%s after=%s\x1b[0m\n",
+		            static_cast<unsigned long long>(sample.frame), static_cast<unsigned long long>(sample.draw),
+		            sample.kind, static_cast<unsigned long long>(sample.image), sample.format,
+		            dispatch ? "cs" : "vs", static_cast<unsigned long long>(sample.first),
+		            dispatch ? "--" : "ps", static_cast<unsigned long long>(sample.second),
+		            sample.detail.empty() ? "" : " ", sample.detail.c_str(),
+		            previous == last_value.end() ? "(first)" : words(previous->second).c_str(),
+		            words(value).c_str());
+		std::fflush(stdout);
+		last_value[sample.image] = value;
 	}
 	if (frame < config.first_frame || frame > config.last_frame || pending.size() >= Slots) {
 		return;
 	}
-	auto& cache = m_context.GetTextureCache();
-	auto* image = cache.m_slot_images.try_get(id);
-	if (image == nullptr || image->backing.image == nullptr || image->backing.samples != 1 ||
-	    image->info.IsBlock() || image->info.bytes_per_block == 0 || image->info.bytes_per_block > SlotBytes ||
-	    (config.address != 0 && image->info.data.address != config.address)) {
+	const bool depth = image.info.IsDepth();
+	// The watched image, or with KYTY_PIXEL_HISTORY_STENCIL=<address> the stencil: a depth image's
+	// stencil plane at that address, or an image there (Ghost of Yotei's R8Uint stencil view).
+	const bool stencil_plane = depth && image.info.HasStencil() &&
+	                           (config.stencil_address != 0 ? image.info.stencil.address == config.stencil_address
+	                                                        : config.stencil && image.info.data.address == config.address);
+	const bool stencil_image = config.stencil_address != 0 && !depth && image.info.data.address == config.stencil_address;
+	const bool watched       = config.address == 0 || image.info.data.address == config.address;
+	if (image.backing.image == nullptr || image.backing.samples != 1 || image.info.IsBlock() ||
+	    image.info.bytes_per_block == 0 || image.info.bytes_per_block > SlotBytes ||
+	    (!watched && !stencil_plane && !stencil_image)) {
 		return;
 	}
-	const auto width  = std::max(image->backing.extent.width >> view.base_level, 1u);
-	const auto height = std::max(image->backing.extent.height >> view.base_level, 1u);
-	if (config.x >= width || config.y >= height) {
+	const auto width  = std::max(image.backing.extent.width >> level, 1u);
+	const auto height = std::max(image.backing.extent.height >> level, 1u);
+	if (config.x >= width || config.y >= height || level >= image.backing.mip_levels ||
+	    layer >= image.backing.layers) {
 		return;
 	}
-	const bool depth   = image->info.IsDepth();
-	const auto aspect  = depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor;
-	const auto bytes   = depth ? 4u : image->info.bytes_per_block;
-	const auto slot    = next_slot;
-	next_slot          = (next_slot + 1u) % Slots;
-	buffer.EndRendering();
-	auto command = buffer.Handle();
-	const auto& states    = image->backing.subresource_states;
-	const auto  index     = view.base_level * image->info.resources.layers + view.base_layer;
-	const auto& state     = index < states.size() ? states[index] : image->backing.state;
+	const auto aspect = stencil_plane ? vk::ImageAspectFlagBits::eStencil
+	                    : depth       ? vk::ImageAspectFlagBits::eDepth
+	                                  : vk::ImageAspectFlagBits::eColor;
+	const auto bytes  = stencil_plane ? 1u : depth ? 4u : image.info.bytes_per_block;
+	const auto slot   = next_slot;
+	next_slot         = (next_slot + 1u) % Slots;
+	scheduler.EndRendering();
+	auto        command    = scheduler.Current().Handle();
+	const auto& states     = image.backing.subresource_states;
+	const auto  index      = level * image.info.resources.layers + layer;
+	const auto& state      = index < states.size() ? states[index] : image.backing.state;
 	const auto  old_layout = state.layout;
 	const auto  old_access = state.access_mask;
-	const ImageSubresourceRange range {view.base_level, 1, view.base_layer, 1};
-	image->Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, range, command);
+	const ImageSubresourceRange range {level, 1, layer, 1};
+	image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, range, command);
 	vk::BufferImageCopy copy {};
-	copy.bufferOffset      = slot * SlotBytes;
-	copy.imageSubresource  = {aspect, view.base_level, view.base_layer, 1};
-	copy.imageOffset       = vk::Offset3D {static_cast<int32_t>(config.x), static_cast<int32_t>(config.y), 0};
-	copy.imageExtent       = vk::Extent3D {1, 1, 1};
-	command.copyImageToBuffer(image->backing.image, vk::ImageLayout::eTransferSrcOptimal, readback->Handle(), 1,
+	copy.bufferOffset     = slot * SlotBytes;
+	copy.imageSubresource = {aspect, level, layer, 1};
+	copy.imageOffset      = vk::Offset3D {static_cast<int32_t>(config.x), static_cast<int32_t>(config.y), 0};
+	copy.imageExtent      = vk::Extent3D {1, 1, 1};
+	command.copyImageToBuffer(image.backing.image, vk::ImageLayout::eTransferSrcOptimal, readback->Handle(), 1,
 	                          &copy);
 	if (old_layout != vk::ImageLayout::eUndefined) {
-		image->Transit(old_layout, old_access, range, command);
+		image.Transit(old_layout, old_access, range, command);
 	}
-	pending.push_back({scheduler.CurrentTick(), frame, draw_number, first_hash, second_hash,
-	                   image->info.data.address, slot, bytes, static_cast<int>(image->backing.format), kind});
+	// The stencil plane is tracked apart from the depth of the same image.
+	const uint64_t key = image.info.data.address ^ (stencil_plane ? 1u : 0u);
+	pending.push_back({scheduler.CurrentTick(), frame, g_pixel_history_call, first_hash, second_hash, key, slot,
+	                   bytes, static_cast<int>(image.backing.format),
+	                   stencil_plane && std::strcmp(kind, "draw-depth") == 0 ? "draw-stencil" : kind, detail});
+}
+
+void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,
+                                        const char* kind, uint64_t first_hash, uint64_t second_hash,
+                                        bool new_call, const std::string& detail) {
+	if (!GetPixelHistoryConfig().enabled) {
+		return;
+	}
+	auto* image = m_context.GetTextureCache().m_slot_images.try_get(id);
+	if (image == nullptr) {
+		return;
+	}
+	buffer.EndRendering();
+	PixelHistoryProbe(m_context.GetGraphics(), m_context.GetCommandScheduler(), *image, view.base_level,
+	                  view.base_layer, kind, first_hash, second_hash, detail, new_call);
 }
 
 void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
@@ -3644,9 +3691,21 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 				PixelHistorySample(buffer, state.color_info[i].image_id, state.color_info[i].desc.view_info,
 				                   "draw", vs_hash, ps_hash, std::exchange(first, false));
 			}
-			if (any_target && state.depth_info.image_id) {
-				PixelHistorySample(buffer, state.depth_info.image_id, state.depth_info.desc.view_info,
-				                   "draw-depth", vs_hash, ps_hash, std::exchange(first, false));
+			if ((any_target || GetPixelHistoryConfig().stencil) && state.depth_info.image_id) {
+				const auto& d  = state.depth_info;
+				const auto  op = [](const vk::StencilOpState& o) {
+					return fmt::format("{}/{}/{}/{} ref={:02x} wmask={:02x}", static_cast<int>(o.compareOp),
+					                   static_cast<int>(o.passOp), static_cast<int>(o.failOp),
+					                   static_cast<int>(o.depthFailOp), o.reference, o.writeMask);
+				};
+				const auto detail =
+				    d.stencil_test_enable || d.stencil_clear_enable
+				        ? fmt::format("stencil test={} clear={}({:02x}) front={} back={}", d.stencil_test_enable ? 1 : 0,
+				                      d.stencil_clear_enable ? 1 : 0, d.stencil_clear_value, op(d.stencil_front),
+				                      op(d.stencil_back))
+				        : std::string("stencil off");
+				PixelHistorySample(buffer, d.image_id, d.desc.view_info, "draw-depth", vs_hash, ps_hash,
+				                   std::exchange(first, false), detail);
 			}
 		}
 		ResetBindings();
@@ -3789,9 +3848,21 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 				PixelHistorySample(buffer, state.color_info[i].image_id, state.color_info[i].desc.view_info,
 				                   "draw", vs_hash, ps_hash, std::exchange(first, false));
 			}
-			if (any_target && state.depth_info.image_id) {
-				PixelHistorySample(buffer, state.depth_info.image_id, state.depth_info.desc.view_info,
-				                   "draw-depth", vs_hash, ps_hash, std::exchange(first, false));
+			if ((any_target || GetPixelHistoryConfig().stencil) && state.depth_info.image_id) {
+				const auto& d  = state.depth_info;
+				const auto  op = [](const vk::StencilOpState& o) {
+					return fmt::format("{}/{}/{}/{} ref={:02x} wmask={:02x}", static_cast<int>(o.compareOp),
+					                   static_cast<int>(o.passOp), static_cast<int>(o.failOp),
+					                   static_cast<int>(o.depthFailOp), o.reference, o.writeMask);
+				};
+				const auto detail =
+				    d.stencil_test_enable || d.stencil_clear_enable
+				        ? fmt::format("stencil test={} clear={}({:02x}) front={} back={}", d.stencil_test_enable ? 1 : 0,
+				                      d.stencil_clear_enable ? 1 : 0, d.stencil_clear_value, op(d.stencil_front),
+				                      op(d.stencil_back))
+				        : std::string("stencil off");
+				PixelHistorySample(buffer, d.image_id, d.desc.view_info, "draw-depth", vs_hash, ps_hash,
+				                   std::exchange(first, false), detail);
 			}
 		}
 		ResetBindings();
