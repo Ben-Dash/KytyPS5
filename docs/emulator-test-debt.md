@@ -43,7 +43,17 @@ Include host ResolveDrawOffsets/native baseVertex plus guest prolog offset
 and mixed native/manual reads; CPU expression evaluation supplies raw input
 independently and cannot prove Vulkan builtin/native-offset equivalence.
 Derive guest register initialization and host addressing separately before
-any new ABI correction. No numerical GPU vertex proof is currently claimed.
+any new ABI correction. Masked-fetch numerical proof is now established by
+unchanged real GPU oracle221933 RED (frontend6ba only) ->222119 GREEN4f0c1f9d:
+wrong55667788 native raw-index sentinel becomes expected11223344 shader
+index1, with full001d0001/high29 preserved. Canonical control passes both.
+Host offset/builtin equivalence and a working original world remain pending.
+
+Position tracing must include vertex-image sample results, coordinates and
+sampler/T# when the selected branch depends on them. Actual2a SSA union
+contains3 ImageSample operations; vertex-image CONTENTS are absent from draw
+snapshots. Matching finite packed buffers alone do not prove all shader inputs
+finite. No arithmetic/format/sampling correction is justified yet.
 
 ## Exported-position / transformed-index investigation (2026-10-11 21:05 UTC)
 

@@ -1,5 +1,39 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: actual masked-fetch GPU RED/GREEN and current v9 IR, 2026-10-11 22:21 UTC
+
+- Same synthetic `--embedded-fetch-gpu-readback` on real RTX5060Ti:
+  first current run221901 passes; scoped frontend-only reversal to6ba,
+  native build221916/run221933 produces intended numerical RED (EXEd62a0445).
+  Canonical positive control reads11223344/index1/high0; masked raw001d0001
+  wrongly reads native raw-index sentinel55667788 (full raw/high29 preserved).
+  No timeout/GPU reset/loop; one indexed point, real24-byte shader buffer,
+  valid7.25MiB native buffer prevents an out-of-bounds failure masquerading as RED.
+- Frontend restored byte-exact4f0c1f9d; build222040/SAME GREEN222119 passes
+  both numerical readbacks on EXE8333f4ba77f3647064d45c8829e77f500571c69c7fa4feb19208f17185130995.
+  SPIR-V validates before draw; actual public translation/materialization/
+  compilation and real shader-store readback prove masked fetch ownership.
+  Native-offset/guest-builtin equivalence and other games remain unproved.
+  This validates f2593c61 but has NOT solved the observed world-output blocker.
+- Journal worker now supports declared8/9 exact codec roundtrips and opt-in
+  decoded/translated/compiled IR. Native build221552; v8 control and v9 PS/db
+  audits221758 pass SPIR-V validation, v9 PS fields retained (no omitted fields).
+  Old2a record824 fails expected specialization/resource-shape gate after the
+  frontend change; gate preserved. Fresh current2a record818 passes222119,
+  SPIR-V59745words and full IR saved. These are reconstructed CPU profiles,
+  not original userdata/materialization/live-SPIR-V equivalence or GPU proof.
+- Fresh frozen v9 journal: SHA f10250132c0d1858fa8752b9fcfa4ec93582119de8f6878a1642dfc64c93ba8b,
+  1924 records fully framed/checksummed. Artifact manifests and metadata matches
+  `journal-audit-current-220706-20261011T2218516940404Z-95df3ad1`; current2a818
+  matches17 compiled buffers, captured db946 matches20 (db1607 another variant).
+- Additional source limit: actual2a Position dependency union includes vertex
+  ImageSample operations. Draw snapshots do not capture vertex-image contents.
+  Matching finite stored vertex buffers therefore do not prove all Position
+  inputs finite. Next required work: selected actual load/sample result and
+  first nonfinite arithmetic trace with explicit branch/draw attribution.
+  Original run220706's -3/-4 screenshots remain the latest visual evidence;
+  partial objects/NaN output still unresolved. No native process remains.
+
 ## Latest checkpoint: requested fresh screenshots and exact input agreement, 2026-10-11 22:14 UTC
 
 - Source f2593c61 plus opt-in diagnostic083aaeae; private EXE680632d7.
