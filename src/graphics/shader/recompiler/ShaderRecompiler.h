@@ -60,6 +60,9 @@ void SetTableMode(bool enabled);
 // KYTY_WAVE_BRANCH_FULL=1 (upstream a8beac19, A/B against be258e8b): a scalar branch decides on the
 // scalar condition over the whole guest wave, lanes EXEC disabled included.
 [[nodiscard]] bool WaveBranchFull();
+// KYTY_NGG_VERTEX_COUNT=1 (upstream cf77fb43): a vertex shader's merged-wave info reports the
+// active lanes as its vertex count instead of the whole wave.
+[[nodiscard]] bool NggVertexCount();
 
 // Packed FP16 arithmetic runs as native 16-bit float vectors (shaderFloat16 with FP16 denormals
 // and signed zero/Inf/NaN preserved) instead of through F32. Set before any compile, only when the

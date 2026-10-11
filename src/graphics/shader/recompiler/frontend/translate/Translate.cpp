@@ -1623,8 +1623,20 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 			} else {
 				entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(2),
 				                      IR::U32(IR::Value(options.wave_size << 12u)));
-				entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
-				                      IR::U32(IR::Value((1u << 28u) | options.wave_size)));
+				// KYTY_NGG_VERTEX_COUNT=1 (upstream cf77fb43): ESVertCount is the number of active
+				// lanes (input vertices), not the wave size.
+				if (ShaderRecompiler::NggVertexCount()) {
+					auto vertex_count = IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[0]}));
+					if (options.wave_size == 64u) {
+						vertex_count = entry_ir.IAdd(
+						    vertex_count, IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[1]})));
+					}
+					entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
+					                      entry_ir.BitwiseOr(vertex_count, IR::U32(IR::Value(1u << 28u))));
+				} else {
+					entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
+					                      IR::U32(IR::Value((1u << 28u) | options.wave_size)));
+				}
 			}
 			entry_ir.SetVectorReg(static_cast<IR::VectorReg>(5),
 			                      builtin(IR::StageInputKind::VertexIndex));

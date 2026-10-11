@@ -517,6 +517,14 @@ bool BindlessTyped() {
 	return enabled;
 }
 
+bool NggVertexCount() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_NGG_VERTEX_COUNT");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 bool WaveBranchFull() {
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_WAVE_BRANCH_FULL");
