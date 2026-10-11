@@ -115,7 +115,20 @@ Prospero::BufferFormat ImageConversionFormat(Prospero::BufferFormat format) {
 	                                                      : Prospero::BufferFormat::kInvalid;
 }
 
-enum class SamplerClass : uint8_t { Float, Integer, PointInteger };
+enum class SamplerClass : uint8_t { Float, Integer, PointInteger, FloatCompare };
+
+// KYTY_SAMPLER_COMPARE_SPLIT=1: one S# that samples both a texture (sample) and a depth texture
+// (sample_c) gets a host sampler for each. The GPU ignores the S#'s compare function for a plain
+// sample; before, the shared host sampler compared for both, and a compare sampler on a colour
+// texture is undefined in Vulkan (VUID-vkCmdDispatch-None-06479 on an RGBA8 view in Ghost of
+// Yotei). Shaders are translated anew.
+bool SamplerCompareSplit() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_SAMPLER_COMPARE_SPLIT");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
 
 SamplerClass ClassifySampler(const ImageResource& image) {
 	if (image.numeric_class == Prospero::TextureNumericClass::Sint ||
@@ -123,8 +136,11 @@ SamplerClass ClassifySampler(const ImageResource& image) {
 	     image.conversion_format != Prospero::BufferFormat::kInvalid)) {
 		return SamplerClass::PointInteger;
 	}
-	return image.numeric_class == Prospero::TextureNumericClass::Uint ? SamplerClass::Integer
-	                                                               : SamplerClass::Float;
+	if (image.numeric_class == Prospero::TextureNumericClass::Uint) {
+		return SamplerClass::Integer;
+	}
+	return image.depth_compare && SamplerCompareSplit() ? SamplerClass::FloatCompare
+	                                                    : SamplerClass::Float;
 }
 
 bool DescriptorIsCube(const DescriptorValue& descriptor) {
@@ -629,7 +645,7 @@ struct SamplerPlan {
 		uint32_t     source;
 		SamplerClass type;
 	};
-	std::array<std::array<uint32_t, 3>, ShaderInfo::MaxSamplers> mapping;
+	std::array<std::array<uint32_t, 4>, ShaderInfo::MaxSamplers> mapping;
 	std::array<Binding, ShaderInfo::MaxSamplers>                bindings;
 	uint32_t                                                  sampler_count = 0;
 };
@@ -2115,7 +2131,8 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 		}
 		samplers[index].snapshot_index = binding.source;
 		samplers[index].force_point_filtering = binding.type == SamplerClass::PointInteger;
-		samplers[index].integer_border        = binding.type != SamplerClass::Float;
+		samplers[index].integer_border        = binding.type != SamplerClass::Float &&
+		                                        binding.type != SamplerClass::FloatCompare;
 	}
 	for (auto& pair: sampled_pairs) {
 		const auto type = static_cast<uint32_t>(ClassifySampler(images[pair.image]));

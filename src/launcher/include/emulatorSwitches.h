@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 28> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 29> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -147,6 +147,9 @@ inline constexpr std::array<EmulatorSwitch, 28> EMULATOR_SWITCHES = {{
     {"KYTY_DEBUG_VK_ERRORS_NONFATAL", "Keep running on Vulkan validation errors (diagnostics)",
      "With the Vulkan validation layer on, an error no longer stops the emulator: it is printed as a red line, each kind three times and then every 1000th time.",
      "Diagnostics only, for sync validation runs."},
+    {"KYTY_SAMPLER_COMPARE_SPLIT", "Separate depth-compare samplers (testing)",
+     "When a shader uses one sampler both for a normal texture and for a shadow (depth-compare) texture, the normal texture gets its own sampler without the compare. Before, it was compared too, which the graphics driver does not define. Shaders are translated anew.",
+     "New, under test in Ghost of Yotei (Vulkan validation error on a colour texture; suspected black spots)."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 
