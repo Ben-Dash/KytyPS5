@@ -110,9 +110,10 @@ milestones.
 ## Active integration worktree and shared handoffs
 
 The active Yotei integration branch is yotei-integration-native in
-G:\repos\KytyPS5\_Build\worktrees\yotei-fork-baseline-6d041035.
+G:\repos\KytyPS5.
 Read docs/ghost-of-yotei-windows-plan.md here first. Historical artifacts and
-the previous yotei-windows-bringup checkout remain at G:\repos\KytyPS5.
+the previous yotei-windows-bringup checkout is preserved at
+G:\repos\KytyPS5\_Build\worktrees\yotei-windows-bringup-5664f3ff.
 The latest shared KytyPS5 handoff may contain unvalidated WIP; verify status/diff.
 
 At the start of nontrivial continuation, read

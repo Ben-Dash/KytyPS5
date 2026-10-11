@@ -1,7 +1,7 @@
 # Integration test debt
 
 Read the current checkpoint in ghost-of-yotei-windows-plan.md and the historical
-G:\repos\KytyPS5\docs\emulator-test-debt.md. Verify older results against current
+G:\repos\KytyPS5\_Build\worktrees\yotei-windows-bringup-5664f3ff\docs\emulator-test-debt.md. Verify older results against current
 source and executable hashes.
 
 Pending: warm introduction input and actual character movement/world entry;

@@ -1,25 +1,41 @@
 # Ghost of Yōtei: active integration and session resume
 
-Checkpoint: 2026-10-11. Primary execution path is now the isolated branch
+Checkpoint: 2026-10-11. Primary execution path is now the main workspace branch
 yotei-integration-native based on peepostarexx/YOTEI-BRANCH6d041035.
 The previous branch remains intact as a source of verified tests and mechanisms.
 
 ## Open these paths first
 
-- Primary worktree: G:\repos\KytyPS5\_Build\worktrees\yotei-fork-baseline-6d041035
+- Primary worktree: G:\repos\KytyPS5
 - Primary branch: yotei-integration-native
 - Tested engine revision: 6d04103525b24559a496612ef8959a7666ce9a20
-- Previous checkout: G:\repos\KytyPS5, branch yotei-windows-bringup
+- Previous checkout: G:\repos\KytyPS5\_Build\worktrees\yotei-windows-bringup-5664f3ff, branch yotei-windows-bringup
 - Previous completed workflow commit: 85494f562070a2d245e79dea4b43931d6d5d6baa
-- Main progress/history: G:\repos\KytyPS5\docs\ghost-of-yotei-windows-plan.md
-- Base research/decision: G:\repos\KytyPS5\docs\yotei-base-comparison-plan-2026-10-11.md
+- Previous progress/history: G:\repos\KytyPS5\_Build\worktrees\yotei-windows-bringup-5664f3ff\docs\ghost-of-yotei-windows-plan.md
+- Base research/decision: G:\repos\KytyPS5\_Build\worktrees\yotei-windows-bringup-5664f3ff\docs\yotei-base-comparison-plan-2026-10-11.md
 - Shared context: C:\Users\fxpw\.codex\shared-context\README.md and newest KytyPS5 handoff
 - WSL access: /mnt/g/repos/KytyPS5 and /mnt/c/Users/fxpw/.codex/shared-context
 
-A session starting in the previous checkout must explicitly use the primary
+A session starting in the preserved previous checkout must use the primary
 worktree for new integration work. Do not replace the previous branch or merge
 the divergent histories wholesale. Documentation commits on the primary branch
 do not change the engine code that was tested at6d041035.
+
+## Main workspace relocation checkpoint
+
+The user explicitly requested G:\repos\KytyPS5 itself on yotei-integration-native.
+The former baseline worktree remains at _Build/worktrees/yotei-fork-baseline-6d041035,
+detached at8ae1e676, with its independent dependencies/build files preserved.
+Previous source branch5664f3ff is checked out separately at
+_Build/worktrees/yotei-windows-bringup-5664f3ff. Its submodules are not initialized
+there yet; initialize exact gitlinks only before a later old-branch build.
+
+All original _Build artifacts and installed binaries remain in G:\repos\KytyPS5.
+Main _Build/windows and its installed EXE belong to prior builds; they are NOT
+validation of this newly checked-out fork. Do not copy the baseline CMakeCache
+(it embeds the detached worktree path). Configure the primary native target
+explicitly using vcvars64/local wrapper and a separate build directory before
+new builds; retain old outputs/caches. No native build/game was run for relocation.
 
 ## Verified state
 
