@@ -383,20 +383,6 @@ untested generated changes may be closed without review.
 
 ## License
 
-BryKytyPS5, like KytyPS5, is licensed under the
+KytyPS5, is licensed under the
 [GNU General Public License version 2](LICENSE) (`GPL-2.0-only`).
 
-BryKytyPS5 is a fork of [KytyPS5](https://github.com/KytyPS5/KytyPS5), which is based on the
-original [Kyty](https://github.com/InoriRus/Kyty), released under the MIT License. Kyty's original
-copyright and license notice are preserved in [`LICENSES/Kyty-MIT.txt`](LICENSES/Kyty-MIT.txt).
-Third-party components remain subject to the licenses included with those components.
-
-## Special Thanks
-
-- [KytyPS5/KytyPS5](https://github.com/KytyPS5/KytyPS5) — BryKytyPS5 is a fork of KytyPS5; the
-  emulator is the work of its developers and contributors.
-- [InoriRus/Kyty](https://github.com/InoriRus/Kyty) — KytyPS5 is based on a heavily modified version
-  of the original Kyty project.
-- [shadps4-emu/shadPS4](https://github.com/shadps4-emu/shadPS4) — reference for understanding PS4
-  memory behavior, GPU resource aliasing and cache coherency,
-  and the AVPlayer implementation.
