@@ -912,6 +912,22 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 					}
 				}
 			}
+			if (tile != Prospero::TileMode::kLinear) {
+				TileSurfaceLayout checked_layout {};
+				if (!TileGetTiledTextureLayout(
+				        {format, tile, TileSurfaceDimension::Dim3D, width, height, depth,
+				         physical_levels, 1u}, checked_layout)) {
+					KYTY_TEXTURE_FAIL("unsupported 3D texture layout: format=%u tile=%u extent=%ux%ux%u levels=%u\n",
+					                  static_cast<uint32_t>(format), static_cast<uint32_t>(tile),
+					                  width, height, depth, physical_levels);
+				}
+				if (checked_layout.total_size > UINT32_MAX) {
+					KYTY_TEXTURE_FAIL("unsupported 3D texture footprint: bytes=%" PRIu64
+					                  " exceeds legacy size capacity=%u format=%u tile=%u extent=%ux%ux%u levels=%u\n",
+					                  checked_layout.total_size, UINT32_MAX, static_cast<uint32_t>(format),
+					                  static_cast<uint32_t>(tile), width, height, depth, physical_levels);
+				}
+			}
 			TileGetTextureTotalSize(format, width, height, depth, physical_levels, tile, true, size);
 		} else {
 			// One slice, then the layers: an array over 4 GiB (Ghost of Yotei after the

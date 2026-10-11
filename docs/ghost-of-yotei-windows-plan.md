@@ -1,5 +1,121 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: CPU fixes and full batch, 2026-10-11 16:45 UTC
+
+Tested source: HEAD`66e073b2` plus working diff; original retry is next.
+
+- Full journal batch:2999 manifests,2770 distinct inputs, all2770 passed native
+  decode/translation/emission and SPIR-V Vulkan1.3 validation in234.233s.
+  Two isolated CPU workers,15s per record,600s coordinator; no failures/timeouts.
+  Artifacts: `_Build/analysis/yotei-integration-20261011/batch-native-full-20261011-163652-9854636`.
+  Auditor SHA256`106b5d16a10977b21c4f703d5440d8dd20d3bbb0a0e6371b7ce167b382a4d2fd`.
+  Conservative explicit profile and reconstructed v8 defaults: no original-input
+  equivalence, optimizer, driver, GPU execution or gameplay proof.
+- Pixel journal: native RED162451 -> unchanged GREEN162914; final native
+  neighbors164451 passed. Version9 preserves sample VGPR, target mask and
+  provoking vertex mode; explicit8 refuses values it cannot represent.
+  Runtime filename `<title>.v9.shaders` preserves previous journals.
+- Volume admission: real descriptor CPU RED163408, exact4GiB, fatal321 at
+  tile.cpp1348 -> unchanged GREEN164349, explicit unsupported rejection.
+  Neighbor modes164350 passed8MiB/2GiB geometry and4/8GiB soft rejection;
+  ordinary4GiB and strict4/8GiB requested errors still exit321.
+  Green auditor SHA256`e341e7c7ffa3619a8f61ed6b440c5e4ace3f640a9105e038f4f61ab3c6a78d58`.
+- Existing fork fallbacks remain experimental. Checked rejection does not
+  implement oversized images or prove feedback/slot ownership. Original raw
+  oversized T# was not collected in the diagnostic retry.
+- Tools: `tools/prepare-shader-journal.ps1`, `tools/audit-shaders.ps1`, explicit
+  profile JSON and `tools/README.md`. Runner fixtures passed dedup/resume,
+  environment isolation and bounded cleanup. Failed-attempt archive is pending.
+- Next: native core/private install with computed key (no diagnostic pin),
+  bounded original retry, v9 cache/memory measurements and owned screenshots.
+  Native slot is idle; no menu/gameplay/issue108 update from these CPU results.
+
+## Latest checkpoint: diagnostic retry, 2026-10-11 16:18 UTC
+
+- Native configure/build/install passed from primary HEAD`66e073b2` plus
+  diagnostic-only `descriptors.cpp` diff. Private EXE SHA256:
+  `d0185f62e3c41b14d9ea65b1cc40c78892f8f848c79fbaced8061cc8b4b7b723`.
+  Exact diff and provenance: `_Build/analysis/yotei-integration-20261011/runtime-built`.
+- Run: `_Build/runs/game-20261011-161201-integration-layout-diagnostic-6358a8`.
+  Same original game, autoswipe4, eager bindless and explicit diagnostic flag;
+  old source-key pin preserved compatible cache because generated SPIR-V and
+  journal codec were unchanged. Clear the pin for later semantic/codec changes.
+- Owned `window-1613.png`/`window-1615.png` show hand/cloth/calligraphy;
+  `window-1617.png` is black. One foreground/hash-verified J/Cross input at
+  16:16:13UTC. No character movement or game-scene entry proved.
+- Finished16:18:25.115Z, graceful exit0 after382.69s because available RAM
+  reached7.76GiB (8GiB reserve). No timeout, task32GiB guard, forced cleanup or
+  GPU reset. Driver cache saved274,931,081payload bytes. Counters998VS/2031PS/549CS
+  indicate observed permutations, not unique shader failures or memory ownership.
+- The earlier oversized-volume fatal did NOT reproduce and no diagnostic T#
+  was emitted. Passing its earlier elapsed-time/count point is not a fix.
+  Required admission CPU regression remains pending; additionally inspect
+  actual cache/resource memory owners before choosing any memory correction.
+- Native execution slot is idle after stream drain. Next: build one CPU batch
+  target for checked journal reconstruction and the minimal volume regression;
+  original-input attempt capture remains pending. No issue108 update published.
+
+## Latest checkpoint: warm introduction, 2026-10-11 15:44 UTC
+
+Primary branch: `yotei-integration-native`, documentation HEAD
+`66e073b22f06b7080962a726a866e9038c3577ae`, engine baseline
+`6d04103525b24559a496612ef8959a7666ce9a20`.
+
+- Warm original-game run: `_Build/runs/game-20261011-154145-integration-warm-intro-9a03b0`.
+  Used the verified baseline EXE `b3ed953555e91759b798aced8a04af324508ceaafd25a70a34d6d34c879c96ef`,
+  private saves/cache and existing `KYTY_DEBUG_PAD_AUTOSWIPE=4` input simulation.
+- Owned screenshot `window-1543.png` visibly shows a hand/cloth and Japanese
+  writing in the introduction. Character movement, title menu and game scene
+  entry remain unproved. The earlier SETTINGS/CONTROLS screen is recorded below.
+- Natural exit321 at15:44:16.550Z after150.85s; no timeout, memory guard, GPU
+  reset or forced cleanup. Minimum observed available RAM16.28GiB.
+- Current fatal: `layout.total_size > UINT32_MAX`, `tile.cpp:1348`.
+  Symbolized path: `TileGetTextureTotalSize -> ResolveTextureInto ->
+  ResolveBindlessKey -> ResolveBindlessHeapEagerly -> PrepareBindlessHeaps ->
+  PrepareBindings -> DispatchDirect`. This is an eager heap walk; an actual
+  GPU request for this descriptor is not established.
+- Next: build opt-in `KYTY_TEXTURE_LAYOUT_DIAGNOSTICS=1` instrumentation from
+  the primary workspace, retaining the fatal. Collect original/effective T#,
+  layout size/mips and eager/requested context. Establish a CPU regression
+  before changing descriptor/layout admission. See `docs/emulator-test-debt.md`.
+- Main private build directory: `_Build/windows-integration`; private install:
+  `_Build/analysis/yotei-integration-20261011/runtime-built`. The ignored
+  `_Build/windows-local.cmd` initializes vcvars64 and preserves prior installs.
+
+## Shader collection and precompilation
+
+The existing v8 journal has2999 successful permutation envelopes and2485
+distinct code/stage identities (897VS/1560PS/542CS;20,679,749bytes). Read-only
+framing, all2999 XXH3 checksums and an independent mirror of the current
+Decoder/Valid contract passed; native ISA/IR/SPIR-V compilation is still pending.
+Input SHA256: `c741440836772903e4ac6b29f9539afc35611aeeca659eaaf4c03b95e3169aff`.
+There are2770 distinct record bodies,229 duplicate bodies and453 hashes with
+multiple records. Journal writes happen after success and do not preserve
+failed-generation inputs or every live userdata/memory callback needed for
+exact replay. v8 also omits pixel-stage `sample_vgpr`, `target_shader_mask`
+and `parameter_mode`, although current compiler paths consume them. Journal
+replay must explicitly report reconstructed-default scope and no original
+input equivalence; new captures must preserve these fields.
+
+1. Validate journal framing/checksums and replay an exact record index in a
+   bounded native CPU worker. Keep decoder, IR, SPIR-V and driver compilation
+   phases separate; do not classify an unreadable input as a compiler defect.
+2. Port compatible capture/runner diagnostics from the preserved prior branch.
+   Archive original attempts before Translate/Emit and fallback, including
+   main/back stage metadata, effective compiler policy, userdata and ordered
+   memory callbacks. Mark incomplete speculative reads explicitly. Protect
+   failure capacity from successful cached permutations.
+3. Batch complete inputs, group overlapping failures by shared cause, then
+   prove synthetic RED/GREEN and replay the affected batch after each shared
+   correction. Preserve original errors and mark fallback-dependent rendering.
+4. Precompile observed variants and reuse compatible SPIR-V/driver caches.
+   New scenes can reveal new shaders, metadata variants and resources; an
+   upfront list cannot guarantee that all future permutations are covered.
+
+Current `--shader-bench` always creates a Vulkan device and lacks exact
+record-index selection. CPU batch isolation and pre-failure capture are still
+pending. Diagnostics do not authorize fabricated resources or success stubs.
+
 Checkpoint: 2026-10-11. Primary execution path is now the main workspace branch
 yotei-integration-native based on peepostarexx/YOTEI-BRANCH6d041035.
 The previous branch remains intact as a source of verified tests and mechanisms.
