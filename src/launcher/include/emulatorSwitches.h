@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 34> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 35> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -165,6 +165,9 @@ inline constexpr std::array<EmulatorSwitch, 34> EMULATOR_SWITCHES = {{
     {"KYTY_R8_SNORM_SAMPLING", "Sample signed 8-bit textures directly (testing)",
      "Single-channel signed 8-bit textures are read by the shader as they are, as an upstream change does; before they counted as unsupported. Shaders are translated anew.",
      "New, not yet tested."},
+    {"KYTY_AVPLAYER_RECYCLE", "Let videos decode ahead (testing)",
+     "A video frame buffer goes back to the decoder as soon as the next frame is shown, so it can work ahead, as an upstream change does. Before, a few older frames were kept.",
+     "New, not yet tested (Ghost of Yotei tree video)."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 

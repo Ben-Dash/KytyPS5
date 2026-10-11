@@ -1,6 +1,7 @@
 #include "common/common.h"
 #include "common/file.h"
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "kernel/fileSystem.h"
 #include "kernel/pthread.h"
 #include "libs/audio.h"
@@ -990,7 +991,16 @@ public:
 		if (!frame) {
 			return false;
 		}
-		if (current_video) {
+		// KYTY_AVPLAYER_RECYCLE=1 (upstream a6f4e8e7): the previous frame's buffer goes straight
+		// back to the decoder, which can then run ahead; off: buffers stay retired until
+		// max_video_buffers - 1 newer frames were handed out.
+		static const bool recycle = [] {
+			const char* text = KYTY_GETENV("KYTY_AVPLAYER_RECYCLE");
+			return text != nullptr && std::strcmp(text, "0") != 0;
+		}();
+		if (current_video && recycle) {
+			video_buffers.Push(std::move(current_video->buffer));
+		} else if (current_video) {
 			retired_video.push_back(std::move(current_video->buffer));
 			if (retired_video.size() >= static_cast<size_t>(max_video_buffers - 1)) {
 				video_buffers.Push(std::move(retired_video.front()));
