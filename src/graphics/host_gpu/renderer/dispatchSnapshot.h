@@ -59,7 +59,7 @@ void CaptureOutputs(RenderContext& context, const Pending& pending,
                     const ShaderComputeInputInfo& input, const PreparedBindings& bindings);
 
 // KYTY_DRAW_SNAPSHOT (diagnostic, off by default): writes draws to disk for offline reading
-// (G:/dev/_notes/draw_snapshot_check.py checks indices against the vertex buffers and scans vertex
+// (tools/draw_snapshot_check.py checks indices against the vertex buffers and scans vertex
 // data for NaN or huge values, the vertex-explosion case).
 //   KYTY_DRAW_SNAPSHOT=<hash>[,<hash>...]  draws whose vertex or pixel shader has one of these
 //   KYTY_DRAW_SNAPSHOT=frame:<n>           every draw of the first frame >= n

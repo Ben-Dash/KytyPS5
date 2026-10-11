@@ -11,6 +11,10 @@ on Astro Bot with AMD hardware, and merges upstream KytyPS5 regularly. The emula
 and its options keep the KytyPS5 names, and the rest of this README is KytyPS5's and applies here
 too.
 
+**Ghost of Yōtei branch:** this branch adds fixes and diagnostics for Ghost of Yōtei
+(PPSA26344), almost all behind emulator switches that are off by default. See
+[docs/yotei-fork.md](docs/yotei-fork.md) for what it changes and how to use the switches.
+
 Upstream KytyPS5: **[weekly updates](https://github.com/KytyPS5/KytyPS5/discussions/862)** (game
 progress, recent fixes and ongoing development) and
 **[development on Discord](https://discord.gg/UNrkMqGaBg)**.

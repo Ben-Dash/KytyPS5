@@ -208,13 +208,12 @@ add_subdirectory("${KYTY_THIRD_PARTY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/3rdparty
 # A build given to other people: no switch names, no fatal error texts, no class names.
 option(KYTY_SHARE_BUILD "Hide switch names, error texts and class names (build for sharing)" OFF)
 # NVIDIA Nsight Aftermath GPU crash dumps (debug builds; KYTY_AFTERMATH=1 at run time, see
-# src/graphics/host_gpu/aftermath.h). The SDK ships with Nsight Graphics; a project-local copy
-# lives in G:/dev/_tools/aftermath.
+# src/graphics/host_gpu/aftermath.h). The SDK ships with Nsight Graphics and is not part of this
+# repository: set KYTY_AFTERMATH_SDK to its root.
 option(KYTY_AFTERMATH "Link the Nsight Aftermath SDK for GPU crash dumps" OFF)
 set(KYTY_AFTERMATH_SDK "" CACHE PATH "Nsight Aftermath SDK root (include/, lib/x64/)")
 if(KYTY_AFTERMATH AND NOT KYTY_AFTERMATH_SDK)
 	foreach(candidate
-		"G:/dev/_tools/aftermath"
 		"C:/Program Files/NVIDIA Corporation/Nsight Graphics 2026.3.1/SDKs/NsightAftermathSDK/2026.3.26197.2318")
 		if(EXISTS "${candidate}/include/GFSDK_Aftermath.h")
 			set(KYTY_AFTERMATH_SDK "${candidate}")
