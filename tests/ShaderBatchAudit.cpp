@@ -5,6 +5,7 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
+#include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "xxhash.h"
 
 #if defined(KYTY_RESOURCE_REGRESSION)
@@ -85,7 +86,7 @@ std::vector<uint8_t> ReadBody(const std::filesystem::path& manifest_path, const 
         throw std::runtime_error("journal record sibling resolves outside its capture directory");
     const auto bytes = std::filesystem::file_size(path);
     if (bytes == 0 || bytes > 4u * 1024u * 1024u || manifest.at("record_bytes") != bytes)
-        throw std::runtime_error("invalid v8 record body size");
+        throw std::runtime_error("invalid journal record body size");
     std::vector<uint8_t> body(bytes);
     std::ifstream stream(path, std::ios::binary);
     if (!stream.read(reinterpret_cast<char*>(body.data()), static_cast<std::streamsize>(bytes)))
@@ -99,14 +100,14 @@ std::vector<uint8_t> ReadBody(const std::filesystem::path& manifest_path, const 
     return body;
 }
 
-int Audit(const char* filename) {
+int Audit(const char* filename, bool dump_ir) {
     const char* phase = "input";
     Json result{{"scope", "journal_specialized_permutation"},
                 {"original_input_equivalent", false}, {"original_spirv_equivalent", false},
                 {"userdata_values_captured", false}, {"userdata_values_used", false},
                 {"resource_materialization_checked", false}, {"guest_memory_read", false},
                 {"driver_pipeline_checked", false}, {"gpu_execution_checked", false},
-                {"reconstructed_defaults", true}};
+                {"reconstructed_defaults", true}, {"ir_dump_requested", dump_ir}};
     try {
         Progress(phase);
         const auto manifest_path = std::filesystem::u8path(filename);
@@ -114,16 +115,21 @@ int Audit(const char* filename) {
             throw std::runtime_error("journal manifest exceeds 1MiB bound");
         std::ifstream stream(manifest_path);
         const auto manifest = Json::parse(stream);
+        const auto& declared_version = manifest.at("journal_version");
         if (manifest.at("schema_version") != 3 || manifest.at("kind") != "journal_record" ||
-            manifest.at("journal_version") != 8)
-            throw std::runtime_error("worker accepts only explicitly extracted v8 journal records");
+            !declared_version.is_number_integer() ||
+            (declared_version != ShaderPrecompile::LegacyRecordVersion &&
+             declared_version != ShaderPrecompile::CurrentRecordVersion))
+            throw std::runtime_error("worker accepts only explicitly extracted v8/v9 journal records");
+        const auto record_version = declared_version.get<uint32_t>();
+        result["journal_version"] = record_version;
         const auto body = ReadBody(manifest_path, manifest);
         ShaderPrecompile::PermutationRecord record;
-        if (!ShaderPrecompile::Decode(body, record, ShaderPrecompile::LegacyRecordVersion))
-            throw std::runtime_error("native v8 codec rejected record");
+        if (!ShaderPrecompile::Decode(body, record, record_version))
+            throw std::runtime_error("native declared-version codec rejected record");
         std::vector<uint8_t> canonical;
-        if (!ShaderPrecompile::Encode(record, canonical, ShaderPrecompile::LegacyRecordVersion) || canonical != body)
-            throw std::runtime_error("native v8 codec roundtrip changed record bytes");
+        if (!ShaderPrecompile::Encode(record, canonical, record_version) || canonical != body)
+            throw std::runtime_error("native declared-version codec roundtrip changed record bytes");
         result["capture_attempt"] = manifest.at("capture_attempt");
         result["record_index"] = manifest.at("capture_attempt").at("record_index");
         result["shader_hash"] = record.hash;
@@ -156,7 +162,7 @@ int Audit(const char* filename) {
         options.wave_size = record.wave_size;
         options.back_code = record.back_code;
         options.bindless_images = Boolean(manifest.at("compiler_settings"), "bindless_images");
-        options.dump_ir = false;
+        options.dump_ir = dump_ir;
         options.early_dump = false;
         options.dump_label = "ShaderJournalAudit";
         std::visit([&](auto& info) {
@@ -164,7 +170,8 @@ int Audit(const char* filename) {
             if constexpr (std::is_same_v<Info, ShaderVertexInputInfo>) options.input_info.vertex = &info;
             else if constexpr (std::is_same_v<Info, ShaderPixelInputInfo>) {
                 options.input_info.pixel = &info;
-                result["omitted_stage_fields"] = {"sample_vgpr", "target_shader_mask", "parameter_mode"};
+                result["omitted_stage_fields"] = record_version == ShaderPrecompile::LegacyRecordVersion
+                    ? Json{"sample_vgpr", "target_shader_mask", "parameter_mode"} : Json::array();
             } else options.input_info.compute = &info;
         }, record.info);
 
@@ -193,6 +200,23 @@ int Audit(const char* filename) {
         phase = "translate"; Progress(phase);
         auto translated = ShaderRecompiler::TranslateProgram(record.code, options);
         if (translated.skip_dispatch) throw std::runtime_error("shared translator rejected recorded permutation; no skip accepted as pass");
+        const auto save_text = [&](const char* name, std::string_view text) {
+            const auto path = std::filesystem::absolute(name);
+            std::ofstream file(path, std::ios::binary);
+            file.write(text.data(), static_cast<std::streamsize>(text.size()));
+            file.close();
+            if (!file) {
+                phase = "input";
+                throw std::runtime_error(std::string("cannot preserve audit artifact ") + name);
+            }
+            return path.string();
+        };
+        if (dump_ir) {
+            result["decoded_file"] = save_text("shader.decoded.txt", translated.decoded_dump);
+            result["translated_ir_file"] = save_text("shader.translated.ir.txt",
+                "CFG:\n" + translated.cfg_dump + "\nIR:\n" +
+                ShaderRecompiler::IR::ProgramToString(translated.program));
+        }
         phase = "resource_plan"; Progress(phase);
         if (!translated.program.resource_tracking_complete ||
             translated.program.info.buffers.size() != record.specialization.buffers.size() ||
@@ -201,6 +225,7 @@ int Audit(const char* filename) {
         phase = "emit"; Progress(phase);
         auto compiled = ShaderRecompiler::CompileProgram(std::move(translated), options,
             record.specialization, record.push_data_start_dword);
+        if (dump_ir) result["compiled_ir_file"] = save_text("shader.compiled.ir.txt", compiled.ir_dump);
         const auto output = std::filesystem::absolute("shader.spv");
         std::ofstream artifact(output, std::ios::binary);
         artifact.write(reinterpret_cast<const char*>(compiled.spirv.data()),
@@ -240,8 +265,16 @@ int main(int argc, char* argv[]) {
     if (argc == 3 && std::string_view(argv[1]) == "--texture-layout-regression")
         return Libs::Graphics::RunTextureLayoutRegression(argv[2]);
 #endif
-    if ((argc == 3 || (argc == 4 && std::string_view(argv[3]) == "--emit-spirv")) &&
-        std::string_view(argv[1]) == "--audit-shader") return Audit(argv[2]);
-    std::fprintf(stderr, "Usage: shader_batch_audit --audit-shader journal-record.json [--emit-spirv]\n");
+    if (argc >= 3 && argc <= 5 && std::string_view(argv[1]) == "--audit-shader") {
+        bool emit_spirv = false, dump_ir = false, valid = true;
+        for (int i = 3; i < argc; ++i) {
+            const std::string_view option(argv[i]);
+            if (option == "--emit-spirv" && !emit_spirv) emit_spirv = true;
+            else if (option == "--dump-ir" && !dump_ir) dump_ir = true;
+            else valid = false;
+        }
+        if (valid) return Audit(argv[2], dump_ir);
+    }
+    std::fprintf(stderr, "Usage: shader_batch_audit --audit-shader journal-record.json [--emit-spirv] [--dump-ir]\n");
     return 2;
 }
