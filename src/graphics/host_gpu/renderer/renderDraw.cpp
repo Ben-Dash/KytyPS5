@@ -48,7 +48,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <memory>
@@ -3235,6 +3237,197 @@ RenderExecutor::RenderExecutor(RenderContext& context): m_context(context) {}
 
 RenderExecutor::~RenderExecutor() = default;
 
+// KYTY_PIXEL_HISTORY=x,y[,0xADDRESS]: "who wrote this pixel", in place of RenderDoc's pixel
+// history. After every draw that renders to an image starting at ADDRESS (without one: the draw's
+// first colour target), and every dispatch that writes such an image as storage, the texel (x, y)
+// of the written view is copied to a readback buffer; once the GPU has run the work, each write
+// that changed the texel is printed as "pixel-history: frame F draw N <kind> image=… vs/ps or cs=…
+// before=… after=…". KYTY_PIXEL_HISTORY_FRAMES=first-last limits the frames (default all; at most
+// 4096 samples are in flight). The copy ends the rendering instance, so only for diagnostics.
+struct PixelHistoryConfig {
+	bool     enabled     = false;
+	uint32_t x           = 0;
+	uint32_t y           = 0;
+	uint64_t address     = 0;
+	uint64_t first_frame = 0;
+	uint64_t last_frame  = UINT64_MAX;
+};
+
+static const PixelHistoryConfig& GetPixelHistoryConfig() {
+	static const PixelHistoryConfig config = [] {
+		PixelHistoryConfig result;
+		const char* text = KYTY_GETENV("KYTY_PIXEL_HISTORY");
+		if (text == nullptr || *text == '\0' || std::strcmp(text, "0") == 0) {
+			return result;
+		}
+		// "1" (the launcher's check box): line 1 of pixel_history.txt next to the emulator is
+		// x,y[,0xaddress], line 2 optionally first-last frames; without the file the centre of a
+		// 3840x2160 target.
+		static std::string from_file;
+		static std::string frames_from_file;
+		if (std::strcmp(text, "1") == 0) {
+			std::ifstream file("pixel_history.txt");
+			std::getline(file, from_file);
+			std::getline(file, frames_from_file);
+			if (from_file.empty()) {
+				from_file = "1920,1080";
+			}
+			text = from_file.c_str();
+		}
+		unsigned long long address = 0;
+		unsigned           x = 0, y = 0;
+		const int          fields = std::sscanf(text, "%u,%u,%llx", &x, &y, &address);
+		if (fields < 2) {
+			std::printf("pixel-history: cannot parse KYTY_PIXEL_HISTORY=%s (x,y[,0xaddress])\n", text);
+			return result;
+		}
+		result.enabled = true;
+		result.x       = x;
+		result.y       = y;
+		result.address = fields >= 3 ? address : 0;
+		const char* frames = KYTY_GETENV("KYTY_PIXEL_HISTORY_FRAMES");
+		if (frames == nullptr && !frames_from_file.empty()) {
+			frames = frames_from_file.c_str();
+		}
+		if (frames != nullptr) {
+			unsigned long long first = 0, last = 0;
+			if (std::sscanf(frames, "%llu-%llu", &first, &last) == 2) {
+				result.first_frame = first;
+				result.last_frame  = last;
+			}
+		}
+		std::printf("pixel-history: watching texel (%u, %u) of %s, frames %llu-%llu\n", x, y,
+		            result.address != 0 ? fmt::format("image 0x{:x}", result.address).c_str()
+		                                : "each draw's first colour target",
+		            static_cast<unsigned long long>(result.first_frame),
+		            static_cast<unsigned long long>(result.last_frame));
+		std::fflush(stdout);
+		return result;
+	}();
+	return config;
+}
+
+bool PixelHistoryEnabled() {
+	return GetPixelHistoryConfig().enabled;
+}
+
+struct PixelHistorySampleRecord {
+	uint64_t    tick   = 0;
+	uint64_t    frame  = 0;
+	uint64_t    draw   = 0;
+	uint64_t    first  = 0;
+	uint64_t    second = 0;
+	uint64_t    image  = 0;
+	uint32_t    slot   = 0;
+	uint32_t    bytes  = 0;
+	int         format = 0;
+	const char* kind   = "";
+};
+
+void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,
+                                        const char* kind, uint64_t first_hash, uint64_t second_hash,
+                                        bool new_call) {
+	const auto& config = GetPixelHistoryConfig();
+	if (!config.enabled) {
+		return;
+	}
+	constexpr uint32_t Slots     = 4096;
+	constexpr uint32_t SlotBytes = 16;
+	static std::unique_ptr<Buffer>               readback;
+	static std::deque<PixelHistorySampleRecord>  pending;
+	static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last_value;
+	static uint32_t next_slot   = 0;
+	static uint64_t draw_frame  = UINT64_MAX;
+	static uint64_t draw_number = 0;
+	auto&           scheduler   = m_context.GetCommandScheduler();
+	if (readback == nullptr) {
+		readback = std::make_unique<Buffer>(m_context.GetGraphics(), scheduler, MemoryUsage::Download, 0,
+		                                    vk::BufferUsageFlagBits::eTransferDst, Slots * SlotBytes);
+	}
+	const auto frame = m_context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
+	if (frame != draw_frame) {
+		draw_frame  = frame;
+		draw_number = 0;
+	}
+	if (new_call) {
+		draw_number++;
+	}
+	// Print what the GPU has run.
+	while (!pending.empty() && scheduler.IsFree(pending.front().tick)) {
+		const auto sample = pending.front();
+		pending.pop_front();
+		if (!readback->IsCoherent()) {
+			readback->Invalidate(sample.slot * SlotBytes, SlotBytes);
+		}
+		std::array<uint32_t, 4> value {};
+		std::memcpy(value.data(), readback->Mapped().data() + sample.slot * SlotBytes, sample.bytes);
+		const auto previous = last_value.find(sample.image);
+		const bool changed  = previous == last_value.end() || previous->second != value;
+		if (changed) {
+			const auto words = [&](const std::array<uint32_t, 4>& v) {
+				std::string out;
+				for (uint32_t i = 0; i < (sample.bytes + 3u) / 4u; i++) {
+					out += fmt::format("{}{:08x}", i == 0 ? "" : ",", v[i]);
+				}
+				return out;
+			};
+			std::printf("\x1b[91mpixel-history: frame %llu draw %llu %s image=0x%016llx format=%d %s=%016llx %s=%016llx "
+			            "before=%s after=%s\x1b[0m\n",
+			            static_cast<unsigned long long>(sample.frame), static_cast<unsigned long long>(sample.draw),
+			            sample.kind, static_cast<unsigned long long>(sample.image), sample.format,
+			            std::strcmp(sample.kind, "dispatch") == 0 ? "cs" : "vs",
+			            static_cast<unsigned long long>(sample.first),
+			            std::strcmp(sample.kind, "dispatch") == 0 ? "--" : "ps",
+			            static_cast<unsigned long long>(sample.second),
+			            previous == last_value.end() ? "(first)" : words(previous->second).c_str(),
+			            words(value).c_str());
+			std::fflush(stdout);
+			last_value[sample.image] = value;
+		}
+	}
+	if (frame < config.first_frame || frame > config.last_frame || pending.size() >= Slots) {
+		return;
+	}
+	auto& cache = m_context.GetTextureCache();
+	auto* image = cache.m_slot_images.try_get(id);
+	if (image == nullptr || image->backing.image == nullptr || image->backing.samples != 1 ||
+	    image->info.IsBlock() || image->info.bytes_per_block == 0 || image->info.bytes_per_block > SlotBytes ||
+	    (config.address != 0 && image->info.data.address != config.address)) {
+		return;
+	}
+	const auto width  = std::max(image->backing.extent.width >> view.base_level, 1u);
+	const auto height = std::max(image->backing.extent.height >> view.base_level, 1u);
+	if (config.x >= width || config.y >= height) {
+		return;
+	}
+	const bool depth   = image->info.IsDepth();
+	const auto aspect  = depth ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor;
+	const auto bytes   = depth ? 4u : image->info.bytes_per_block;
+	const auto slot    = next_slot;
+	next_slot          = (next_slot + 1u) % Slots;
+	buffer.EndRendering();
+	auto command = buffer.Handle();
+	const auto& states    = image->backing.subresource_states;
+	const auto  index     = view.base_level * image->info.resources.layers + view.base_layer;
+	const auto& state     = index < states.size() ? states[index] : image->backing.state;
+	const auto  old_layout = state.layout;
+	const auto  old_access = state.access_mask;
+	const ImageSubresourceRange range {view.base_level, 1, view.base_layer, 1};
+	image->Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, range, command);
+	vk::BufferImageCopy copy {};
+	copy.bufferOffset      = slot * SlotBytes;
+	copy.imageSubresource  = {aspect, view.base_level, view.base_layer, 1};
+	copy.imageOffset       = vk::Offset3D {static_cast<int32_t>(config.x), static_cast<int32_t>(config.y), 0};
+	copy.imageExtent       = vk::Extent3D {1, 1, 1};
+	command.copyImageToBuffer(image->backing.image, vk::ImageLayout::eTransferSrcOptimal, readback->Handle(), 1,
+	                          &copy);
+	if (old_layout != vk::ImageLayout::eUndefined) {
+		image->Transit(old_layout, old_access, range, command);
+	}
+	pending.push_back({scheduler.CurrentTick(), frame, draw_number, first_hash, second_hash,
+	                   image->info.data.address, slot, bytes, static_cast<int>(image->backing.format), kind});
+}
+
 void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
                                const DrawIndexArgs& args) {
 	KYTY_PROFILER_FUNCTION();
@@ -3395,6 +3588,22 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 		ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source,
 		                    primitive_restart);
+		if (PixelHistoryEnabled()) [[unlikely]] {
+			const uint64_t vs_hash = state.vertex_info[0].stage.program->shader_hash;
+			const uint64_t ps_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
+			// Without an address only the first colour target; with one every target at it.
+			const bool     any_target = GetPixelHistoryConfig().address != 0;
+			const uint32_t colors     = any_target ? state.color_count : std::min(state.color_count, 1u);
+			bool           first      = true;
+			for (uint32_t i = 0; i < colors; i++) {
+				PixelHistorySample(buffer, state.color_info[i].image_id, state.color_info[i].desc.view_info,
+				                   "draw", vs_hash, ps_hash, std::exchange(first, false));
+			}
+			if (any_target && state.depth_info.image_id) {
+				PixelHistorySample(buffer, state.depth_info.image_id, state.depth_info.desc.view_info,
+				                   "draw-depth", vs_hash, ps_hash, std::exchange(first, false));
+			}
+		}
 		ResetBindings();
 		pixel_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
 	}
@@ -3524,6 +3733,22 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 
 		DrawIndexBufferSource index_source {};
 		ExecutePreparedDraw(submit_id, buffer, draw, state, topology, emit, index_source, false);
+		if (PixelHistoryEnabled()) [[unlikely]] {
+			const uint64_t vs_hash = state.vertex_info[0].stage.program->shader_hash;
+			const uint64_t ps_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
+			// Without an address only the first colour target; with one every target at it.
+			const bool     any_target = GetPixelHistoryConfig().address != 0;
+			const uint32_t colors     = any_target ? state.color_count : std::min(state.color_count, 1u);
+			bool           first      = true;
+			for (uint32_t i = 0; i < colors; i++) {
+				PixelHistorySample(buffer, state.color_info[i].image_id, state.color_info[i].desc.view_info,
+				                   "draw", vs_hash, ps_hash, std::exchange(first, false));
+			}
+			if (any_target && state.depth_info.image_id) {
+				PixelHistorySample(buffer, state.depth_info.image_id, state.depth_info.desc.view_info,
+				                   "draw-depth", vs_hash, ps_hash, std::exchange(first, false));
+			}
+		}
 		ResetBindings();
 		pixel_hash = state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0;
 	}

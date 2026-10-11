@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 26> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 28> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -141,6 +141,12 @@ inline constexpr std::array<EmulatorSwitch, 26> EMULATOR_SWITCHES = {{
     {"KYTY_DEBUG_DEPTHONLY", "Log depth-only draws (diagnostics)",
      "Prints a line for each kind of draw that only writes depth: whether the game set a pixel shader, its kill and export settings.",
      "Diagnostics only."},
+    {"KYTY_PIXEL_HISTORY", "Log who wrote one pixel (diagnostics)",
+     "After every draw and compute step the emulator reads one pixel back and prints a red line whenever it changed: frame, step, shader hashes, value before and after. Which pixel: x,y[,0xaddress] in line 1 of pixel_history.txt next to the emulator, optional frame range first-last in line 2; otherwise the centre of the picture. Costs a lot of speed.",
+     "Diagnostics only."},
+    {"KYTY_DEBUG_VK_ERRORS_NONFATAL", "Keep running on Vulkan validation errors (diagnostics)",
+     "With the Vulkan validation layer on, an error no longer stops the emulator: it is printed as a red line, each kind three times and then every 1000th time.",
+     "Diagnostics only, for sync validation runs."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 

@@ -46,6 +46,8 @@ struct RenderExecutorTestAccess;
 // KYTY_DEBUG_IMAGE_USERS=<guest address> (see renderDraw.cpp): whether it is set, and a draw's or
 // dispatch's bindings to count (pixel_hash 0 and no targets for a dispatch).
 [[nodiscard]] bool ImageUsersEnabled();
+// KYTY_PIXEL_HISTORY (renderDraw.cpp).
+[[nodiscard]] bool PixelHistoryEnabled();
 void NoteImageUsers(TextureCache& cache, std::span<PreparedBindings* const> stages,
                     std::span<const RenderColorInfo> colors, const RenderDepthInfo* depth,
                     uint64_t pixel_hash, uint64_t vertex_hash);
@@ -248,6 +250,11 @@ public:
 	// the keys shaders flagged as pending.
 	void PrepareBindlessHeaps(const ShaderStageRuntime& runtime, PreparedBindings& prepared);
 	void ResolveBindlessRequests();
+	// KYTY_PIXEL_HISTORY (renderDraw.cpp): copies the watched texel of an image a draw or dispatch
+	// just wrote, and prints the writes that changed it once the GPU has run them.
+	void PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,
+	                        const char* kind, uint64_t first_hash, uint64_t second_hash,
+	                        bool new_call);
 	bool ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key);
 	// KYTY_BINDLESS_EAGER: resolves every image T# key of a heap nothing has resolved yet.
 	void ResolveBindlessHeapEagerly(BindlessTable::Heap& heap, uint32_t entries, uint64_t shader_hash);

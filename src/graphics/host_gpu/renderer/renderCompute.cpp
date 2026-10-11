@@ -1064,6 +1064,15 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	if (snapshot.id != 0) [[unlikely]] {
 		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		bool first = true;
+		for (const auto& image: bindings.images) {
+			if (image.desc.type == TextureCache::BindingType::Storage) {
+				PixelHistorySample(buffer, image.image_id, image.desc.view_info, "dispatch",
+				                   input_info.stage.program->shader_hash, 0, std::exchange(first, false));
+			}
+		}
+	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();
 	return true;
@@ -1201,6 +1210,15 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	if (snapshot.id != 0) [[unlikely]] {
 		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
+	}
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		bool first = true;
+		for (const auto& image: bindings.images) {
+			if (image.desc.type == TextureCache::BindingType::Storage) {
+				PixelHistorySample(buffer, image.image_id, image.desc.view_info, "dispatch",
+				                   input_info.stage.program->shader_hash, 0, std::exchange(first, false));
+			}
+		}
 	}
 	m_context.GetBufferCache().OnCommandRecorded();
 	ResetBindings();

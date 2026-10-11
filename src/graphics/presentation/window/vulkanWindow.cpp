@@ -35,7 +35,9 @@
 #include <cstring>
 #include <fmt/format.h>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <vulkan/vk_platform.h>
 
@@ -1056,6 +1058,25 @@ static VKAPI_ATTR vk::Bool32 VKAPI_CALL VulkanDebugMessengerCallback(
 	if (error && !nonfatal) {
 		EXIT_COLOR(severity_style, "[Vulkan][%s][%u]: %s\n", severity_str,
 		           static_cast<uint32_t>(message_types), callback_data->pMessage);
+	}
+	// Non-fatal validation errors are deduplicated by message id: the first three of each id are
+	// printed in full, then every 1000th with its count, so sync validation over a whole frame
+	// does not drown the log.
+	if (error) {
+		static std::mutex                             seen_mutex;
+		static std::unordered_map<int32_t, uint64_t> seen;
+		uint64_t                                      count = 0;
+		{
+			std::lock_guard lock(seen_mutex);
+			count = ++seen[callback_data->messageIdNumber];
+		}
+		if (count <= 3 || (count % 1000) == 0) {
+			std::printf("\x1b[91m[Vulkan][E] #%llu of %s: %s\x1b[0m\n", static_cast<unsigned long long>(count),
+			            callback_data->pMessageIdName != nullptr ? callback_data->pMessageIdName : "?",
+			            callback_data->pMessage);
+			std::fflush(stdout);
+		}
+		return VK_FALSE;
 	}
 
 	if (!skip) {
