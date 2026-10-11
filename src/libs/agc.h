@@ -308,6 +308,10 @@ uint32_t* KYTY_SYSV_ABI AgcDcbSetFlip(CommandBuffer* buf, uint32_t video_out_han
 
 namespace Gen5Driver {
 
+int Initialize();
+// KYTY_DRIVER_DMEM_EARLY (agc.cpp).
+bool EarlyDmem();
+
 struct Packet {
 	uint32_t* addr;
 	uint32_t  dw_num;
