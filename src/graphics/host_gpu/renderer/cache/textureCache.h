@@ -339,6 +339,10 @@ private:
 		uint64_t                size   = 0;
 	};
 	void               KeepStencil(ImageId depth_id);
+	// KYTY_STENCIL_FROM_R8 (textureCache.cpp): the keeper of `depth`'s stencil from the 8-bit
+	// image at its stencil address when shaders wrote that image since.
+	void               RefreshKeeperFromStencilTexture(const Image& depth);
+	[[nodiscard]] static bool StencilSourceLog();
 	// Drops the keeper of `address`; its buffer lives on until the GPU and the record thread are
 	// done with the copies recorded from or into it (see RetireStencilBuffer).
 	void               EraseStencilKeeper(uint64_t address);

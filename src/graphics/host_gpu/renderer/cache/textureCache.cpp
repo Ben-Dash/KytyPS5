@@ -1097,9 +1097,21 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 	// the stencil for its material masks in between).
 	if (cached.info.IsDepth() && cached.info.HasStencil() && !replacement.info.IsDepth()) {
 		KeepStencil(cached_id);
-	} else if (!cached.info.IsDepth() && replacement.info.IsDepth() &&
-	           replacement.info.HasStencil() && RestoreStencil(replacement, true)) {
-		replacement.stencil_restored = true;
+	} else if (!cached.info.IsDepth() && replacement.info.IsDepth() && replacement.info.HasStencil()) {
+		// KYTY_STENCIL_FROM_R8=1: while the depth buffer was a color image, shaders may have
+		// changed the stencil through the 8-bit image at its stencil address; that image, when
+		// written since, refreshes the keeper first, so the depth image does not get the stale
+		// kept stencil back.
+		RefreshKeeperFromStencilTexture(replacement);
+		if (RestoreStencil(replacement, true)) {
+			replacement.stencil_restored = true;
+		} else if (StencilSourceLog()) [[unlikely]] {
+			std::printf("\x1b[91mstencil-source: depth 0x%llx (stencil 0x%llx) replaces a color image without "
+			            "a kept stencil: its stencil plane is not restored\x1b[0m\n",
+			            static_cast<unsigned long long>(replacement.info.data.address),
+			            static_cast<unsigned long long>(replacement.info.stencil.address));
+			std::fflush(stdout);
+		}
 	}
 	FreeImage(cached_id);
 	return replacement_id;
@@ -2027,6 +2039,67 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	}
 }
 
+bool TextureCache::StencilSourceLog() {
+	static const bool enabled = KYTY_GETENV("KYTY_STENCIL_FROM_R8") != nullptr ||
+	                            KYTY_GETENV("KYTY_DEBUG_STENCIL_SOURCE") != nullptr;
+	return enabled;
+}
+
+void TextureCache::RefreshKeeperFromStencilTexture(const Image& depth) {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_STENCIL_FROM_R8");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	if (!enabled) {
+		return;
+	}
+	const auto address = depth.info.stencil.address;
+	const auto found   = m_stencil_keepers.find(address);
+	for (const auto id: FindImagesInRegion(address, 1, false)) {
+		auto* texture = m_slot_images.try_get(id);
+		if (texture == nullptr || texture->depth_id || texture->info.IsDepth() ||
+		    texture->info.data.address != address || texture->backing.image == nullptr ||
+		    texture->backing.samples != 1 || vk::blockSize(texture->backing.format) != 1 ||
+		    texture->info.extent.width != depth.info.extent.width ||
+		    texture->info.extent.height != depth.info.extent.height || !texture->IsGpuModified() ||
+		    texture->IsBufferModified() || texture->IsCpuDirty()) {
+			continue;
+		}
+		auto info      = texture->info;
+		info.resources = {1, std::min(texture->backing.layers, depth.info.resources.layers)};
+		info.pitch     = found != m_stencil_keepers.end() ? found->second.pitch : info.extent.width;
+		if (info.pitch < info.extent.width) {
+			info.pitch = info.extent.width;
+		}
+		const uint64_t slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
+		const uint64_t size  = slice * info.resources.layers;
+		auto&          keeper = m_stencil_keepers[address];
+		if (keeper.buffer == nullptr || keeper.size < size) {
+			if (keeper.buffer != nullptr) {
+				RetireStencilBuffer(std::move(keeper.buffer));
+			}
+			keeper.buffer = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0,
+			                                         AllFlags, size);
+		}
+		keeper.extent = info.extent;
+		keeper.layers = info.resources.layers;
+		keeper.pitch  = info.pitch;
+		keeper.size   = size;
+		texture->Download(BuildDepthCopies(info, slice, vk::ImageAspectFlagBits::eColor),
+		                  keeper.buffer->Handle(), 0, size, keeper.buffer->Size());
+		static std::map<uint64_t, uint64_t> logged;
+		if (const auto count = ++logged[address]; count <= 3 || count % 1000 == 0) {
+			std::printf("\x1b[91mstencil-source: depth 0x%llx takes its stencil from the 8-bit image 0x%llx "
+			            "(%ux%u) (#%llu)\x1b[0m\n",
+			            static_cast<unsigned long long>(depth.info.data.address),
+			            static_cast<unsigned long long>(address), info.extent.width, info.extent.height,
+			            static_cast<unsigned long long>(count));
+			std::fflush(stdout);
+		}
+		return;
+	}
+}
+
 // A keeper's buffer is the source of RestoreStencil's upload and the target of KeepStencil's
 // download, both recorded as deferred copies that the record thread replays later. Destroying it
 // with the keeper made those copies read a destroyed VkBuffer ("deferred-call: stale buffer
@@ -2668,6 +2741,12 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 	CommitGpuWrite(image);
 	if (desc.info.HasStencil()) {
 		RefreshImage(AssociateStencil(id, desc.info.stencil));
+	}
+	if (PixelHistoryEnabled()) [[unlikely]] {
+		// The depth/stencil as the draw finds it, before it renders: a change here came from the
+		// cache (refresh, association, replacement), not from the draw.
+		PixelHistoryProbe(m_graphics, m_scheduler, image, desc.view_info.base_level, desc.view_info.base_layer,
+		                  "depth-acquire", 0, 0, {}, false);
 	}
 	return image.FindView(desc.view_info);
 }

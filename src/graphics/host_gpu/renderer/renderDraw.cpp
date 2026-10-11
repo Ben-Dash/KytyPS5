@@ -3384,6 +3384,7 @@ struct PixelHistorySampleRecord {
 	int         format = 0;
 	const char* kind   = "";
 	std::string detail;
+	uint64_t    handle = 0; // VkImage: a new handle at the same address is another image
 };
 
 namespace {
@@ -3404,6 +3405,7 @@ void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Im
 	static std::unique_ptr<Buffer>                               readback;
 	static std::deque<PixelHistorySampleRecord>                  pending;
 	static std::unordered_map<uint64_t, std::array<uint32_t, 4>> last_value;
+	static std::unordered_map<uint64_t, uint64_t>                last_handle;
 	static uint32_t                                              next_slot = 0;
 	std::lock_guard                                              lock(g_pixel_history_mutex);
 	if (readback == nullptr) {
@@ -3427,8 +3429,11 @@ void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Im
 		}
 		std::array<uint32_t, 4> value {};
 		std::memcpy(value.data(), readback->Mapped().data() + sample.slot * SlotBytes, sample.bytes);
-		const auto previous = last_value.find(sample.image);
-		if (previous != last_value.end() && previous->second == value) {
+		const auto previous  = last_value.find(sample.image);
+		const auto handle    = last_handle.find(sample.image);
+		const bool new_image = handle != last_handle.end() && handle->second != sample.handle;
+		last_handle[sample.image] = sample.handle;
+		if (previous != last_value.end() && previous->second == value && !new_image) {
 			continue;
 		}
 		const auto words = [&](const std::array<uint32_t, 4>& v) {
@@ -3440,14 +3445,15 @@ void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Im
 		};
 		const bool dispatch = std::strcmp(sample.kind, "dispatch") == 0;
 		std::printf("\x1b[91mpixel-history: frame %llu call %llu %s image=0x%016llx format=%d %s=%016llx %s=%016llx%s%s "
-		            "before=%s after=%s\x1b[0m\n",
+		            "before=%s after=%s vkimage=%llx%s\x1b[0m\n",
 		            static_cast<unsigned long long>(sample.frame), static_cast<unsigned long long>(sample.draw),
 		            sample.kind, static_cast<unsigned long long>(sample.image), sample.format,
 		            dispatch ? "cs" : "vs", static_cast<unsigned long long>(sample.first),
 		            dispatch ? "--" : "ps", static_cast<unsigned long long>(sample.second),
 		            sample.detail.empty() ? "" : " ", sample.detail.c_str(),
 		            previous == last_value.end() ? "(first)" : words(previous->second).c_str(),
-		            words(value).c_str());
+		            words(value).c_str(), static_cast<unsigned long long>(sample.handle),
+		            new_image ? " (NEW IMAGE)" : "");
 		std::fflush(stdout);
 		last_value[sample.image] = value;
 	}
@@ -3502,7 +3508,8 @@ void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Im
 	const uint64_t key = image.info.data.address ^ (stencil_plane ? 1u : 0u);
 	pending.push_back({scheduler.CurrentTick(), frame, g_pixel_history_call, first_hash, second_hash, key, slot,
 	                   bytes, static_cast<int>(image.backing.format),
-	                   stencil_plane && std::strcmp(kind, "draw-depth") == 0 ? "draw-stencil" : kind, detail});
+	                   stencil_plane && std::strcmp(kind, "draw-depth") == 0 ? "draw-stencil" : kind, detail,
+	                   reinterpret_cast<uint64_t>(static_cast<VkImage>(image.backing.image))});
 }
 
 void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const ImageViewInfo& view,

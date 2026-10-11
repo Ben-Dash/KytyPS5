@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 36> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 37> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -171,6 +171,9 @@ inline constexpr std::array<EmulatorSwitch, 36> EMULATOR_SWITCHES = {{
     {"KYTY_DRIVER_DMEM_EARLY", "Reserve graphics driver memory at start (testing)",
      "The graphics driver reserves its own memory when the emulator starts, before the game allocates any, as an upstream change does. Before, it did so when the game first set up graphics. This can move where the game puts its data in memory.",
      "New, not yet tested."},
+    {"KYTY_STENCIL_FROM_R8", "Stencil follows its 8-bit copy (testing)",
+     "When a depth buffer comes back after being used as a plain picture, its stencil is taken from the 8-bit picture shaders worked on in between, not from the copy saved before. Prints red stencil-source lines.",
+     "New, under test in Ghost of Yotei (white interior walls)."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
      "things green, warnings yellow, audio blue, shaders purple, memory turquoise. Uncheck it for " 
