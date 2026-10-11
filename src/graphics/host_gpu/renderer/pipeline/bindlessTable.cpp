@@ -26,7 +26,7 @@
 namespace Libs::Graphics {
 
 BindlessTable::BindlessTable(GraphicContext& graphics, CommandScheduler& scheduler)
-    : m_graphics(graphics) {
+    : m_graphics(graphics), m_scheduler(scheduler) {
 	if (!graphics.bindless_enabled) {
 		return;
 	}
@@ -409,18 +409,182 @@ BindlessTable::~BindlessTable() {
 	}
 }
 
-bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries) {
-	// Headroom so a growing heap rarely moves; a move re-writes the keys resolved so far.
-	const auto capacity = std::max(entries, std::min<uint32_t>(entries * 2u, 1u << 16u));
-	if (capacity > ShaderRecompiler::IR::WatchdogReportBase - m_next_region) {
-		return false;
+BindlessTable::PreparationScope::PreparationScope(BindlessTable& table): m_table(table) {
+	m_table.BeginPreparation();
+}
+
+BindlessTable::PreparationScope::~PreparationScope() {
+	m_table.EndPreparation();
+}
+
+void BindlessTable::BeginPreparation() {
+	if (m_preparation_depth++ == 0) {
+		EXIT_IF(++m_preparation_serial == 0);
+		m_preparation_used = false;
 	}
+}
+
+void BindlessTable::EndPreparation() {
+	EXIT_IF(m_preparation_depth == 0);
+	if (--m_preparation_depth != 0) return;
+	for (auto* region: m_prepared_regions) {
+		// A ring wrap may have advanced the recording tick since descriptor commit.
+		if (m_preparation_used)
+			region->last_gpu_tick = std::max(region->last_gpu_tick, m_scheduler.CurrentTick());
+		region->preparation = 0;
+	}
+	m_prepared_regions.clear();
+}
+
+void BindlessTable::PinRegion(Region& region) {
+	if (m_preparation_depth != 0 && region.preparation != m_preparation_serial) {
+		region.preparation = m_preparation_serial;
+		m_prepared_regions.push_back(&region);
+	}
+}
+
+void BindlessTable::PinRegion(const Heap& heap) {
+	if (heap.region_generation == 0) return;
+	const auto found = std::ranges::find(m_regions, heap.region_generation, &Region::generation);
+	EXIT_IF(found == m_regions.end());
+	PinRegion(*found);
+}
+
+void BindlessTable::MarkPreparationUsed(uint64_t tick) {
+	EXIT_IF(tick > m_scheduler.CurrentTick());
+	for (auto* region: m_prepared_regions)
+		region->last_gpu_tick = std::max(region->last_gpu_tick, tick);
+	m_preparation_used = true;
+}
+
+bool BindlessTable::IsPreparationRegion(const RegionUse& use) const {
+	return m_preparation_depth != 0 && std::ranges::any_of(m_regions, [&](const Region& region) {
+		return region.generation == use.generation && region.offset == use.region &&
+		       use.entries <= region.capacity && region.preparation == m_preparation_serial;
+	});
+}
+
+bool BindlessTable::CanAllocateRegion(uint32_t capacity) const {
+	return capacity <= ShaderRecompiler::IR::WatchdogReportBase - m_next_region ||
+	       std::ranges::any_of(m_free_extents, [&](const FreeExtent& extent) {
+		       return capacity <= extent.capacity;
+	       });
+}
+
+uint32_t BindlessTable::AcquireRegion(uint32_t capacity) {
+	for (auto it = m_free_extents.begin(); it != m_free_extents.end(); ++it) {
+		if (capacity > it->capacity) continue;
+		const auto offset = it->offset;
+		it->offset += capacity;
+		it->capacity -= capacity;
+		if (it->capacity == 0) m_free_extents.erase(it);
+		return offset;
+	}
+	if (capacity > ShaderRecompiler::IR::WatchdogReportBase - m_next_region) return 0;
+	const auto offset = m_next_region;
+	m_next_region += capacity;
+	return offset;
+}
+
+void BindlessTable::FreeRegion(const Region& region) {
+	m_free_extents.push_back({region.offset, region.capacity});
+	std::ranges::sort(m_free_extents, {}, &FreeExtent::offset);
+	for (size_t index = 1; index < m_free_extents.size();) {
+		auto& previous = m_free_extents[index - 1];
+		const auto end = uint64_t {previous.offset} + previous.capacity;
+		EXIT_IF(end > m_free_extents[index].offset);
+		if (end == m_free_extents[index].offset) {
+			previous.capacity += m_free_extents[index].capacity;
+			m_free_extents.erase(m_free_extents.begin() + index);
+		} else {
+			++index;
+		}
+	}
+}
+
+void BindlessTable::RemoveImageReferences(const Heap& heap) {
+	for (auto it = m_image_refs.begin(); it != m_image_refs.end();) {
+		std::erase_if(it->second, [&](const auto& reference) { return reference.first == &heap; });
+		if (it->second.empty()) it = m_image_refs.erase(it);
+		else ++it;
+	}
+}
+
+void BindlessTable::ReclaimRegions(const Heap& protected_heap, uint32_t required_entries) {
+	const auto completed = [&](const Region& region) {
+		return region.preparation == 0 &&
+		       (region.last_gpu_tick == 0 || m_scheduler.IsFree(region.last_gpu_tick));
+	};
+	for (auto it = m_regions.begin(); it != m_regions.end();) {
+		if (it->retired && completed(*it)) {
+			FreeRegion(*it);
+			it = m_regions.erase(it);
+		} else ++it;
+	}
+	if (CanAllocateRegion(required_entries)) return;
+	std::vector<Heap*> inactive;
+	for (auto& heap: m_heaps) {
+		if (&heap == &protected_heap || heap.region_generation == 0) continue;
+		const bool busy = std::ranges::any_of(m_regions, [&](const Region& region) {
+			return region.owner == heap.identity && !completed(region);
+		});
+		if (!busy) inactive.push_back(&heap);
+	}
+	std::ranges::sort(inactive, [](const Heap* a, const Heap* b) {
+		if (a->checked_frame != b->checked_frame) return a->checked_frame < b->checked_frame;
+		if (a->last_preparation != b->last_preparation)
+			return a->last_preparation < b->last_preparation;
+		return a->identity < b->identity;
+	});
+	for (const auto* heap: inactive) {
+		RemoveImageReferences(*heap);
+		for (auto it = m_regions.begin(); it != m_regions.end();) {
+			if (it->owner == heap->identity) {
+				FreeRegion(*it);
+				it = m_regions.erase(it);
+			} else ++it;
+		}
+		const auto found = std::ranges::find_if(m_heaps, [&](const Heap& candidate) {
+			return &candidate == heap;
+		});
+		EXIT_IF(found == m_heaps.end());
+		m_heaps.erase(found);
+		if (CanAllocateRegion(required_entries)) break;
+	}
+}
+
+bool BindlessTable::AllocateRegion(Heap& heap, uint32_t entries, uint32_t required_entries) {
+	// Headroom so a growing heap rarely moves; a move re-writes the keys resolved so far.
+	const auto preferred = std::max<uint64_t>(entries, std::min<uint64_t>(uint64_t {entries} * 2u, 1u << 16u));
+	if (required_entries == 0 || required_entries >= ShaderRecompiler::IR::WatchdogReportBase)
+		return false;
+	if (!CanAllocateRegion(static_cast<uint32_t>(preferred)))
+		ReclaimRegions(heap, required_entries);
+	if (!CanAllocateRegion(required_entries) && m_scheduler.Active()) {
+		// Wait never drains general resource callbacks while a draw's views are prepared.
+		m_scheduler.Wait(m_scheduler.CurrentTick());
+		ReclaimRegions(heap, required_entries);
+	}
+	const auto capacity = CanAllocateRegion(static_cast<uint32_t>(preferred))
+	                          ? static_cast<uint32_t>(preferred) : required_entries;
+	const auto region = AcquireRegion(capacity);
+	if (region == 0) return false;
 	const auto old_region  = heap.region;
 	const auto old_entries = heap.entries;
-	heap.region            = m_next_region;
+	if (heap.region_generation != 0) {
+		const auto old = std::ranges::find(m_regions, heap.region_generation, &Region::generation);
+		EXIT_IF(old == m_regions.end());
+		old->retired = true;
+	}
+	EXIT_IF(++m_next_region_generation == 0);
+	auto& ownership = m_regions.emplace_back(Region {.offset = region, .capacity = capacity,
+	                                                .generation = m_next_region_generation,
+	                                                .owner = heap.identity});
+	PinRegion(ownership);
+	heap.region_generation = ownership.generation;
+	heap.region            = region;
 	heap.entries           = capacity;
 	heap.region_snapshot   = m_snapshot_count;
-	m_next_region += capacity;
 	heap.slots.resize(capacity, 0u);
 	heap.settled.resize(capacity, 0u);
 	heap.record_hash.resize(capacity, 0u);
@@ -458,13 +622,17 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 		    heap.resource.r128 == resource.r128 && heap.pointer_offset == pointer_offset &&
 		    heap.sub_stride == sub_stride && heap.sub_keys == sub_keys &&
 		    heap.pointer_mask == pointer_mask) {
-			if (entries > heap.entries && !AllocateRegion(heap, entries)) {
-				return nullptr;
-			}
+			if (m_preparation_depth != 0) heap.last_preparation = m_preparation_serial;
+			PinRegion(heap);
+			if (entries > heap.entries && !AllocateRegion(heap, entries, entries))
+				EXIT("Bindless translation arena cannot hold %u required keys without retiring a live region\n", entries);
 			return &heap;
 		}
 	}
 	auto& heap        = m_heaps.emplace_back();
+	EXIT_IF(++m_next_heap_identity == 0);
+	heap.identity = m_next_heap_identity;
+	if (m_preparation_depth != 0) heap.last_preparation = m_preparation_serial;
 	heap.base         = base;
 	heap.table_offset = table_offset;
 	heap.record_stride = record_stride;
@@ -482,39 +650,11 @@ BindlessTable::Heap* BindlessTable::FindOrCreateHeap(
 	const auto initial = record_stride != 32u ? std::max(entries, 16u)
 	                     : KeyBoundsEnabled()  ? std::max(entries, std::min(entries * 4u, 1u << 14u))
 	                                           : std::max(entries, 1u << 14u);
-	if (!AllocateRegion(heap, initial)) {
+	if (!AllocateRegion(heap, initial, entries)) {
 		m_heaps.pop_back();
-		static std::atomic<uint32_t> resets {0};
-		if (resets.fetch_add(1) < 8) {
-			std::printf("bindless: translation regions full (%zu heaps); starting over\n",
-			            m_heaps.size());
-			std::fflush(stdout);
-		}
-		ResetHeaps();
-		auto& fresh         = m_heaps.emplace_back();
-		fresh.base          = base;
-		fresh.table_offset  = table_offset;
-		fresh.record_stride = record_stride;
-		fresh.binding       = binding;
-		fresh.resource      = resource;
-		fresh.pointer_offset = pointer_offset;
-		fresh.pointer_mask   = pointer_mask;
-		fresh.sub_stride     = sub_stride;
-		fresh.sub_keys       = sub_keys;
-		if (!AllocateRegion(fresh, initial)) {
-			m_heaps.pop_back();
-			return nullptr;
-		}
-		return &fresh;
+		EXIT("Bindless translation arena cannot hold %u required keys without retiring a live region\n", entries);
 	}
 	return &heap;
-}
-
-void BindlessTable::ResetHeaps() {
-	if (BindlessProvenance::Enabled()) ++m_diagnostic_reset_epoch;
-	m_heaps.clear();
-	m_image_refs.clear();
-	m_next_region = 1;
 }
 
 uint32_t BindlessTable::SharedSlot(uint32_t binding, ImageId id, vk::ImageView view,
@@ -589,6 +729,9 @@ void BindlessTable::RecordFeedbackSnapshot(CommandScheduler& scheduler) {
 	                        vk::PipelineStageFlagBits::eHost, {}, 0, nullptr, 1,
 	                        &snapshot_written, 0, nullptr);
 	m_snapshot_tick = scheduler.CurrentTick();
+	// The copy reads every allocated feedback extent, including retired growth regions.
+	for (auto& region: m_regions)
+		region.last_gpu_tick = std::max(region.last_gpu_tick, m_snapshot_tick);
 	m_snapshot_recorded = ++m_snapshot_count;
 	if (BindlessProvenance::Enabled()) m_diagnostic_snapshot_tick = m_snapshot_tick;
 }
@@ -598,8 +741,8 @@ bool BindlessTable::SnapshotReady(CommandScheduler& scheduler) {
 }
 
 // KYTY_BINDLESS_KEY_BOUNDS (default on, =0 turns it off): requests only for keys a draw's descriptor covers, and none from a
-// snapshot recorded before the heap's region was allocated: after ResetHeaps a new heap reuses the
-// regions of dropped ones, whose flags the older snapshot still holds (Ghost of Yotei: 6cc64dee's
+// snapshot recorded before the heap's region was allocated: a new heap may reuse a retired
+// region whose flags the older snapshot still holds (Ghost of Yotei: 6cc64dee's
 // 8-key table got requests for keys near 18000, other data whose resolution lost the device).
 bool BindlessTable::KeyBoundsEnabled() {
 	static const bool enabled = [] {
@@ -610,7 +753,7 @@ bool BindlessTable::KeyBoundsEnabled() {
 }
 
 void BindlessTable::TakeRequests(const Heap& heap, std::vector<uint32_t>& keys) {
-	if (KeyBoundsEnabled() && heap.region_snapshot >= m_snapshot_recorded) {
+	if (heap.region_snapshot >= m_snapshot_recorded) {
 		return; // the snapshot predates this region: its words belong to another heap
 	}
 	const auto* snapshot = reinterpret_cast<const uint32_t*>(m_feedback_snapshot->Mapped().data());

@@ -22,6 +22,7 @@
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
 #include "graphics/host_gpu/renderer/meshDispatch.h"
 #include "graphics/host_gpu/renderer/meshIndirect.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/host_gpu/renderer/render.h"
@@ -2739,6 +2740,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	auto&                            bindings = m_graphics_bindings;
 	std::array<PreparedBindings*, 4> descriptor_stages {};
 	uint32_t                         stage_count = 0;
+	BindlessTable::PreparationScope bindless_preparation(m_context.GetBindlessTable());
 	for (uint32_t i = 0; i < vertex_stages.size(); i++) {
 		auto& prepared = vertex_stages.size() == 1
 		                     ? StageRecord(0, state.vertex_info[i].stage, bindings.vertex[i])

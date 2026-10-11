@@ -16,6 +16,7 @@
 #include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/imageInfo.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
@@ -976,6 +977,7 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		return m_context.GetPipelineCache().GetComputePipeline(input_info, compute_program);
 	}();
 	auto& bindings = m_compute_bindings;
+	BindlessTable::PreparationScope bindless_preparation(m_context.GetBindlessTable());
 	PrepareBindings(input_info.stage, bindings);
 	if (program.bindings.dispatch_thread_dword != ShaderRecompiler::IR::PushData::NoStart) {
 		std::copy(std::begin(input_info.dispatch_threads_num), std::end(input_info.dispatch_threads_num),
@@ -1116,6 +1118,7 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		return m_context.GetPipelineCache().GetComputePipeline(input_info, compute_program);
 	}();
 	auto& bindings = m_compute_bindings;
+	BindlessTable::PreparationScope bindless_preparation(m_context.GetBindlessTable());
 	PrepareBindings(input_info.stage, bindings);
 	FindBuffers(bindings);
 	DebugDumpDispatchInputs(m_context, input_info.stage);

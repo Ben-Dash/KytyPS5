@@ -1,5 +1,87 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: artifacts remain; automatic input removed, 2026-10-11 18:50 UTC
+
+User confirms disappearing/redrawing textures remain and asks about unsolicited
+input. The184655 run retained the explicit debug touchpad swipe every4seconds;
+it was stopped after this steering. Owned PID42816 closed gracefully, runner
+finished18:49:40.754Z, exit0, no timeout/forced cleanup/memory guard, streams
+drained. Actual screenshot `window-1848.png` (frame426,6FPS) shows severe
+stretched surfaces; the lifecycle correction is not a complete visual fix.
+
+Next retry uses the same exact EXE `ac945386...` with autoswipe0, no autopress
+or replay inherited, and compute-chain0 as a synchronization comparison.
+No further synthetic keyboard input will be sent in this manual retry. This
+is diagnosis, not a proven synchronization fix. Native slot currently idle.
+The next independent RED candidate is actual bindless CommitBindings access
+age: successful initial resolution pins ordinary GC, but subsequent raw image
+lookups do not refresh the access tick used by overlap retirement.
+
+## Latest checkpoint: lifecycle neighbors pass; visual retry active, 2026-10-11 18:47 UTC
+
+- Unchanged mapping oracle passed again at184625. Preparation/growth/abort
+  neighbors pass with key bounds on184423 and off184627, using real mapped
+  translation words and required allocation pressure in the unchanged arena.
+- A separate scoped reproduction restored only the legacy conditional snapshot
+  guard. Native build184506 passed; key-bounds-off run184536 failed exactly
+  old-snapshot ownership rejection. Production file was restored byte-exact,
+  then build184546 and the same unchanged feedback test passed off184623 and
+  on184624. Real GPU feedback copies and both owner-positive controls passed.
+  Final test EXE `b549fc77eef2108c0391225278cf52be854e306699ffaa46bf1b96a0f4811159`.
+- Native core build183750 and private install183926 passed. Original retry
+  `_Build/runs/game-20261011-184655-integration-bindless-lifecycle-f23933`
+  is active, PID42816,660s bounded, same explicit experimental settings and
+  private seeded saves/cache. Installed EXE
+  `ac9453867ef5a97ebae3c9eac65a109a4e9676a806fb4ce7c46e416506ca8e42`;
+  computed source cache key, exact source diff/provenance retained in
+  `runtime-bindless-lifecycle`. Stable visual rendering is still pending.
+- Pending coverage: real shader/SRT consumer and pending-tick transfer;
+  self-pinned first-growth capacity corner and delivery of old-growth feedback.
+  Independent image-access-age/overlap retirement lead needs its own regression.
+  No push or issue108 comment. Do not start another native process during retry.
+
+## Latest checkpoint: bindless lifecycle RED to GREEN, 2026-10-11 18:35 UTC
+
+The unchanged actual-table regression now passes after safe region reclamation.
+Source is local HEAD `2a599092` plus the lifecycle correction and test/CMake diff.
+The original fixture remains SHA256 `c428093091e3502d18ea5bf4588a1d36bb01d62c2228ec49063679f574f6badf`.
+
+- Native build: `checks/20261011-183359-8045246-build-target`, exit0.
+  Bounded test: `checks/20261011-183446-0649646-bindless-lifecycle-green`,
+  exit0, no timeout, actual RTX5060Ti/Vulkan/image setup, no shader dispatch.
+  Test EXE SHA256 `679bf65eac55c962728ae7646ed37e2547254b9c2502b39e45fc66e7b1bf08f2`.
+- The same fixed arena now reclaims completed, unleased extents rather than
+  clearing every heap. Stable heap nodes and active mappings keep their offsets.
+  Preparation scopes protect all stages; exact region generations and scheduler
+  ticks retain older growth regions and pending feedback copies. Old snapshots
+  are rejected independently of the optional key-range policy.
+- This proves the host mapping-retention correction. Growth/preparation/feedback
+  neighbors and original visual retry are next; stable game textures remain
+  unverified. No new issue108 comment or push.
+
+## Latest checkpoint: bindless lifecycle RED, 2026-10-11 18:20 UTC
+
+Native actual-table reproduction succeeded onHEAD`2a599092` plus test/CMake
+changes. New standalone `bindless_lifecycle_tests` uses real Vulkan/VMA/image
+setup and production BindlessTable, with no shader dispatch. The original
+large compute test TU has pre-existing API drift; its test-only additions were
+reverted and this independent304-line bootstrap avoids those unrelated errors.
+
+- Native build181815 passed; bounded run181957 onRTX5060Ti passed setup and
+  failed the intended mapping-retention oracle at temporary30, arena request
+  983168entries. Existing limits were unchanged. ResetHeaps removed live heap
+  A and resolved slot7; prior prepared patch lost ownership.
+- Exact artifact: `_Build/analysis/yotei-integration-20261011/checks/20261011-181957-8381841-bindless-lifecycle-red`;
+  EXE`6f0d29e258ac19b91906d15b7a624867b945af4c5b1a0c796e9cac10918942e3`.
+  Exit-1073740791 from the expected test assertion; no timeout/reset/hang.
+- Shared correction is now authorized by intended RED. Reclaim completed,
+  unpinned temporary regions while preserving live offsets/mappings and real
+  GPU/preparation ownership. Preserve current mask/provenance and bounds;
+  no limit increase, fake resource or rejection of required allocation.
+- Tests/bootstrap are frozen for unchanged GREEN. Growth with earlier patches,
+  in-flight consumers, late old feedback and stable visual retry remain needed.
+  Native slot idle; production implementation in progress, no GREEN claimed.
+
 ## Latest checkpoint: unstable world rendering, 2026-10-11 18:03 UTC
 
 - User now identifies periodic disappearance/rebuilding of all textures. Fix

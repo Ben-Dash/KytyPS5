@@ -5,6 +5,7 @@
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
 #include "graphics/host_gpu/renderer/image/image.h"
+#include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/shaderBindings.h"
@@ -81,6 +82,7 @@ struct PreparedBindings {
 	// Bindless: flattened-SRT words to patch (offset, region, entries) and resolved images to
 	// keep readable for this draw.
 	std::vector<std::array<uint32_t, 3>>  bindless_patches;
+	std::vector<BindlessTable::RegionUse> bindless_regions;
 	std::vector<ImageId>                  bindless_images;
 	// KYTY_DEBUG_DRAW_PHASES: the previous draw's program and descriptor hashes (see
 	// NoteBindingRepeat).

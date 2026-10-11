@@ -10,6 +10,7 @@
 
 #include <array>
 #include <deque>
+#include <list>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -27,6 +28,9 @@ class SamplerCache;
 // host fills per guest descriptor heap, and a bitset where shaders flag keys whose texture is
 // not resident yet. Created only when the device supports descriptor indexing.
 class BindlessTable {
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+	friend struct BindlessLifecycleTestAccess;
+#endif
 public:
 	enum Binding : uint32_t {
 		Images2D          = 0,
@@ -68,9 +72,30 @@ public:
 	[[nodiscard]] vk::DescriptorSet       Set() const noexcept { return m_set; }
 	[[nodiscard]] uint32_t                ImagesPerArray() const noexcept { return m_images_per_array; }
 
+	// One draw/dispatch owns every region prepared by all its stages until recording ends.
+	class PreparationScope {
+	public:
+		explicit PreparationScope(BindlessTable& table);
+		~PreparationScope();
+		PreparationScope(const PreparationScope&) = delete;
+		PreparationScope& operator=(const PreparationScope&) = delete;
+	private:
+		BindlessTable& m_table;
+	};
+	struct RegionUse {
+		uint32_t region = 0;
+		uint32_t entries = 0;
+		uint64_t generation = 0;
+	};
+	void MarkPreparationUsed(uint64_t tick);
+	[[nodiscard]] bool IsPreparationRegion(const RegionUse& use) const;
+
 	// A guest descriptor heap as one view type samples it: a region of the translation (and
 	// feedback) buffer, one entry per key, and the textures resolved so far.
 	struct Heap {
+		uint64_t                            identity = 0;
+		uint64_t                            region_generation = 0;
+		uint64_t                            last_preparation = 0;
 		uint64_t                            base         = 0;
 		uint32_t                            table_offset = 0;
 		uint32_t                            record_stride = 32;
@@ -115,7 +140,7 @@ public:
 	                                     uint32_t pointer_offset = UINT32_MAX,
 	                                     uint32_t sub_stride = 0, uint32_t sub_keys = 0,
 	                                     uint64_t pointer_mask = 0x0000ffffffffffffull);
-	[[nodiscard]] std::deque<Heap>& Heaps() noexcept { return m_heaps; }
+	[[nodiscard]] std::list<Heap>& Heaps() noexcept { return m_heaps; }
 	// 0 when the array is full (slots are not reused yet).
 	[[nodiscard]] uint32_t AllocateSlot(uint32_t binding);
 	void WriteSlot(uint32_t binding, uint32_t slot, vk::ImageView view, vk::ImageLayout layout);
@@ -173,7 +198,22 @@ public:
 	void OnImageUnregistered(ImageId id);
 
 private:
-	[[nodiscard]] bool AllocateRegion(Heap& heap, uint32_t entries);
+	[[nodiscard]] bool AllocateRegion(Heap& heap, uint32_t entries, uint32_t required_entries);
+	struct Region {
+		uint32_t offset = 0, capacity = 0;
+		uint64_t generation = 0, owner = 0, last_gpu_tick = 0, preparation = 0;
+		bool retired = false;
+	};
+	struct FreeExtent { uint32_t offset = 0, capacity = 0; };
+	void BeginPreparation();
+	void EndPreparation();
+	void PinRegion(Region& region);
+	void PinRegion(const Heap& heap);
+	[[nodiscard]] bool CanAllocateRegion(uint32_t capacity) const;
+	[[nodiscard]] uint32_t AcquireRegion(uint32_t capacity);
+	void FreeRegion(const Region& region);
+	void ReclaimRegions(const Heap& protected_heap, uint32_t required_entries);
+	void RemoveImageReferences(const Heap& heap);
 public:
 
 private:
@@ -187,14 +227,19 @@ private:
 	}
 
 	GraphicContext&         m_graphics;
-	std::deque<Heap>        m_heaps;
+	CommandScheduler&       m_scheduler;
+	std::list<Heap>         m_heaps;
+	std::list<Region>       m_regions;
+	std::vector<FreeExtent> m_free_extents;
+	std::vector<Region*>    m_prepared_regions;
+	uint64_t               m_next_heap_identity = 0, m_next_region_generation = 0;
+	uint64_t               m_preparation_serial = 0;
+	uint32_t               m_preparation_depth = 0;
+	bool                   m_preparation_used = false;
 	std::unordered_map<uint64_t, std::vector<std::pair<Heap*, uint32_t>>> m_image_refs;
 	// (binding, view) -> slot, and the shared slots of each image (binding, slot, map key).
 	std::unordered_map<uint64_t, uint32_t>                               m_shared_slots;
 	std::unordered_map<uint64_t, std::vector<std::array<uint64_t, 3>>>   m_image_shared_slots;
-	// Drops every heap and starts the translation regions over: per-frame descriptor tables
-	// create a heap per base address, and the regions are never freed one by one.
-	void ResetHeaps();
 	uint32_t                m_next_region = 1; // translation[0] is the out-of-range entry
 	std::array<uint32_t, ImageArrays> m_next_slot {
 	    PlaceholderColors, PlaceholderColors, PlaceholderColors, PlaceholderColors,

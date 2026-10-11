@@ -2527,6 +2527,7 @@ void RenderExecutor::PrepareBindlessSamplers(const ShaderStageRuntime& runtime,
 void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
                                           PreparedBindings& prepared) {
 	prepared.bindless_patches.clear();
+	prepared.bindless_regions.clear();
 	prepared.bindless_images.clear();
 	const auto& program  = *runtime.program;
 	const auto& snapshot = *runtime.resources;
@@ -2590,7 +2591,7 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		// whose address comes round again, a streamed texture replaced) is resolved again, or
 		// the key would keep showing the earlier frame's texture.
 		// KYTY_BINDLESS_RECHECK=0 keeps every key as first resolved (A/B for the device losses);
-		// checked_frame still marks the heap as used, which CompactHeaps relies on.
+		// checked_frame also retains recently used mappings ahead of colder completed heaps.
 		static const bool recheck = [] {
 			const char* text = KYTY_GETENV("KYTY_BINDLESS_RECHECK");
 			return text == nullptr || std::strcmp(text, "0") != 0;
@@ -2669,6 +2670,8 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		}
 		prepared.bindless_patches.push_back(
 		    {use.mapping_offset, heap->region, std::min(entries, heap->entries)});
+		prepared.bindless_regions.push_back(
+		    {heap->region, std::min(entries, heap->entries), heap->region_generation});
 		prepared.bindless_images.insert(prepared.bindless_images.end(), heap->resolved.begin(),
 		                                heap->resolved.end());
 	}
@@ -2907,6 +2910,8 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
+	for (const auto& region: prepared.bindless_regions)
+		EXIT_IF(!m_context.GetBindlessTable().IsPreparationRegion(region));
 	const auto& program   = *prepared.runtime->program;
 	const auto& snapshot  = *prepared.runtime->resources;
 	const auto& layout    = program.bindings;
@@ -4114,6 +4119,10 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
 	}
 	if (pipeline.uses_bindless) {
 		// The shared bindless table; the pipeline's own sets 0 and 1 follow below.
+		for (const auto* prepared: prepared_bindings)
+			for (const auto& region: prepared->bindless_regions)
+				EXIT_IF(!m_context.GetBindlessTable().IsPreparationRegion(region));
+		m_context.GetBindlessTable().MarkPreparationUsed(m_context.GetCommandScheduler().CurrentTick());
 		const auto set = m_context.GetGraphics().bindless_set;
 		EXIT_IF(set == nullptr);
 		vk_buffer.bindDescriptorSets(pipeline_bind_point, pipeline.pipeline_layout,

@@ -2,6 +2,35 @@
 
 ## Periodic texture disappearance / bindless region lifetime (2026-10-11)
 
+Native actual-table RED181957 reproduced active mapping loss at temporary30
+and983168 requested arena entries onRTX5060Ti after realGPU/image setup.
+Exact expected assertion, no shader dispatch/timeout/hang; standalone target
+bindless_lifecycle_tests and unchanged fixture are the GREEN oracle. Shared
+safe-reclaim/lifetime correction passed the same unchanged fixture at183446,
+exit0 after native build183359. Stable offsets/mappings survive the same pressure.
+Preparation/growth/abort neighbors passed184423/184627 (bounds on/off). Native
+feedback copies/owner reuse passed184623/184624 (bounds off/on). Visual runtime
+retry184655 is active; stable textures remain unverified.
+Retry ended gracefully18:49:40 exit0 on user input concern; window1848 still
+shows severe stretched surfaces. Stable visual rendering remains unresolved.
+
+Independent epoch-policy case: with KYTY_BINDLESS_KEY_BOUNDS=0, an old completed
+feedback snapshot must remain rejected after numeric-region reuse. A native
+test now uses real feedback copies, same-owner controls and actual arena reuse.
+Scoped restoration of only the legacy conditional guard produced intended
+native RED184536. Byte-exact restored unconditional guard then passed the same
+unchanged test184623; old/new owner controls passed, no shader issuer claim.
+Review limits: first growth pins its old region even without an earlier patch;
+old growth feedback is not forwarded to the current incarnation. Pending-tick
+transfer completion and actual SRT-upload coverage remain unproved.
+
+Independent next required regression: actual CommitBindings with a registered
+bindless image and no ordinary image bindings must refresh its access tick/LRU,
+with a direct-binding positive control. Ordinary GC is already blocked by the
+successful-resolution pin; ResolveOverlap uses access age and can retire a
+pinned resource. Prove intended access-age RED before any shared correction;
+held-GPU descriptor-slot retirement needs separate bounded coverage.
+
 User reports all textures disappear and redraw. Run d8addc visibly alternates
 normal world view (`window-now-1758.png`) and severely distorted surfaces
 (`window-now-1756.png`, `window-now-1800.png`). This establishes unstable
@@ -12,7 +41,8 @@ heap mappings/image references and restarting region1. No individual reclaim
 or scheduler retirement protects live mappings; delayed feedback must rebuild
 them. Recorded reset epochs30/57/85/111 confirm repeated resets. Earlier
 prepared.bindless_patches and older recorded GPU references may retain/reuse
-those regions. This is a concrete mechanism lead, not yet RED/GREEN proof.
+those regions. Mapping retention now has intended native RED/GREEN proof;
+pending GPU use and late feedback require separate neighboring cases.
 
 Required regression against actual host state: stable active heap A's resolved
 mapping must survive bounded unrelated temporary-heap churn, with old temporary
