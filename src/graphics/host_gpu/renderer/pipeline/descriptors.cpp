@@ -1,5 +1,9 @@
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 
+#if defined(KYTY_RESOURCE_REGRESSION)
+#include "TextureLayoutRegression.h"
+#endif
+
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/common.h"
@@ -552,8 +556,19 @@ struct BindlessFailContext {
 	uint32_t key       = 0;
 	uint64_t shader    = 0;
 	bool     requested = false;
+	uint64_t diagnostic_descriptor_address = 0;
+	std::array<uint32_t, 8> diagnostic_descriptor_words {};
+	bool diagnostic_descriptor_valid = false;
 };
 static thread_local BindlessFailContext g_bindless_fail_context;
+
+static bool TextureLayoutDiagnosticsEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_TEXTURE_LAYOUT_DIAGNOSTICS");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
 // Every distinct placeholder is printed in red (no shader may lose a texture unnoticed, user
 // 2026-10-09); the same texture failing again in later frames is not repeated.
 // KYTY_STRICT_TEXTURES=1 (test runs) ends the session at the first one a shader asked for.
@@ -854,6 +869,49 @@ TextureDescription DescribeTexture(const ShaderRecompiler::IR::ImageResource& re
 		}
 		pitch = TileGetTexturePitch(format, width, tile);
 		if (volume) {
+			if (TextureLayoutDiagnosticsEnabled()) {
+				TileSurfaceLayout diagnostic_layout {};
+				if (TileGetTiledTextureLayout(
+				        {format, tile, TileSurfaceDimension::Dim3D, width, height, depth,
+				         physical_levels, 1u}, diagnostic_layout) &&
+				    diagnostic_layout.total_size > UINT32_MAX) {
+					static std::atomic<bool> reported {false};
+					if (!reported.exchange(true, std::memory_order_relaxed)) {
+						const auto& context = g_bindless_fail_context;
+						const bool raw_valid = g_soft_texture_failures && context.diagnostic_descriptor_valid;
+						std::printf("TextureLayoutDiagnostic: oversized_volume total=%" PRIu64
+						            " extent=%ux%ux%u levels=%u base=%u last=%u max=%u format=%u tile=%u type=%u"
+						            " address=0x%016" PRIx64 " class=%u numeric=%u dimension=%u mip_mode=%u"
+						            " r128=%d read=%d written=%d heap=0x%016" PRIx64 " binding=%u key=%u"
+						            " shader=%016" PRIx64 " requested=%d bindless_soft_scope=%d raw_valid=%d"
+						            " descriptor_address=0x%016" PRIx64 "\n",
+						            diagnostic_layout.total_size, width, height, depth, physical_levels,
+						            base_level, last_level, descriptor.MaxMip(), static_cast<uint32_t>(format),
+						            static_cast<uint32_t>(tile), static_cast<uint32_t>(type), address,
+						            static_cast<uint32_t>(resource.resource_class),
+						            static_cast<uint32_t>(resource.numeric_class),
+						            static_cast<uint32_t>(resource.dimension), static_cast<uint32_t>(resource.mip_mode),
+						            resource.r128, resource.read, resource.written, context.heap_base, context.binding,
+						            context.key, context.shader, context.requested, g_soft_texture_failures, raw_valid,
+						            raw_valid ? context.diagnostic_descriptor_address : uint64_t {0});
+						std::printf("TextureLayoutDiagnostic: effective_dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
+						            descriptor.fields[0], descriptor.fields[1], descriptor.fields[2], descriptor.fields[3],
+						            descriptor.fields[4], descriptor.fields[5], descriptor.fields[6], descriptor.fields[7]);
+						if (raw_valid) {
+							const auto& words = context.diagnostic_descriptor_words;
+							std::printf("TextureLayoutDiagnostic: original_read_dwords=%08x,%08x,%08x,%08x,%08x,%08x,%08x,%08x\n",
+							            words[0], words[1], words[2], words[3], words[4], words[5], words[6], words[7]);
+						}
+						for (uint32_t level = 0; level < physical_levels; ++level) {
+							const auto& mip = diagnostic_layout.mips[level];
+							std::printf("TextureLayoutDiagnostic: mip=%u offset=%" PRIu64 " size=%" PRIu64
+							            " elements=%ux%u padded=%ux%u tail=%ux%u\n", level, mip.offset, mip.size,
+							            mip.width, mip.height, mip.padded_width, mip.padded_height, mip.tail_x, mip.tail_y);
+						}
+						std::fflush(stdout);
+					}
+				}
+			}
 			TileGetTextureTotalSize(format, width, height, depth, physical_levels, tile, true, size);
 		} else {
 			// One slice, then the layers: an array over 4 GiB (Ghost of Yotei after the
@@ -1066,6 +1124,39 @@ bool ViewMemoEnabled() {
 }
 
 } // namespace
+
+#if defined(KYTY_RESOURCE_REGRESSION)
+TextureLayoutRegressionObservation ProbeTextureDescriptionForRegression(
+    const std::array<uint32_t, 8>& words, bool requested, bool soft_scope) {
+	struct RestoreScope {
+		bool soft = g_soft_texture_failures;
+		bool failed = g_soft_texture_failed;
+		BindlessFailContext context = g_bindless_fail_context;
+		~RestoreScope() {
+			g_soft_texture_failures = soft;
+			g_soft_texture_failed = failed;
+			g_bindless_fail_context = context;
+		}
+	} restore;
+	g_soft_texture_failures = soft_scope;
+	g_soft_texture_failed = false;
+	g_bindless_fail_context = {};
+	g_bindless_fail_context.requested = requested;
+	ShaderRecompiler::IR::DescriptorValue value {};
+	value.dword_count = 8u;
+	value.dwords = words;
+	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	ShaderRecompiler::IR::ImageResource resource {};
+	resource.resource_class = ShaderRecompiler::IR::ImageResourceClass::Sampled;
+	resource.numeric_class = Prospero::TextureNumericClass::Float;
+	resource.dimension = ShaderRecompiler::Decoder::ImageDimension::Dim3D;
+	resource.read = true;
+	// The actual planner reaches the existing overflow fatal before any backing/image work.
+	const auto description = DescribeTexture(resource, descriptor);
+	return {g_soft_texture_failed, description.size != 0 || description.desc.info.data.size != 0,
+	        description.size};
+}
+#endif
 
 TextureBinding RenderExecutor::ResolveTexture(const ShaderRecompiler::IR::ImageResource&   resource,
                                               const ShaderRecompiler::IR::DescriptorValue& value,
@@ -2001,6 +2092,9 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	g_bindless_fail_context.binding   = heap.binding;
 	g_bindless_fail_context.key       = key;
 	g_bindless_fail_context.shader    = heap.shader_hash;
+	if (TextureLayoutDiagnosticsEnabled()) {
+		g_bindless_fail_context.diagnostic_descriptor_valid = false;
+	}
 	if (heap.listed[key] == 0) {
 		heap.listed[key] = 1;
 		heap.settled_keys.push_back(key);
@@ -2026,6 +2120,11 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		ReportPlaceholder(fmt::format("T# at 0x{:x} is unreadable\n", address).c_str(), true);
 		table.SetTranslation(heap, key, 0u);
 		return false;
+	}
+	if (TextureLayoutDiagnosticsEnabled()) {
+		g_bindless_fail_context.diagnostic_descriptor_address = address;
+		std::copy_n(value.dwords.begin(), 8u, g_bindless_fail_context.diagnostic_descriptor_words.begin());
+		g_bindless_fail_context.diagnostic_descriptor_valid = true;
 	}
 	// A 128-bit T#: the record's next 16 bytes are other data, not the descriptor's upper half.
 	if (heap.resource.r128) {

@@ -472,6 +472,12 @@ endfunction()
 
 add_kyty_full_emulator_test(shader_cfg_tests "${KYTY_TESTS_DIR}/shaderCfgTests.cpp")
 
+# Offline journal emission and bounded descriptor regression: no Vulkan device is created.
+add_kyty_full_emulator_test(shader_batch_audit "${KYTY_TESTS_DIR}/ShaderBatchAudit.cpp")
+target_sources(shader_batch_audit PRIVATE "${KYTY_TESTS_DIR}/TextureLayoutRegression.cpp")
+target_include_directories(shader_batch_audit PRIVATE "${KYTY_TESTS_DIR}")
+target_compile_definitions(shader_batch_audit PRIVATE KYTY_RESOURCE_REGRESSION=1)
+
 add_executable(scalar_provenance_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/ScalarProvenanceTests.cpp"
 	"${KYTY_SOURCE_DIR}/graphics/host_gpu/hostMemory.cpp"
