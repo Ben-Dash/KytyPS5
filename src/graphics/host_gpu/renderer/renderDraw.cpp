@@ -3508,7 +3508,9 @@ void PixelHistoryProbe(GraphicContext& graphics, CommandScheduler& scheduler, Im
 	const uint64_t key = image.info.data.address ^ (stencil_plane ? 1u : 0u);
 	pending.push_back({scheduler.CurrentTick(), frame, g_pixel_history_call, first_hash, second_hash, key, slot,
 	                   bytes, static_cast<int>(image.backing.format),
-	                   stencil_plane && std::strcmp(kind, "draw-depth") == 0 ? "draw-stencil" : kind, detail,
+	                   stencil_plane && std::strcmp(kind, "draw-depth") == 0 ? "draw-stencil" : kind,
+	                   // The layout the image had: UNDEFINED means its contents were not defined.
+	                   fmt::format("{}{}layout={}", detail, detail.empty() ? "" : " ", vk::to_string(old_layout)),
 	                   reinterpret_cast<uint64_t>(static_cast<VkImage>(image.backing.image))});
 }
 

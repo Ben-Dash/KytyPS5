@@ -1105,12 +1105,32 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 		RefreshKeeperFromStencilTexture(replacement);
 		if (RestoreStencil(replacement, true)) {
 			replacement.stencil_restored = true;
-		} else if (StencilSourceLog()) [[unlikely]] {
-			std::printf("\x1b[91mstencil-source: depth 0x%llx (stencil 0x%llx) replaces a color image without "
-			            "a kept stencil: its stencil plane is not restored\x1b[0m\n",
-			            static_cast<unsigned long long>(replacement.info.data.address),
-			            static_cast<unsigned long long>(replacement.info.stencil.address));
-			std::fflush(stdout);
+		} else {
+			if (StencilSourceLog()) [[unlikely]] {
+				std::printf("\x1b[91mstencil-source: depth 0x%llx (stencil 0x%llx) replaces a color image without "
+				            "a kept stencil: %s\x1b[0m\n",
+				            static_cast<unsigned long long>(replacement.info.data.address),
+				            static_cast<unsigned long long>(replacement.info.stencil.address),
+				            StencilKeepFix() ? "stencil plane cleared to 0" : "its stencil plane is not restored");
+				std::fflush(stdout);
+			}
+			if (StencilKeepFix()) {
+				// KYTY_STENCIL_KEEP_FIX: a defined stencil (0, as the frame's stencil clear) instead of
+				// whatever the new image's memory holds.
+				m_scheduler.EndRendering();
+				auto command = m_scheduler.Current().Handle();
+				replacement.Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {},
+				                    command);
+				const vk::ClearDepthStencilValue zero {0.0f, 0u};
+				const vk::ImageSubresourceRange  plane {vk::ImageAspectFlagBits::eStencil, 0,
+				                                        replacement.backing.mip_levels, 0, replacement.backing.layers};
+				command.clearDepthStencilImage(replacement.backing.image, vk::ImageLayout::eTransferDstOptimal,
+				                               &zero, 1, &plane);
+				if (PixelHistoryEnabled()) [[unlikely]] {
+					PixelHistoryProbe(m_graphics, m_scheduler, replacement, 0, 0, "init-stencil", 0, 0,
+					                  "no kept stencil, cleared to 0", true);
+				}
+			}
 		}
 	}
 	FreeImage(cached_id);
@@ -1992,31 +2012,50 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 			association = id;
 		}
 	});
-	if (!association) {
-		erase();
-		return;
+	// KYTY_STENCIL_KEEP_FIX=1: without an association record that says the GPU wrote the stencil,
+	// the whole stencil plane (level 0, all layers) is kept anyway: dropping it left the depth image
+	// that replaces the color one with an undefined stencil plane (Ghost of Yotei: 0xff in the
+	// interior, which 7c766c91 paints white).
+	const char* drop_reason = !association                                       ? "no association record"
+	                          : !m_slot_images[association].IsGpuModified()       ? "record not GPU-written"
+	                          : m_slot_images[association].stencil_subresources.layer_count == 0 ? "no stencil layers"
+	                                                                             : nullptr;
+	if (drop_reason != nullptr) {
+		if (StencilSourceLog()) [[unlikely]] {
+			static std::map<std::string, uint64_t> logged;
+			const auto key = fmt::format("{:x} {}", depth.info.data.address, drop_reason);
+			if (const auto count = ++logged[key]; count <= 3 || count % 1000 == 0) {
+				std::printf("\x1b[91mstencil-source: keep of depth 0x%llx (stencil 0x%llx): %s, %s (#%llu)\x1b[0m\n",
+				            static_cast<unsigned long long>(depth.info.data.address),
+				            static_cast<unsigned long long>(depth.info.stencil.address), drop_reason,
+				            StencilKeepFix() ? "keeping the whole plane" : "nothing kept",
+				            static_cast<unsigned long long>(count));
+				std::fflush(stdout);
+			}
+		}
+		if (!StencilKeepFix()) {
+			erase();
+			return;
+		}
 	}
-	const auto& record = m_slot_images[association];
-	if (!record.IsGpuModified() || record.stencil_subresources.layer_count == 0) {
-		erase();
-		return;
-	}
+	const ImageSubresourceRange kept = drop_reason == nullptr
+	                                       ? m_slot_images[association].stencil_subresources
+	                                       : ImageSubresourceRange {0, 1, 0, depth.info.resources.layers};
 	auto info      = depth.info;
-	info.resources = {record.stencil_subresources.level_count,
-	                  record.stencil_subresources.layer_count};
+	info.resources = {kept.level_count, kept.layer_count};
 	if (info.IsTiled()) {
 		info.pitch = TileGetDepthPitch(info.extent.width, 1, 0);
 	}
 	const uint64_t slice = static_cast<uint64_t>(info.pitch) * info.extent.height;
 	const uint64_t size  = slice * info.resources.layers;
 	if (info.pitch < info.extent.width || size == 0 ||
-	    record.stencil_subresources.base_layer + info.resources.layers > depth.info.resources.layers) {
+	    kept.base_layer + info.resources.layers > depth.info.resources.layers) {
 		erase();
 		return;
 	}
 	auto copies = BuildDepthCopies(info, slice, vk::ImageAspectFlagBits::eStencil);
 	for (auto& copy: copies) {
-		copy.imageSubresource.baseArrayLayer += record.stencil_subresources.base_layer;
+		copy.imageSubresource.baseArrayLayer += kept.base_layer;
 	}
 	auto& keeper = m_stencil_keepers[depth.info.stencil.address];
 	if (keeper.buffer == nullptr || keeper.size < size) {
@@ -2034,13 +2073,22 @@ void TextureCache::KeepStencil(ImageId depth_id) {
 	depth.Download(copies, keeper.buffer->Handle(), 0, size, keeper.buffer->Size());
 	if (PixelHistoryEnabled()) [[unlikely]] {
 		// The value kept: the depth image's stencil plane as it is copied out.
-		PixelHistoryProbe(m_graphics, m_scheduler, depth, 0, record.stencil_subresources.base_layer,
+		PixelHistoryProbe(m_graphics, m_scheduler, depth, 0, kept.base_layer,
 		                  "keep-stencil", 0, 0, "copied to keeper", true);
 	}
 }
 
+bool TextureCache::StencilKeepFix() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_STENCIL_KEEP_FIX");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
 bool TextureCache::StencilSourceLog() {
 	static const bool enabled = KYTY_GETENV("KYTY_STENCIL_FROM_R8") != nullptr ||
+	                            KYTY_GETENV("KYTY_STENCIL_KEEP_FIX") != nullptr ||
 	                            KYTY_GETENV("KYTY_DEBUG_STENCIL_SOURCE") != nullptr;
 	return enabled;
 }

@@ -343,6 +343,7 @@ private:
 	// image at its stencil address when shaders wrote that image since.
 	void               RefreshKeeperFromStencilTexture(const Image& depth);
 	[[nodiscard]] static bool StencilSourceLog();
+	[[nodiscard]] static bool StencilKeepFix();
 	// Drops the keeper of `address`; its buffer lives on until the GPU and the record thread are
 	// done with the copies recorded from or into it (see RetireStencilBuffer).
 	void               EraseStencilKeeper(uint64_t address);

@@ -23,7 +23,7 @@ struct EmulatorSwitch {
 	const char* default_titles = nullptr; // Title ids (comma separated) where it is on by default, "*" = all
 };
 
-inline constexpr std::array<EmulatorSwitch, 37> EMULATOR_SWITCHES = {{
+inline constexpr std::array<EmulatorSwitch, 38> EMULATOR_SWITCHES = {{
     {"KYTY_COMPUTE_CHAIN", "Chain compute work without extra waits",
      "Compute steps that follow each other run without a full wait between them, as long as the "
      "game itself does not ask to wait in between. On by default for ASTRO BOT, ASTRO's PLAYROOM "
@@ -173,6 +173,9 @@ inline constexpr std::array<EmulatorSwitch, 37> EMULATOR_SWITCHES = {{
      "New, not yet tested."},
     {"KYTY_STENCIL_FROM_R8", "Stencil follows its 8-bit copy (testing)",
      "When a depth buffer comes back after being used as a plain picture, its stencil is taken from the 8-bit picture shaders worked on in between, not from the copy saved before. Prints red stencil-source lines.",
+     "New, under test in Ghost of Yotei (white interior walls)."},
+    {"KYTY_STENCIL_KEEP_FIX", "Keep the stencil when a depth buffer changes use (testing)",
+     "When a depth buffer is briefly used as a plain picture, its stencil is always saved and given back afterwards; if nothing was saved, the stencil starts at 0 instead of random memory. Prints red stencil-source lines.",
      "New, under test in Ghost of Yotei (white interior walls)."},
     {"KYTY_CONSOLE_COLORS", "Colored console window",
      "The console window next to the game shows its lines in colors by kind: errors red, fixed " 
