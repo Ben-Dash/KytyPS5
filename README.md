@@ -1,15 +1,10 @@
-# BryKytyPS5
+# KytyPS5
 
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64%20%7C%20macOS%20x86__64-0078D4.svg)](#system-requirements)
 [![Status](https://img.shields.io/badge/status-active%20development-orange.svg)](#current-status)
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 
-**BryKytyPS5** is Bryan's PlayStation 5 emulator: a fork of
-[KytyPS5](https://github.com/KytyPS5/KytyPS5), which is itself based on
-[Kyty](https://github.com/InoriRus/Kyty). It focuses on performance and rendering fixes, measured
-on Astro Bot with AMD hardware, and merges upstream KytyPS5 regularly. The emulator, its binaries
-and its options keep the KytyPS5 names, and the rest of this README is KytyPS5's and applies here
-too.
+
 
 **Ghost of Yōtei branch:** this branch adds fixes and diagnostics for Ghost of Yōtei
 (PPSA26344), almost all behind emulator switches that are off by default. See
