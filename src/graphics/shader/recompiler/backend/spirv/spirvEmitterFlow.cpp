@@ -564,6 +564,9 @@ void EmitVertexExplodeCheck(EmitterState& state, uint32_t position) {
 				state.builder.AddFunction(spv::OpCompositeExtract, f32, component, position, i);
 				store(5 + i, Unary(state, spv::OpBitcast, TypeU32(state), component));
 			}
+			// Frame readback clears counters, not record payloads. Every first writer
+			// must reset optional identity fields before recording its own values.
+			for (uint32_t word = 9; word <= 12; ++word) store(word, ConstantU32(state, 0));
 			if (state.explode_base_vertex_variable != 0) {
 				const auto base_vertex = state.builder.AllocateId();
 				state.builder.AddFunction(spv::OpLoad, TypeI32(state), base_vertex,
