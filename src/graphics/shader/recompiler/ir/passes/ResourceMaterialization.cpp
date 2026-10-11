@@ -2121,6 +2121,30 @@ void ApplyResourceSpecialization(Program& program, const ResourceSpecialization&
 
 	SamplerPlan sampler_plan;
 	EXIT_IF(!BuildSamplerPlan(program.info, images, sampler_plan));
+	// KYTY_SAMPLER_COMPARE_SPLIT or KYTY_DEBUG_SAMPLER_COMPARE=1: a red line, once per shader and
+	// S#, for each S# that serves sample and sample_c of float textures alike.
+	static const bool log_shared = SamplerCompareSplit() || KYTY_GETENV("KYTY_DEBUG_SAMPLER_COMPARE") != nullptr;
+	if (log_shared) [[unlikely]] {
+		std::array<uint8_t, ShaderInfo::MaxSamplers> kinds {};
+		for (const auto& pair: program.info.sampled_pairs) {
+			if (pair.image < images.size() && pair.sampler < kinds.size() &&
+			    images[pair.image].numeric_class == Prospero::TextureNumericClass::Float) {
+				kinds[pair.sampler] |= images[pair.image].depth_compare ? 2u : 1u;
+			}
+		}
+		static std::mutex                   shared_mutex;
+		static std::unordered_set<uint64_t> shared_seen;
+		for (uint32_t index = 0; index < program.info.samplers.size() && index < kinds.size(); index++) {
+			if (kinds[index] != 3u) continue;
+			std::lock_guard lock(shared_mutex);
+			if (shared_seen.insert(program.shader_hash ^ (uint64_t {index} << 56u)).second) {
+				std::printf("\x1b[91msampler-compare: shader=%016llx sampler=%u serves sample and sample_c (%s)\x1b[0m\n",
+				            static_cast<unsigned long long>(program.shader_hash), index,
+				            SamplerCompareSplit() ? "split" : "shared, compares both");
+				std::fflush(stdout);
+			}
+		}
+	}
 	auto samplers      = program.info.samplers;
 	auto sampled_pairs = program.info.sampled_pairs;
 	samplers.reserve(sampler_plan.sampler_count);
