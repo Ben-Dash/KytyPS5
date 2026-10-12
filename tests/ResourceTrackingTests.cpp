@@ -2786,33 +2786,254 @@ void TestDynamicSrtReadRemainsExplicit() {
 }
 
 void TestWritableDescriptorPhi() {
+  for (const bool typed : {false, true}) {
+    Fixture fixture;
+    auto *left = fixture.block;
+    auto *right = fixture.AddBlock();
+    auto *merge = fixture.AddBlock();
+    left->AddBranch(merge);
+    right->AddBranch(merge);
+    auto &phi = merge->AppendNewInst(ValueOpcode::Phi, {},
+                                     static_cast<uint64_t>(Type::U32));
+    phi.AddPhiOperand(left, Value(1u));
+    phi.AddPhiOperand(right, Value(2u));
+    const auto word3 =
+        fixture.Emit(ValueOpcode::UMin32, {Value(&phi), Value(0x100u)}, 0, merge);
+    const auto handle = fixture.Emit(ValueOpcode::GetBufferResource,
+                                     {Value(0u), Value(0u), Value(0u), word3},
+                                     MemoryFlags{0, 20}, merge);
+    MemoryInfo memory;
+    memory.kind = ResourceKind::Buffer;
+    memory.typed = typed;
+    fixture.Emit(ValueOpcode::StoreBufferU32,
+                 {handle, Value(0u), Value(0u), Value(0u), Value(1u), Value(true)},
+                 fixture.AddMemory(memory, 20), merge);
+
+    if (typed) {
+      CheckFatal([&] { fixture.PlanAndTrack(); }, "not a valid runtime value",
+                 "unsupported typed descriptor Phi was accepted");
+      Check(!fixture.program.resource_tracking_complete &&
+                fixture.program.info.buffers.empty() &&
+                fixture.program.descriptor_sources.empty(),
+            "unsupported typed descriptor Phi was not rejected transactionally");
+      continue;
+    }
+    // No valid scalar diamond exists here: host descriptor selection must remain
+    // rejected. Raw buffer stores already support evaluating the descriptor on
+    // the GPU through IndirectBuffer, independently of host Phi lowering.
+    fixture.PlanAndTrack();
+    Check(fixture.program.resource_tracking_complete && fixture.program.info.uses_dma &&
+              fixture.program.info.buffers.empty() &&
+              fixture.program.descriptor_sources.empty() &&
+              fixture.program.memory_info.back().kind == ResourceKind::IndirectBuffer &&
+              std::ranges::none_of(fixture.program.value_storage, [](const Inst& inst) {
+                return inst.GetOpcode() == ValueOpcode::SelectU32;
+              }) && phi.GetOpcode() == ValueOpcode::Phi && phi.NumPhiBlocks() == 2u,
+          "unsupported control-dependent descriptor was lowered on the host or lost its GPU Phi");
+  }
+}
+
+enum class DescriptorPhiPredicate { UserData, ScalarBuffer, ScalarAddress, VectorBuffer, Lane };
+
+ResourcePlan ScalarDescriptorPhiPlan(DescriptorPhiPredicate predicate,
+                                     bool writable = true, bool nested = true,
+                                     bool reverse_branch = false, bool reverse_phi = false) {
+  namespace CFG = Libs::Graphics::ShaderRecompiler::CFG;
   Fixture fixture;
-  auto *left = fixture.block;
-  auto *right = fixture.AddBlock();
+  auto *entry = fixture.block;
+  auto *first = fixture.AddBlock();
+  auto *second = fixture.AddBlock();
   auto *merge = fixture.AddBlock();
-  left->AddBranch(merge);
-  right->AddBranch(merge);
-  auto &phi = merge->AppendNewInst(ValueOpcode::Phi, {},
-                                   static_cast<uint64_t>(Type::U32));
-  phi.AddPhiOperand(left, Value(1u));
-  phi.AddPhiOperand(right, Value(2u));
-  const auto word3 =
-      fixture.Emit(ValueOpcode::UMin32, {Value(&phi), Value(0x100u)}, 0, merge);
-  const auto handle = fixture.Emit(ValueOpcode::GetBufferResource,
-                                   {Value(0u), Value(0u), Value(0u), word3},
-                                   MemoryFlags{0, 20}, merge);
+  entry->AddBranch(first);
+  entry->AddBranch(second);
+  first->AddBranch(merge);
+  second->AddBranch(merge);
+  fixture.program.block_info[0].terminator = {
+      .kind = CFG::TerminatorKind::ConditionalBranch,
+      .true_block = reverse_branch ? 2u : 1u,
+      .false_block = reverse_branch ? 1u : 2u};
+  fixture.program.block_info[1].terminator = {
+      .kind = CFG::TerminatorKind::Branch, .true_block = 3};
+  fixture.program.block_info[2].terminator = {
+      .kind = CFG::TerminatorKind::Branch, .true_block = 3};
+  fixture.program.block_info[3].terminator.kind = CFG::TerminatorKind::Return;
+
+  std::array<Value, 14> user_data;
+  for (uint32_t index = 0; index < user_data.size(); ++index)
+    user_data[index] = fixture.UserData(index);
+  auto flag = user_data[8];
+  if (predicate == DescriptorPhiPredicate::Lane) {
+    flag = fixture.Emit(ValueOpcode::LaneId);
+  } else if (predicate != DescriptorPhiPredicate::UserData) {
+    const auto control = fixture.Buffer({Value(0x1000u), Value(0u), Value(16u), Value(0u)});
+    MemoryInfo read;
+    if (predicate == DescriptorPhiPredicate::ScalarAddress) {
+      read.kind = ResourceKind::ScalarAddress;
+      flag = fixture.Emit(ValueOpcode::LoadAddressU32,
+                          {fixture.Address(Value(0x1000u), Value(0u)), Value(0u),
+                           Value(0u), Value(true)}, fixture.AddMemory(read, 4));
+    } else if (predicate == DescriptorPhiPredicate::VectorBuffer) {
+      read.kind = ResourceKind::Buffer;
+      flag = fixture.Emit(ValueOpcode::LoadBufferU32,
+                          {control, Value(0u), Value(0u), Value(0u), Value(true)},
+                          fixture.AddMemory(read, 4));
+    } else {
+      read.kind = ResourceKind::ScalarBuffer;
+      flag = fixture.Emit(ValueOpcode::ReadConstBuffer, {control, Value(0u)},
+                          fixture.AddMemory(read, 4));
+    }
+    // The store aliases the control bytes. A host predicate cannot select an
+    // incoming descriptor from a memory snapshot in a writing shader.
+    if (writable) {
+      MemoryInfo store;
+      store.kind = ResourceKind::Buffer;
+      fixture.Emit(ValueOpcode::StoreBufferU32,
+                   {control, Value(0u), Value(0u), Value(0u), Value(1u), Value(true)},
+                   fixture.AddMemory(store, 8));
+    }
+  }
+  // Keep memory and lane dependencies beneath integer operations, so checking
+  // only the condition's opcode would incorrectly accept them.
+  flag = fixture.Emit(ValueOpcode::BitwiseXor32, {flag, Value(0x80000000u)});
+  fixture.program.block_info[0].condition =
+      fixture.Emit(ValueOpcode::INotEqual32, {flag, Value(0x80000000u)});
+
+  const auto arm_words = [&](Block *block, uint32_t base) {
+    const auto sum = fixture.Emit(ValueOpcode::IAddCarry32,
+                                  {user_data[base], user_data[9]}, 0, block);
+    const auto low = fixture.Emit(ValueOpcode::CompositeExtractU32x2,
+                                  {sum, Value(0u)}, 0, block);
+    const auto carry = fixture.Emit(ValueOpcode::CompositeExtractU32x2,
+                                    {sum, Value(1u)}, 0, block);
+    const auto high = fixture.Emit(ValueOpcode::IAdd32,
+                                   {user_data[base + 1], carry}, 0, block);
+    return std::array<Value, 4>{low, high, user_data[base + 2], user_data[base + 3]};
+  };
+  const auto first_words = arm_words(first, 0);
+  const auto second_words = arm_words(second, 4);
+  std::array<Value, 4> words;
+  for (uint32_t word = 0; word < words.size(); ++word) {
+    auto &phi = merge->AppendNewInst(ValueOpcode::Phi, {}, uint64_t(Type::U32));
+    const bool reversed = reverse_phi != ((word & 1u) != 0u);
+    phi.AddPhiOperand(reversed ? second : first,
+                      reversed ? second_words[word] : first_words[word]);
+    phi.AddPhiOperand(reversed ? first : second,
+                      reversed ? first_words[word] : second_words[word]);
+    words[word] = Value(&phi);
+  }
+  fixture.block = merge;
+  auto high = words[1];
+  if (nested) {
+    high = fixture.Emit(ValueOpcode::BitwiseOr32,
+                         {fixture.Emit(ValueOpcode::IAdd32, {high, Value(0u)}),
+                          Value(0x40000u)});
+  }
+  const auto selected = fixture.Buffer({words[0], high, words[2], words[3]}, 0x40);
+  const auto neighbor = fixture.Buffer(
+      {user_data[10], user_data[11], user_data[12], user_data[13]}, 0x44);
   MemoryInfo memory;
   memory.kind = ResourceKind::Buffer;
-  fixture.Emit(ValueOpcode::StoreBufferU32,
-               {handle, Value(0u), Value(0u), Value(0u), Value(1u), Value(true)},
-               fixture.AddMemory(memory, 20), merge);
+  const auto access = [&](Value buffer, uint32_t pc) {
+    if (writable) {
+      fixture.Emit(ValueOpcode::StoreBufferU32,
+                   {buffer, Value(0u), Value(0u), Value(0u), Value(0x1234u), Value(true)},
+                   fixture.AddMemory(memory, pc));
+    } else {
+      fixture.Emit(ValueOpcode::LoadBufferU32,
+                   {buffer, Value(0u), Value(0u), Value(0u), Value(true)},
+                   fixture.AddMemory(memory, pc));
+    }
+  };
+  access(selected, 0x40);
+  access(neighbor, 0x44);
+  access(selected, 0x48);
+  fixture.PlanAndTrack();
+  const bool host_selection = predicate == DescriptorPhiPredicate::UserData;
+  if (host_selection) {
+    Check(!fixture.program.info.uses_dma && fixture.program.info.buffers.size() == 2u,
+          "scalar descriptor selection changed binding count or fell back to DMA");
+  } else {
+    Check(fixture.program.info.uses_dma &&
+              fixture.program.memory_info[fixture.program.memory_info.size() - 3].kind ==
+                  ResourceKind::IndirectBuffer &&
+              fixture.program.memory_info.back().kind == ResourceKind::IndirectBuffer,
+          "mutable or nonuniform predicate was incorrectly selected by the host");
+  }
+  for (const auto word : words) {
+    const auto *phi = word.ResolveInstruction();
+    Check(phi->GetOpcode() == ValueOpcode::Phi && phi->Parent() == merge &&
+              phi->NumPhiBlocks() == 2u,
+          "host descriptor selection changed GPU SSA or Phi edges");
+  }
+  Check(std::ranges::count_if(fixture.program.value_storage, [](const Inst &inst) {
+          return inst.GetOpcode() == ValueOpcode::SelectU32;
+        }) == (host_selection ? 4u : 0u),
+        "repeated selected-buffer uses duplicated host Phi selections");
+  EliminateDeadCode(fixture.program.blocks);
+  ValidateProgram(fixture.program, true);
+  return ExtractResourcePlan(fixture.program);
+}
 
-  CheckFatal([&] { fixture.PlanAndTrack(); }, "not a valid runtime value",
-             "control-dependent writable descriptor phi was accepted");
-  Check(!fixture.program.resource_tracking_complete &&
-            fixture.program.info.buffers.empty() &&
-            fixture.program.descriptor_sources.empty(),
-        "control-dependent writable descriptor phi was not rejected transactionally");
+void TestScalarDescriptorPhiMaterialization() {
+  for (const bool nested : {false, true}) {
+    for (const bool reverse_branch : {false, true}) {
+      for (const bool reverse_phi : {false, true}) {
+        const auto plan = ScalarDescriptorPhiPlan(DescriptorPhiPredicate::UserData,
+                                                  true, nested, reverse_branch, reverse_phi);
+        std::array<uint32_t, 14> user_data{
+            0xfffffff0u, 0x10u, 64u, 0x16204u,
+            0x2400u, 0x20u, 128u, 0x16204u,
+            0u, 0x40u, 0x8000u, 0u, 16u, 0x16204u};
+        for (const uint32_t flag : {0u, 1u, 0x80000000u, UINT32_MAX}) {
+          for (const uint32_t addend : {0u, 0x40u, UINT32_MAX}) {
+            user_data[8] = flag;
+            user_data[9] = addend;
+            const auto original = user_data;
+            const auto base = ((flag != 0u) != reverse_branch) ? 0u : 4u;
+            const uint64_t sum = uint64_t(user_data[base]) + addend;
+            const std::array<uint32_t, 4> expected{
+                uint32_t(sum), (user_data[base + 1] + uint32_t(sum >> 32u)) |
+                                   (nested ? 0x40000u : 0u),
+                user_data[base + 2], user_data[base + 3]};
+            const SrtRuntime runtime{.user_data = user_data};
+            DescriptorValue interpreted;
+            Check(SrtWalker(plan, runtime).EvaluateDescriptor(plan.info.buffers[0].source,
+                                                             interpreted) &&
+                      std::equal(expected.begin(), expected.end(), interpreted.dwords.begin()),
+                  "detached host plan chose the wrong scalar descriptor or carry");
+            ResourceSnapshot snapshot;
+            ResourceSpecialization specialization;
+            Check(MaterializeResources(plan, runtime, snapshot, specialization) &&
+                      snapshot.buffers.size() == 2u &&
+                      std::equal(expected.begin(), expected.end(), snapshot.buffers[0].dwords.begin()) &&
+                      std::equal(user_data.begin() + 10, user_data.end(),
+                                 snapshot.buffers[1].dwords.begin()) &&
+                      snapshot.user_data == std::vector<uint32_t>(original.begin(), original.end()) &&
+                      user_data == original,
+                  "compiled descriptor plan changed its selected buffer, neighbor or user data");
+          }
+        }
+        const SrtRuntime truncated{.user_data = std::span(user_data).first(9)};
+        ResourceSnapshot snapshot;
+        ResourceSpecialization specialization;
+        Check(!MaterializeResources(plan, truncated, snapshot, specialization),
+              "selected descriptor accepted missing carry input or neighbor words");
+      }
+    }
+  }
+}
+
+void TestScalarDescriptorPhiSafety() {
+  for (const auto predicate : {DescriptorPhiPredicate::ScalarBuffer,
+                               DescriptorPhiPredicate::ScalarAddress,
+                               DescriptorPhiPredicate::VectorBuffer,
+                               DescriptorPhiPredicate::Lane}) {
+    (void)ScalarDescriptorPhiPlan(predicate);
+  }
+  // Read-only user-data selection remains supported, including expressions
+  // above the descriptor Phi. Coherent-memory sampler coverage is separate.
+  const auto plan = ScalarDescriptorPhiPlan(DescriptorPhiPredicate::UserData, false);
+  Check(plan.info.buffers.size() == 2u, "read-only scalar descriptor selection was lost");
 }
 
 ResourcePlan ConditionalSamplerPlan(bool diamond, bool reverse, bool reverse_phi,
@@ -3999,21 +4220,35 @@ int main(int argc, char *argv[]) {
   const std::string_view selected = argc == 2 ? argv[1] : "";
   if (argc > 2 || (!selected.empty() && selected != "--masked-pointer-record-only" &&
                    selected != "--pointer-source-identity-only" &&
-                   selected != "--pointer-mask-neighbors-only")) {
+                   selected != "--pointer-mask-neighbors-only" &&
+                   selected != "--descriptor-phi-only" &&
+                   selected != "--descriptor-phi-neighbors-only")) {
     std::cerr << "Usage: resource_tracking_tests [--masked-pointer-record-only | "
-                 "--pointer-source-identity-only | --pointer-mask-neighbors-only]\n";
+                 "--pointer-source-identity-only | --pointer-mask-neighbors-only | "
+                 "--descriptor-phi-only | --descriptor-phi-neighbors-only]\n";
     return 2;
   }
   try {
+    constexpr std::string_view descriptor_phi_neighbors[] = {
+        "writable descriptor phi", "conditional sampler phi",
+        "finite image phi cycle", "runtime-rooted loop", "invariant loop phi",
+        "conditional buffer materialization"};
     const auto Run = [&](const char *name, auto test) {
       if ((selected == "--masked-pointer-record-only" &&
            std::string_view(name) != "masked bindless pointer record") ||
           (selected == "--pointer-source-identity-only" &&
            std::string_view(name) != "distinct bindless pointer sources") ||
           (selected == "--pointer-mask-neighbors-only" &&
-           !std::string_view(name).starts_with("pointer mask "))) return;
+           !std::string_view(name).starts_with("pointer mask ")) ||
+          (selected == "--descriptor-phi-only" &&
+           !std::string_view(name).starts_with("descriptor phi ")) ||
+          (selected == "--descriptor-phi-neighbors-only" &&
+           std::ranges::find(descriptor_phi_neighbors, std::string_view(name)) ==
+               std::ranges::end(descriptor_phi_neighbors))) return;
       try {
         test();
+        if (selected == "--descriptor-phi-neighbors-only")
+          std::cout << "resource tracking neighbor passed: " << name << '\n';
       } catch (const std::exception &exception) {
         throw std::runtime_error(std::string(name) + ": " + exception.what());
       }
@@ -4040,6 +4275,8 @@ int main(int argc, char *argv[]) {
     Run("SRT runtime", TestSrtFlatteningAndRuntimeMemoization);
     Run("dynamic SRT", TestDynamicSrtReadRemainsExplicit);
     Run("writable descriptor phi", TestWritableDescriptorPhi);
+    Run("descriptor phi scalar materialization", TestScalarDescriptorPhiMaterialization);
+    Run("descriptor phi safety", TestScalarDescriptorPhiSafety);
     Run("conditional sampler phi", TestConditionalSamplerPhi);
     Run("finite image phi cycle", TestFiniteImagePhiCycle);
     Run("finite image bit scan sentinel", TestFiniteImageBitScanSentinel);

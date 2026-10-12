@@ -17139,6 +17139,11 @@ public:
       }
 
 
+      // The rectangle shader below has one EXP0 routed to MRT3. Restore its
+      // compact export state after the preceding two-export sparse-MRT case.
+      registers.SetShaderMask(0xf000);
+      registers.SetTargetOutputMode(1, 0);
+
       // A fourth VS invocation reads beyond the descriptor instead of reconstructing the corner.
       const ShaderBufferResource rect_buffer{{
           static_cast<u32>(rect_address),
@@ -42868,6 +42873,12 @@ void CheckPm4CeCompletion(RenderContext &renderer) {
 } // namespace
 } // namespace Libs::Graphics
 
+namespace Libs::Graphics {
+namespace {
+#include "ScalarBranchDescriptorWritesTests.inc"
+}
+}
+
 #include "AttachmentFeedbackTests.inc"
 #include "PerformanceMemoryTests.inc"
 #include "ShaderPrecompileGpuTests.inc"
@@ -42880,6 +42891,11 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && std::strcmp(argv[1], "--scalar-branch-descriptor-writes-only") == 0) {
+    VulkanHarness vulkan;
+    RunScalarBranchDescriptorWrites(&vulkan);
+    return 0;
+  }
   if (argc >= 2 && std::strcmp(argv[1], "--native-fp16") == 0) {
     g_native_float16_requested = true;
     argv[1] = argv[0];

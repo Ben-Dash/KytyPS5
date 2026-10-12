@@ -19,6 +19,7 @@
 #include <optional>
 #include <span>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -566,7 +567,7 @@ private:
 	Value LowerDescriptorPhi(Value value) {
 		value           = value.Resolve();
 		const auto* phi = value.TryInstruction();
-		if (m_shader_writes || phi == nullptr || phi->GetOpcode() != ValueOpcode::Phi ||
+		if (phi == nullptr || phi->GetOpcode() != ValueOpcode::Phi ||
 		    phi->NumArgs() != 2u || phi->NumPhiBlocks() != 2u || phi->GetType() != Type::U32 ||
 		    m_program.blocks.size() != m_program.block_info.size()) {
 			return value;
@@ -619,6 +620,7 @@ private:
 		    !((term.true_block == target_ids[0] && term.false_block == target_ids[1]) ||
 		      (term.false_block == target_ids[0] && term.true_block == target_ids[1])) ||
 		    !ValidateRuntimeValue(m_program, info.condition, RuntimeValueType::Integer) ||
+		    (m_shader_writes && ReadsMemory(info.condition)) ||
 		    !ValidateRuntimeValue(m_program, phi->Arg(0)) ||
 		    !ValidateRuntimeValue(m_program, phi->Arg(1))) {
 			return value;
@@ -631,6 +633,84 @@ private:
 		selected.SetArg(2, phi->Arg(true_arg ^ 1u));
 		m_descriptor_selections.emplace_back(phi, Value(&selected));
 		return Value(&selected);
+	}
+
+	// Shader stores may invalidate a memory-backed predicate, but cannot change
+	// dispatch user data. Inspect dependencies rather than only its outer opcode.
+	static bool ReadsMemory(Value value) {
+		std::vector<Value> pending {value};
+		std::unordered_set<const Inst*> visited;
+		while (!pending.empty()) {
+			const auto* inst = pending.back().Resolve().TryInstruction();
+			pending.pop_back();
+			if (inst == nullptr || !visited.insert(inst).second) continue;
+			const auto op = inst->GetOpcode();
+			if (op == ValueOpcode::ReadConst || op == ValueOpcode::ReadConstBuffer ||
+			    AddressOpcodeInfoOf(op).access != AddressAccess::None ||
+			    BufferAccessOf(op) != BufferAccess::None ||
+			    ImageOpcodeInfoOf(op).access != ImageAccess::None) return true;
+			for (size_t index = 0; index < inst->NumArgs(); ++index)
+				pending.push_back(inst->Arg(index));
+		}
+		return false;
+	}
+
+	// Rebuild descriptor expressions over host selections without replacing GPU
+	// Phis or moving arm-local instructions across their dominance boundaries.
+	// Iterative and memoized: descriptor dependency chains can exhaust the stack.
+	Value LowerDescriptorWord(Value value, std::unordered_map<const Inst*, Value>& lowered) {
+		value = value.Resolve();
+		const auto* root = value.TryInstruction();
+		if (root == nullptr) return value;
+		if (const auto found = lowered.find(root); found != lowered.end()) return found->second;
+		struct Frame {
+			const Inst* inst;
+			size_t next = 0;
+		};
+		std::vector<Frame> pending;
+		std::unordered_set<const Inst*> visiting;
+		const auto enter = [&](const Inst* inst) {
+			if (inst->GetOpcode() == ValueOpcode::Phi) {
+				lowered.emplace(inst, LowerDescriptorPhi(Value(const_cast<Inst*>(inst))));
+			} else if (!IsRuntimeUniformOp(inst->GetOpcode())) {
+				lowered.emplace(inst, Value(const_cast<Inst*>(inst)));
+			} else {
+				visiting.insert(inst);
+				pending.push_back({inst});
+			}
+		};
+		enter(root);
+		while (!pending.empty()) {
+			auto& frame = pending.back();
+			const auto* inst = frame.inst;
+			if (frame.next < inst->NumArgs()) {
+				const auto* arg = inst->Arg(frame.next++).Resolve().TryInstruction();
+				if (arg == nullptr || lowered.contains(arg)) continue;
+				// Preserve malformed cycles for the existing validator to reject.
+				if (visiting.contains(arg)) return value;
+				enter(arg);
+				continue;
+			}
+			std::vector<Value> args(inst->NumArgs());
+			bool changed = false;
+			for (size_t index = 0; index < args.size(); ++index) {
+				args[index] = inst->Arg(index).Resolve();
+				if (const auto* arg = args[index].TryInstruction(); arg != nullptr)
+					args[index] = lowered.at(arg);
+				changed |= args[index] != inst->Arg(index).Resolve();
+			}
+			auto result = Value(const_cast<Inst*>(inst));
+			if (changed) {
+				auto& rebuilt = m_program.value_storage.emplace_back(inst->GetOpcode(),
+				                                                     inst->Flags<uint64_t>());
+				for (size_t index = 0; index < args.size(); ++index) rebuilt.SetArg(index, args[index]);
+				result = Value(&rebuilt);
+			}
+			lowered.emplace(inst, result);
+			visiting.erase(inst);
+			pending.pop_back();
+		}
+		return lowered.at(root);
 	}
 
 	void MakeSource(const Inst& handle, uint32_t width, bool sampler, bool sample_adjust,
@@ -647,10 +727,11 @@ private:
 			                     ValueOpcodeName(handle.GetOpcode()), handle.NumArgs(), width));
 		}
 		descriptor.dword_count = width;
+		std::unordered_map<const Inst*, Value> lowered;
 		for (uint32_t i = 0; i < width; i++) {
 			const auto value = base_reg != UINT32_MAX
 			    ? NativeDescriptorSource(handle.Arg(i), base_reg + i, pc) : handle.Arg(i);
-			descriptor.dwords[i] = LowerDescriptorPhi(value);
+			descriptor.dwords[i] = LowerDescriptorWord(value, lowered);
 		}
 		if (sample_adjust) {
 			descriptor.dwords[3] = CanonicalizeSampleAdjustDword3(descriptor.dwords[3]);
