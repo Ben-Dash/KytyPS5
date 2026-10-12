@@ -3,6 +3,10 @@ namespace Libs::Graphics {
 struct RenderExecutorTestAccess {
   static void BindTarget(RenderExecutor &executor, ImageId id) { executor.BindRenderTarget(id); }
   static void ResetBindings(RenderExecutor &executor) { executor.ResetBindings(); }
+  static void PrepareGraphicsBindings(RenderExecutor &executor,
+                                      std::span<PreparedBindings* const> stages) {
+    executor.PrepareGraphicsBindings(stages, {});
+  }
 };
 struct TextureCacheTestAccess {
   static void FreeImage(TextureCache &cache, ImageId id) {

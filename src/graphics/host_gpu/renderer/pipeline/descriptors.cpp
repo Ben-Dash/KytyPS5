@@ -3258,6 +3258,13 @@ void RenderExecutor::PrepareGraphicsBindings(std::span<PreparedBindings* const> 
 	for (auto* stage: stages) {
 		RebindBuffers(*stage);
 	}
+	// Image acquisition or buffer alias merges can register a larger BDA owner
+	// after the first pass. Synchronize its mapped CPU-dirty fringe before any
+	// command handles or draw reservations are retained. Unchanged epochs are cheap.
+	if (uses_dma) {
+		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::Bda);
+		m_context.PrepareBda();
+	}
 }
 
 namespace {

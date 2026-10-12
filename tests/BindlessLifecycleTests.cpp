@@ -326,6 +326,7 @@ private:
 #include "EndOfPipeWriteGpuTests.inc"
 #include "EndOfPipeLiteralGpuTests.inc"
 #include "EndOfPipeLiteralNeighborTests.inc"
+#include "LateBdaImageFringeTests.inc"
 #include "FaultBufferProtocolGpuTests.inc"
 #include "FaultBufferProtocolNeighborTests.inc"
 #include "FaultBitmapInitializationGpuTests.inc"
@@ -371,10 +372,11 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-frame-only") == 0 ||
                             std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-default-only") == 0 ||
                             std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-cap-only") == 0 ||
+                            std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
                             std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu | --ngg-vertex-count-gpu | --dispatch-snapshot-job-selector-only | --dispatch-snapshot-job-selector-frame-only | --dispatch-snapshot-job-selector-default-only | --dispatch-snapshot-job-inventory-only | --dispatch-snapshot-job-inventory-frame-only | --dispatch-snapshot-job-inventory-default-only | --dispatch-snapshot-job-inventory-cap-only]");
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --late-bda-image-fringe-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu | --ngg-vertex-count-gpu | --dispatch-snapshot-job-selector-only | --dispatch-snapshot-job-selector-frame-only | --dispatch-snapshot-job-selector-default-only | --dispatch-snapshot-job-inventory-only | --dispatch-snapshot-job-inventory-frame-only | --dispatch-snapshot-job-inventory-default-only | --dispatch-snapshot-job-inventory-cap-only]");
   if (argc == 2 && (std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-frame-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-default-only") == 0 ||
@@ -407,6 +409,8 @@ int main(int argc, char **argv) {
     ConfigurePackedBufferOffsetTests();
   if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0)
     ConfigureNggVertexCountTests();
+  if (argc == 2 && std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0)
+    ConfigureLateBdaImageFringeTests();
   if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
                     std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0))
     ConfigureFaultFirstBindingDeferredGpu();
@@ -431,7 +435,8 @@ int main(int argc, char **argv) {
       (std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
-       std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0));
+       std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0));
   if (argc == 2 && std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0)
     CheckBindlessPreparationNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)
@@ -454,6 +459,8 @@ int main(int argc, char **argv) {
     CheckGenericBufferCodegenCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0)
     CheckNggVertexCountGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0)
+    CheckLateBdaImageFringeGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0)
     CheckPackedBufferOffsetCodegenCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)

@@ -1008,6 +1008,11 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		               input_info.stage.program->shader_hash);
 	}
 	RebindBuffers(bindings);
+	// Images/shared storage can expand BDA owners after the initial pass.
+	// Finish residency before snapshots, chain handles and command reservations.
+	if (program.info.uses_dma) {
+		m_context.PrepareBda();
+	}
 	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
 		DispatchSnapshot::WatchDispatch(input_info, bindings, m_context.GetGpu().GetFrameNum(),
 		                               m_context.GetCommandScheduler().CurrentTick(), submit_id,
@@ -1161,6 +1166,10 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	    args_addr, sizeof(vk::DispatchIndirectCommand), false);
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
+	// Include owners acquired by images, shared storage and indirect arguments.
+	if (program.info.uses_dma) {
+		m_context.PrepareBda();
+	}
 	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
 		DispatchSnapshot::WatchDispatch(input_info, bindings, m_context.GetGpu().GetFrameNum(),
 		                               m_context.GetCommandScheduler().CurrentTick(), submit_id,
