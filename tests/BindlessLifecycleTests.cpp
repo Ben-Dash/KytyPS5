@@ -288,6 +288,7 @@ private:
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
 #include "VertexValueTraceGpuTests.inc"
+#include "GenericBufferCodegenTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -301,10 +302,17 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--bindless-descriptor-retirement-readback") == 0 ||
                             std::strcmp(argv[1], "--bindless-descriptor-retirement-neighbors") == 0 ||
                             std::strcmp(argv[1], "--embedded-fetch-gpu-readback") == 0 ||
-                            std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback]");
+                            std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0 ||
+                            std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                            std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
+                            std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement]");
   if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     ConfigureVertexTraceGpuEnvironment();
+  if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
+                    std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0))
+    ConfigureGenericBufferTests();
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -333,6 +341,12 @@ int main(int argc, char **argv) {
     CheckEmbeddedFetchGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     CheckVertexValueTraceGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0)
+    CheckGenericBufferCodegenCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0)
+    CheckGenericBufferNumeric(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0)
+    return MeasureGenericBufferNumeric(vulkan) == 0u ? 0 : 2;
   else
     CheckBindlessLifecycle(vulkan);
   return 0;

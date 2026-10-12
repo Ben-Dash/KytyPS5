@@ -1911,6 +1911,73 @@ uint32_t NormalizeDynamicBufferComponent(EmitterState& state, uint32_t raw, uint
 	return Select(state, TypeU32(state), is_type(Format::ComponentType::Float), floating, result);
 }
 
+// Share only the existing pure component conversion body. Address extraction,
+// bounds, dst_sel constants, D16 packing and guest EXEC stay at each load site.
+uint32_t GenericFormattedConversionBody(EmitterState& state, const std::array<uint32_t, 10>& params) {
+	const auto u32 = TypeU32(state);
+	const auto raw = params[0];
+	const auto bits = params[1];
+	// As NormalizeFormatComponent for 8/16/32-bit components; signed types sign-extend.
+	const auto signed_raw = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), signed_raw,
+	                          Unary(state, spv::OpBitcast, TypeI32(state), raw), ConstantU32(state, 0),
+	                          bits);
+	const auto unsigned_float = Unary(state, spv::OpConvertUToF, TypeF32(state), raw);
+	const auto signed_float   = Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw);
+	const auto unorm = Binary(state, spv::OpFDiv, TypeF32(state), unsigned_float, params[8]);
+	const auto snorm = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpExtInst, TypeF32(state), snorm, GlslStd450(state), GLSLstd450FMax,
+	                          Binary(state, spv::OpFDiv, TypeF32(state), signed_float,
+	                                 params[9]),
+	                          ConstantF32Value(state, -1.0f));
+	auto converted = Select(state, u32, params[2],
+	                        EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw)), raw);
+	for (const auto [is_type, value]: {std::pair {params[3], Unary(state, spv::OpBitcast, u32, signed_raw)},
+	                                   std::pair {params[4], Unary(state, spv::OpBitcast, u32, unsigned_float)},
+	                                   std::pair {params[5], Unary(state, spv::OpBitcast, u32, signed_float)},
+	                                   std::pair {params[6], Unary(state, spv::OpBitcast, u32, unorm)},
+	                                   std::pair {params[7], Unary(state, spv::OpBitcast, u32, snorm)}}) {
+		converted = Select(state, u32, is_type, value, converted);
+	}
+	return converted;
+}
+
+uint32_t CallGenericFormattedConversion(EmitterState& state, uint32_t raw, uint32_t bits,
+                                       const EmitterState::GenericBufferFormatValues& format,
+                                       uint32_t output) {
+	if (state.generic_formatted_conversion_function == 0) {
+		state.generic_formatted_conversion_function = state.builder.AllocateId();
+	}
+	const auto result = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpFunctionCall, TypeU32(state), result,
+	                          state.generic_formatted_conversion_function, raw, bits,
+	                          format.half[output], format.is_sint, format.is_uscaled,
+	                          format.is_sscaled, format.is_unorm, format.is_snorm,
+	                          format.unsigned_max[output], format.signed_max[output]);
+	return result;
+}
+
+void EmitGenericFormattedConversionHelper(EmitterState& state) {
+	if (state.generic_formatted_conversion_function == 0) return;
+	const auto u32 = TypeU32(state);
+	const auto boolean = TypeBool(state);
+	const auto f32 = TypeF32(state);
+	const auto type = state.builder.Type(spv::OpTypeFunction, u32, u32, u32,
+	                                     boolean, boolean, boolean, boolean, boolean, boolean, f32, f32);
+	state.builder.AddFunction(spv::OpFunction, u32, state.generic_formatted_conversion_function,
+	                          spv::FunctionControlMaskNone, type);
+	std::array<uint32_t, 10> params {};
+	for (uint32_t i = 0; i < params.size(); ++i) {
+		params[i] = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpFunctionParameter, i < 2u ? u32 : i < 8u ? boolean : f32,
+		                          params[i]);
+	}
+	EmitLabel(state, state.builder.AllocateId());
+	const auto converted = GenericFormattedConversionBody(state, params);
+	state.builder.AddFunction(spv::OpReturnValue, converted);
+	state.builder.AddFunction(spv::OpFunctionEnd);
+}
+
 // The formatted load of a GenericBufferFormat buffer, with the format values decoded at entry
 // (EmitGenericBufferFormats). The whole unaligned element must be in bounds (as
 // PrepareFormattedMemory); out of bounds, each output is its dst_sel's constant. Each output
@@ -1965,28 +2032,7 @@ uint32_t LoadGenericFormatted(ValueEmitContext& ctx, const IR::Inst& inst, const
 		           Binary(state, spv::OpISub, u32, ConstantU32(state, 32), within)));
 		const auto raw = EmitBitFieldUExtract(state, Binary(state, spv::OpBitwiseOr, u32, low, high),
 		                                      ConstantU32(state, 0), bits);
-		// As NormalizeFormatComponent for 8/16/32-bit components; signed types sign-extend.
-		const auto signed_raw = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), signed_raw,
-		                          Unary(state, spv::OpBitcast, TypeI32(state), raw), ConstantU32(state, 0),
-		                          bits);
-		const auto unsigned_float = Unary(state, spv::OpConvertUToF, TypeF32(state), raw);
-		const auto signed_float   = Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw);
-		const auto unorm = Binary(state, spv::OpFDiv, TypeF32(state), unsigned_float, format.unsigned_max[output]);
-		const auto snorm = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpExtInst, TypeF32(state), snorm, GlslStd450(state), GLSLstd450FMax,
-		                          Binary(state, spv::OpFDiv, TypeF32(state), signed_float,
-		                                 format.signed_max[output]),
-		                          ConstantF32Value(state, -1.0f));
-		auto converted = Select(state, u32, format.half[output],
-		                        EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw)), raw);
-		for (const auto [is_type, value]: {std::pair {format.is_sint, Unary(state, spv::OpBitcast, u32, signed_raw)},
-		                                   std::pair {format.is_uscaled, Unary(state, spv::OpBitcast, u32, unsigned_float)},
-		                                   std::pair {format.is_sscaled, Unary(state, spv::OpBitcast, u32, signed_float)},
-		                                   std::pair {format.is_unorm, Unary(state, spv::OpBitcast, u32, unorm)},
-		                                   std::pair {format.is_snorm, Unary(state, spv::OpBitcast, u32, snorm)}}) {
-			converted = Select(state, u32, is_type, value, converted);
-		}
+		const auto converted = CallGenericFormattedConversion(state, raw, bits, format, output);
 		values[output] = Select(state, u32, format.constant_one[output], format.one,
 		                        Select(state, u32, AndCondition(state, format.from_memory[output], in_bounds),
 		                               converted, ConstantU32(state, 0)));
@@ -2321,6 +2367,7 @@ uint32_t LoadIndirectFormatted(ValueEmitContext& ctx, const IR::Inst& inst, uint
 } // namespace
 
 void EmitIndirectFormattedHelpers(EmitterState& state) {
+	EmitGenericFormattedConversionHelper(state);
 	const auto u32 = TypeU32(state);
 	for (size_t i = 0; i < state.indirect_formatted_helpers.size(); i++) {
 		const auto helper = state.indirect_formatted_helpers[i];

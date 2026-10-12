@@ -151,6 +151,8 @@ struct EmitterState {
 		std::array<uint32_t, 4> unsigned_max {}, signed_max {}, half {};
 	};
 	std::array<GenericBufferFormatValues, IR::ShaderInfo::MaxBuffers> generic_buffer_formats {};
+	// One pure component conversion body for all generic formatted load sites.
+	uint32_t                                         generic_formatted_conversion_function = 0;
 	uint32_t                                         bda_pagetable_variable  = 0;
 	uint32_t                                         fault_buffer_variable   = 0;
 	std::array<uint32_t, 2>                           value_trace_claimed {};
