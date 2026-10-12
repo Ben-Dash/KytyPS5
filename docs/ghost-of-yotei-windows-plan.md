@@ -1,5 +1,101 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Useful changes retained; incomplete sampler archived, 2026-10-12
+
+User authorized publishing useful work and cleaning the active branch. The fetched
+origin/yotei-integration-native already points to c0b54a608c6ed794132d2aca2f92fcc32999fe96,
+including verified BC0f40da8a, HTile63c97d04 and alpha-coverage14f2a886 fixes.
+Keep that published history and the committed opt-in CPU sampler reproduction;
+it describes an outstanding defect, not a completed sampler feature.
+
+All eight changed/untracked files were copied and SHA256-checked before cleanup:
+`_Build/analysis/branch-cleanup-20261012T1848474844736Z/manifest.json`,
+`uncommitted.patch` and `working-tree/`. The three sampler planner/materializer
+source edits, GPU-harness glue and untracked DynamicSamplerHeapGpuTests.inc were
+removed from the active working tree. Source/tests now exactly match committed
+c0. No reset of published history, game data/cache deletion or WSL changes.
+
+Publication retains the threading/performance research, launch checkpoints and
+corrected CTest timing. Stored native CTest154203 was rechecked: source14f2a886,
+exit0, 11/11 PASS, 6.69s CTest /7.60s runner. Stored c0 build/install/help were
+also PASS; no new build/test/game run was needed for this documentation/cleanup.
+Latest installed EXE remains c0/DC6B; visible current-package effects, actual
+1080p and stable60 FPS are still unproved. WSL must remain running.
+
+Next resume starts from clean committed c0 source and the published research
+priorities. Consult the archive for rejected/unproved sampler drafts; do not
+restore them wholesale. A new sampler attempt needs a valid key-buffer fixture,
+GPU positive controls and coherence proof before changing production behavior.
+New performance work likewise starts with a measured cause and a regression.
+
+## CPU/GPU parallelism research; execution unchanged, 2026-10-12 17:24 UTC
+
+User asked whether rendering is restricted to one CPU/GPU core and requested
+research. See [threading and performance research](yotei-threading-and-performance-research-2026-10-12.md).
+Verified native source HEAD c0b54a608c6ed794132d2aca2f92fcc32999fe96 and saved
+run.json/stdout evidence. No new build/test/game run or production edit for this
+research. WSL must remain running; do not lower memory guards/repeat identical
+memory failures. No issue update or push.
+
+CPU has one main sequential PM4 processor, plus draw preparation, deferred
+Vulkan recording/submission and compiler workers. Latest c0 log confirms shader
+replay on 7 threads and queued compute pipeline creation on 2 threads. One main
+universal VkQueue does not mean one GPU core. KYTY_GPU_CORE affinity is opt-in,
+absent from recorded latest overrides; gpu_frames_ahead has no runtime consumer.
+
+Two saved 30s loading profiles show full-drain 21.61/29.07 ms per present and
+GPU gaps 37.93/35.73 ms; queue-lock waits only 0.13/0.17 ms. Separate cold
+pipeline misses cost 18.061/16.864s. These categories overlap and loading does
+not prove world FPS or GPU occupancy. Last confirmed world used targets up to
+4K despite 1080p window; actual 1080p/60 FPS remains pending.
+
+Priority: identify exact missing pipeline permutations/cache readiness, then
+prove avoidable readback/release/wait dependencies before changing them. Add
+parallel command preparation/recording only if CPU critical path is measured;
+dedicated async-compute queues are a later, higher-risk option. Required
+synthetic correctness cases and measurement plan are in the research document.
+
+Sampler WIP is preserved and paused for this research: three planner/materializer
+source files have been changed since the earlier 16:25 checkpoint. CPU regression
+163727/E89AA passed, but GPU163953/80CD fixture produced image0/wrap for all keys,
+including its image-key positive control. Its key-buffer descriptor needs legal
+bounds/stride semantics plus raw GPU key witnesses before an intended sampler
+GPU RED/GREEN claim. Host sampler mirror/coherence proposal remains unapplied.
+Installed c0/DC6B runtime does not include this WIP. Next resume: finish those
+fixture/control/coherence checks; apply the researched performance work separately.
+
+## Latest native package; memory limit reached, 2026-10-12 16:25 UTC
+
+Currentcommittedc0b54a60 (sourcefix14f2a886); native build-core154637, install155337,
+help155338 PASS. `_Build/analysis/yotei-effects-20261012/runtime-c0b54a60/kyty_emulator.exe`
+SHA256DC6B68AD628D172B718E0359FE2A20BD0BE7BB871CD2DC2763B43D8B7BB3A2AB.
+Source-generatedkey6f054404...; privatefresh journal/cache, priorarchives preserved,
+private savedata copied. NewflagsPassesOnly (noGPUtiming/zones) and2compilethreads.
+
+- Run155535-three-fixes-live-journal-129dc5 closed15:56:40UTC/exit0 at physicalfree
+ 7.98GiB, commitheadroom8.7; maxownedWS10.64GiB. Loadingonly frame463/title2.9.
+  Actualused-only sourcejournal1295977bytes; nocorrectnesscheck/draw disabled.
+- Differentbounded profile161457-reserve6-fe3ed9 used6GiB physicalreserve, 1second
+  checks, same42GiB ownedmax/2GiB commitguard, max900s. Closed16:16:02UTC/exit0 at
+  physical5.68GiB andcommit2.5GiB; maxownedWS14.21. Do NOTlowerreserveagain or repeat
+  unchanged memory failures. WSL explicitlymustremainrunning; noWSLprocess stopped.
+  Loadingonly frame341/title12.0. Actualeffect/renderresolution/FPS comparisonpending.
+
+SmallGPU sampler baseline161851/EDC2: all4 native staticwrap/clamp colors/once1
+controls PASS. Dynamic8 cases fail materialization beforedispatch/once0; NOTintended
+samplerGPU RED. Diagnostic162422 sameEXE confirms srt-node-fail Void,args0,
+materialize-failed bufferindex1; actualimagepc40 doesreceive indirectplan.
+Root/descriptor_phi_port prepares ignoredpacked16sampler planner/materializer and
+independent source/DCE diagnosis, no production sampler edits yet. CPU152233 valid
+plannedidentityRED remains. Test-only GPUfixture/glue are currentWIP; keep default
+harness unchanged, only opt-in supporteddevicefeature mode enabled.
+
+Currentno nativegame/build/test running. Next: resolve immutable SRT root/DCE and
+sampler planning using unchangedCPU/GPUcontrols, mirrorcoherence regressions before
+wideenablement. Preserve all failing inputs, supportedSrc guards and rawsamplerwords.
+Newnative11FXCTest reporttiming corrected to6.69s CTest/7.60s boundedrunner.
+LiveallrequestedFX/actual1080/60FPS remainsblockedbycurrentRAMheadroom, notachieved.
+
 ## Three shared FX corrections proved; WSL must stay running, 2026-10-12 15:43 UTC
 
 Completedlocal0f40da8a BCpartialBUFFER/statistics,63c97d04 registeredHTile,
@@ -7,7 +103,7 @@ Completedlocal0f40da8a BCpartialBUFFER/statistics,63c97d04 registeredHTile,
 for exact intendedRED/unchangedGREEN, hashes/artifacts, supportedscope and debts.
 Hardened32A2C RED152819/5349 ->unchangedGREEN153233/9FB1;64earlyZneighbors153721,
 60CPUrequestfields153722, depth/color neighbors153722/153723 PASS. Final native
-CTest154203:11/11PASS,7.59s; no fullsuite/cross-game gameplay/effect claim.
+CTest154203:11/11PASS,6.69s CTest /7.60s runner; no fullsuite/cross-game gameplay/effect claim.
 Exactfractional/dither/EQAA nativecoverage is a logged diagnostic approximation;
 actualsource routing/swizzle andforceddepthfirst unsupported errors preserved.
 

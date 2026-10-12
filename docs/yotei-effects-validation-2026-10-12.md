@@ -43,7 +43,7 @@ CPU predicate tests for formats3/6 do not prove those unsupported export formats
 shader emission or GPU behavior. Only float endpoints0/1 at1x/4x are numerically
 proved here. Source-routing/forced-depth rejection fixtures remain test debt.
 
-Native focused CTest150447:8/8PASS,5.53s. Final affected CTest154203:11/11PASS,7.59s,
+Native focused CTest150447:8/8PASS,5.53s. Final affected CTest154203:11/11PASS,6.69s CTest /7.60s runner,
 including32endpoint/64early-neighbor/60CPU requests. Executables9A1146AB(bindless)
 and0BB5B8B6(shader), fullSHA256 in run.json. Additional153722 sampled depth/comparison/
 attachment-feedback/A16address and153723 color/1D target neighbors pass. No other
