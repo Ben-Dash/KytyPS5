@@ -785,6 +785,11 @@ if(BUILD_TESTING)
 	add_test(NAME texture_r8_snorm
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --r8-snorm-texture-only)
 	set_tests_properties(texture_r8_snorm PROPERTIES TIMEOUT 30)
+	add_test(NAME texture_bc_r64_layout
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --bc-r64-texture-layout-only)
+	add_test(NAME texture_bc_r64_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --bc-r64-texture-gpu-only)
+	set_tests_properties(texture_bc_r64_layout texture_bc_r64_gpu PROPERTIES TIMEOUT 30)
 	add_test(NAME performance_memory
 	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --performance-memory-only)
 	add_test(NAME shader_precompile_gpu

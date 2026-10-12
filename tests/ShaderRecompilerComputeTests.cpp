@@ -17542,6 +17542,8 @@ public:
     return {std::move(pixel), std::move(gds)};
   }
 
+#include "BcR64TextureTests.inc"
+
   void CheckGpuTilerCpuParity() {
     constexpr const char *name = "GpuTilerCpuParity";
     EnsureRuntimeContext();
@@ -17607,8 +17609,8 @@ public:
       const vk::BufferCopy copy{result.offset, offset, result.size};
       scheduler.Current().Handle().copyBuffer(result.buffer, scratch_output.buffer, 1, &copy);
     };
-    // Keep all four conversions in flight to check growth, overwrite ordering,
-    // the requested span on reuse, and two simultaneously live workspaces.
+    // Keep all four conversions in flight. Deferred scratch retirement protects
+    // their complete lifetimes; the pool cannot reuse a still-live allocation.
     const auto first = tile_manager.TransformColor(
         {scratch_input.buffer, 0, 8}, ColorTransform::SwapBgra16, true);
     copy_scratch(first, 0);
@@ -17620,10 +17622,22 @@ public:
     copy_scratch(reused, 40);
     const auto paired = tile_manager.TransformColor(reused, ColorTransform::SwapBgra16, true);
     copy_scratch(paired, 48);
-    Require(name, "scratch workspace reuse",
-            first.buffer != grown.buffer && grown.buffer == reused.buffer &&
-                reused.buffer != paired.buffer && reused.size == 8 && paired.size == 8,
-            "scratch growth, input exclusion, or requested span was lost");
+    const std::array scratch_results{first, grown, reused, paired};
+    bool scratch_distinct = true;
+    bool scratch_ranges_valid = true;
+    for (size_t i = 0; i < scratch_results.size(); ++i) {
+      const auto& result = scratch_results[i];
+      scratch_ranges_valid &= result.buffer != nullptr &&
+          result.buffer != scratch_input.buffer && result.offset == 0 &&
+          result.capacity >= result.size;
+      for (size_t j = 0; j < i; ++j) {
+        scratch_distinct &= result.buffer != scratch_results[j].buffer;
+      }
+    }
+    Require(name, "scratch workspace lifetimes",
+            scratch_distinct && scratch_ranges_valid && first.size == 8 &&
+                grown.size == 32 && reused.size == 8 && paired.size == 8,
+            "live scratch allocations alias or requested spans/capacities are invalid");
     host_barrier(scratch_output.buffer, scratch_output.size,
                     vk::PipelineStageFlagBits::eTransfer, vk::AccessFlagBits::eTransferWrite);
     scheduler.Finish();
@@ -18035,7 +18049,8 @@ public:
     constexpr RenderTargetFormatCase render_target_formats[] = {
         {Prospero::BufferFormat::k8Srgb, 1},
         {Prospero::BufferFormat::k8_8Srgb, 2},
-        {Prospero::BufferFormat::k9_9_9_5Float, 0},
+        // Texture memory layout is independent of attachment renderability.
+        {Prospero::BufferFormat::k9_9_9_5Float, 4},
     };
     for (const auto &test : render_target_formats) {
       for (const auto tile :
@@ -43416,6 +43431,16 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--gpu-tiler-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckGpuTilerCpuParity();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--bc-r64-texture-layout-only") == 0) {
+    VulkanHarness::CheckBcR64TextureAdmission();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--bc-r64-texture-gpu-only") == 0) {
+    VulkanHarness::CheckBcR64TextureAdmission();
+    VulkanHarness vulkan;
+    vulkan.CheckBcR64TextureGpuRoundTrip();
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--gpu-command-lane-only") == 0) {
