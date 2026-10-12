@@ -23,6 +23,7 @@
 #include "graphics/host_gpu/renderer/commandHooks.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
+#include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/blitHelper.h"
 #include "graphics/host_gpu/renderer/meshIndirect.h"
 #include "graphics/host_gpu/renderer/image/image.h"
@@ -5560,6 +5561,7 @@ public:
   #include "DispatchRecordingAgeBudgetTests.inc"
   #include "RecordingAgePolicyNeighbors.inc"
   #include "ActiveAgeIndirectDispatchTests.inc"
+  #include "OrdinaryBufferNativeFillCostTests.inc"
 
   void CheckComputeMetaClearClassification() {
     constexpr const char *name = "ComputeMetaClearClassification";
@@ -42918,6 +42920,11 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--dispatch-recording-age-budget-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckDispatchRecordingAgeBudget();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--ordinary-buffer-native-fill-cost-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckOrdinaryBufferNativeFillCost();
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--recording-age-policy-only") == 0) {
