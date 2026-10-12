@@ -1,5 +1,27 @@
 # Integration test debt
 
+## Vertex journal shape and original-game debt, 2026-10-12 12:38 UTC
+
+Source5b231fdf native build/install/help PASS; packageB28453B2. Fresh full corpus
+2770 distinct inputs:2524 PASS/246 FAIL, all246vertex resource-shape mismatch,
+before emit. AllCS542/PS1331 pass. Evidence fullbatch122604 (FDF74819).
+Native single-record238 without today's Phi code123522 (C9118E81) still fails;
+do not attribute the246group to this port, or claim all246 baseline-proved.
+
+Required next diagnosis: compare current translated buffers/images/completion
+against recorded specialization for preserved vertex inputs; identify the earlier
+shared semantic change or missing replay metadata. Keep the cardinality check,
+original journal/code and all captures. Do not fill new specialization entries
+with defaults, remap indices by guess, or relabel this failure as a shader PASS.
+Any production correction needs its own independent regression first. Current
+native replay rejects these mismatches before specialization; cold live paths
+use actual resources, but a successful game launch remains unproved.
+
+Original192 missing matrix rows, body/world stability and1920x1080/~60FPS remain
+pending. Historical3/3 original-run limit was not reset; no new game run occurred.
+Further game capture must use new explicit launch authorization. Sources restored
+byte-exact and no owned native processes remain; details in the first launch checkpoint.
+
 ## Upstream ports proved; remaining coverage, 2026-10-12 12:22 UTC
 
 Required Phi/DMA/BC/raw/partial-copy reproductions below now have independent

@@ -1,5 +1,48 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Native package verified; corpus replay incompatibility recorded, 2026-10-12 12:38 UTC
+
+Active branch yotei-integration-native. Tested production/test source
+5b231fdf0a5e5cc42751f7281cbd0e21276382b7; local fixes3f98bd1d (Phi),
+30db5f71 (DMA bases),2b5504f3 (BC/raw+partial copy), registration/evidence5b231fdf.
+All12 focused CTest tests PASS; four intended native RED->GREEN mechanisms,
+GPU neighbors,96 Phi CPU variants/6 GPU cases and358 tiler cases are recorded
+in [validation report](yotei-upstream-ports-validation-2026-10-12.md).
+
+- Native build-core122312 and private install122420 PASS. Runtime:
+  `_Build/analysis/upstream-ports-20261012/runtime-5b231fdf/kyty_emulator.exe`,
+  SHA256 **B28453B26DE56615B9A1DAEF1D5D153E8893F530593D92C40EB49996EFA779DA**.
+  Bounded `--help`122603 PASS. This is not a game launch or visible frame.
+- Full fresh CPU corpus finished12:30:28UTC without timeout:2999 manifests,
+  2770 distinct inputs/executed, reused0,2524 PASS/246 FAIL;237.447s auditor,
+ 264.167s coordinator. All246 are vertex records failing the same strict
+  recorded-specialization/resource-shape gate, before emission. All542 compute
+  and1331 pixel distinct inputs pass;651/897 vertex pass. No decode/emit/SPIR-V
+  failure in the successfully emitted inputs; full-corpus GREEN not claimed.
+  Evidence `yotei-integration-20261011/batch-native-full-20261012-122604-0742614/`
+  under `_Build/analysis/`; actual auditor FDF74819416AA97D05D57B7BD5B6579852D51A0F93B917D02C5E3765538D711E.
+- Exact record238 also fails with only Phi behavior reverted to e5c6e346:
+  native123522/C9118E81, saved translated IR. This excludes today's Phi port
+  as the cause for that sample; the246-wide baseline/source attribution remains
+  pending. Do not claim all246 were already failing on e5c6e346 or fabricate
+  new specializations from missing guest inputs. Original records are preserved.
+- Native replay checks the same cardinalities before ApplyResourceSpecialization;
+  incompatible records are not installed. Live lookups use actual guest resources.
+  The new source-generated cache key differs from prior original-run journals;
+  private runtime has no copied pipeline cache. These are verified code/package
+  facts, not proof that cold compilation or gameplay completes.
+- Scoped absence sources restored byte-exact/touched; final auditor rebuilt123523
+  as1D5D2420C6FF217340D5D41589A1089D4112197B8550D5C9E37CF67A502C39A9.
+  Full audit is evidence for FDF74819, not a second whole-corpus run of1D5D2420.
+  No native game/test/Ninja/MSBuild/auditor process remains; no push/issue comment.
+
+Next required work: resolve the vertex journal cardinality/source attribution,
+preserving strict validation; capture fresh current-source specializations when
+an original-game launch is explicitly authorized. On that run use the private
+native artifact, actual1920x1080 measurements, body/nearby-object screenshots and
+DA4 producer/VS witnesses. Original192 matrix holes and stable picture/~60FPS
+remain unproved. Historical original-game3/3 cap is retained; no fourth run occurred.
+
 ## Verified upstream mechanisms; final native audit preparing, 2026-10-12 12:22 UTC
 
 New user instruction "делай" authorized implementation and bounded native tests.
