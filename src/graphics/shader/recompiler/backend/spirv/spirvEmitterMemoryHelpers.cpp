@@ -107,13 +107,14 @@ uint32_t StorageBufferElementBits(const IR::Program& program, const IR::MemoryIn
 }
 
 void EmitMemoryOffsets(EmitterState& state) {
-	for (uint32_t i = 0; i < state.program.bindings.memory_offset_count; i++) {
+	const auto count = state.program.bindings.memory_offset_count;
+	for (uint32_t i = 0; i < count; i += 4u) {
 		const auto word =
 		    EmitShaderDataDwordLoad(state, state.program.bindings.memory_offset_dword + i / 4u);
-		const auto shift             = ConstantU32(state, (i % 4u) * 8u);
-		state.memory_byte_offsets[i] = EmitBinaryU32(
-		    state, spv::OpBitwiseAnd, EmitBinaryU32(state, spv::OpShiftRightLogical, word, shift),
-		    ConstantU32(state, 0xffu));
+		for (uint32_t lane = 0; lane < std::min(4u, count - i); ++lane) {
+			state.memory_byte_offsets[i + lane] = EmitNative<spv::OpBitFieldUExtract, IR::Type::U32>(
+			    state, word, ConstantU32(state, lane * 8u), ConstantU32(state, 8u));
+		}
 	}
 	const auto& strides = state.program.bindings.buffer_strides;
 	for (uint32_t k = 0; k < strides.size(); k++) {
