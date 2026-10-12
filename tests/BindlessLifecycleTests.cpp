@@ -7,6 +7,7 @@
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/guest_gpu/hardwareContext.h"
+#include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/shader.h"
 #include "kernel/memory.h"
@@ -319,6 +320,9 @@ private:
 #include "BindlessDescriptorRetirementTests.inc"
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
+#include "BcAliasOwnershipTests.inc"
+#include "BcAliasPartialTailPaddingTests.inc"
+#include "CopyMipDestinationOwnershipTests.inc"
 #include "NggVertexCountTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
@@ -328,6 +332,9 @@ private:
 #include "EndOfPipeLiteralNeighborTests.inc"
 #include "LateBdaImageFringeTests.inc"
 #include "FirstUseBdaPointerChainTests.inc"
+#include "FirstUseDmaBaseTests.inc"
+#include "DmaBaseOriginsTests.inc"
+#include "DmaBaseRuntimeBoundsTests.inc"
 #include "FaultBufferProtocolGpuTests.inc"
 #include "FaultBufferProtocolNeighborTests.inc"
 #include "FaultBitmapInitializationGpuTests.inc"
@@ -376,6 +383,15 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0 ||
                             std::strcmp(argv[1], "--first-use-bda-pointer-chain-gpu") == 0 ||
                             std::strcmp(argv[1], "--first-use-bda-pointer-chain-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--first-use-dma-base-gpu") == 0 ||
+                            std::strcmp(argv[1], "--first-use-dma-base-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bc-alias-ownership-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
+                            std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
+                            std::strcmp(argv[1], "--dma-base-origins-only") == 0 ||
+                            std::strcmp(argv[1], "--dma-base-runtime-bounds") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
                             std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)),
@@ -417,6 +433,15 @@ int main(int argc, char **argv) {
   if (argc == 2 && (std::strcmp(argv[1], "--first-use-bda-pointer-chain-gpu") == 0 ||
                    std::strcmp(argv[1], "--first-use-bda-pointer-chain-neighbors-gpu") == 0))
     ConfigureFirstUseBdaPointerChainTests();
+  if (argc == 2 && (std::strcmp(argv[1], "--first-use-dma-base-gpu") == 0 ||
+                   std::strcmp(argv[1], "--first-use-dma-base-neighbors-gpu") == 0))
+    ConfigureFirstUseDmaBaseTests();
+  if (argc == 2 && (std::strcmp(argv[1], "--bc-alias-ownership-gpu") == 0 ||
+                   std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
+                   std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
+                   std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
+                   std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0))
+    ConfigureBcAliasOwnershipTests();
   if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
                     std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0))
     ConfigureFaultFirstBindingDeferredGpu();
@@ -444,7 +469,47 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0 ||
        std::strcmp(argv[1], "--first-use-bda-pointer-chain-gpu") == 0 ||
-       std::strcmp(argv[1], "--first-use-bda-pointer-chain-neighbors-gpu") == 0));
+       std::strcmp(argv[1], "--first-use-bda-pointer-chain-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--first-use-dma-base-gpu") == 0 ||
+       std::strcmp(argv[1], "--first-use-dma-base-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-alias-ownership-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
+       std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0));
+  if (argc == 2 && std::strcmp(argv[1], "--dma-base-origins-only") == 0) {
+    CheckDmaBaseOrigins();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--dma-base-runtime-bounds") == 0) {
+    CheckDmaBaseRuntimeBounds(vulkan);
+    return 0;
+  }
+  const bool image_ownership_mode = argc == 2 &&
+      (std::strcmp(argv[1], "--bc-alias-ownership-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
+       std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
+       std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0);
+  if (image_ownership_mode) {
+    // GPU-owned guest memory must be retired on the actual GPU thread, as in
+    // production. Setup/cleanup uses that thread; readback oracles stay intact.
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    renderer.GetGpu().SendCommandSync([&] {
+      if (std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0)
+        CheckBcAliasPartialTailPaddingGpu(vulkan);
+      else if (std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
+               std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0)
+        CheckCopyMipDestinationOwnershipGpu(vulkan,
+            std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0);
+      else
+        CheckBcAliasOwnershipGpu(vulkan,
+            std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0);
+    });
+    renderer.ShutdownGpu();
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0)
     CheckBindlessPreparationNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)
@@ -473,6 +538,10 @@ int main(int argc, char **argv) {
     CheckFirstUseBdaPointerChainGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--first-use-bda-pointer-chain-neighbors-gpu") == 0)
     CheckFirstUseBdaPointerChainGpu(vulkan, true);
+  else if (argc == 2 && std::strcmp(argv[1], "--first-use-dma-base-gpu") == 0)
+    CheckFirstUseDmaBaseGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--first-use-dma-base-neighbors-gpu") == 0)
+    CheckFirstUseDmaBaseGpu(vulkan, true);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0)
     CheckPackedBufferOffsetCodegenCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)

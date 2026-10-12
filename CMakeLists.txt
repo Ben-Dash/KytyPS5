@@ -880,6 +880,36 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-bda-pointer-chain-gpu)
 	add_test(NAME first_use_bda_pointer_chain_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-bda-pointer-chain-neighbors-gpu)
+	add_test(NAME first_use_dma_base_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-dma-base-gpu)
+	add_test(NAME first_use_dma_base_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-dma-base-neighbors-gpu)
+	add_test(NAME dma_base_origins
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dma-base-origins-only)
+	add_test(NAME dma_base_runtime_bounds
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dma-base-runtime-bounds)
+	add_test(NAME bc_alias_ownership_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bc-alias-ownership-gpu)
+	add_test(NAME bc_alias_ownership_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bc-alias-ownership-neighbors-gpu)
+	add_test(NAME bc_alias_tail_padding_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bc-alias-tail-padding-gpu)
+	add_test(NAME copy_mip_destination_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --copy-mip-destination-gpu)
+	add_test(NAME copy_mip_destination_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --copy-mip-destination-neighbors-gpu)
+	add_test(NAME descriptor_phi_materialization
+		COMMAND $<TARGET_FILE:resource_tracking_tests> --descriptor-phi-only)
+	add_test(NAME descriptor_phi_neighbors
+		COMMAND $<TARGET_FILE:resource_tracking_tests> --descriptor-phi-neighbors-only)
+	add_test(NAME scalar_branch_descriptor_writes_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --scalar-branch-descriptor-writes-only)
+	set_tests_properties(first_use_dma_base_gpu first_use_dma_base_neighbors_gpu
+		dma_base_origins dma_base_runtime_bounds bc_alias_ownership_gpu
+		bc_alias_ownership_neighbors_gpu bc_alias_tail_padding_gpu copy_mip_destination_gpu
+		copy_mip_destination_neighbors_gpu descriptor_phi_materialization
+		descriptor_phi_neighbors scalar_branch_descriptor_writes_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	set_tests_properties(first_use_bda_pointer_chain_gpu first_use_bda_pointer_chain_neighbors_gpu
 		PROPERTIES TIMEOUT 30)
 	add_test(NAME fault_first_binding_state_neighbors_gpu

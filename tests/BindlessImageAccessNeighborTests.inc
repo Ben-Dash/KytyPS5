@@ -9,6 +9,11 @@ struct RenderExecutorTestAccess {
   }
 };
 struct TextureCacheTestAccess {
+  static void CopyImageMip(TextureCache& cache, ImageId dst, ImageId src,
+                           uint32_t level, uint32_t layer) {
+    std::scoped_lock lock(cache.m_lock);
+    cache.CopyImageMip(dst, src, level, layer);
+  }
   static void FreeImage(TextureCache &cache, ImageId id) {
     std::scoped_lock lock(cache.m_lock);
     cache.FreeImage(id);

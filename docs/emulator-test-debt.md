@@ -1,5 +1,59 @@
 # Integration test debt
 
+## Upstream ports proved; remaining coverage, 2026-10-12 12:22 UTC
+
+Required Phi/DMA/BC/raw/partial-copy reproductions below now have independent
+native RED->GREEN and12 focused CTest PASS. Local commits3f98bd1d/30db5f71/
+2b5504f3 and [evidence](yotei-upstream-ports-validation-2026-10-12.md) preserve scope.
+Pending final native core/auditor build and fresh full corpus. No game retry.
+
+- Original192 first64/512 matrix holes and stable objects/~60FPS unproved.
+- Full default ResourceTracking still fails pre-existing mixed numeric class
+  policy; full Materialization UniformVectorDescriptorRead debt remains.
+- Existing relative-register test hits ConditionRef argument-count validation;
+  guarded scalar descriptor disabled/null-BVH test also fails without the Phi
+  behavior (saved absence executable58669B72). No core suppression or broad
+  suite success claim. Six actual Phi neighbors pass; typed unsupported store
+  still rejects transactionally and supported raw GPU fallback is tested.
+- Broad image-overlap GPU test initially had stale two-export MRT fixture state;
+  native absence121557 reproduces it, test-only reset restores coverage/UV.
+  Follow-on121952 reaches unaligned writable buffer adjustment2/stencil
+  binding failure. Need independent regression and baseline attribution before
+  fixing that shared capability; broad suite remains failing.
+- Phi GPU proof uses independent harness bindings and exact descriptor-word
+  checks, not production guest-address resolution. DMA IndirectBuffer high16
+  and40-bit bounds have planning/runtime checks, not separate mapped boundary GPU
+  or decoded indirect-buffer shader proofs. Other-game runtime unavailable.
+
+Historical3/3 original-game attempts remain exhausted; current authorization
+covers these ports/tests and records, not an automatically reset launch budget.
+
+## Authorized upstream-port regressions, 2026-10-12 11:20 UTC
+
+The new "делай" instruction authorizes implementation and bounded native tests.
+Historical original-game attempts remain 3/3; no additional game run is implied.
+Before changing production behavior, reproduce each candidate independently:
+
+- BC/raw alias ownership: actual GPU-written raw integer image with a compatible
+  BC7 alias, multiple layers/mips and packed tails. Read back the BC consumer;
+  require correct written bytes and unchanged untouched layers/padding. Extend
+  to BC4/5/7 and partial destination copies preserving GPU-owned bytes. Use
+  current local upload-layout contracts, not newer upstream layout fields.
+- Writable descriptor-word Phi: CPU planning for a pure user-data scalar diamond,
+  both polarities/input orders, nested OR plus ADD/ADDC carry, detached interpreted
+  and compiled snapshots, independent descriptor preservation, unchanged GPU
+  SSA edges. Reject memory-loaded and lane-derived predicates. GPU proof requires
+  both valid mapped destinations, bounded writes/atomic-once and neighbor canaries;
+  CPU planning alone does not prove GPU execution or game behavior.
+- First-use direct DMA base: decoded FLAT address from an adjacent user-data
+  low/high pair, without CPU SMEM/SRT reads. A 16KiB window crossing cache pages
+  must be resident on first dispatch; check endpoint, unused user-data decoy,
+  unmapped/null boundaries, atomic-once and GPU-dirty owner preservation. Trace
+  supported expressions conservatively; do not scan arbitrary pointer-looking
+  values or infer roots through memory-loaded operands.
+
+Game causality, stable visible scene and approximately60FPS remain unproved.
+
 ## STOP after3 attempts: residual matrix and runtime debt, 2026-10-12 10:10 UTC
 
 User's attempt budget3/3 is exhausted and work is stopped. Entries below are

@@ -1,5 +1,49 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Verified upstream mechanisms; final native audit preparing, 2026-10-12 12:22 UTC
+
+New user instruction "делай" authorized implementation and bounded native tests.
+Completed local commits: 3f98bd1d immutable scalar descriptor Phi, 30db5f71
+known direct DMA bases, 2b5504f3 BC/raw ownership and partial-copy destination.
+Each has intended native RED -> unchanged GREEN. All12 new focused CTest cases
+PASS in4.10s; actual BC4/5/7 mip/layer readbacks,4080 untouched tail bytes,
+first-dispatch DMA endpoints/atomic1/GPU-dirty neighbor,96 CPU Phi variations
+and6 GPU writes are independently verified. No original game run occurred.
+
+See [full validation record](yotei-upstream-ports-validation-2026-10-12.md) for
+commands, exact executable hashes, scope, temporary source restoration and logs.
+Current source mechanisms are2b5504f3 plus test-registration/documentation WIP.
+Core executable build/install and fresh2770-distinct-input CPU corpus audit are
+next; no success is claimed for these pending stages. Original192 matrix holes,
+stable surrounding objects/body, actual1080p/~60FPS remain unproved. The previous
+original-game budget stays3/3; no fourth run, push or issue comment is implied.
+
+Full default CPU suite still hits recorded pre-existing mixed-numeric-image
+policy failure. Six relevant older Phi neighbors pass; unrelated guarded-null
+and relative-ConditionRef cases remain debt. Existing image-overlap GPU suite
+now passes rasterization after a test-only MRT-state correction (same prior
+failure proved with all three port behaviors absent), then stops on the separate
+unaligned writable halfword/stencil binding case; whole-suite GREEN not claimed.
+
+## Upstream ports in progress, 2026-10-12 11:20 UTC
+
+The new user instruction "делай" authorizes implementing the researched fixes
+and running bounded native regression tests. The previous three original-game
+attempts remain recorded below; this checkpoint does not reset that budget.
+No new original-game run, visual repair or performance result is claimed.
+
+Three independently tested candidates are being prepared: official main
+dad900c6 BC/raw image ownership, TheCruZ d5259de5 writable descriptor-word Phi,
+and TheCruZ 19cc54d0 direct user-data DMA bases before any SRT read. Each needs
+an intended RED on this branch before its production correction, unchanged
+GREEN and neighboring cases. Builds are serialized and completed fixes will
+be committed separately. Existing local TickFrame aging already addresses the
+upstream GC issue; no GC rewrite is planned. Baseline source is e5c6e346.
+
+Required reproductions are recorded first in the test debt. Synthetic success
+will not establish the cause of the remaining 192 matrix holes or prove stable
+textures, nearby objects, gameplay or 1920x1080 at approximately60FPS.
+
 ## Research-only checkpoint: fresh main/forks reviewed, 2026-10-12 11:08 UTC
 
 New user instruction authorizes only inspecting main/fork fixes. The earlier3/3
