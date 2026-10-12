@@ -201,7 +201,10 @@ private:
 	[[nodiscard]] bool SynchronizeBufferFromImage(Buffer& buffer, uint64_t vaddr, uint64_t size);
 	// Records downloads of the range's unarmed GPU-dirty pages, arms them, and queues their
 	// publication, which finalizes them. Returns false when there was nothing to arm.
-	[[nodiscard]] bool DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size);
+	// An immediate ordered store may supply its exact bytes for publication after the
+	// same native completion, while other dirty bytes retain their actual GPU downloads.
+	[[nodiscard]] bool DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size,
+	                                        std::span<const uint8_t> ordered_bytes = {});
 	// Thread_Gpu: arms the readback window around [vaddr, vaddr+size).
 	void RecordReadback(uint64_t vaddr, uint64_t size, bool is_write);
 	// Other threads: publish GPU-dirty pages without draining Thread_Gpu.

@@ -2,6 +2,22 @@
 
 ## Performance cycle 2 required regressions, 2026-10-13
 
+LiteralEopPublicationCost now has a valid native RED: build211441 PASS,
+test211508/BA99ECCF, eight setup/native value/ownership/CPU overwrite/WAIT/IRQ
+controls pass before the intended zero-download cost assertion fails (ordinary
+literal reserves64 bytes, repeated literals128). All native work cleaned up
+before abort. Earlier fixture ACCESS_VIOLATION was missing test fault-handler
+bootstrap and is explicitly not the reproduction. Shared correction now has
+unchanged eight-case GREEN211809/DD73A957: known-only reservations0, mixed unknown
+reservation64, all semantic controls retained. Existing EOP literal and native
+consumer/generation/IRQ neighbors211818–211819 PASS. Final native eight-case
+GREEN212334/4BA4B219 also PASS. Three span neighbors212333 PASS: 64-byte caller
+payload mutation, an allowed eight-byte store spanning tracker pages, and a merged
+dirty range with real unknown GPU prefix/suffix. PM4 wait/resume and command-stream
+neighbors212232/F1763B39 PASS. Native core/game FPS remains pending. Tiny mixed
+split ranges can reserve128 bytes instead of baseline64; no universal byte-saving
+or FPS claim follows from the pure-literal cost proof.
+
 - Known ordered EOP literals: actual GPU producer/store/consumer must agree for
   32/64-bit labels; CPU label and following WAIT-dependent work stay old before
   the native fence. After completion, exact literal bytes and interrupt ordering

@@ -342,11 +342,21 @@ void BufferCache::DeleteBuffer(BufferId id) {
 	}
 }
 
-bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size) {
+bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size,
+                                      std::span<const uint8_t> ordered_bytes) {
+	EXIT_IF(!ordered_bytes.empty() && ordered_bytes.size() != size);
 	std::vector<vk::BufferCopy>                copies;
 	std::vector<std::pair<uint64_t, uint64_t>> pages;
+	std::vector<std::pair<uint64_t, uint64_t>> pending_ranges;
 	uint64_t                                   total_size     = 0;
 	const auto                                 buffer_address = buffer.CpuAddress();
+	uint64_t                                   known_size     = 0;
+	const auto add_copy = [&](uint64_t begin, uint64_t end) {
+		if (begin == end) return;
+		copies.emplace_back(begin - buffer_address, total_size, end - begin);
+		// Keep packed ranges on separate cache lines, as in shadPS4.
+		total_size += Common::AlignUp(end - begin, 64);
+	};
 	// Pages armed by an earlier download already have their bytes in flight.
 	m_memory_tracker.ForEachUnarmedDownloadRange(
 	    vaddr, size, [&](uint64_t address, uint64_t bytes) noexcept {
@@ -354,15 +364,26 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		                                           "buffer download");
 		    pages.emplace_back(address, bytes);
 		    m_gpu_modified_ranges.ForEachInRange(address, bytes, [&](uint64_t start, uint64_t end) {
-			    copies.emplace_back(start - buffer_address, total_size, end - start);
-			    // Keep packed ranges on separate cache lines, as in shadPS4.
-			    total_size += Common::AlignUp(end - start, 64);
+			    pending_ranges.emplace_back(start, end - start);
+			    if (ordered_bytes.empty() || end <= vaddr || start >= vaddr + size) {
+				    add_copy(start, end);
+				    return;
+			    }
+			    const auto known_begin = std::max(start, vaddr);
+			    const auto known_end   = std::min(end, vaddr + size);
+			    known_size += known_end - known_begin;
+			    add_copy(start, known_begin);
+			    add_copy(known_end, end);
 		    });
 		    m_gpu_modified_ranges.Subtract(address, bytes);
 	    });
 	if (pages.empty()) {
 		return false;
 	}
+	// Only the immediate ordered native store supplies these bytes. Unknown GPU
+	// writes elsewhere on the same page still use their normal download copies.
+	EXIT_IF(!ordered_bytes.empty() && known_size != ordered_bytes.size());
+	std::vector<uint8_t> known_bytes(ordered_bytes.begin(), ordered_bytes.end());
 	// Arm after any ring wrap (which can submit and move the tick) and before queueing the
 	// publication, which may run inline during shutdown. Waiters only wait on submitted ticks,
 	// so they cannot observe an arm before its publication is queued.
@@ -372,7 +393,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 			m_memory_tracker.ArmReadback(address, bytes, token, m_scheduler.CurrentTick());
 		}
 	};
-	if (copies.empty()) {
+	if (copies.empty() && known_bytes.empty()) {
 		// Dirty pages without recorded bytes carry nothing to copy; their publication only
 		// ends their GPU ownership.
 		arm();
@@ -383,74 +404,83 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		});
 		return true;
 	}
-	DrainStats::Record(DrainStats::Kind::Readback, total_size);
-
-	auto [mapped, offset] = m_download_buffer.Map(total_size, 64);
+	uint8_t* mapped = nullptr;
+	uint64_t offset = 0;
 	std::unique_ptr<Buffer> temporary;
-	Buffer*                 download = &m_download_buffer;
-	if (mapped == nullptr) {
-		// Ring wraps already wait for retirement. A reservation larger than the ring needs
-		// separate host staging, kept alive until the priority callback publishes the bytes.
-		temporary = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Download, 0,
-		                                     vk::BufferUsageFlagBits::eTransferDst, total_size);
-		download  = temporary.get();
-		mapped    = download->Mapped().data();
-		offset    = 0;
-		EXIT_IF(mapped == nullptr);
-	} else {
-		m_download_buffer.Commit();
-	}
-	for (auto& copy: copies) {
-		copy.dstOffset += offset;
-	}
-
-	auto& command = m_scheduler.Current();
-	command.EndRendering();
-	const auto              native = command.Handle();
-	GpuZones::Mark(native, DrainStats::Zone::BufferCopy);
-	vk::BufferMemoryBarrier before {};
-	before.srcAccessMask       = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
-	before.dstAccessMask       = vk::AccessFlagBits::eTransferRead;
-	before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	before.buffer              = buffer.Handle();
-	before.offset              = 0;
-	before.size                = buffer.Size();
-	native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-	                       vk::PipelineStageFlagBits::eTransfer, {}, 0, nullptr, 1, &before, 0,
-	                       nullptr);
-	ClampBufferCopies(copies, buffer.Size(), download->Size(), "download", buffer.CpuAddress());
+	Buffer* download = nullptr;
 	if (!copies.empty()) {
-		native.copyBuffer(buffer.Handle(), download->Handle(), static_cast<uint32_t>(copies.size()),
-		                  copies.data());
-	}
+		DrainStats::Record(DrainStats::Kind::Readback, total_size);
+		const auto reservation = m_download_buffer.Map(total_size, 64);
+		mapped = reservation.first;
+		offset = reservation.second;
+		download = &m_download_buffer;
+		if (mapped == nullptr) {
+			// Ring wraps already wait for retirement. A reservation larger than the ring needs
+			// separate host staging, kept alive until the priority callback publishes the bytes.
+			temporary = std::make_unique<Buffer>(m_graphics, m_scheduler, MemoryUsage::Download, 0,
+			                                     vk::BufferUsageFlagBits::eTransferDst, total_size);
+			download  = temporary.get();
+			mapped    = download->Mapped().data();
+			offset    = 0;
+			EXIT_IF(mapped == nullptr);
+		} else {
+			m_download_buffer.Commit();
+		}
+		for (auto& copy: copies) {
+			copy.dstOffset += offset;
+		}
 
-	auto after          = before;
-	after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-	after.dstAccessMask = vk::AccessFlagBits::eHostRead;
-	after.buffer        = download->Handle();
-	after.offset        = offset;
-	after.size          = total_size;
-	native.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-	                       vk::PipelineStageFlagBits::eAllCommands |
-	                           vk::PipelineStageFlagBits::eHost,
-	                       {}, 0, nullptr, 1, &after, 0, nullptr);
+		auto& command = m_scheduler.Current();
+		command.EndRendering();
+		const auto              native = command.Handle();
+		GpuZones::Mark(native, DrainStats::Zone::BufferCopy);
+		vk::BufferMemoryBarrier before {};
+		before.srcAccessMask       = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
+		before.dstAccessMask       = vk::AccessFlagBits::eTransferRead;
+		before.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		before.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		before.buffer              = buffer.Handle();
+		before.offset              = 0;
+		before.size                = buffer.Size();
+		native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+		                       vk::PipelineStageFlagBits::eTransfer, {}, 0, nullptr, 1, &before, 0,
+		                       nullptr);
+		ClampBufferCopies(copies, buffer.Size(), download->Size(), "download", buffer.CpuAddress());
+		if (!copies.empty()) {
+			native.copyBuffer(buffer.Handle(), download->Handle(), static_cast<uint32_t>(copies.size()),
+			                  copies.data());
+		}
+
+		auto after          = before;
+		after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		after.dstAccessMask = vk::AccessFlagBits::eHostRead;
+		after.buffer        = download->Handle();
+		after.offset        = offset;
+		after.size          = total_size;
+		native.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+		                       vk::PipelineStageFlagBits::eAllCommands |
+		                           vk::PipelineStageFlagBits::eHost,
+		                       {}, 0, nullptr, 1, &after, 0, nullptr);
+	}
 	arm();
 	PruneInFlight();
 	m_gpu_dirty_generation++;
 	auto& inflight = m_inflight_downloads.emplace_back();
 	inflight.tick  = m_scheduler.CurrentTick();
-	inflight.ranges.reserve(copies.size());
-	for (const auto& copy: copies) {
-		inflight.ranges.emplace_back(buffer_address + copy.srcOffset, copy.size);
-	}
+	// Known bytes also remain GPU-owned until this tick is actually published.
+	// Otherwise a clean-backing read could observe the old CPU label before the fence.
+	inflight.ranges = std::move(pending_ranges);
 	m_scheduler.DeferPriorityOperation([this, token, pages = std::move(pages), download,
 	                                    owner = std::move(temporary), mapped, offset, total_size,
-	                                    buffer_address, copies = std::move(copies)] {
-		download->Invalidate(offset, total_size);
+	                                    buffer_address, copies = std::move(copies), vaddr,
+	                                    known_bytes = std::move(known_bytes)] {
+		if (download != nullptr) download->Invalidate(offset, total_size);
 		for (const auto& copy: copies) {
 			Libs::LibKernel::Memory::WriteBacking(buffer_address + copy.srcOffset,
 			                                      mapped + (copy.dstOffset - offset), copy.size);
+		}
+		if (!known_bytes.empty()) {
+			Libs::LibKernel::Memory::WriteBacking(vaddr, known_bytes.data(), known_bytes.size());
 		}
 		(void)owner; // Retain dedicated staging through the final backing write.
 		// The backing holds the GPU bytes now; pages still armed by this download become
@@ -1834,7 +1864,7 @@ void BufferCache::WriteOrderedMemory(uint64_t vaddr, std::span<const uint8_t> by
 	OnCommandRecorded();
 	// Readbacks publish through Kernel backing rather than a protected guest VA. Their
 	// owner/token checks keep a later GPU write dirty until its own publication completes.
-	EXIT_IF(!DownloadBufferMemory(*destination, vaddr, bytes.size()));
+	EXIT_IF(!DownloadBufferMemory(*destination, vaddr, bytes.size(), bytes));
 }
 
 void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t size, bool dst_gds,

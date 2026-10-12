@@ -844,6 +844,12 @@ if(BUILD_TESTING)
 	set_tests_properties(packed_buffer_offset_cost packed_buffer_offset_gpu PROPERTIES TIMEOUT 30)
 	add_test(NAME end_of_pipe_literal_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-neighbors-gpu)
+	add_test(NAME end_of_pipe_literal_publication_cost
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-publication-cost)
+	set_tests_properties(end_of_pipe_literal_publication_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME end_of_pipe_literal_publication_span_neighbors
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-publication-span-neighbors)
+	set_tests_properties(end_of_pipe_literal_publication_span_neighbors PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
 	add_test(NAME dispatch_snapshot_selector
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-only)
