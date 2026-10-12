@@ -1915,6 +1915,8 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 		                           uint64_t {db.shader_z_export_enable}, uint64_t {ctx.GetRenderTargetMask()},
 		                           uint64_t {ctx.GetColorControl().mode}, uint64_t {out_modes},
 		                           uint64_t {ctx.GetAlphaToMaskRaw()},
+		                           uint64_t {state.depth_info.desc.info.samples},
+		                           uint64_t {ctx.GetEqaaControl().alpha_to_mask_num_samples},
 		                           state.depth_info.desc.info.data.address}) {
 			key = (key ^ part) * 0x100000001b3ull;
 		}
@@ -1923,7 +1925,8 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 			std::printf("depthonly: depth=0x%016llx guest_ps=0x%llx host_ps=%016llx ps_active=%d "
 			            "vs=%016llx kill=%d z_export=%d mask_export=%d exec_noop=%d a2m_disable=%d "
 			            "z_behavior=%u cb_target_mask=0x%08x cb_shader_mask=0x%08x color_mode=%u "
-			            "col_format=0x%08x db_alpha_to_mask=0x%08x color_outputs=0x%x\n",
+			            "col_format=0x%08x db_alpha_to_mask=0x%08x color_outputs=0x%x "
+			            "depth_samples=%u alpha_quality_log2=%u\n",
 			            static_cast<unsigned long long>(state.depth_info.desc.info.data.address),
 			            static_cast<unsigned long long>(guest_ps), static_cast<unsigned long long>(ps_hash),
 			            state.ps_active ? 1 : 0, static_cast<unsigned long long>(vs_hash),
@@ -1932,7 +1935,9 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 			            db.alpha_to_mask_disable ? 1 : 0, static_cast<uint32_t>(db.shader_z_behavior),
 			            ctx.GetRenderTargetMask(), shader_regs.m_cbShaderMask,
 			            static_cast<uint32_t>(ctx.GetColorControl().mode), out_modes,
-			            ctx.GetAlphaToMaskRaw(), color_output_mask);
+			            ctx.GetAlphaToMaskRaw(), color_output_mask,
+			            state.depth_info.desc.info.samples,
+			            static_cast<uint32_t>(ctx.GetEqaaControl().alpha_to_mask_num_samples));
 			std::fflush(stdout);
 		}
 	}

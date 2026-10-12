@@ -951,6 +951,27 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-overlap-only)
 	add_test(NAME texture_cache_htile_clear
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --htile-clear-only)
+	add_test(NAME bc_partial_buffer_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bc-partial-buffer-gpu)
+	add_test(NAME bc_partial_buffer_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bc-partial-buffer-neighbors-gpu)
+	add_test(NAME bc_partial_buffer_statistics_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --drain-stats --bc-partial-buffer-neighbors-gpu)
+	add_test(NAME texture_cache_htile_high_state
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --htile-high-state-only)
+	add_test(NAME texture_cache_htile_high_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --htile-high-gpu-only)
+	add_test(NAME texture_cache_htile_registration_neighbors
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --htile-registration-neighbors)
+	add_test(NAME texture_cache_dcc_statistics_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --dcc-clear-stats-only)
+	add_test(NAME gpu_counted_multi_draw_srd
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-counted-multi-draw-srd)
+	set_tests_properties(bc_partial_buffer_gpu bc_partial_buffer_neighbors_gpu
+		bc_partial_buffer_statistics_gpu texture_cache_htile_high_state
+		texture_cache_htile_high_gpu texture_cache_htile_registration_neighbors
+		texture_cache_dcc_statistics_gpu gpu_counted_multi_draw_srd
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME buffer_cache_ranges
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --buffer-cache-range-only)
 

@@ -22,6 +22,7 @@
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/commandHooks.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
+#include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/host_gpu/renderer/image/blitHelper.h"
 #include "graphics/host_gpu/renderer/meshIndirect.h"
 #include "graphics/host_gpu/renderer/image/image.h"
@@ -10478,6 +10479,10 @@ public:
     DestroyBuffer(&probe);
     return result;
   }
+
+  #include "GpuCountedMultiDrawTests.inc"
+
+#include "AlphaCoverageEndpointTests.inc"
 
   void CheckNativeIndirectDispatch() {
     constexpr const char *name = "NativeIndirectDispatch";
@@ -43701,6 +43706,20 @@ int main(int argc, char **argv) {
     vulkan.CheckUnifiedTextureCacheFlow();
     return 0;
   }
+  if (argc == 2 && std::strcmp(argv[1], "--dcc-clear-stats-only") == 0) {
+    struct DrainStatsScope {
+      bool previous = Libs::Graphics::DrainStats::g_enabled.exchange(
+          true, std::memory_order_relaxed);
+      ~DrainStatsScope() {
+        Libs::Graphics::DrainStats::g_enabled.store(previous, std::memory_order_relaxed);
+      }
+    } stats_scope;
+    // Run the existing numerical oracle unchanged with its real diagnostic
+    // callbacks active; no periodic reporter thread or production bypass.
+    VulkanHarness vulkan;
+    vulkan.CheckRenderExecutorColorMetadataClear();
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--dcc-clear-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckRenderExecutorColorMetadataClear();
@@ -43715,6 +43734,17 @@ int main(int argc, char **argv) {
     vulkan.CheckRenderExecutorColorMetadataClear();
     vulkan.CheckSampledDccClear();
     vulkan.CheckRenderExecutorStencilBindingDiscovery();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--alpha-coverage-endpoints") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckAlphaCoverageEndpoints();
+    return 0;
+  }
+  if (argc == 2 && (std::strcmp(argv[1], "--gpu-counted-multi-draw") == 0 ||
+                   std::strcmp(argv[1], "--gpu-counted-multi-draw-srd") == 0)) {
+    VulkanHarness vulkan;
+    vulkan.CheckGpuCountedMultiDraw(std::strcmp(argv[1], "--gpu-counted-multi-draw-srd") != 0);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--native-indirect-only") == 0) {

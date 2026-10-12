@@ -1,5 +1,129 @@
 # Ghost of Yōtei: active integration and session resume
 
+## BC/HTile committed; actual alpha-coverage RED, 2026-10-12 14:58 UTC
+
+Completed local fixes0f40da8a (BC partialbuffer+publication statistics) and63c97d04
+(actual HTile extent), on yotei-integration-native. Statistics-on BC RED144435
+CE17 recursiveTrackingSpinLock -> same8cases GREEN144626/912D. GPU DCC-clear
+statistics neighbor144900/6F850 PASS with unchanged numerical oracle.
+
+New real depth-only alpha-to-mask endpoint fixture145449/63287313:32cases at1x/4x,
+actual PM4 + DrawAuto + native depth readback. All disabled/override/alpha1 and
+canary controls PASS; all enabled/nonoverride/alpha0 write depth0.25 instead of
+preserving0.75, including EXEC_ON_NOOP retainedPS controls. Intended RED, cleanup
+completed before assertions. First fixture build145112 had Vulkan-Hpp initializer
+setup failure; corrected explicitstage fields, not counted as RED. No A2C production
+patch yet: physicalCOL0 routing and exactfractional/dither/EQAA mapping require
+careful handling. Ignored guarded draft is withdrawn (arbitraryraw2222/EQAA guards
+not justified by endpointsemantics). Preserve originalcontrols; hostfractional
+coverage would be a documenteddiagnosticapproximation, not exactguest proof.
+
+Next: new private native BC/HTile package, same source-generated shadercachekey
+(no pipeline/recompiler changes in these2fixes), preserve compatible prior native
+cache/data and compare game effects. Bounded2-framepass/depthonly+actualsamples
+capture added for attribution. Alpha/A2C RED mode is pending implementation and
+is not registered as a passingCTest. Current8FX CTest names cover supportedBC,
+HTile,DCCstats and ordinarySRDCOUNT. Existing unsupportedBDA/oldsyncdebt remains.
+
+## Effects cycle: two GPU regressions fixed; third lead revised, 2026-10-12 14:43 UTC
+
+Source3b819e1f plus preserved WIP. User confirms prior character/object artifacts
+are gone; effects remain the active request. Native source inputs/build/test/game
+are serialized. Nothing in this checkpoint establishes correct effects or60FPS.
+
+- Cached BC partial BUFFER write: default pre-fix RED135900 has4 stale consumer
+  DWORDs despite native producer/CPU-stale/guard controls PASS. Experimental flag1
+  baseline135902 loses2 previously written GPU-image C DWORDs. Shared preparation
+  publishes complete BC backing before a partial buffer overwrite, then invalidates
+  byte-overlapping BC consumers. GREEN141815 and8 BC4/5/6HU/7 neighbors141816
+  preserve C+B/all guards. Old BC alias/tail tests141818/141819 PASS.
+- HTile121-layer actual depth registration: RED141111 tracks only32/121;
+  native RED141113 fails to clear slices32/120 while31/untouched controls pass.
+  Same unchanged fixtures GREEN142528/142529 clear all121 and31/32/120 correctly;
+  laterGPU depth survives repeat acquisition. Registration neighbor143534 passes
+  all/partial/expanded seeds,33->121 growth, smaller views, memo and strict bounds.
+  Legacy owner-retirement fixture incorrectly expected slice1 with declared1layer;
+  corrected real2-layer fixture144215 and layered/storage/DCC/depth/358tiler
+  neighbors143536..143540 PASS. First correction used nonbase image type and
+  failed setup143826; not a production RED or correctness proof.
+- GPU counted draw lead: first fixture142530 had two test errors (readonly stream
+  snapshot instead of writable owner; BDA LOAD0x0c instead of STORE0x1c). Corrected
+  PeekPage GPUbefore/after + store witness143828 proves10 ordinary SRD indexed/
+  nonindexed N0/1/2/3/5 cases already correct on original production. Explicit
+  writable FLAT/GLOBAL guard rejects BDA store before execution; those cases are
+  unsupported, not COUNT RED. Dedicated supported mode144216 PASS. No COUNT fix.
+- Existing NativeIndirectDispatch descriptor-sync assertion fails both patched
+ 143536 and scoped production-absence143827. This is not introduced by this batch;
+  its numerical output/underlying semantics still require an independent diagnosis.
+- Read-only review found publication's DrainStats DCC query reacquires held texture
+  lock. Bounded statistics-on regression and shared lock-aware query are next.
+  Third effect candidate is DB_ALPHA_TO_MASK/required pixel-stage retention;
+  endpoint alpha0/1 at1x/4x needs synthetic RED before any production implementation.
+
+Evidence is under `_Build/analysis/yotei-integration-20261011/checks/`, with ignored
+proposals/reviews in `yotei-effects-20261012` and `upstream-forks-research-20261012`.
+Current runtimeB284/5b231fdf predates these effect fixes. Build/install new package
+and retry actual vegetation/shadow/reflection passes after focused checks.
+
+Visual correction to earlier summary: baseline131752 `window-780s.png` is a
+visually confirmed in-game SETTINGS menu, opened by the single explicit Options
+pulse; earlier village/character frames show world entry. Issue108 already has
+Oct5 menu milestone; latest comments were read, so do not duplicate it. Game-entry
+publication must clearly distinguish this local-only source/package from PR497.
+
+## User confirms geometry artifacts gone; effects are the active target, 2026-10-12
+
+Latest live user inspection confirms the previous character/object artifacts are
+gone on the current package. New priorities: shadows, grass/vegetation, water,
+particles, wind, volumetric fog, fire and reflections. Begin with vegetation and
+shadows, preserving the user's recurring three-proposal/sequential-test workflow.
+Approximately60FPS at actual1920x1080 remains a performance target, not a verified result.
+
+Do not treat the old192 matrix holes alone as proof of a remaining visible bug.
+They persist in fresh captures but their causality is unproved after the user's
+visual correction. Earlier entry-fetch/loaded-leaf/merged-owner fixtures remain
+saved ignored proposals; re-admit only if an actual effect/pass witness uses them.
+Agents now research effects/indirect draw+dispatch, shadow/3D volume resources,
+blend/image ownership; no production edits until each specific intended regression.
+
+Native live inspection uses verified5b231fdf/B28453B2, manual input, one game
+process. New runs:130603 stopped by WMI monitor error;131317 stopped gracefully
+by commit guard at0.11GiB; user-authorized WSL shutdown freed headroom to56.57GiB.
+131752 then completed900s/exit0 with village/character visible, selected DA4/VS
+captures and neutral pad except one explicit Options pulse. User manual run
+133526 ended13:38:50UTC/exit0 after user inspection. No game currently runs.
+Actual captured graphics targets remain3840x2160 despite1920x1080 window;
+VideoOut already advertises1080 under current flags, so do not fabricate a
+resolution-API bug or blindly resize guest image backings. FPS around2.5..5.6
+in recorded scene is preliminary/title timing, not a60FPS benchmark.
+
+## User removed attempt cap; recurring three-candidate cycles active, 2026-10-12
+
+The latest user instruction explicitly removes the previous original-game limit
+and authorizes fixes, tests and game launches in recurring cycles. Historical3/3
+attempts below are evidence only; they no longer stop current work. No renewed
+permission is needed for routine bounded native launches within this task.
+
+Workflow: agents independently propose three concrete ranked alternatives with
+expected behavior, minimal synthetic regression and live witness. Root selects
+three complementary candidates for the current observed blocker, tests them
+sequentially (one native build/test/game at a time), records each outcome and
+starts the next cycle using new evidence. Do not invent three speculative patches
+merely to fill a quota: a falsified lead is a useful result. Production changes
+still require intended RED->unchanged GREEN and shared semantics.
+
+First step is a fresh bounded original baseline on the already verified native
+5b231fdf/B28453B2 package with new BC/Phi/DMA ports. Keep inputs neutral, capture
+body and surrounding objects over several frames, producer/VS evidence and actual
+frame timing. Target remains1920x1080 stable picture and approximately60FPS;
+menu, loading FPS and compiled pipelines do not prove that outcome. Existing
+old journal/cardinality and broad-suite debts stay recorded separately.
+
+Preserve every failed input before diagnostic fallback, group batch causes,
+keep fallback observations separate, preserve caches/data and save a uniquely
+timestamped handoff after meaningful work. No push or new external issue update
+is implied beyond the existing visually confirmed milestone policy.
+
 ## Native package verified; corpus replay incompatibility recorded, 2026-10-12 12:38 UTC
 
 Active branch yotei-integration-native. Tested production/test source

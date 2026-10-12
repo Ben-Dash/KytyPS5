@@ -1,5 +1,93 @@
 # Integration test debt
 
+## Effects review: statistics lock and alpha coverage, 2026-10-12
+
+Required statistics reproduction BEFORE correcting lock ownership: enable real
+DrainStats accounting around existing BC partial-publication and GPU DCC-clear
+fixtures; preserve native texels/metadata/guards. Current explicit publication
+acquires BufferCache while holding the texture lock, and its DCC accounting query
+reacquires the same TrackingSpinLock. Host recursive-lock rejection is a bounded
+valid RED; disabling metrics or loosening lock checks is not a fix. Supply exact
+known-DCC classification inside an already-held lock while ordinary queries keep
+locking. BC/BDA write ownership is a separate pre-existing unsupported gap.
+
+Required alpha-to-mask reproduction BEFORE production: actual DB_ALPHA_TO_MASK
+and DB_SHADER_CONTROL disable override, real pixel COL0 alpha0/1, depth-only
+no-color render at1x/4x. Alpha0 must preserve old depth when enabled, alpha1 must
+write; disabled/override controls write both. Required pixel-stage retention must
+be proved separately from Vulkan coverage state. AMD quad dithering at fractional
+alpha has no proved portable Vulkan mapping yet; do not claim exact equivalence.
+
+Current BC and actual121-layer HTile regressions have intended RED/unchanged
+GREEN with ownership/registration neighbors; live effect correctness pending.
+Ordinary counted indirect draw10 cases already pass baseline after fixture controls
+were corrected. BDA20-mode stops at explicit FLAT writable-ownership guard before
+execution; not a COUNT failure. NativeIndirectDispatch's old descriptor-sync
+assertion also fails with both new production patches absent; numerical diagnosis
+pending, no full-suite PASS claim. Details: first launch checkpoint.
+
+## Effect cycle: GPU-produced counted indirect draw reaches vegetation, 2026-10-12
+
+Required reproduction: actual guest command processor reads GPU-produced COUNT
+with CPU shadow0 and real ownership/protection intact. Independent RGB regions
+and vertex-index coverage must execute min(N,max3), N0/1/2/3/5, ordinary SRD and
+BDA producers, indexed/nonindexed packets. Producer atomic-once1, GPU count
+readback, argument/count/draw guards and true-zero no-work are mandatory controls.
+Current direct count dereference may already fault coherently: if this fixture
+passes, close the lead without modifying production. An actual grass/particle
+packet/count witness is required before claiming visible causality.
+
+## Effect cycle: HTile clear over actual registered array extent, 2026-10-12
+
+Required pre-fix regression: register121-layer D32+HTile through real depth
+target discovery. Clear/expand all actual layers, update31/32/120 individually,
+refresh memo and reject121/UINT32_MAX/unregistered addresses. GPU seed0.625,
+acquire selected slices with pending clear0.375, read back31/32/120 and untouched
+neighbors. A later actual GPU0.75 on consumed32 must survive second acquisition.
+Current uint32 clear state loses registered layers>=32. Use registered geometry
+and metadata footprint for bounds; do not replace the limit with another magic
+capacity, alter clear-value oracle or suppress depth-register validation.
+Real effect/shadow use remains a live witness requirement after synthetic proof.
+
+## Effect cycle: cached BC array after partial buffer writes, 2026-10-12
+
+Required regression BEFORE production: real cached BC7 array,3layers/8mips,
+CPU A remains stale; one GPU buffer writes B at a nonbase packed-tail block.
+Full24-subresource BC readback must see B and preserve every other A byte.
+Independent native buffer control and guards must pass before wrong consumer
+is an intended RED. Neighbor starts with genuine GPU image C, then partial
+buffer B; C must survive even if the write owner initially lacks the array base.
+Extend bounded BC4/5/6H/7 cases, repeated writes and ownership replacement.
+Current experimental BC_BUFFER_WRITES flag is a comparison, not a safe fix.
+An actual reflection/water pass witness is still required for a visual claim.
+
+## Active effects debt after user inspection, 2026-10-12
+
+User now visually confirms prior geometry/texture artifacts gone. Current request
+is shadows, grass/vegetation, water, particles, wind, volumetric fog, fire and
+reflections, with vegetation/shadows first. Old192 matrix rows are diagnostic
+debt, not an independently proved current visible defect. Preserve prior proposals.
+
+For each effect: identify a current pass/indirect work count, input/output resource,
+native rendering state and visible result; record its required reusable synthetic
+regression before changing production. Three alternatives per cycle must be
+supported by these witnesses. Keep conservative unsupported errors and capacities;
+warnings (121depth slices/first32HTile, partly unmapped image, placeholder records)
+are leads, not specifications or permission to suppress work/validation.
+
+Manual user game133526/B28453B2 ended13:38:50UTC/exit0. Native runs stay serialized.
+User removed old3-attempt cap; bounded lifetimes and one native slot still apply.
+
+## New launch authorization and recurring cycles, 2026-10-12
+
+User explicitly removed the original-game attempt limit. Native fixes/tests/game
+launches are now authorized in recurring batches of three sequential candidates.
+Historical stopping statements below no longer govern current work. Bounded
+lifetimes, serialized native execution and regression-first proof still apply.
+Start from current B28453B2 game baseline; choose regressions from actual new
+evidence, rather than assuming the old192 matrix holes or246 journal mismatches
+still describe the current visible blocker. Stable1920x1080/~60FPS remains the goal.
+
 ## Vertex journal shape and original-game debt, 2026-10-12 12:38 UTC
 
 Source5b231fdf native build/install/help PASS; packageB28453B2. Fresh full corpus
