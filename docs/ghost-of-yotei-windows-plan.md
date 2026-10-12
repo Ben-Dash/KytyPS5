@@ -1,5 +1,22 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Research-only checkpoint: fresh main/forks reviewed, 2026-10-12 11:08 UTC
+
+New user instruction authorizes only inspecting main/fork fixes. The earlier3/3
+visual budget remains exhausted; no new code implementation, native build/test or
+game run occurred. Research completed against local72e3568c and officialmain
+dad900c61d6c7ff8aefc9e666ca7c3de4bbf4176:60commits/19afterprior730 pin,
+eightselectedfork branchsets/sevencodehistories,847publicdirectfork metadata.
+
+Saved [Russian review and candidate checks](kytyps5-upstream-fixes-review-2026-10-12.md).
+Main BC alias/copy-destination ownership and TheCruZ nested writable descriptor
+Phi/DMA-base preparation are concrete absent comparison candidates; no verified
+repair of actual192 first64/512 holes. GC ages already use localTickFrame;
+fullwave branch is already local/attempt3 and unchanged in latestmain.
+peepostarexx liveAPI404, historicalYOTEI6d041035 preserved. No blindmerge or
+title/hash workaround; implementation/runtime remain stopped until a new user
+instruction. Main/fork reports and unique shared handoffs preserve exactsources.
+
 ## STOP: all3 user-authorized attempts exhausted, 2026-10-12 10:10 UTC
 
 The user said "у тебя 3 попытки, если не получится дальше не иди". All3
