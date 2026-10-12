@@ -1,5 +1,20 @@
 # Integration test debt
 
+## Performance cycle 3 diagnostics, 2026-10-13
+
+CPU diagnostic now has intended RED214049/58794710 at exact OS-name oracle;
+unchanged GREEN214122/836A6F68 passes ASCII/UTF8/null/no-Tracy-startup. Production
+change publishes native descriptions without starting Tracy; no guest/GPU ordering
+or shader emitter change. Native core/name-to-role runtime mapping remain pending.
+
+Before profiling new performance changes, establish native OS thread names while
+Tracy is disabled. CPU-only regression must restore the original thread description
+and then fail the exact ASCII-name oracle on the existing implementation. Same
+fixture after the diagnostic correction must prove UTF8/null handling and no Tracy
+startup; this is measurement support, not an FPS improvement. Current tests and
+native runtime title baselines remain separate. Three agents research current PRs,
+GPU work and CPU waits; root retains serialized native operations and30s title FPS.
+
 ## Performance cycle 2 required regressions, 2026-10-13
 
 LiteralEopPublicationCost now has a valid native RED: build211441 PASS,

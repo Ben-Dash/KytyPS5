@@ -850,6 +850,11 @@ if(BUILD_TESTING)
 	add_test(NAME end_of_pipe_literal_publication_span_neighbors
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-publication-span-neighbors)
 	set_tests_properties(end_of_pipe_literal_publication_span_neighbors PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	if(WIN32)
+		add_test(NAME native_thread_names_without_profiler
+			COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --native-thread-names-only)
+		set_tests_properties(native_thread_names_without_profiler PROPERTIES TIMEOUT 10)
+	endif()
 	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
 	add_test(NAME dispatch_snapshot_selector
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-only)

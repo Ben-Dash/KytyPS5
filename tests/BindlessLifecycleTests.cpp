@@ -348,6 +348,7 @@ private:
 #include "FaultFirstBindingDeferredNeighborTests.inc"
 #include "DispatchSnapshotSelectorTests.inc"
 #include "DispatchSnapshotJobSelectorTests.inc"
+#include "NativeThreadNamesTests.inc"
 
 int main(int argc, char **argv) {
   const bool drain_stats_mode = argc == 3 && std::strcmp(argv[1], "--drain-stats") == 0;
@@ -364,6 +365,10 @@ int main(int argc, char **argv) {
   } drain_stats_scope(drain_stats_mode);
   using namespace Libs::Graphics;
   std::setvbuf(stdout, nullptr, _IONBF, 0);
+  if (argc == 2 && std::strcmp(argv[1], "--native-thread-names-only") == 0) {
+    CheckNativeThreadNamesWithoutProfiler();
+    return 0;
+  }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0 ||
