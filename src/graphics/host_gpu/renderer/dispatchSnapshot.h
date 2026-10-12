@@ -20,6 +20,10 @@
 //   KYTY_DISPATCH_SNAPSHOT_DIR=<dir>           where they go (_snapshots)
 //   KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER=<slot>:<bytes>  require this written buffer's declared
 //     SRD size (decimal, nonzero bytes); rejected dispatches do not consume capture limits.
+//   KYTY_DISPATCH_SNAPSHOT_JOB_RANGE=<count_dw>:<base_dw>:<first_index>:<required_count>
+//     require a known 1D job interval from these actual flattened-SRT words to contain the whole
+//     requested interval (strict decimal uint32 fields). This is a diagnostic admission hint,
+//     not evidence of executed stores. Unknown indirect groups are not admitted.
 // A snapshot holds the permutation's journal record and live SPIR-V, the host contents of every
 // buffer, image and sampler the dispatch binds, its push data and group counts, and afterwards
 // the contents the dispatch wrote. The inputs reach the disk before the dispatch is submitted, so
@@ -53,8 +57,24 @@ struct WrittenBufferSelector {
 [[nodiscard]] bool MatchesWrittenBufferSelector(const WrittenBufferSelector& selector,
                                                const ShaderStageRuntime& runtime) noexcept;
 
+struct JobRangeSelector {
+	uint32_t count_dword = 0;
+	uint32_t base_dword = 0;
+	uint32_t first_index = 0;
+	uint32_t required_count = 0;
+};
+// Strict decimal fields; nonzero required count and end <=2^32. Failure leaves output unchanged.
+[[nodiscard]] bool ParseJobRangeSelector(std::string_view text,
+                                        JobRangeSelector& selector) noexcept;
+[[nodiscard]] bool MatchesJobRangeSelector(const JobRangeSelector& selector,
+                                          const ShaderComputeInputInfo& input,
+                                          std::array<uint32_t, 3> groups) noexcept;
+
 // Whether this dispatch is snapshotted (counts it). Cheap when snapshots are off.
+// The runtime-only form has no trusted group dimensions and declines an enabled job filter.
 [[nodiscard]] bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame);
+[[nodiscard]] bool Wanted(const ShaderComputeInputInfo& input,
+                         std::array<uint32_t, 3> groups, uint64_t frame);
 
 struct Pending {
 	uint32_t id = 0; // 0: nothing captured.

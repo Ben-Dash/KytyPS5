@@ -1014,7 +1014,8 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		                               {thread_group_x, thread_group_y, thread_group_z});
 	}
 	DispatchSnapshot::Pending snapshot;
-	if (DispatchSnapshot::Wanted(input_info.stage, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
+	if (DispatchSnapshot::Wanted(input_info, {thread_group_x, thread_group_y, thread_group_z},
+	                             m_context.GetGpu().GetFrameNum())) [[unlikely]] {
 		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings,
 		                                           {thread_group_x, thread_group_y, thread_group_z},
 		                                           m_context.GetGpu().GetFrameNum());

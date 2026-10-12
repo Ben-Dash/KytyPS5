@@ -55,6 +55,7 @@ struct Settings {
 	uint32_t              ring  = 0; // KYTY_DISPATCH_SNAPSHOT_RING: keep only the last n snapshots
 	std::filesystem::path directory;
 	std::optional<WrittenBufferSelector> written_buffer;
+	std::optional<JobRangeSelector> job_range;
 };
 
 const Settings& GetSettings() {
@@ -105,11 +106,26 @@ const Settings& GetSettings() {
 			}
 			s.written_buffer = selector;
 		}
+		if (const char* filter = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_JOB_RANGE");
+		    filter != nullptr) {
+			JobRangeSelector selector;
+			if (!ParseJobRangeSelector(filter, selector)) {
+				EXIT("dispatch-snapshot: malformed KYTY_DISPATCH_SNAPSHOT_JOB_RANGE; expected "
+				     "decimal uint32 count_dw:base_dw:first_index:nonzero_count with end <=2^32\n");
+			}
+			s.job_range = selector;
+		}
 		std::printf("dispatch-snapshot: on (%s), max %u, dir %s\n", text, s.max,
 		            s.directory.string().c_str());
 		if (s.written_buffer) {
 			std::printf("dispatch-snapshot: written buffer filter slot=%u declared_bytes=%" PRIu64 "\n",
 			            s.written_buffer->slot, s.written_buffer->declared_bytes);
+		}
+		if (s.job_range) {
+			std::printf("dispatch-snapshot: job range hint count_dw=%u base_dw=%u first_index=%u "
+			            "required_count=%u (whole interval; not executed-store proof)\n",
+			            s.job_range->count_dword, s.job_range->base_dword,
+			            s.job_range->first_index, s.job_range->required_count);
 		}
 		std::fflush(stdout);
 		return s;
@@ -404,6 +420,49 @@ bool MatchesWrittenBufferSelector(const WrittenBufferSelector& selector,
 	}
 	const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[slot]);
 	return descriptor.GetSize() == selector.declared_bytes;
+}
+
+bool ParseJobRangeSelector(std::string_view text, JobRangeSelector& selector) noexcept {
+	std::array<uint32_t, 4> fields {};
+	for (size_t i = 0; i < fields.size(); ++i) {
+		const auto colon = text.find(':');
+		if ((i + 1u < fields.size()) != (colon != std::string_view::npos)) return false;
+		const auto field = text.substr(0, colon);
+		if (field.empty() || !std::ranges::all_of(field, [](char c) { return c >= '0' && c <= '9'; })) {
+			return false;
+		}
+		const auto parsed = std::from_chars(field.data(), field.data() + field.size(), fields[i]);
+		if (parsed.ec != std::errc{} || parsed.ptr != field.data() + field.size()) return false;
+		if (colon != std::string_view::npos) text.remove_prefix(colon + 1u);
+	}
+	constexpr uint64_t IndexLimit = uint64_t {1} << 32u;
+	if (fields[3] == 0u || uint64_t {fields[2]} + fields[3] > IndexLimit) return false;
+	selector = {fields[0], fields[1], fields[2], fields[3]};
+	return true;
+}
+
+bool MatchesJobRangeSelector(const JobRangeSelector& selector, const ShaderComputeInputInfo& input,
+                              std::array<uint32_t, 3> groups) noexcept {
+	constexpr uint64_t IndexLimit = uint64_t {1} << 32u;
+	if (!input.stage || input.stage.program->stage != ShaderType::Compute ||
+	    selector.required_count == 0u ||
+	    uint64_t {selector.first_index} + selector.required_count > IndexLimit ||
+	    input.threads_num[0] == 0u || groups[0] == 0u ||
+	    input.threads_num[1] != 1u || input.threads_num[2] != 1u ||
+	    groups[1] != 1u || groups[2] != 1u) {
+		return false;
+	}
+	const auto& flat = input.stage.resources->flattened_srt;
+	if (selector.count_dword >= flat.size() || selector.base_dword >= flat.size()) return false;
+	// The product of two uint32 operands fits uint64. Reject capacities beyond the guest U32
+	// job space instead of admitting a wrapped index. Hardware limits are a separate concern.
+	const uint64_t capacity = uint64_t {input.threads_num[0]} * groups[0];
+	if (capacity > IndexLimit) return false;
+	const uint64_t count = std::min<uint64_t>(flat[selector.count_dword], capacity);
+	const uint64_t base = flat[selector.base_dword];
+	const uint64_t end = base + count;
+	const uint64_t required_end = uint64_t {selector.first_index} + selector.required_count;
+	return count != 0u && end <= IndexLimit && base <= selector.first_index && required_end <= end;
 }
 
 namespace {
@@ -882,7 +941,8 @@ void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& 
 	}
 }
 
-bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame) {
+namespace {
+bool WantedRuntime(const ShaderStageRuntime& runtime, uint64_t frame) {
 	const auto& s = GetSettings();
 	if (!s.enabled) [[likely]] {
 		return false;
@@ -907,6 +967,18 @@ bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame) {
 	static std::unordered_map<uint64_t, uint32_t> taken;
 	return s.ring != 0 || taken[shader_hash]++ < s.max;
 }
+} // namespace
+
+bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame) {
+	if (GetSettings().job_range) return false;
+	return WantedRuntime(runtime, frame);
+}
+
+bool Wanted(const ShaderComputeInputInfo& input, std::array<uint32_t, 3> groups, uint64_t frame) {
+	const auto& s = GetSettings();
+	if (s.job_range && !MatchesJobRangeSelector(*s.job_range, input, groups)) return false;
+	return WantedRuntime(input.stage, frame);
+}
 
 Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& input,
                       const PreparedBindings& bindings, std::array<uint32_t, 3> groups,
@@ -914,6 +986,9 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	static uint32_t next_id = 0;
 	const auto&     s       = GetSettings();
 	if (s.written_buffer && !MatchesWrittenBufferSelector(*s.written_buffer, input.stage)) {
+		return {};
+	}
+	if (s.job_range && (args != nullptr || !MatchesJobRangeSelector(*s.job_range, input, groups))) {
 		return {};
 	}
 	const auto&     program = *input.stage.program;
@@ -936,6 +1011,18 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	if (s.written_buffer) {
 		meta["admission_written_buffer"] = {{"index", s.written_buffer->slot},
 		                                     {"declared_bytes", s.written_buffer->declared_bytes}};
+	}
+	if (s.job_range) {
+		const auto& selector = *s.job_range;
+		const uint64_t capacity = uint64_t {input.threads_num[0]} * groups[0];
+		const uint64_t effective = std::min<uint64_t>(resources.flattened_srt[selector.count_dword], capacity);
+		meta["admission_job_range"] = {
+		    {"count_dword", selector.count_dword}, {"base_dword", selector.base_dword},
+		    {"first_index", selector.first_index}, {"required_count", selector.required_count},
+		    {"observed_count", resources.flattened_srt[selector.count_dword]},
+		    {"observed_base", resources.flattened_srt[selector.base_dword]},
+		    {"logical_capacity", capacity}, {"effective_jobs", effective},
+		    {"scope", "diagnostic whole-interval hint; executed branch/EXEC/stores not proved"}};
 	}
 	meta["frame"]    = frame;
 	meta["tick"]     = context.GetCommandScheduler().CurrentTick();

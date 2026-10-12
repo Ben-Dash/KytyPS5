@@ -837,6 +837,14 @@ if(BUILD_TESTING)
 	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
 	add_test(NAME dispatch_snapshot_selector
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-only)
+	add_test(NAME dispatch_snapshot_job_selector
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-selector-only)
+	add_test(NAME dispatch_snapshot_job_selector_frame
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-selector-frame-only)
+	add_test(NAME dispatch_snapshot_job_selector_default
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-selector-default-only)
+	set_tests_properties(dispatch_snapshot_job_selector dispatch_snapshot_job_selector_frame
+		dispatch_snapshot_job_selector_default PROPERTIES TIMEOUT 10)
 	add_test(NAME dispatch_snapshot_selector_frame
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-frame-only)
 	add_test(NAME dispatch_snapshot_selector_default
