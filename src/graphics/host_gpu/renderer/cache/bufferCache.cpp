@@ -1613,6 +1613,25 @@ bool BufferCache::VerifyStreamReuse(const StreamCopy& copy) {
 std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t size,
                                                        bool is_written, bool is_texel_buffer,
                                                        BufferId id) {
+	if (m_scheduler.Current().IsInvalid() || !GuestRange {vaddr, size}.Valid()) {
+		EXIT("BufferCache: buffer request requires a recording command buffer\n");
+	}
+	if (is_written) {
+		// Publication can replace a partial owner. Run before retaining its
+		// slot reference and before the caller records its buffer overwrite.
+		m_texture_cache.PrepareBlockBufferWrite(vaddr, size);
+	}
+	return ObtainBufferImpl(vaddr, size, is_written, is_texel_buffer, id);
+}
+
+std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferForImagePublication(uint64_t vaddr,
+                                                                      uint64_t size) {
+	return ObtainBufferImpl(vaddr, size, true, false, {}, true);
+}
+
+std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferImpl(uint64_t vaddr, uint64_t size,
+                                                          bool is_written, bool is_texel_buffer,
+                                                          BufferId id, bool image_publication) {
 	auto& command = m_scheduler.Current();
 	if (command.IsInvalid() || !GuestRange {vaddr, size}.Valid()) {
 		EXIT("BufferCache: buffer request requires a recording command buffer\n");
@@ -1692,7 +1711,8 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 		}
 		if (DrainStats::Enabled()) {
 			DrainStats::RecordGpuWrite(vaddr, size);
-			if (m_texture_cache.IsKnownDccMetadata(vaddr, size)) {
+			if (image_publication ? m_texture_cache.IsKnownDccMetadataLocked(vaddr, size)
+			                      : m_texture_cache.IsKnownDccMetadata(vaddr, size)) {
 				DrainStats::Record(DrainStats::Kind::DccMetaWrite, size);
 			}
 		}

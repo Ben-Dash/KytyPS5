@@ -272,6 +272,10 @@ private:
 	                                           ImageId cached, ImageId merged);
 	[[nodiscard]] static bool IsBlockAlias(const ImageInfo& requested, const ImageInfo& cached);
 	[[nodiscard]] bool PublishBlockAlias(Image& image);
+	void PrepareBlockBufferWrite(uint64_t address, uint64_t size);
+	// Caller already owns m_lock (for image/metadata publication).
+	void PrepareBlockBufferWriteLocked(uint64_t address, uint64_t size);
+	[[nodiscard]] bool IsKnownDccMetadataLocked(uint64_t address, uint64_t size) const;
 	void ResolveBlockAlias(ImageId cached, ImageId merged);
 	[[nodiscard]] ImageId       ResolveDepthOverlap(const ImageInfo& requested, BindingType binding,
 	                                                ImageId cached);

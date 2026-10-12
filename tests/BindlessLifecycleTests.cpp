@@ -6,6 +6,7 @@
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/guest_gpu/graphicsRun.h"
 #include "graphics/host_gpu/vulkanCommon.h"
@@ -321,6 +322,7 @@ private:
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
 #include "BcAliasOwnershipTests.inc"
+#include "BcPartialBufferWriteTests.inc"
 #include "BcAliasPartialTailPaddingTests.inc"
 #include "CopyMipDestinationOwnershipTests.inc"
 #include "NggVertexCountTests.inc"
@@ -345,6 +347,18 @@ private:
 #include "DispatchSnapshotJobSelectorTests.inc"
 
 int main(int argc, char **argv) {
+  const bool drain_stats_mode = argc == 3 && std::strcmp(argv[1], "--drain-stats") == 0;
+  if (drain_stats_mode) { --argc; ++argv; }
+  struct DrainStatsScope {
+    bool previous;
+    explicit DrainStatsScope(bool enabled)
+        : previous(Libs::Graphics::DrainStats::g_enabled.load(std::memory_order_relaxed)) {
+      if (enabled) Libs::Graphics::DrainStats::g_enabled.store(true, std::memory_order_relaxed);
+    }
+    ~DrainStatsScope() {
+      Libs::Graphics::DrainStats::g_enabled.store(previous, std::memory_order_relaxed);
+    }
+  } drain_stats_scope(drain_stats_mode);
   using namespace Libs::Graphics;
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   Require("BindlessLifecycle", "arguments", argc == 1 ||
@@ -392,6 +406,9 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
                             std::strcmp(argv[1], "--dma-base-origins-only") == 0 ||
                             std::strcmp(argv[1], "--dma-base-runtime-bounds") == 0 ||
+                            std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
                             std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)),
@@ -442,6 +459,11 @@ int main(int argc, char **argv) {
                    std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
                    std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0))
     ConfigureBcAliasOwnershipTests();
+  if (argc == 2 && (std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
+                   std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
+                   std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0))
+    ConfigureBcPartialBufferWriteTests(
+        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0);
   if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
                     std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0))
     ConfigureFaultFirstBindingDeferredGpu();
@@ -476,7 +498,10 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
        std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
-       std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0));
+       std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0));
   if (argc == 2 && std::strcmp(argv[1], "--dma-base-origins-only") == 0) {
     CheckDmaBaseOrigins();
     return 0;
@@ -490,14 +515,22 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-alias-ownership-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
        std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
-       std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0);
+       std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0);
   if (image_ownership_mode) {
     // GPU-owned guest memory must be retired on the actual GPU thread, as in
     // production. Setup/cleanup uses that thread; readback oracles stay intact.
     auto& renderer = vulkan.RuntimeRenderer();
     renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&] {
-      if (std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0)
+      if (std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
+          std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
+          std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0)
+        CheckBcPartialBufferWriteGpu(vulkan,
+            std::strcmp(argv[1], "--bc-partial-buffer-gpu") != 0);
+      else if (std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0)
         CheckBcAliasPartialTailPaddingGpu(vulkan);
       else if (std::strcmp(argv[1], "--copy-mip-destination-gpu") == 0 ||
                std::strcmp(argv[1], "--copy-mip-destination-neighbors-gpu") == 0)

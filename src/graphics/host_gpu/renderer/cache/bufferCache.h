@@ -83,6 +83,11 @@ public:
 	                                                        bool     is_written,
 	                                                        bool     is_texel_buffer = false,
 	                                                        BufferId id              = {});
+	// Image/metadata publication already owns the texture-cache lock. Its caller
+	// prepares any relevant aliases explicitly before acquiring this destination;
+	// this path must not recursively prepare another buffer overwrite.
+	[[nodiscard]] std::pair<Buffer*, uint64_t> ObtainBufferForImagePublication(uint64_t vaddr,
+	                                                                          uint64_t size);
 	[[nodiscard]] StreamBuffer&                GetUtilityBuffer(MemoryUsage usage) noexcept {
 		switch (usage) {
 			case MemoryUsage::Upload: return m_staging_buffer;
@@ -186,6 +191,10 @@ private:
 	void DeleteBuffer(BufferId id);
 	[[nodiscard]] bool SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size,
 	                                     bool is_written, bool is_texel_buffer);
+	[[nodiscard]] std::pair<Buffer*, uint64_t> ObtainBufferImpl(uint64_t vaddr, uint64_t size,
+	                                                            bool is_written,
+	                                                            bool is_texel_buffer, BufferId id,
+	                                                            bool image_publication = false);
 	// deferred: the pages' protections are queued (PageManager::DeferProtects).
 	[[nodiscard]] vk::Buffer UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
 	                                      uint64_t total_size, bool deferred = false);

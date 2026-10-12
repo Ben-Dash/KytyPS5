@@ -1414,11 +1414,35 @@ bool TextureCache::PublishBlockAlias(Image& image) {
 	auto transfer = BuildDownload(image);
 	if (!transfer.valid) return false;
 	const auto [buffer, offset] =
-	    m_buffer_cache.ObtainBuffer(image.info.data.address, image.info.data.size, true);
+	    m_buffer_cache.ObtainBufferForImagePublication(image.info.data.address, image.info.data.size);
 	DownloadImage(image, *buffer, offset, image.info.data.size, std::move(transfer));
 	image.ClearGpuModified();
 	image.MarkBufferModified();
 	return true;
+}
+
+void TextureCache::PrepareBlockBufferWrite(uint64_t address, uint64_t size) {
+	if (!GuestRange {address, size}.Valid()) {
+		return;
+	}
+	std::scoped_lock lock {m_lock};
+	PrepareBlockBufferWriteLocked(address, size);
+}
+
+void TextureCache::PrepareBlockBufferWriteLocked(uint64_t address, uint64_t size) {
+	for (const auto id: FindImagesInRegion(address, size, false)) {
+		auto& image = m_slot_images[id];
+		if (!image.registered || image.depth_id || !image.info.IsBlock() ||
+		    !image.Overlaps(address, size) || !image.SafeToDownload()) {
+			continue;
+		}
+		// A writable descriptor can store only a few blocks. Preserve every old
+		// GPU block before the caller records its write, including other mips
+		// and layers outside the requested buffer's original partial owner.
+		if (!PublishBlockAlias(image)) {
+			EXIT("TextureCache: cannot preserve GPU-owned BC image before buffer write\n");
+		}
+	}
 }
 
 void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_offset) {
@@ -1893,8 +1917,16 @@ bool TextureCache::MaterializeDccClearOnGpu(ImageId id, const ImageDesc& desc,
 		DrainStats::Record(DrainStats::Kind::DccGpuCheck, count);
 	}
 	// The check consumes cleared slices on the GPU, so the metadata stays GPU-owned.
-	const auto [metadata, metadata_offset] =
-	    m_buffer_cache.ObtainBuffer(slices_address, slice_size * count, true, false);
+	// Preserve a byte-overlapping BC owner and acquire this metadata destination
+	// under one explicit texture operation, without recursive preparation.
+	std::pair<Buffer*, uint64_t> metadata_source;
+	{
+		std::scoped_lock lock {m_lock};
+		PrepareBlockBufferWriteLocked(slices_address, slice_size * count);
+		metadata_source =
+		    m_buffer_cache.ObtainBufferForImagePublication(slices_address, slice_size * count);
+	}
+	const auto [metadata, metadata_offset] = metadata_source;
 	auto& command = m_scheduler.Current();
 	command.EndRendering();
 	const auto native = command.Handle();
@@ -3442,6 +3474,10 @@ void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size,
 	if (!GuestRange {address, size}.Valid()) {
 		return;
 	}
+	// Fill/copy paths invalidate before acquiring the writable buffer. The
+	// acquisition hook covers shader stores and callers that invalidate after
+	// recording; preserve the old image before relinquishing its ownership.
+	PrepareBlockBufferWrite(address, size);
 	std::scoped_lock lock {m_lock};
 	const auto images = FindImagesInRegion(address, size, true);
 	// A shader writing exactly one image's range as a buffer (Sky Garden writes several tiled
@@ -3459,19 +3495,12 @@ void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size,
 			exact            = exact || (data.address == address && data.size == size);
 		}
 	}
-	// KYTY_BC_BUFFER_WRITES=1: a block-compressed image takes buffer writes anywhere inside it.
-	// Nothing renders or stores to a BC surface as an image, so a GPU write into its range is the
-	// game filling it through a buffer alias, mip by mip and layer by layer (Ghost of Yotei
-	// 4337635433d63234 compresses its reflection cubes into a 102-layer BC6H array at
-	// 0x503228f000 in 0x10000/0x4000/0x1000 pieces; none starts at the array, so it stayed empty).
-	static const bool bc_buffer_writes = [] {
-		const char* text = KYTY_GETENV("KYTY_BC_BUFFER_WRITES");
-		return text != nullptr && std::strcmp(text, "0") != 0;
-	}();
+	// BC blocks can be filled through interior buffer ranges, mip by mip and
+	// layer by layer. Earlier image transfers were published before the write,
+	// so refreshing any byte-overlapping BC consumer preserves untouched blocks.
 	for (const auto id: images) {
 		auto& image = m_slot_images[id];
-		if (bc_buffer_writes && image.info.IsBlock() && image.info.data.address != address &&
-		    address >= image.info.data.address && address + size <= image.info.data.End()) {
+		if (image.info.IsBlock() && image.Overlaps(address, size, false)) {
 			static std::mutex                   bc_mutex;
 			static std::unordered_set<uint64_t> bc_seen;
 			{
@@ -3725,6 +3754,10 @@ bool TextureCache::IsMeta(uint64_t address) {
 
 bool TextureCache::IsKnownDccMetadata(uint64_t address, uint64_t size) {
 	std::scoped_lock lock {m_lock};
+	return IsKnownDccMetadataLocked(address, size);
+}
+
+bool TextureCache::IsKnownDccMetadataLocked(uint64_t address, uint64_t size) const {
 	return m_dcc_metadata_seen.Intersects(address, size);
 }
 
