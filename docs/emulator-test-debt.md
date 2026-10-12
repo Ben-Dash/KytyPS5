@@ -1,5 +1,91 @@
 # Integration test debt
 
+## STOP after3 attempts: residual matrix and runtime debt, 2026-10-12 10:10 UTC
+
+User's attempt budget3/3 is exhausted and work is stopped. Entries below are
+unproved cases for a possible future explicitly authorized task, not instructions
+to continue now. Stable picture/~60FPS remains unachieved.
+
+- Attempt2 true DA4 BAD bank now fills943/1135 rows after known metadata
+  residency; holes1050..1113/1562..1625/2074..2137 remainzero. Target24DWORDs
+  match zero producer AFTER and VS readback, so no later positive-loss proof.
+  Actual root pages now present, code unchanged E386. Executed input/EXEC/LDS
+  and store witnesses for first guest wave are still missing; simple1135 loop passes.
+- Attempt3 full-wave flag sanity passed BEFORE original run, but300s original
+  produced no DA4/VS module capture and no visible scene. No equivalence,
+  matrix-effect or gameplay-FPS conclusion is justified from loading/title30.
+- Old UniformVectorDescriptorRead compiled/reference result mismatch reproduced
+  WITHOUT this metadata observer in092111; focused5 cases pass093817. Broader
+  materialization suite is not green. No unrelated repair attempted under budget.
+- GPU shader/image regression proofs do not prove stable nearbyobjects/body,
+  cross-game compatibility, internal1920x1080 or60FPS. No further native
+  test/game/implementation/research permitted until new user instruction.
+
+## Virtual null-reader values are not backed memory, 2026-10-12 09:38 UTC
+
+Attempt1 introduced an original early crash: successful provider reads at0x30
+were synthesized zeros for guarded null paths, then erroneously preacquired as
+backing. Independent CPU test first reproduced current metadata error093738
+before observer filtering; same5 cases passed093817 after provider contract.
+The new synthetic_zero_read_end defaults0, is declared only for GPU zero-provider,
+and excludes whole successful reads starting below its end, exactly as the
+provider defines them. Real exact-boundary ranges remain, values stayzero,
+default ordinary/strict cookies, failure/memo semantics and Memory errors remain.
+Original attempt2 and refreshed GPU pointer/dirty-owner neighbors pending.
+
+## First-use SRT metadata pages read through BDA, 2026-10-12 08:46 UTC
+
+Attempt1 preparation under user's new maximum3 attempts. Before any production
+preacquisition change, synthetic mapped root/child/control/output in distinct
+16KiB pages: actual SMEM resource materialization reads root/child metadata;
+only ordinary control/output SRDs acquire cache buffers. The real dynamic FLAT
+path must read root+24 pointer and child+152 positive value on first dispatch.
+Record PTEs before/after, ordinary positive control, atomic once1 and canaries;
+cleanup before assertions. No loops, blind replay, fabricated resources, title
+selection or arbitrary userdata pointer scans. Expected RED is wrong first-load
+value with valid materialization/other controls, not a driver error.
+
+Possible shared correction only after RED: retain successful, bounds-validated
+SRT materialization read ranges in ResourceSnapshot, acquire those known metadata
+pages for uses_dma before PrepareBda. Cover memo refresh, failed reads, range
+overflow, duplicate/coalesced reads and GPU-written data preservation. Original
+actual root-page PeekPage was absent in all4 captures; actual GPU PTE/load remains
+unobserved, so synthetic correction is not yet proof of original causality.
+
+## Plain persistent loop passed baseline, 2026-10-12 08:30 UTC
+
+TESTONLY ceeb543d uses WG512, guest64/native32/groups1/count1135/step512,
+all1135 positive row markers, all512 per-lane store counts, scalar bailout=0
+and complete canaries. Four independent scalar checks bound a broken vector
+induction variable; there is no LDS/readlane/barrier inside the divergent loop.
+Native target082842PASS; baseline083006 E007BF8C child0, same shader production
+7cb371e7. The tested fixture was A32012C8 (later comments only cleaned).
+No intended RED, so no loop production correction. Nested phase/gate/input
+ancestry in actual DA4 remains unproved.
+
+## Persistent matrix producer loop and surrounding meshes, 2026-10-12 08:23 UTC
+
+Required independent bounded guest regression before any loop/EXEC correction:
+logical WG512 on native32 with guest64, j=localID, count1135, step512;
+restored EXEC and positive indexed store witness on all valid j over3iterations.
+Check first64 of each512block and tail boundaries, counts512/1024/1135 and
+sentinels; no workgroup barrier/readlane inside divergent loop. Failure must be
+wrong expected readback, not unrelated driver fault. Basic lane grouping already
+passes but is loop-free and does not prove the large producer's nested phases.
+
+Actual original da4 producer covers1050..2184 and leaves1135zero rows for BAD
+bank versus fillsall1135 for FINITE. Inputs differ, so actual executed masks,
+values and first relevant source/PTE reads require proof. Captures75refs/41blobs
+complete; no subsequent loss of target24positiveDWORDs. Existing snapshots
+contain only heuristic BDA pages; missing captured page does not prove unmappedGPU.
+
+Targeted original081727 ended321 at semaphore counter/wait with unknownVkResult;
+keep heavy retries stopped until bounded diagnosis. Instrument stability does
+not prove all static/world meshes correct: user explicitly points to nearbyobjects.
+The diagnostic job-capacity clamp doesn't describe internal strided loops; disable
+JOB_RANGE for actualproducer capture until a semantics-aware admission hint exists.
+
+
 ## Late image-backed BDA fringe: regression resolved, 2026-10-12 07:50 UTC
 
 The actual production graphics preparation phase reproduced the defect before

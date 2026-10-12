@@ -1,5 +1,197 @@
 # Ghost of Yōtei: active integration and session resume
 
+## STOP: all3 user-authorized attempts exhausted, 2026-10-12 10:10 UTC
+
+The user said "у тебя 3 попытки, если не получится дальше не иди". All3
+attempts have now been used. WORK STOPPED. Do not automatically continue from
+older continuation requests, run another warmup/game/test, or implement another
+fix/research pass without a new explicit user instruction. Recording these
+results and preserving already validated changes is the final authorized work.
+
+Stable picture and approximately60FPS at1920x1080 were NOT achieved. This is
+partial emulator progress, not a menu/gameplay milestone or a completed visual fix.
+
+| Attempt | Tested core / executable | Verified result |
+| --- | --- | --- |
+| 1: validated SRT read pages | 989390b2 / E4EF9163 | 092806 ended09:28:21.215Z exit321 after14.28s; virtual null read0x30 wrongly preacquired; no screenshot or shader capture. |
+| 2: backed versus virtual reads | 7b89aee6 / 4858584F | 094309 ended09:46:13.730Z exit0/180s/graceful, min14.72GiB. Actual BAD DA4 fills943/1135 rows;192 remainzero, exactly first64 of each512 block. Targets2097/2098 stillzero and exact VS join. Captured150/170s screenshots black; stable scene not confirmed. |
+| 3: existing full-wave branch mode | SAME7b89aee6 / SAME4858584F, KYTY_WAVE_BRANCH_FULL=1 | 100117 ended10:06:35.140Z after300s budget+boundedcleanup, exit-1/forcedcleanup/min18.99GiB. Six screenshots saved; actual290s frame155 screen black. No DA4/VS/liveSPV capture, so mode effect on matrix holes unavailable. Title30FPS is loading, not gameplay performance. |
+
+- All owned native game/test/build processes ended; rootexec42858 fully drained.
+  Exact installed SHA4858584F26F0AC0DD09D4032C7F2A7D16663F9A149BD1429368141B52D5528BF checked.
+  Final evidence `writer-history-diagnostic-20261012/attempt3-final-stop-20261012T1009032364618Z/`.
+- General corrections remain local commits989390b2/7b89aee6: first-use known
+  metadata pages now resident; virtual null values remain values rather than
+  backing. Intended GPU/CPU RED→GREEN, five CPU neighbors and GPU preservation
+  checks passed. Earlier77098f2a late-image fringe also proved separately.
+- Full-wave configuration was checked BEFORE attempt3:095617/6154D64B passes
+  bounded Wave64RawMasksAndScalarBranch and1135-row strided loop. This is a
+  configuration experiment only; default production branch behavior unchanged.
+- Actual partial progress is943 newly populated matrix rows in the BAD producer,
+  with unchanged original E386 SPIR-V.192 missing rows and affected surrounding
+  objects remain unresolved; no sanitizer or title/hash workaround was installed.
+- Existing full materialization suite failure at UniformVectorDescriptorRead
+  was confirmed with the new observer absent; logged separately. Focused five
+  residency cases pass. Cross-game runtime and true internal1080p/60FPS unproved.
+- Tests, private runtimes, savedata, caches, screenshots, exact inputs/IR and
+  uniquely timestamped shared handoffs are preserved. No push or external issue
+  comment; verified menu/entry milestones were not reached during these attempts.
+
+## Attempt1 failed; attempt2 preparing, 2026-10-12 09:38 UTC
+
+Used1 of3 allowed original attempts; at most2 remain. Attempt1 original092806
+on989390b2/E4EF9163 ended09:28:21.215Z exit321 after14.28s, min21.52GiB,
+noRAMguard. Required ClampRangeSize rejected address0x30/size32 during new
+metadata preparation. No screenshot, DA4 or VS capture exists; no visual result.
+
+Source cause: the existing GPU metadata reader deliberately returns TRUE+zero
+for guarded null paths starting below NullGuestRegionEnd. These are virtual
+values, not backing. Attempt2 declares that provider contract in SrtRuntime and
+excludes those reads from residency only; callback values and required memory
+errors stay unchanged. Ahead reader accesses actual backing and keeps default0.
+CPU RED093738/C2285CC5 -> SAME5-case GREEN093817/8284C5D4 verifies two bounds,
+virtual starts/spans, exact real boundaries, mixed reads, memo/cookies and defaults.
+Native GPU neighbors/build/original attempt2 stillpending. No game/hash/address
+exception, silent Memory::Clamp error suppression, stage skip or command replay.
+
+## Attempt1 of3: validated SRT-read residency correction, 2026-10-12 09:27 UTC
+
+User budget is now3 total further visual attempts; attempt1 is about to launch,
+with at most2 remaining if unsuccessful. Do not reset or add warmup retries.
+Shared fix989390b2 retains this refresh's actual successful SRT reads for DMA
+stages and acquires their cache pages before ordinary descriptors/BDA preparation.
+No arbitrary pointer scan, game/hash branch, store suppression or replay.
+
+- Intended GPU RED090350, EXE86E3B4AF, fixtureA960C26C: correct ordinary/SMEM/
+  atomic-once/sentinel controls, root+childPTE0, dynamic pointer/leaf incorrectly0.
+- SAME fixture GREEN091355/C9D9AE84: prepared PTEs populated, child pointer and
+  leaf71335599 correct, atomic1 unchanged. GPU dirty-owner neighbor091657 on
+  51F1CEBA preserves89abcdef; late-image091658 and rendering/chain091658 pass.
+- CPU4 focused cases091928 then restored-source092300/3805F87C allpass: nested/
+  repeated reads, strict-cookie separation, equal-value source relocation/memo,
+  failure clearing and DMA-off. Existing fullsuite stops at UniformVectorDescriptorRead
+  compiled/reference result mismatch; SAME failure confirmed with this patch absent
+  in092111/7109BF0F. Native link/test-name harness repairs are not regression proofs.
+- Native core092426/install092716 PASS, fresh E4EF916379D6FECD768E46BBCCEBC5A4CB15BD31E132D56879394E05E0CB62C9.
+  Private runtime-attempt1-srt-residency, baselinePerformance/hardware bounds true,
+  manual1920x1080/timestamp100/workers4/replay1/DA4 max2/noJOBfilter, bounded180s
+  including warmup. Prior private data/cache copied unchanged; normal key validation.
+- Picture/menu/gameplay and stable~60FPS remain unconfirmed until actual screenshots.
+  No push or external issue milestone. Attempt2/3 only within the user's remaining budget.
+
+## Active user limit: at most3 further attempts, 2026-10-12 08:46 UTC
+
+The user now allows at most3 further concrete fix/configuration attempts with
+original visual verification and says stop if they fail. No further original
+attempt completed since that instruction; attempt1 is preparing the first-use
+SRT metadata/BDA regression. Do not silently reset this budget across sessions.
+After the third unsuccessful attempt, stop work and record the results.
+
+Exact live DA4 code links root+372 to flatc1: BAD41 enters phase600..2294,
+FINITE40 skips it. The entered phase handles first128 indices and loads by
+address through actual userdata root+24 then child+152/+136. In all4 captures,
+CaptureInputs' actual userdata-root page query found no host BDA owner; the
+8192-candidate limit was not approached. This is stronger than an arbitrary
+missing-page heuristic, but still not actual GPU PTE/load evidence. First attempt
+will test retention/preacquisition of already validated SRT memory-read ranges,
+with no game-specific flags, arbitrary pointer scans or command replay.
+
+## Latest checkpoint: exact live producer module regenerated; simple loop passes, 2026-10-12 08:39 UTC
+
+- TESTONLY ceeb543d: independent bounded persistent loop1135/WG512/guest64-on32
+  baseline083006 passes all rows/counts/bailout/canaries on fresh E007BF8C after
+  native082842 build. No loop fix follows from a passing probe. Secondary unused
+  count512/1024/1135 draft remains ignored/uncompiled.
+- Native shader_batch_audit083329PASS/EXE057C36EC; actual DA4 capture body A195AC
+  matches prior journal bytes. Recompiled with actual hw-bounds/native-FP16 true,
+  tablefalse/bindlesstrue and VTX_EXPLODE1 at083642, child0/CPU-only validation.
+  Emitted3077040-byte SPIR-V SHA E386624DAAC172120B664ABB49B4200AEBEC999B9C16BB5B761362CBC8B3403A
+  is BYTE-IDENTICAL to captured live module. Exact IR/CFG is now an appropriate
+  code-ancestry reference. This is MODULE equivalence only: runtime materialization,
+  actual executed masks/loads/stores and expected game output are not proved.
+- Current installed runtime remains7cb371e7/PE5DC44E05; later ceeb543d only adds
+  reusable test/CTest. Last original081727 ended321 and all task-native processes
+  are gone. No further heavy original retries after semaphore failure.
+- Current frontier: compare actual DA4 BAD/FINITE phase gates and executed inputs,
+  including resource reads and restored EXEC after nested phases. Preserve
+  stable instrument versus broken nearbyobjects/body as separate observations;
+  no game-specific flag override or zero-matrix sanitation. Stableimage/~60FPS
+  stillpending. Docs/debt and ignored evidence preserve continuation; no push.
+
+## Latest checkpoint: missing producer identified and captured, 2026-10-12 08:23 UTC
+
+- Core7cb371e7/PE5DC44E05: fullhistory original081201 ended08:15:06.515Z
+  child0/180s/min14.15GiB, native processes ended. It exported all28 overlapping
+  writers without truncation and revealed the previously hidden oldest shader
+  da4ff1222c09f131 (slot2/25, groups1x1x1). Its loop advances each job by512;
+  the earlier job filter's min(count,launchcapacity) is not an execution model
+  for persistent loops. Disable that filter for this shader; do not equate
+  an unadmitted capture with a skipped dispatch or missing producer.
+- SAME core/PE targeted original081727, no job filter, max4 and written2:124224:
+  four complete captures267/267/268/269,75 references/41 blobs verified. Live
+  original code matches prior decoder; logical512, count1135/base1050, loop
+  covers[1050,2185). First BAD bank all1135 matrix rows zero BEFORE AND AFTER;
+  next FINITE bank all1135 zero -> nonzero. Both2097/2098 reader joins exactly
+  match AFTER bytes (24 DWORDs). No later loss of those positive data shown.
+- Inputs/executed masks still differ; zero classification is not an independent
+  expected-value oracle or proof of absent stores. Scratch uses packed alignment
+  prefix4; corrected firstcapture slot5 changes logical128..511, not128..512.
+  No arithmetic/EXEC/loop production correction is justified yet.
+- Targeted run ended unexpectedly08:20:15.844Z child321, min14.91GiB/noRAMguard,
+  before180s deadline. Fatal masterSemaphore.cpp276/301 counter/wait result;
+  actual VkResult is not logged, so device loss is unconfirmed. Streams drained,
+  ownedPID34868 ended. Do not repeatedly retry heavy scene to force GPU resets.
+- User asks to inspect surrounding objects as well as character, and confirms
+  stable instrument versus broken body/clothes. Earlier210s063813 screenshot
+  visibly contains intact instrument/board fragments with severely missing world;
+  global texture-versus-skinned-only scope is not established. Need draw identity
+  and transform ancestry for surrounding meshes; do not limit investigation to skin.
+- F2 opens emulator settings; F3 toggles render resolution/FPS info. Async pipelines
+  and relaxed readback OFF in our profiles. Settings file kyty_settings.ini in
+  runtime working directory. No setting is verified to fix this defect.
+- ps5rs master0df6569e researched: no compatible graphics fix (shader disassemble
+  is hexdump, AGC/driver submit functions arestubs); SELF/ELF/NID useful only as
+  optional CPU-analysis tools. Primary-source report ps5rs-review-20261012 preserved;
+  no installation/execution or data upload. Current priority remains actualDA4.
+- Next: bounded synthetic strided-loop/EXEC regression, then precise executed-input
+  and output-store proof for BAD/FINITE DA4. Original stableimage/~60FPS1920x1080
+  still NOT achieved. All original data/artifacts retained; no push/external milestone.
+
+
+## Latest checkpoint: original picture still broken; preceding matrix producer search, 2026-10-12 08:12 UTC
+
+- Shared residency correction77098f2a remains proved RED/GREEN; it did not fix
+  the sampled original zero-matrix signature or visible geometry.
+- Core e42b621c / PE5C6133BA: cold original075437 ended07:59:44.889Z exit0,
+  300s, no RAM guard, min15.05GiB; actual210s frame349 screenshot shows severe
+  stretched geometry, title3.2 FPS. Normal cache invalidation occurred.
+- SAME PE warm original080225 ended08:07:29.254Z exit0, 300s, min14.03GiB;
+  loaded176985706-byte cache, actual150s frame536 screenshot remains broken,
+  title2.6 FPS. 90/210s captures withheld because owned focus was unavailable.
+  Both runs manual/autoswipe0 with neutral input logs. Internal targets still
+  exceed the requested1920x1080 window; no stable FPS claim.
+- Warm CPU inventory4096:703 retained selected-hash records match124224-byte
+  output SRD, no job covers2097/2098; all logged groupsX=1. Matching palette
+  jobs cover[664,1050) and[2185,2588). Scope/cap hide other hashes/later keys.
+  No final inventory summary was observed despite childexit0; final overflow
+  totals unknown. No CS capture was admitted in either run.
+- Pure-file matrix/scratch evidence: zero64-row slices begin1050/1562/2074,
+  exactly512 apart. Row2097/2098 falls in the third slice. Inputs differ, so
+  this pattern does not alone prove an EXEC/arithmetic or BDA-load defect.
+- User confirms instrument remains stable while character/body/clothes deform.
+  This favors investigating animated geometry/matrix data; exact instrument
+  draw identity is still uncorrelated, so global texture fixes are not inferred.
+- Local-only diagnostic7cb371e7 preserves default writer-query8 but explicitly
+  exports up to64 older declarations in admitted VS trace (28 matches previously
+  truncated). CPU080834PASS: default8, cutoff28, hardcap64/order and boundaries.
+  Native core080842/install081013PASS, PE5DC44E05, unchanged private warmcache.
+- ACTIVE bounded original081201 (PID5296, rootexec67621), source7cb371e7,
+  runtime-full-writer-history-1080, timeout180/manual1080. Next inspect all28
+  producer declarations and identify actual preceding writer of[1050,2185).
+  No shader behavior fix justified until intended regression. Stablepicture/
+  ~60FPS stillpending; no push or external milestone. Preserve originalartifacts.
+
+
 ## Latest checkpoint: late image-backed BDA fringe fixed, 2026-10-12 07:50 UTC
 
 A native GPU regression now proves one real shared residency defect fixed.
