@@ -918,11 +918,12 @@ WriterHistory::Stats WriterHistoryStats() {
 	return state.history.Snapshot();
 }
 
-WriterHistory::Query QueryWriterHistory(uint64_t address, uint64_t size, uint64_t cutoff_sequence) {
+WriterHistory::Query QueryWriterHistory(uint64_t address, uint64_t size, uint64_t cutoff_sequence,
+                                       size_t max_matches) {
 	if (!WriterHistoryEnabled()) return {};
 	auto& state = GetWriterHistory();
 	std::lock_guard lock(state.mutex);
-	return state.history.Read(address, size, cutoff_sequence);
+	return state.history.Read(address, size, cutoff_sequence, max_matches);
 }
 
 bool WatchActive() {

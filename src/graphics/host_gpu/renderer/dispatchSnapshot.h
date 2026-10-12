@@ -173,7 +173,8 @@ void               WatchWrite(const char* source, uint64_t address, uint64_t siz
 [[nodiscard]] bool WriterHistoryEnabled();
 [[nodiscard]] WriterHistory::Stats WriterHistoryStats();
 [[nodiscard]] WriterHistory::Query QueryWriterHistory(uint64_t address, uint64_t size,
-                                                     uint64_t cutoff_sequence);
+                                                     uint64_t cutoff_sequence,
+                                                     size_t max_matches = WriterHistory::DefaultMatches);
 // Every written buffer; context is before CommitBindings. Indirect group counts
 // are CPU input metadata, not a readback of the actual GPU indirect command.
 void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& bindings,

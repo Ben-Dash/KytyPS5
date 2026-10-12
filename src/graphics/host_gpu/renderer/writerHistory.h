@@ -10,7 +10,8 @@
 
 namespace Libs::Graphics::WriterHistory {
 inline constexpr size_t Capacity = 32768;
-inline constexpr size_t MaxMatches = 8;
+inline constexpr size_t DefaultMatches = 8;
+inline constexpr size_t MaxMatches = 64;
 enum class Kind : uint32_t { Packet, ComputeBuffer };
 struct Record {
     uint64_t sequence = 0, address = 0, size = 0, detail = 0;
@@ -66,7 +67,7 @@ public:
         return s;
     }
     Query Read(uint64_t address, uint64_t size, uint64_t cutoff,
-               size_t max_matches = MaxMatches) const {
+               size_t max_matches = DefaultMatches) const {
         Query q;
         q.enabled = true; q.stats = Snapshot(); q.cutoff_sequence = cutoff;
         q.valid_range = ValidRange(address, size);

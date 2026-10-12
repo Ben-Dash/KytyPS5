@@ -47,6 +47,21 @@ int main() {
     History one(0); a.address = UINT64_MAX - 4; a.size = 4;
     if (!Check(one.Add(a) && one.Read(a.address, a.size, 1).matches == 1,
                "last representable exclusive endpoint or minimum capacity failed")) return 1;
+    History producers(80);
+    a.address = 0x4000; a.size = 0x100;
+    for (uint64_t i = 1; i <= 70; ++i) { a.shader = i; producers.Add(a); }
+    q = producers.Read(0x4000, 4, 70);
+    if (!Check(q.records.size() == 8 && q.matches == 70 && q.truncated &&
+               q.records.front().shader == 70 && q.records.back().shader == 63,
+               "default newest-eight view changed")) return 1;
+    q = producers.Read(0x4000, 4, 28, 64);
+    if (!Check(q.matches == 28 && q.records.size() == 28 && !q.truncated &&
+               q.records.front().shader == 28 && q.records.back().shader == 1,
+               "expanded cutoff view lost older producer declarations")) return 1;
+    q = producers.Read(0x4000, 4, 70, SIZE_MAX);
+    if (!Check(q.matches == 70 && q.records.size() == 64 && q.truncated &&
+               q.records.back().shader == 7,
+               "oversized query escaped the diagnostic output bound")) return 1;
     std::puts("writer history: CPU boundary/cutoff/relocation/wrap tests PASS");
     return 0;
 }

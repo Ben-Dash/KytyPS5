@@ -625,7 +625,10 @@ void NoteValueTraceBindings(uint64_t token, std::span<PreparedBindings* const> s
 					const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(words);
 					const auto address = descriptor.Base48();
 					const auto size = descriptor.GetSize();
-					const auto query = DispatchSnapshot::QueryWriterHistory(address, size, writer_cutoff);
+					// Actual captures had 28 overlapping writers; the default newest-eight
+					// view hid preceding producers. Export bounded older declarations too.
+					const auto query = DispatchSnapshot::QueryWriterHistory(
+					    address, size, writer_cutoff, WriterHistory::MaxMatches);
 					nlohmann::json range = {
 					    {"buffer_index", i}, {"guest_address", address}, {"guest_size", size},
 					    {"valid_range", query.valid_range}, {"reader_cutoff_sequence", query.cutoff_sequence},
