@@ -885,6 +885,9 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --context-state-only)
 	add_test(NAME gpu_tiler
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-tiler-only)
+	add_test(NAME wave64_strided_job_loop_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --wave64-strided-job-loop-only)
+	set_tests_properties(wave64_strided_job_loop_gpu PROPERTIES TIMEOUT 30)
 
 	add_test(NAME texture_cache_layered_image
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --layered-image-only)
