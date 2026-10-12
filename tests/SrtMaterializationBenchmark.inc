@@ -145,9 +145,10 @@ SrtPlanShape AnalyzeSrtPlan(const ShaderRecompiler::IR::ResourcePlan &plan) {
     for (uint32_t i = 0; i < source.dword_count; ++i) {
       pending.push_back(source.dwords[i]);
     }
-    if (source.indirect_image) {
-      pending.push_back(source.indirect_image->key_count);
-      pending.push_back(source.indirect_image->selector_mask);
+    if (source.indirect_descriptor) {
+      pending.push_back(source.indirect_descriptor->key_count);
+      pending.push_back(source.indirect_descriptor->selector_first);
+      pending.push_back(source.indirect_descriptor->selector_mask);
     }
   }
   for (const auto &block : plan.control_flow) {

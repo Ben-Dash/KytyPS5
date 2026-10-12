@@ -1462,6 +1462,7 @@ struct TestCase {
   std::vector<u32> expected_gds;
   std::vector<std::pair<std::string, size_t>> decoded_counts;
   std::vector<std::pair<std::string, size_t>> ir_counts;
+  u32 expected_mip_descriptors = 0;
   u32 expected_storage_mip_descriptors = 0;
   // Opt-in alternate for a documented host-format conversion, never a general
   // numerical tolerance. Every word still has to match one complete result.
@@ -3213,6 +3214,34 @@ public:
   void CheckGpuCommandLane() {
     EnsureRuntimeContext();
     auto &context = Renderer();
+    // EOP labels are guest memory, owned by the real resource/fault lifecycle.
+    // Host stack labels cannot exercise cached native stores or ordered publication.
+    constexpr uint64_t eop_base = 0x0000000200490000ull;
+    constexpr uint64_t eop_bytes = 0x30000u, eop_alignment = 0x10000u;
+    int64_t eop_direct = -1;
+    Require("GpuCommandLane", "EOP direct allocation",
+            LibKernel::Memory::KernelAllocateDirectMemory(0,
+                LibKernel::Memory::KernelGetDirectMemorySize(), eop_bytes,
+                eop_alignment, 0, &eop_direct) == 0,
+            "EOP guest-label allocation failed; not an ordering regression");
+    void* eop_memory = reinterpret_cast<void*>(eop_base);
+    Require("GpuCommandLane", "EOP direct mapping",
+            LibKernel::Memory::KernelMapDirectMemory(&eop_memory, eop_bytes, 0x3, 0x10,
+                eop_direct, eop_alignment) == 0 && eop_memory == reinterpret_cast<void*>(eop_base),
+            "EOP guest-label mapping failed; not an ordering regression");
+    std::memset(eop_memory, 0, eop_bytes);
+    LibKernel::Memory::InstallGpuResources(&context);
+    context.MapMemory(eop_base, eop_bytes);
+    const auto eop_label = [&](uint32_t slot) -> uint64_t& {
+      return *reinterpret_cast<uint64_t*>(eop_base + uint64_t{slot} * 0x4000u);
+    };
+    bool eop_backing_available = true;
+    const auto eop_backing = [&](const auto& label) {
+      uint64_t value = 0;
+      eop_backing_available &= LibKernel::Memory::TryReadBacking(
+          reinterpret_cast<uint64_t>(&label), &value, sizeof(label));
+      return value;
+    };
     context.InitializeGpu(nullptr);
     auto &gpu = context.GetGpu();
 
@@ -3281,9 +3310,14 @@ public:
       });
 
       std::binary_semaphore parser_complete{0};
-      alignas(uint64_t) uint64_t interrupt_only_gds_label = UINT64_MAX;
-      alignas(uint64_t) uint64_t cb_db_release_label = UINT64_MAX;
+      auto& interrupt_only_gds_label = eop_label(0);
+      auto& cb_db_release_label = eop_label(1);
+      interrupt_only_gds_label = cb_db_release_label = UINT64_MAX;
+      std::array<uint64_t*, 2> blocked_clock_labels{&eop_label(2), &eop_label(3)};
+      for (auto* label : blocked_clock_labels) *label = UINT64_MAX;
+      bool timestamps_kept_nonblocking = true;
       bool parser_kept_nonblocking_boundaries = false;
+      const auto clock_before_gpu_record = Sync::ReadReferenceClock();
       std::jthread no_gpu_wait([&] {
         gpu.SendCommandSync([&] {
           processor->BufferInit();
@@ -3305,23 +3339,19 @@ public:
               processor->Process(cb_db_execution, cb_db_release);
           const bool cb_db_release_did_not_submit =
               cb_db_result == Pm4ProcessResult::Complete &&
-              cb_db_release_label == 0 &&
+              eop_backing(cb_db_release_label) == UINT64_MAX &&
               gpu_scheduler.CurrentTick() == cb_db_tick;
 
+          uint32_t clock_index = 0;
           for (const auto gcr : {0u, 1u << 9u}) {
-            const auto before = Sync::ReadReferenceClock();
-            auto timestamp =
-                make_release_mem(3, 0, &cb_db_release_label, UINT64_MAX, 0x14u, gcr);
+            auto* label = blocked_clock_labels[clock_index++];
+            auto timestamp = make_release_mem(3, 0, label, UINT64_MAX, 0x14u, gcr);
             Pm4Execution timestamp_execution;
-            const auto timestamp_result =
-                processor->Process(timestamp_execution, timestamp);
-            Require("GpuCommandLane", "timestamp write",
-                    timestamp_result == Pm4ProcessResult::Complete &&
-                        cb_db_release_label >= before &&
-                        cb_db_release_label <= Sync::ReadReferenceClock() &&
-                        gpu_scheduler.CurrentTick() == cb_db_tick,
-                    "timestamp write failed, returned an invalid time, or "
-                    "submitted extra GPU work");
+            const auto timestamp_result = processor->Process(timestamp_execution, timestamp);
+            timestamps_kept_nonblocking &=
+                timestamp_result == Pm4ProcessResult::Complete &&
+                eop_backing(*label) == UINT64_MAX &&
+                gpu_scheduler.CurrentTick() == cb_db_tick;
           }
 
           auto gds_interrupt_only =
@@ -3332,7 +3362,7 @@ public:
               processor->Process(gds_interrupt_execution, gds_interrupt_only);
           parser_kept_nonblocking_boundaries =
               cache_and_counter_did_not_submit &&
-              cb_db_release_did_not_submit &&
+              cb_db_release_did_not_submit && timestamps_kept_nonblocking &&
               interrupt_result == Pm4ProcessResult::Complete &&
               gpu_scheduler.CurrentTick() == interrupt_tick + 1 &&
               interrupt_only_gds_label == UINT64_MAX;
@@ -3351,16 +3381,34 @@ public:
                   vk::Result::eSuccess,
               "failed to release the blocked GPU timeline");
       no_gpu_wait.join();
-      gpu.SendCommandSync([&] { gpu_scheduler.Finish(); });
+      gpu.SendCommandSync([&] {
+        gpu_scheduler.Finish();
+        gpu_scheduler.WaitPriorityOperations(gpu_scheduler.CurrentTick() - 1);
+      });
       m_runtime_context.device.destroySemaphore(blocked_timeline, nullptr);
       Require("GpuCommandLane", "nonblocking GPU packets",
-              parser_did_not_wait_gpu && parser_kept_nonblocking_boundaries,
+              parser_did_not_wait_gpu && parser_kept_nonblocking_boundaries &&
+                  eop_backing_available,
               "a cache event, GL2 writeback, DE counter, or interrupt boundary "
               "used the wrong "
               "submission behavior");
 
-      alignas(uint64_t) uint64_t release_label = 0;
-      alignas(uint64_t) uint64_t gds_label = UINT64_MAX;
+      // Validate data after releasing the real GPU gate and draining publications.
+      Require("GpuCommandLane", "completed blocked literal", eop_backing(cb_db_release_label) == 0,
+              "completed CB/DB release lost its literal");
+      const auto clock_after_gpu_finish = Sync::ReadReferenceClock();
+      for (const auto* label : blocked_clock_labels) {
+        const auto value = eop_backing(*label);
+        // Queue coverage checks publication and the existing common clock domain only.
+        // Actual sample-stage timing remains the separate frozen EOP GPU oracle/debt.
+        Require("GpuCommandLane", "completed published timestamp",
+                value >= clock_before_gpu_record && value <= clock_after_gpu_finish,
+                "ordered timestamp label lies outside the broad parsing/completion clock range");
+      }
+      auto& release_label = eop_label(4);
+      auto& gds_label = eop_label(5);
+      release_label = 0;
+      gds_label = UINT64_MAX;
       bool release_mem_submission_counts = false;
       gpu.SendCommandSync([&] {
         processor->BufferInit();
@@ -3368,9 +3416,11 @@ public:
         const auto clock_before = Sync::ReadReferenceClock();
         processor->WriteAtEndOfPipe64(0, 0, 0x04, 0x38, 5, 4,
                                      &release_label, UINT64_MAX, 2);
+        gpu_scheduler.Finish();
+        gpu_scheduler.WaitPriorityOperations(gpu_scheduler.CurrentTick() - 1);
         Require("GpuCommandLane", "EOP reference clock with interrupt",
-                release_label >= clock_before &&
-                    release_label <= Sync::ReadReferenceClock(),
+                eop_backing(release_label) >= clock_before &&
+                    eop_backing(release_label) <= Sync::ReadReferenceClock(),
                 "clock write with writeback and interrupt lost its data");
 
         for (const auto interrupt : {0u, 3u, 1u, 2u}) {
@@ -3384,9 +3434,13 @@ public:
           // the last submit has passed (15c45d7c), so a release submits at most once here.
           Require("GpuCommandLane", "32-bit release boundary",
                   immediate_result == Pm4ProcessResult::Complete &&
-                      gpu_scheduler.CurrentTick() <= immediate_tick + 1 &&
-                      release_label == (interrupt == 1 ? 0 : 0x11223344u),
-                  "a release submitted more than once or wrote the wrong label");
+                      gpu_scheduler.CurrentTick() <= immediate_tick + 1,
+                  "a release submitted more than once");
+          gpu_scheduler.Finish();
+          gpu_scheduler.WaitPriorityOperations(gpu_scheduler.CurrentTick() - 1);
+          Require("GpuCommandLane", "completed 32-bit release label",
+                  eop_backing(release_label) == (interrupt == 1 ? 0u : 0x11223344u),
+                  "completed release wrote the wrong label");
         }
 
         auto gds = make_release_mem(5, 0, &gds_label, 1ull << 16u);
@@ -3500,12 +3554,12 @@ public:
       });
       gate_entered.acquire();
       gpu.Submit(first_commands, {});
-      gpu.Done();
+      gpu.SuspendPoint();
       const bool first_did_not_wait = first_value == 0;
       gpu.Submit(second_commands, {});
       std::atomic_bool second_returned{false};
       std::thread second_done([&] {
-        gpu.Done();
+        gpu.SuspendPoint();
         second_returned.store(true);
       });
       std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -3518,7 +3572,7 @@ public:
       barrier.gpu_frames_ahead = 0;
       barrier.label_flush_interval_us = 0;
       Config::Load(barrier);
-      gpu.Done();
+      gpu.SuspendPoint();
       Require("GpuCommandLane", "frames-ahead suspend points",
               first_did_not_wait && second_waited && first_completed &&
                   second_value == 2,
@@ -3631,7 +3685,8 @@ public:
             "submission completion synthesized an interrupt absent from the "
             "executed PM4 stream");
 
-    uint32_t graphics_interrupt_label = 0xa5a5a5a5u;
+    auto& graphics_interrupt_label = *reinterpret_cast<uint32_t*>(&eop_label(6));
+    graphics_interrupt_label = 0xa5a5a5a5u;
     auto graphics_interrupt_commands = make_interrupt_packet(
         1, 1, &graphics_interrupt_label, 0x11223344u, 0);
     gpu.Submit(graphics_interrupt_commands, {});
@@ -3648,7 +3703,8 @@ public:
                 graphics_interrupt_label == 0xa5a5a5a5u,
             "graphics kOnly interrupt was misrouted or wrote its label");
 
-    uint32_t compute_interrupt_label = 0x5a5a5a5au;
+    auto& compute_interrupt_label = *reinterpret_cast<uint32_t*>(&eop_label(7));
+    compute_interrupt_label = 0x5a5a5a5au;
     auto compute_interrupt_commands = make_interrupt_packet(
         1, 0, &compute_interrupt_label, 0x55667788u, 0x456u);
     std::binary_semaphore compute_interrupt_gate_entered{0};
@@ -3673,7 +3729,8 @@ public:
         interrupt_event.udata == &compute_interrupt_udata &&
         compute_interrupt_label == 0x55667788u;
 
-    uint64_t compute_clock_label = 0;
+    auto& compute_clock_label = eop_label(8);
+    compute_clock_label = 0;
     auto compute_clock_commands = make_interrupt_packet(
         3, 1, &compute_clock_label, 0, 0x567u);
     gpu.SubmitCompute(0x20, compute_clock_commands);
@@ -3690,7 +3747,8 @@ public:
         compute_clock_label != 0;
 
     constexpr uint64_t compute_done_value = 0x1234567887654321ull;
-    uint64_t compute_done_label = 0;
+    auto& compute_done_label = eop_label(9);
+    compute_done_label = 0;
     auto compute_done_commands = make_interrupt_packet(
         2, 2, &compute_done_label, compute_done_value, 0x678u);
     compute_done_commands[1] = 0x62fu; // CS_DONE, shader-done index, no GCR action.
@@ -4237,6 +4295,12 @@ public:
     Require("GpuCommandLane", "unmap after shutdown",
             !resources.IsMapped(empty_unmap_base, empty_unmap_size),
             "renderer retained mapped coverage after the GPU command lane stopped");
+    context.UnmapMemory(eop_base, eop_bytes);
+    LibKernel::Memory::InstallGpuResources(nullptr);
+    Require("GpuCommandLane", "EOP fixture unmap",
+            LibKernel::Memory::KernelMunmap(eop_base, eop_bytes) == 0 &&
+                LibKernel::Memory::KernelReleaseDirectMemory(eop_direct, eop_bytes) == 0,
+            "mapped EOP label cleanup failed");
     context.ShutdownGpu();
     std::printf("[host]    %-32s ok\n", "GpuCommandLane");
   }
@@ -6117,7 +6181,7 @@ public:
             vk::BufferUsageFlagBits::eTransferDst,
             std::vector<u32>(expected.size()));
         texture_cache.GetImage(id).Download(copies, readback.buffer, 0,
-                                            readback.size);
+                                            readback.size, readback.size);
         HostReadBarrier(readback.buffer, readback.size,
                         vk::PipelineStageFlagBits::eTransfer,
                         vk::AccessFlagBits::eTransferWrite);
@@ -6208,7 +6272,7 @@ public:
           name, bc5_expected.size() * sizeof(u32),
           vk::BufferUsageFlagBits::eTransferDst, std::vector<u32>(bc5_expected.size()));
       texture_cache.GetImage(bc5_alias_id).Download(
-          bc5_probes, bc5_readback.buffer, 0, bc5_readback.size);
+          bc5_probes, bc5_readback.buffer, 0, bc5_readback.size, bc5_readback.size);
       HostReadBarrier(bc5_readback.buffer, bc5_readback.size,
                       vk::PipelineStageFlagBits::eTransfer,
                       vk::AccessFlagBits::eTransferWrite);
@@ -6724,7 +6788,7 @@ public:
       htile_copy.imageExtent = {1, 1, 1};
       texture_cache.GetImage(htile_storage_image).Download(
           std::span<const vk::BufferImageCopy>(&htile_copy, 1), htile_readback.buffer,
-          0, htile_readback.size);
+          0, htile_readback.size, htile_readback.size);
       HostReadBarrier(htile_readback.buffer, htile_readback.size,
                       vk::PipelineStageFlagBits::eTransfer,
                       vk::AccessFlagBits::eTransferWrite);
@@ -6811,7 +6875,7 @@ public:
         copies[1].imageSubresource = {vk::ImageAspectFlagBits::eStencil, 0, 0, 6};
         for (auto &copy : copies) copy.imageExtent = {4, 1, 1};
         texture_cache.GetImage(layered_stencil_id).Download(
-            copies, readback.buffer, 0, readback.size);
+            copies, readback.buffer, 0, readback.size, readback.size);
         HostReadBarrier(readback.buffer, readback.size,
                         vk::PipelineStageFlagBits::eTransfer,
                         vk::AccessFlagBits::eTransferWrite);
@@ -7351,7 +7415,7 @@ public:
         }
       }
       stencil_clear_image.Download(stencil_copies, stencil_readback.buffer, 0,
-                                   stencil_readback.size);
+                                   stencil_readback.size, stencil_readback.size);
       HostReadBarrier(stencil_readback.buffer, stencil_readback.size,
                       vk::PipelineStageFlagBits::eTransfer,
                       vk::AccessFlagBits::eTransferWrite);
@@ -14020,7 +14084,7 @@ public:
         const vk::BufferImageCopy copy{pass * depth_bytes, 0, 0,
             {vk::ImageAspectFlagBits::eDepth, 0, 0, 1}, {}, depth_only.desc.info.extent};
         texture_cache.GetImage(depth_only.image_id).Download(
-            std::span{&copy, 1}, bounds_readback.buffer, 0, bounds_readback.size);
+            std::span{&copy, 1}, bounds_readback.buffer, 0, bounds_readback.size, bounds_readback.size);
       }
       vk::MemoryBarrier2 bounds_host_barrier{};
       bounds_host_barrier.sType = vk::StructureType::eMemoryBarrier2;
@@ -14186,7 +14250,7 @@ public:
               {},
               copy_destination.desc.info.extent}}};
         texture_cache.GetImage(copy_destination.image_id)
-            .Download(copies, copy_readback.buffer, 0, copy_readback.size);
+            .Download(copies, copy_readback.buffer, 0, copy_readback.size, copy_readback.size);
       }
       scheduler.Current().Handle().pipelineBarrier2(bounds_dependency);
       scheduler.Finish();
@@ -14915,7 +14979,7 @@ public:
                               {1, 1, 1}}};
       texture_cache.GetImage(target_parent_id)
           .Download(target_probes, target_readback.buffer, 0,
-                    target_readback.size);
+                    target_readback.size, target_readback.size);
       const vk::MemoryBarrier2 target_host_barrier{
           .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
           .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -15171,7 +15235,7 @@ public:
       const std::array<vk::BufferImageCopy, 2> stencil_copies{{
           {0, 0, 0, {vk::ImageAspectFlagBits::eDepth, 0, 0, 1}, {}, {1, 1, 1}},
           {4, 0, 0, {vk::ImageAspectFlagBits::eStencil, 0, 0, 1}, {}, {1, 1, 1}}}};
-      texture_cache.GetImage(depth_id).Download(stencil_copies, stencil_readback.buffer, 0, 8);
+      texture_cache.GetImage(depth_id).Download(stencil_copies, stencil_readback.buffer, 0, 8, stencil_readback.size);
       vk::MemoryBarrier2 stencil_host_barrier{};
       stencil_host_barrier.sType = vk::StructureType::eMemoryBarrier2;
       stencil_host_barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
@@ -15290,7 +15354,7 @@ public:
         const auto check_plane = [&](const char *phase, bool native_clear) {
           (void)texture_cache.FindDepthTarget(plane_depth_id, plane_depth);
           texture_cache.GetImage(plane_depth_id).Download(
-              plane_copies, plane_readback.buffer, 0, plane_readback.size);
+              plane_copies, plane_readback.buffer, 0, plane_readback.size, plane_readback.size);
           scheduler.Current().Handle().pipelineBarrier2(stencil_dependency);
           scheduler.Finish();
           const auto values = ReadBuffer(name, plane_readback, texels + 2);
@@ -15331,7 +15395,7 @@ public:
                 texture_cache.FindTexture(plane_depth_id, sampled_plane) != nullptr,
                 "an associated stencil plane could not be sampled");
         texture_cache.GetImage(plane_depth_id).Download(
-            plane_copies, plane_readback.buffer, 0, plane_readback.size);
+            plane_copies, plane_readback.buffer, 0, plane_readback.size, plane_readback.size);
         scheduler.Current().Handle().pipelineBarrier2(stencil_dependency);
         scheduler.Finish();
         const auto sampled_values = ReadBuffer(name, plane_readback, texels + 2);
@@ -16600,7 +16664,7 @@ public:
         const vk::BufferImageCopy copy{0, 0, 0,
             {vk::ImageAspectFlagBits::eStencil, 0, 0, 1}, {}, {extent, extent, 1}};
         cache.GetImage(depth.image_id).Download(std::span{&copy, 1},
-            stencil_readback.buffer, 0, stencil_readback.size);
+            stencil_readback.buffer, 0, stencil_readback.size, stencil_readback.size);
         const vk::MemoryBarrier2 barrier{
             .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
             .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
@@ -18582,9 +18646,9 @@ public:
     Libs::Graphics::Image volume_image(m_runtime_context, scheduler,
                                        volume_info);
     volume_image.Upload(volume_copies, volume_upload.buffer, 0,
-                        volume_size.size);
+                        volume_size.size, volume_upload.size);
     volume_image.Download(volume_copies, volume_download.buffer, 0,
-                          volume_size.size);
+                          volume_size.size, volume_download.size);
     scheduler.Finish();
     const auto volume_observed =
         ReadBuffer(name, volume_download, volume_source.size());
@@ -36759,6 +36823,281 @@ TestCase DispatcherIrreducibleControlFlow() {
 
 #include "ShaderRayTracingGpuTests.inc"
 
+// Restored test fixture verbatim from 581dad7d; no core FP64 draft applied.
+TestCase VectorCompareF64Edges() {
+  using O = ShaderOpcode;
+  constexpr std::array<std::array<uint64_t, 2>, 12> pairs{{
+      {0, 0x8000000000000000ull}, {1, 0}, {1, 1}, {1, 2},
+      {0x11d04c7b00ull, 0}, {0x3ff0000000000000ull, 0x3ff0000000000001ull},
+      {0xbff0000000000000ull, 0xbff0000000000000ull},
+      {0x7ff0000000000000ull, 0x7ff0000000000000ull},
+      {0x7ff0000000000000ull, 0xfff0000000000000ull},
+      {0x7ff8000000000001ull, 0x7ff8000000000001ull},
+      {0x7ff0000000000001ull, 0}, {0x7fefffffffffffffull, 0x7fefffffffffffffull}}};
+  TestCase test;
+  test.name = "VectorCompareF64Edges";
+  for (const auto& pair : pairs)
+    for (const auto bits : pair)
+      test.initial.insert(test.initial.end(), {u32(bits), u32(bits >> 32)});
+  test.expected = test.initial;
+  const auto store_mask = [&](u32 sgpr, bool value) {
+    AppendStoreSgprPair(&test.code, sgpr, static_cast<u32>(test.expected.size()));
+    test.expected.insert(test.expected.end(), {u32(value), 0});
+  };
+  for (u32 i = 0; i < pairs.size(); ++i) {
+    for (u32 word = 0; word < 4; ++word) {
+      AppendVMovU32(&test.code, 31, (i * 4 + word) * 4);
+      AppendBufferLoadDword(&test.code, 1 + word, 31);
+    }
+    const auto lhs = std::bit_cast<double>(pairs[i][0]);
+    const auto rhs = std::bit_cast<double>(pairs[i][1]);
+    test.code.push_back(EncodeVopc(0x22, Vgpr(1), 3));
+    store_mask(106, lhs == rhs);
+    AppendVop3(&test.code, 0x22, 20, Vgpr(1), Vgpr(3), 0, 1, 0, false, 0, 1);
+    store_mask(20, -std::abs(lhs) == rhs);
+    test.code.push_back(EncodeVop1(0x02, 100, Vgpr(3)));
+    test.code.push_back(EncodeVop1(0x02, 101, Vgpr(4)));
+    // Captured e6d76d24f59f8015 PC 0xe4: compare zero with s100:s101.
+    test.code.insert(test.code.end(), {0xd422006au, 0x0000c880u});
+    store_mask(106, 0.0 == rhs);
+  }
+  AppendEnd(&test.code);
+  test.initial.resize(test.expected.size());
+  test.opcodes = {O::V_MOV_B32, O::BUFFER_LOAD_DWORD, O::V_READFIRSTLANE_B32,
+                  O::V_CMP_EQ_F64, O::BUFFER_STORE_DWORD, O::S_ENDPGM};
+  test.required_spirv = {"OpCapability Float64", "OpTypeFloat 64", "OpFOrdEqual"};
+  return test;
+}
+
+// Restored test fixture verbatim from 0d0b215f; no core FP64 draft applied.
+TestCase VectorCompareInteger64Edges() {
+  using O = ShaderOpcode;
+  constexpr std::array<std::array<uint64_t, 2>, 10> pairs{{
+      {0, 0}, {0, 1}, {1, 0}, {0xffffffffull, 0x100000000ull},
+      {0x100000000ull, 0xffffffffull}, {0x8000000000000000ull, 0},
+      {0x7fffffffffffffffull, 0x8000000000000000ull},
+      {0xffffffffffffffffull, 0xffffffffffffffffull},
+      {0xffffffff80000000ull, 0xffffffff7fffffffull},
+      {0x1234567880000000ull, 0x123456787fffffffull}}};
+  TestCase test;
+  test.name = "VectorCompareInteger64Edges";
+  for (const auto& pair : pairs)
+    for (const auto bits : pair)
+      test.initial.insert(test.initial.end(), {u32(bits), u32(bits >> 32)});
+  test.expected = test.initial;
+  const auto store_mask = [&](u32 sgpr, bool value) {
+    AppendStoreSgprPair(&test.code, sgpr, static_cast<u32>(test.expected.size()));
+    test.expected.insert(test.expected.end(), {u32(value), 0});
+  };
+  for (u32 i = 0; i < pairs.size(); ++i) {
+    for (u32 word = 0; word < 4; ++word) {
+      AppendVMovU32(&test.code, 31, (i * 4 + word) * 4);
+      AppendBufferLoadDword(&test.code, 1 + word, 31);
+    }
+    test.code.push_back(EncodeVop1(0x02, 8, Vgpr(3)));
+    test.code.push_back(EncodeVop1(0x02, 9, Vgpr(4)));
+    const auto lhs = pairs[i][0], rhs = pairs[i][1];
+    const auto signed_lhs = std::bit_cast<int64_t>(lhs);
+    const auto signed_rhs = std::bit_cast<int64_t>(rhs);
+    for (const auto [opcode, value] : std::array<std::pair<u32, bool>, 4>{{
+             {0xa1, signed_lhs < signed_rhs}, {0xa3, signed_lhs <= signed_rhs},
+             {0xe3, lhs <= rhs}, {0xe6, lhs >= rhs}}}) {
+      test.code.push_back(EncodeVopc(opcode, Vgpr(1), 3));
+      store_mask(106, value);
+      AppendVop3(&test.code, opcode, 20, Vgpr(1), 8);
+      store_mask(20, value);
+    }
+    // A negative literal expands by signedness, including equality comparisons.
+    for (const auto [opcode, value] : std::array<std::pair<u32, bool>, 4>{{
+             {0xa1, -1 < signed_rhs}, {0xa3, -1 <= signed_rhs},
+             {0xa2, -1 == signed_rhs}, {0xe3, 0xffffffffull <= rhs}}}) {
+      test.code.push_back(EncodeVopc(opcode, 255, 3));
+      test.code.push_back(0xffffffffu);
+      store_mask(106, value);
+    }
+    AppendVop3(&test.code, 0xa3, 20, Vgpr(1), 255);
+    test.code.push_back(0xffffffffu);
+    store_mask(20, signed_lhs <= -1);
+  }
+  AppendEnd(&test.code);
+  test.initial.resize(test.expected.size());
+  test.opcodes = {O::V_MOV_B32, O::BUFFER_LOAD_DWORD, O::V_READFIRSTLANE_B32,
+                  O::V_CMP_LT_I64, O::V_CMP_LE_I64, O::V_CMP_EQ_I64,
+                  O::V_CMP_LE_U64, O::V_CMP_GE_U64,
+                  O::BUFFER_STORE_DWORD, O::S_ENDPGM};
+  test.required_spirv = {"OpSLessThan", "OpULessThanEqual", "OpUGreaterThanEqual"};
+  return test;
+}
+
+// Restored test fixture verbatim from 0d0b215f; no core FP64 draft applied.
+TestCase VectorCompareExecWaveMasks(u32 wave_size) {
+  using O = ShaderOpcode;
+  // Rows exercise signed 16-bit truncation, full-width unsigned ordering, and
+  // ordered FP64 comparisons (including NaN, signed zero, and subnormals).
+  constexpr std::array<std::array<std::array<uint64_t, 2>, 8>, 3> inputs{{
+      {{{0x1111ffff, 0x22220000}, {0x33338000, 0x44447fff},
+        {0x55550000, 0x66660000}, {0x77777fff, 0x88888000},
+        {0x99990001, 0xaaaa0002}, {0xbbbb0002, 0xcccc0001},
+        {0xddddffff, 0xeeeeffff}, {0xffff8001, 0x11118000}}},
+      {{{0, 0}, {0, 1}, {1, 0}, {0xffffffffull, 0x100000000ull},
+        {0x100000000ull, 0xffffffffull}, {0x8000000000000000ull, 0},
+        {0xffffffffffffffffull, 0xffffffffffffffffull},
+        {0x1234567880000000ull, 0x123456787fffffffull}}},
+      {{{0, 0x8000000000000000ull}, {1, 0}, {0x8000000000000001ull, 0},
+        {0x7ff8000000000001ull, 0}, {0, 0x7ff0000000000001ull},
+        {0xc000000000000000ull, 0xbff0000000000000ull},
+        {0x7ff0000000000000ull, 0x7ff0000000000000ull},
+        {0x3ff0000000000001ull, 0x3ff0000000000000ull}}}}};
+  struct Compare { u32 encoding; O opcode; u32 group; };
+  constexpr std::array comparisons{
+      Compare{0x99, O::V_CMPX_LT_I16, 0}, Compare{0x9a, O::V_CMPX_EQ_I16, 0},
+      Compare{0x9b, O::V_CMPX_LE_I16, 0}, Compare{0x9c, O::V_CMPX_GT_I16, 0},
+      Compare{0x9d, O::V_CMPX_NE_I16, 0}, Compare{0x9e, O::V_CMPX_GE_I16, 0},
+      Compare{0xf3, O::V_CMPX_LE_U64, 1}, Compare{0x33, O::V_CMPX_LE_F64, 2},
+      Compare{0x36, O::V_CMPX_GE_F64, 2}};
+  constexpr u32 low_exec = 0xeeeeeeeeu, high_exec = 0x77777777u;
+  constexpr u32 vcc_lo = 0x12345678u, vcc_hi = 0x89abcdefu;
+  TestCase test;
+  test.name = wave_size == 32 ? "VectorCompareExecWave32Masks" : "VectorCompareExecWave64Masks";
+  test.initial.assign(12 * wave_size, 0);
+  for (u32 group = 0; group < inputs.size(); ++group)
+    for (u32 lane = 0; lane < wave_size; ++lane)
+      for (u32 word = 0; word < 4; ++word)
+        test.initial[(group * 4 + word) * wave_size + lane] =
+            u32(inputs[group][lane % 8][word / 2] >> (32 * (word % 2)));
+  test.expected = test.initial;
+  auto& code = test.code;
+  code.push_back(EncodeSop1(0x04, 10, 126));
+  AppendSMovLiteral(&code, 106, vcc_lo);
+  AppendSMovLiteral(&code, 107, vcc_hi);
+  for (const auto compare : comparisons) {
+    for (u32 word = 0; word < 4; ++word) {
+      code.push_back(EncodeVop2(0x1a, 30, InlineU32(2), 0));
+      AppendVMovU32(&code, 31, (compare.group * 4 + word) * wave_size * 4);
+      code.push_back(EncodeVop2(0x25, 31, Vgpr(31), 30));
+      AppendBufferLoadDword(&code, 1 + word, 31);
+    }
+    std::array<u32, 2> expected_exec{};
+    for (u32 lane = 0; lane < wave_size; ++lane) {
+      const auto pair = inputs[compare.group][lane % 8];
+      const auto a = std::bit_cast<int16_t>(uint16_t(pair[0]));
+      const auto b = std::bit_cast<int16_t>(uint16_t(pair[1]));
+      bool result = false;
+      switch (compare.encoding) {
+        case 0x99: result = a < b; break;
+        case 0x9a: result = a == b; break;
+        case 0x9b: result = a <= b; break;
+        case 0x9c: result = a > b; break;
+        case 0x9d: result = a != b; break;
+        case 0x9e: result = a >= b; break;
+        case 0xf3: result = pair[0] <= pair[1]; break;
+        case 0x33: result = std::bit_cast<double>(pair[0]) <= std::bit_cast<double>(pair[1]); break;
+        case 0x36: result = std::bit_cast<double>(pair[0]) >= std::bit_cast<double>(pair[1]); break;
+      }
+      if (result) expected_exec[lane / 32] |= 1u << (lane % 32);
+    }
+    expected_exec[0] &= low_exec;
+    expected_exec[1] &= high_exec;
+    for (const bool vop3 : {false, true}) {
+      AppendSMovLiteral(&code, 126, low_exec);
+      if (wave_size == 64) AppendSMovLiteral(&code, 127, high_exec);
+      if (vop3) AppendVop3(&code, compare.encoding, 20, Vgpr(1), Vgpr(3));
+      else code.push_back(EncodeVopc(compare.encoding, Vgpr(1), 3));
+      code.push_back(EncodeSMovB32(20, 126));
+      code.push_back(EncodeSMovB32(21, 127));
+      code.push_back(EncodeSop1(0x04, 126, 10));
+      for (const auto [reg, value] : std::array<std::pair<u32, u32>, 4>{{
+               {20, expected_exec[0]}, {21, expected_exec[1]},
+               {106, vcc_lo}, {107, vcc_hi}}}) {
+        AppendStoreSgprAtLaneDwordOffset(&code, reg, 0, u32(test.expected.size()));
+        test.expected.insert(test.expected.end(), wave_size, value);
+      }
+    }
+    test.opcodes.push_back(compare.opcode);
+  }
+  AppendEnd(&code);
+  test.initial.resize(test.expected.size());
+  test.compute_info.threads_num[0] = wave_size;
+  test.compute_info.threads_num[1] = test.compute_info.threads_num[2] = 1;
+  test.compute_info.thread_ids_num = 1;
+  test.compute_info.wave_size = wave_size;
+  test.has_compute_info = true;
+  test.opcodes.insert(test.opcodes.end(), {O::V_MOV_B32, O::S_MOV_B32, O::S_MOV_B64,
+      O::V_LSHLREV_B32, O::V_ADD_NC_U32, O::BUFFER_LOAD_DWORD,
+      O::BUFFER_STORE_DWORD, O::S_ENDPGM});
+  test.required_spirv = {"OpFOrdLessThanEqual", "OpFOrdGreaterThanEqual"};
+  return test;
+}
+
+// Restored test fixture verbatim from b8946fef; no core FP64 draft applied.
+TestCase VectorCompare64WaveMasks(u32 wave_size, bool integer_ne = false) {
+  using O = ShaderOpcode;
+  constexpr std::array<uint64_t, 4> values{0, 1, 0x8000000000000000ull,
+                                          0x7ff8000000000000ull};
+  constexpr u32 low_exec = 0xeeeeeeeeu, high_exec = 0x77777777u;
+  constexpr u32 vcc_hi = 0x89abcdefu;
+  constexpr u32 vcc_lo = 0x12345678u;
+  const u32 result_reg = integer_ne ? 20 : 106;
+  const u32 result_bits = integer_ne ? 0xeeeeeeeeu : 0x55555555u;
+  TestCase test;
+  test.name = integer_ne
+      ? (wave_size == 32 ? "VectorCompareNeI64Wave32Masks" : "VectorCompareNeI64Wave64Masks")
+      : (wave_size == 32 ? "VectorCompareF64Wave32Masks" : "VectorCompareF64Wave64Masks");
+  test.initial.assign((integer_ne ? 8 : 6) * wave_size, 0);
+  for (u32 lane = 0; lane < wave_size; ++lane) {
+    test.initial[lane] = u32(values[lane % 4]);
+    test.initial[wave_size + lane] = u32(values[lane % 4] >> 32);
+  }
+  test.expected = test.initial;
+  for (u32 lane = 0; lane < wave_size; ++lane) {
+    test.expected[2 * wave_size + lane] = low_exec & result_bits;
+    test.expected[3 * wave_size + lane] = wave_size == 64 ? high_exec & result_bits : vcc_hi;
+    test.expected[4 * wave_size + lane] = low_exec;
+    test.expected[5 * wave_size + lane] = wave_size == 64 ? high_exec : 0;
+    if (integer_ne) {
+      test.expected[6 * wave_size + lane] = vcc_lo;
+      test.expected[7 * wave_size + lane] = vcc_hi;
+    }
+  }
+  auto& code = test.code;
+  code.push_back(EncodeVop2(0x1a, 30, InlineU32(2), 0));
+  AppendBufferLoadDword(&code, 1, 30);
+  AppendVMovU32(&code, 31, wave_size * 4);
+  code.push_back(EncodeVop2(0x25, 31, Vgpr(31), 30));
+  AppendBufferLoadDword(&code, 2, 31);
+  code.push_back(EncodeSop1(0x04, 10, 126));
+  AppendSMovLiteral(&code, result_reg + 1, vcc_hi);
+  if (integer_ne) {
+    AppendSMovLiteral(&code, 106, vcc_lo);
+    AppendSMovLiteral(&code, 107, vcc_hi);
+  }
+  AppendSMovLiteral(&code, 126, low_exec);
+  if (wave_size == 64) AppendSMovLiteral(&code, 127, high_exec);
+  AppendVop3(&code, integer_ne ? 0xa5 : 0x22, result_reg, InlineU32(0), Vgpr(1));
+  code.push_back(EncodeSMovB32(22, 126));
+  code.push_back(EncodeSMovB32(23, 127));
+  code.push_back(EncodeSop1(0x04, 126, 10));
+  for (const auto [reg, offset] : std::array<std::pair<u32, u32>, 4>{{
+           {result_reg, 2}, {result_reg + 1, 3}, {22, 4}, {23, 5}}})
+    AppendStoreSgprAtLaneDwordOffset(&code, reg, 0, offset * wave_size);
+  if (integer_ne) {
+    AppendStoreSgprAtLaneDwordOffset(&code, 106, 0, 6 * wave_size);
+    AppendStoreSgprAtLaneDwordOffset(&code, 107, 0, 7 * wave_size);
+  }
+  AppendEnd(&code);
+  test.compute_info.threads_num[0] = wave_size;
+  test.compute_info.threads_num[1] = test.compute_info.threads_num[2] = 1;
+  test.compute_info.thread_ids_num = 1;
+  test.compute_info.wave_size = wave_size;
+  test.has_compute_info = true;
+  test.opcodes = {O::V_MOV_B32, O::S_MOV_B32, O::S_MOV_B64, O::V_LSHLREV_B32,
+                  O::V_ADD_NC_U32, O::BUFFER_LOAD_DWORD,
+                  integer_ne ? O::V_CMP_NE_I64 : O::V_CMP_EQ_F64,
+                  O::BUFFER_STORE_DWORD, O::S_ENDPGM};
+  test.required_spirv = {integer_ne ? "OpINotEqual" : "OpFOrdEqual"};
+  return test;
+}
+
 std::vector<TestCase> MakeCases() {
   std::vector<TestCase> cases;
   cases.reserve(128);
@@ -38656,7 +38995,7 @@ void CheckImageTransitionState(RenderContext &renderer) {
   source_copies[1].imageSubresource = {vk::ImageAspectFlagBits::eStencil, 0, 0,
                                        1};
   source_copies[1].imageExtent = {2, 2, 1};
-  source.Upload(source_copies, upload.Handle(), upload_offset, 128);
+  source.Upload(source_copies, upload.Handle(), upload_offset, 128, upload.Size());
   destination.CopyMip(source, 1, 0);
 
   const auto [download_data, download_offset] = download.Map(128, 4);
@@ -38669,7 +39008,7 @@ void CheckImageTransitionState(RenderContext &renderer) {
   destination_copies[1].bufferOffset = download_offset + 64;
   destination_copies[1].imageSubresource.mipLevel = 1;
   destination.Download(destination_copies, download.Handle(), download_offset,
-                       128);
+                       128, download.Size());
 
   auto buffered_info = MakeInfo(vk::Format::eR8Unorm, 1, 1);
   buffered_info.extent = {8, 4, 1};
@@ -38695,7 +39034,7 @@ void CheckImageTransitionState(RenderContext &renderer) {
   buffered_region.imageSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
   buffered_region.imageExtent = buffered_info.extent;
   buffered_source.Upload(std::span{&buffered_region, 1}, upload.Handle(),
-                         buffered_upload_offset, buffered_expected.size());
+                         buffered_upload_offset, buffered_expected.size(), upload.Size());
   Buffer copy_scratch(context, scheduler, MemoryUsage::DeviceLocal, 0, AllFlags,
                       16);
   StreamBuffer copy_parameters(context, scheduler, MemoryUsage::Stream, 4096);
@@ -38709,7 +39048,7 @@ void CheckImageTransitionState(RenderContext &renderer) {
   buffered_region.bufferOffset = buffered_download_offset;
   buffered_destination.Download(std::span{&buffered_region, 1},
                                 download.Handle(), buffered_download_offset,
-                                buffered_expected.size());
+                                buffered_expected.size(), download.Size());
   scheduler.Finish();
   download.Invalidate(download_offset, 128);
   download.Invalidate(buffered_download_offset, buffered_expected.size());

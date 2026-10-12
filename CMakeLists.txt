@@ -805,6 +805,12 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --hardware-buffer-bounds)
 	add_test(NAME gpu_command_lane
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
+	add_test(NAME end_of_pipe_literal_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
+	add_test(NAME end_of_pipe_literal_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-neighbors-gpu)
+	set_tests_properties(end_of_pipe_literal_gpu end_of_pipe_literal_neighbors_gpu
+		PROPERTIES TIMEOUT 30)
 	add_test(NAME pm4_context_state
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --context-state-only)
 	add_test(NAME gpu_tiler
@@ -837,6 +843,7 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --buffer-cache-range-only)
 
 	add_custom_target(kyty_tests DEPENDS
+		bindless_lifecycle_tests
 		ime_dialog_tests
 		shader_cfg_tests
 		embedded_fetch_index_tests

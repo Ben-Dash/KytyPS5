@@ -83,6 +83,10 @@ static void RecordEndOfPipeWrite(uint64_t submit_id, CommandBuffer& buffer, uint
 	const auto value_low  = static_cast<uint32_t>(value);
 	const auto value_high = static_cast<uint32_t>(value >> 32u);
 	const auto operation  = static_cast<uint32_t>(DebugOperation(action));
+	// Record the native store and its backing publication before queueing the interrupt.
+	// CPU parsing must not make a completion label visible ahead of prior GPU work.
+	buffer.GetContext().GetBufferCache().WriteOrderedMemory(
+	    destination, {reinterpret_cast<const uint8_t*>(&value), width});
 	if (TriggersInterrupt(action)) {
 		buffer.SetDebugInfo(operation, submit_id, width, context_id, value_low, value_high,
 		                    destination);

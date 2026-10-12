@@ -2026,7 +2026,6 @@ void CommandProcessor::WriteAtEndOfPipe(uint32_t cache_policy, uint32_t event_wr
 	auto write32 = [&](bool with_writeback) {
 		auto* dst  = static_cast<uint32_t*>(dst_gpu_addr);
 		auto  data = static_cast<uint32_t>(value);
-		std::memcpy(dst, &data, sizeof(data));
 
 		if (with_interrupt) {
 			if (with_writeback) {
@@ -2083,7 +2082,6 @@ void CommandProcessor::WriteAtEndOfPipe(uint32_t cache_policy, uint32_t event_wr
 				}
 				auto write64 = [&](bool with_writeback) {
 					auto* dst = static_cast<uint64_t*>(dst_gpu_addr);
-					std::memcpy(dst, &value, sizeof(value));
 
 					if (with_interrupt) {
 						if (with_writeback) {

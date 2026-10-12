@@ -1800,6 +1800,23 @@ void BufferCache::FillBuffer(uint64_t vaddr, uint64_t size, uint32_t value, bool
 	OnCommandRecorded();
 }
 
+void BufferCache::WriteOrderedMemory(uint64_t vaddr, std::span<const uint8_t> bytes) {
+	if (bytes.empty() || !GuestRange {vaddr, bytes.size()}.Valid() ||
+	    ((vaddr | bytes.size()) & 3u) != 0) {
+		EXIT("BufferCache: invalid ordered memory write\n");
+	}
+	m_texture_cache.InvalidateMemoryFromGPU(vaddr, bytes.size(), TextureCache::GpuWriteSource::Copy);
+	auto [destination, offset] = ObtainBuffer(vaddr, bytes.size(), true, true);
+	(void)offset;
+	// The staging copy includes an ALL_COMMANDS execution dependency before the transfer,
+	// then makes the stored bytes visible to subsequent commands on this queue.
+	WriteDataBuffer(*destination, vaddr, bytes.data(), bytes.size());
+	OnCommandRecorded();
+	// Readbacks publish through Kernel backing rather than a protected guest VA. Their
+	// owner/token checks keep a later GPU write dirty until its own publication completes.
+	EXIT_IF(!DownloadBufferMemory(*destination, vaddr, bytes.size()));
+}
+
 void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t size, bool dst_gds,
                              bool src_gds) {
 	const bool dst_memory = !dst_gds;

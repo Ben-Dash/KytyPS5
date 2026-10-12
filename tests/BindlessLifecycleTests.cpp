@@ -289,6 +289,9 @@ private:
 #include "EmbeddedFetchGpuTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
+#include "EndOfPipeWriteGpuTests.inc"
+#include "EndOfPipeLiteralGpuTests.inc"
+#include "EndOfPipeLiteralNeighborTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -306,8 +309,11 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
-                            std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement]");
+                            std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0 ||
+                            std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0 ||
+                            std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0 ||
+                            std::strcmp(argv[1], "--eop-literal-neighbors-gpu") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu]");
   if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     ConfigureVertexTraceGpuEnvironment();
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
@@ -352,6 +358,12 @@ int main(int argc, char **argv) {
     CheckGenericBufferNumeric(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0)
     return MeasureGenericBufferNumeric(vulkan) == 0u ? 0 : 2;
+  else if (argc == 2 && std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0)
+    CheckEndOfPipeWriteGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0)
+    CheckEndOfPipeLiteralGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--eop-literal-neighbors-gpu") == 0)
+    CheckEndOfPipeLiteralNeighbors(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;
