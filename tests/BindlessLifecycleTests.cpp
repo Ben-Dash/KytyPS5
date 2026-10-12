@@ -328,6 +328,8 @@ private:
 #include "FaultBufferProtocolNeighborTests.inc"
 #include "FaultBitmapInitializationGpuTests.inc"
 #include "FaultBitmapInitializationNeighborTests.inc"
+#include "FaultFirstBindingDeferredGpuTests.inc"
+#include "FaultFirstBindingDeferredNeighborTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -352,10 +354,15 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--fault-buffer-protocol-gpu") == 0 ||
                             std::strcmp(argv[1], "--fault-buffer-protocol-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
-                            std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu]");
+                            std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu]");
   if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     ConfigureVertexTraceGpuEnvironment();
+  if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0))
+    ConfigureFaultFirstBindingDeferredGpu();
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
     ConfigureVertexNonFiniteTraceGpuEnvironment();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
@@ -375,7 +382,9 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
-       std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0));
+       std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
+       std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0));
   if (argc == 2 && std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0)
     CheckBindlessPreparationNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)
@@ -414,6 +423,10 @@ int main(int argc, char **argv) {
     CheckFaultBitmapInitializationGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0)
     CheckFaultBitmapInitializationNeighborsGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0)
+    CheckFaultFirstBindingDeferredGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0)
+    CheckFaultFirstBindingDeferredNeighborsGpu(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;

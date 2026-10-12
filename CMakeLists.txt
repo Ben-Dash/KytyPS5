@@ -821,9 +821,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-bitmap-initialization-gpu)
 	add_test(NAME fault_bitmap_initialization_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-bitmap-initialization-neighbors-gpu)
+	add_test(NAME fault_first_binding_deferred_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-first-binding-deferred-gpu)
+	add_test(NAME fault_first_binding_state_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-first-binding-state-neighbors-gpu)
 	set_tests_properties(end_of_pipe_literal_gpu end_of_pipe_literal_neighbors_gpu
 		fault_buffer_protocol_gpu fault_buffer_protocol_neighbors_gpu
 		fault_bitmap_initialization_gpu fault_bitmap_initialization_neighbors_gpu
+		fault_first_binding_deferred_gpu fault_first_binding_state_neighbors_gpu
 		PROPERTIES TIMEOUT 30)
 	set_tests_properties(shader_writer_history PROPERTIES TIMEOUT 10)
 	add_test(NAME pm4_context_state
