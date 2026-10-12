@@ -27,6 +27,9 @@ struct SrtRuntime {
 	// reading each of its dwords with read_memory would give the same values; false otherwise.
 	SrtMemoryReader           read_memory_block          = nullptr;
 	std::span<const uint32_t> workgroup_counts;
+	// A provider may return virtual zeros for guarded null-address reads. These
+	// successes are scalar values, not backed memory ranges to make GPU-resident.
+	uint64_t synthetic_zero_read_end = 0;
 };
 
 [[nodiscard]] inline void* SpecializationUserdata(const SrtRuntime& runtime) {

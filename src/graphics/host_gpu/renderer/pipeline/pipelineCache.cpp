@@ -939,6 +939,7 @@ struct PipelineCache::ProgramCache {
 		    // TryReadGpuCleanBacking fails for a range when any byte is GPU-dirty or unbacked.
 		    .specialization_block_reads = true,
 		    .read_memory_block          = ReadShaderGuestBlockOnGpuThread,
+		    .synthetic_zero_read_end    = NullGuestRegionEnd,
 		};
 		if constexpr (std::is_same_v<InputInfo, ShaderComputeInputInfo>) {
 			runtime.workgroup_counts = input_info.workgroup_counts;

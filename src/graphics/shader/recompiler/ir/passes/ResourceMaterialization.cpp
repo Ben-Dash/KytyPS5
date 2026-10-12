@@ -1853,7 +1853,8 @@ public:
 private:
 	void Note(uint64_t address, std::span<uint32_t> values, bool success) {
 		const auto size = values.size_bytes();
-		if (success && address != 0 && size != 0 && size <= UINT64_MAX - address)
+		if (success && address != 0 && address >= m_source.synthetic_zero_read_end &&
+		    size != 0 && size <= UINT64_MAX - address)
 			m_reads.emplace_back(address, size);
 	}
 	static bool Ordinary(void* opaque, uint64_t address, std::span<uint32_t> values) {

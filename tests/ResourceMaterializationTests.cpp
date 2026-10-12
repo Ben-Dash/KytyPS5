@@ -1083,6 +1083,86 @@ void TestDmaSrtReadCaptureIsScopedToCurrentDmaRefresh() {
         "rejected DMA plan retained an earlier read set");
 }
 
+void TestDmaSyntheticZeroReadsKeepValuesWithoutBacking() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  // This is reader metadata, not a hard-coded address policy of the observer.
+  for (const uint64_t zero_end : {uint64_t{0x1000u}, uint64_t{0x100000u}}) {
+    struct ZeroMemory {
+      TableMemory backed;
+      uint64_t zero_end;
+      uint32_t zero_reads = 0;
+      uint32_t backed_reads = 0;
+    } memory{{}, zero_end};
+    memory.backed.base = zero_end;
+    for (uint32_t i = 0; i < memory.backed.words.size(); ++i) {
+      memory.backed.words[i] = 0x12340000u + i;
+    }
+    const auto reader = +[](void *data, uint64_t address,
+                            std::span<uint32_t> words) {
+      auto &memory = *static_cast<ZeroMemory *>(data);
+      if (address < memory.zero_end) {
+        if (words.size_bytes() > memory.zero_end - address) return false;
+        ++memory.zero_reads;
+        std::fill(words.begin(), words.end(), 0u);
+        return true;
+      }
+      ++memory.backed_reads;
+      return TableMemory::Read(&memory.backed, address, words);
+    };
+    for (const auto address : {uint64_t{0x30u}, zero_end - 4u,
+                               zero_end, zero_end + 4u}) {
+      auto plan = SrtPlan(address);
+      plan.info.uses_dma = true;
+      SrtRuntime runtime{.read_memory = reader, .userdata = &memory};
+      runtime.synthetic_zero_read_end = zero_end;
+      ResourceSnapshot snapshot;
+      ResourceSpecialization specialization;
+      const bool synthetic = address < zero_end;
+      const auto expected = synthetic ? 0u :
+          memory.backed.words[(address - zero_end) / 4u];
+      Check(MaterializeResources(plan, runtime, snapshot, specialization) &&
+                snapshot.flattened_srt == std::vector<uint32_t>{expected},
+            "synthetic-zero metadata changed the successful SRT read value");
+      Check(synthetic ? snapshot.srt_memory_reads.empty()
+                      : CoversRead(snapshot.srt_memory_reads, address, 4u),
+            "synthetic zero was treated as backing or a real boundary read was omitted");
+    }
+
+    auto mixed = SrtPlan(0x30u);
+    mixed.info.uses_dma = true;
+    auto &handle = mixed.value_storage.emplace_back(ValueOpcode::GetAddressResource);
+    handle.SetArg(0, Value(static_cast<uint32_t>(zero_end)));
+    handle.SetArg(1, Value(0u));
+    auto &real = mixed.value_storage.emplace_back(ValueOpcode::LoadAddressU32);
+    real.SetArg(0, Value(&handle));
+    real.SetArg(1, Value(0u));
+    real.SetArg(2, Value(0u));
+    real.SetArg(3, Value(true));
+    real.SetFlags(MemoryFlags{.index = 0, .pc = 0x44});
+    mixed.srt_reads.push_back({Value(&real), 1u});
+    SrtRuntime runtime{.read_memory = reader, .userdata = &memory};
+    runtime.synthetic_zero_read_end = zero_end;
+    ResourceSnapshot snapshot;
+    ResourceSpecialization specialization;
+    Check(MaterializeResources(mixed, runtime, snapshot, specialization) &&
+              snapshot.flattened_srt ==
+                  std::vector<uint32_t>{0u, memory.backed.words[0]} &&
+              !CoversRead(snapshot.srt_memory_reads, 0x30u, 4u) &&
+              CoversRead(snapshot.srt_memory_reads, zero_end, 4u),
+          "mixed synthetic and backed SRT reads lost values or real residency");
+
+    // The opt-in bound must leave generic successful-read behavior unchanged.
+    runtime.synthetic_zero_read_end = 0;
+    Check(MaterializeResources(mixed, runtime, snapshot, specialization) &&
+              snapshot.flattened_srt ==
+                  std::vector<uint32_t>{0u, memory.backed.words[0]} &&
+              CoversRead(snapshot.srt_memory_reads, 0x30u, 4u) &&
+              CoversRead(snapshot.srt_memory_reads, zero_end, 4u) &&
+              memory.zero_reads != 0 && memory.backed_reads != 0,
+          "disabled synthetic-zero metadata changed historical read capture");
+  }
+}
+
 } // namespace
 
 namespace Common {
@@ -1150,7 +1230,8 @@ int main(int argc, char **argv) {
   run("DmaSrtReadsPreserveSpecializationUserdata", TestDmaSrtReadsPreserveSpecializationUserdata);
   run("DmaSrtReadsRefreshUnderMemoAndClearOnFailure", TestDmaSrtReadsRefreshUnderMemoAndClearOnFailure);
   run("DmaSrtReadCaptureIsScopedToCurrentDmaRefresh", TestDmaSrtReadCaptureIsScopedToCurrentDmaRefresh);
-  std::puts(residency_only ? "ResourceMaterializationTests: 4 SRT residency cases passed"
+  run("DmaSyntheticZeroReadsKeepValuesWithoutBacking", TestDmaSyntheticZeroReadsKeepValuesWithoutBacking);
+  std::puts(residency_only ? "ResourceMaterializationTests: 5 SRT residency cases passed"
                           : "ResourceMaterializationTests: all cases passed");
   return 0;
 }
