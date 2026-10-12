@@ -2,7 +2,25 @@
 
 ## Current checkpoint: three proposals, 30-second title FPS tests, 2026-10-13
 
-Active native branch `yotei-integration-native`, local HEAD `faa5d3ac`; published
+First proposal completed locally as `8c8d01319900427f3b61ab7d34e8c8649f27edd7`.
+LiteralEopPublicationCost intended RED211508/BA99ECCF -> unchanged eight-case
+GREEN211809/DD73A957; final GREEN212334/4BA4B219 and three span neighbors212333
+PASS. Existing native EOP/IRQ/generation neighbors and fresh PM4 wait/resume/
+command-stream neighbors PASS. The GPU store and native completion remain
+required; known bytes alone avoid their redundant download. Tiny mixed split
+spans can use more staging, so this is not a universal bandwidth improvement.
+
+Native core build212431 and private install212539 PASS, EXE SHA256
+`81F89A92F99A6636B2A860073EB11F45F9FED3A5699911C75A45A86D303F0638`.
+Game212552-5ee908 sampled30 seconds from21:29:13UTC/frame650, mean window-title
+FPS2.257 (23 logged values, min2.1/max2.4). Auto-closed21:29:46UTC/exit0 with no
+guards; maxWS17.83GiB/minphysical26.37/mincommit24.69. Full rendering, neutral
+input, no menus, no diagnostic GPU zones. No screenshots or image inspection.
+Compared with earlier2.435 first baseline interval and later~2.55 warm titles,
+this is no measured gain, with a possible slowdown requiring a fresh matched
+control before attributing it to this correction. Passing tests is not a speedup.
+
+Active native branch `yotei-integration-native`, local source fix `8c8d0131`; published
 head remains `a73b9592`. PM4 clean-packet reads (`7823f07f`) and selective generic
 format conversions (`faa5d3ac`) have recorded RED/GREEN evidence. Neither has
 demonstrated a useful world FPS improvement. Native faa5 build/install passed;
@@ -15,7 +33,7 @@ only after FPS increases. Loading/cache warm-up precedes the measured interval;
 keep it bounded separately. WSL was explicitly stopped; no native task remains
 running at this checkpoint. Preserve complete rendering and existing guards.
 
-Same faa5 executable, title-only/full rendering, neutral input: direct recording
+Earlier same faa5 executable, title-only/full rendering, neutral input: direct recording
 2.532 FPS, direct submission 2.542 FPS, speculation disabled 2.592 FPS (means of
 logged title values over the first 30-second frame>=650 interval). Normal title
 baseline first interval 2.435 includes a 1.1 FPS sample; its later warm interval
@@ -24,12 +42,17 @@ All runs exited0, without memory guards; no screenshots were taken for these
 variants. Exact records: performance-cycle2 `title-fps-config-comparison.json`
 and `_Build/runs/game-20261012-{202909,203850,204403,204938}-*`.
 
-Next three proposals: fence-ordered publication of already-known EOP literals
-without redundant GPU readback; repeated wave64 subgroup votes; spatial resource
-cache invalidation. Each requires a production-path regression before fixing.
+The two remaining proposals are repeated wave64 subgroup votes and spatial
+resource-cache invalidation. Each requires a production-path regression before fixing.
 Unknown GPU bytes, native fences, writer generations and unsupported-case errors
 must remain intact. Stable60 FPS, actual1080 rendering and full effect correctness
 remain pending. No new push or issue publication is authorized by this cycle.
+
+Next: map the88%-of-one-core unnamed hot thread using the saved native-name
+diagnostic. Larger existing buffer-specialization mode2 requires independent
+cross-profile numeric/coherence controls and a private cache before a title FPS
+experiment. Avoid treating tiny static-work reductions as runtime progress.
+See [cycle2 evidence](yotei-performance-cycle2-2026-10-13.md).
 
 ## GPU generic conversion validated; next world comparison, 2026-10-12
 

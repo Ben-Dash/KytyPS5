@@ -49,8 +49,23 @@ Artifacts are under ignored `_Build/analysis/yotei-performance-cycle1-20261012/c
 Pure known spans remove their native download work. A tiny merged unknown range
 split into two aligned copies may reserve128 bytes instead of the original64;
 this correction does not universally reduce staging size. No new cross-game
-gameplay was available. Native install and actual30-second world FPS remain
-pending; tests alone do not prove a speedup or complete effect correctness.
+gameplay was available. Tests alone do not prove a speedup or complete effects.
+
+Native core build212431 and install212539 PASS for local revision8c8d0131.
+Private installed EXE SHA256
+`81F89A92F99A6636B2A860073EB11F45F9FED3A5699911C75A45A86D303F0638`.
+World run `_Build/runs/game-20261012-212552-perf-cycle2-eop-title-30s-world-1080-5ee908`
+automatically measured30 seconds starting21:29:13UTC/frame650; mean recorded
+window-title FPS2.2565 (23 values, min2.1/max2.4), then exited0 at21:29:46UTC.
+MaxWS17.83GiB, minphysical26.37GiB/mincommit24.69GiB, no guards. Full rendering,
+neutral input, no menu, no GPU diagnostic profiling or images. Exact metadata,
+title trace and summary are retained in the run folder. Compatible cache replay
+built507/taken480, sync/prefetch0; no cache key override.
+
+This does not improve earlier2.435 first baseline window or later~2.55 warm title
+values. Possible slowdown needs a fresh matched control before attributing its
+cause; static download cost reduction alone is not a useful FPS improvement.
+Native tests also do not establish complete effect correctness or60FPS.
 
 ## Other proposals remain unapplied
 

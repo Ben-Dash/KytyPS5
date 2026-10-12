@@ -14,7 +14,10 @@ consumer/generation/IRQ neighbors211818–211819 PASS. Final native eight-case
 GREEN212334/4BA4B219 also PASS. Three span neighbors212333 PASS: 64-byte caller
 payload mutation, an allowed eight-byte store spanning tracker pages, and a merged
 dirty range with real unknown GPU prefix/suffix. PM4 wait/resume and command-stream
-neighbors212232/F1763B39 PASS. Native core/game FPS remains pending. Tiny mixed
+neighbors212232/F1763B39 PASS. Native build/install PASS; game212552-5ee908
+completed30-second title FPS sample at2.257/min2.1/max2.4, no gain, exited0.
+Possible slowdown requires a fresh matched control; no visual check performed
+under the user's FPS-first rule. Tiny mixed
 split ranges can reserve128 bytes instead of baseline64; no universal byte-saving
 or FPS claim follows from the pure-literal cost proof.
 
