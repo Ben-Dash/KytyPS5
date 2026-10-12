@@ -391,4 +391,3 @@
     }
     std::printf("[gpu] GpuCountedMultiDraw %zu bounded ownership-preserving variants PASS\n", results.size());
   }
-
