@@ -578,6 +578,7 @@ add_executable(resource_materialization_tests EXCLUDE_FROM_ALL
 	"${KYTY_SOURCE_DIR}/graphics/host_gpu/hostMemory.cpp"
 	"${KYTY_SOURCE_DIR}/graphics/shader/recompiler/ir/passes/ResourceMaterialization.cpp"
 	"${KYTY_SOURCE_DIR}/graphics/shader/recompiler/ir/passes/SrtWalker.cpp"
+	"${KYTY_SOURCE_DIR}/graphics/shader/recompiler/ir/passes/BindingLayout.cpp"
 )
 target_link_libraries(resource_materialization_tests fmt::fmt)
 target_include_directories(resource_materialization_tests PRIVATE ${inc_headers})
@@ -765,6 +766,8 @@ if(BUILD_TESTING)
 	add_test(NAME lru_cache COMMAND $<TARGET_FILE:lru_cache_tests>)
 	add_test(NAME shader_vertex_metadata COMMAND $<TARGET_FILE:shader_vertex_metadata_tests>)
 	add_test(NAME resource_materialization COMMAND $<TARGET_FILE:resource_materialization_tests>)
+	add_test(NAME srt_read_residency COMMAND $<TARGET_FILE:resource_materialization_tests> --srt-residency-only)
+	set_tests_properties(srt_read_residency PROPERTIES TIMEOUT 30)
 	add_test(NAME resource_tracking COMMAND $<TARGET_FILE:resource_tracking_tests>)
 	add_test(NAME event_queue_lifetime COMMAND $<TARGET_FILE:event_queue_lifetime_tests>)
 	add_test(NAME kernel_file_system COMMAND $<TARGET_FILE:kernel_file_system_tests>)
@@ -873,6 +876,12 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-first-binding-deferred-gpu)
 	add_test(NAME late_bda_image_fringe_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --late-bda-image-fringe-gpu)
+	add_test(NAME first_use_bda_pointer_chain_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-bda-pointer-chain-gpu)
+	add_test(NAME first_use_bda_pointer_chain_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --first-use-bda-pointer-chain-neighbors-gpu)
+	set_tests_properties(first_use_bda_pointer_chain_gpu first_use_bda_pointer_chain_neighbors_gpu
+		PROPERTIES TIMEOUT 30)
 	add_test(NAME fault_first_binding_state_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-first-binding-state-neighbors-gpu)
 	set_tests_properties(end_of_pipe_literal_gpu end_of_pipe_literal_neighbors_gpu

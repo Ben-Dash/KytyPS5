@@ -82,6 +82,9 @@ struct ResourceSnapshot {
 	std::vector<uint32_t>        flattened_srt;
 	std::vector<uint32_t>        user_data;
 	std::vector<std::pair<uint64_t, uint64_t>> specialization_reads;
+	// Successful metadata reads of this refresh. DMA consumers may read the same
+	// mapped SRT pages by address, independently of flattened scalar values.
+	std::vector<std::pair<uint64_t, uint64_t>> srt_memory_reads;
 	UniformFill                 uniform_fill;
 };
 

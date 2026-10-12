@@ -1,9 +1,11 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 
@@ -888,41 +890,268 @@ void TestMemoRejectsUntrackedInputs() {
   }
 }
 
+using GuestReadRanges = std::vector<std::pair<uint64_t, uint64_t>>;
+
+// The oracle compares covered bytes, allowing exact, repeated and block reads
+// to represent the same residency requirement without prescribing its layout.
+GuestReadRanges ReadCoverage(GuestReadRanges ranges) {
+  std::sort(ranges.begin(), ranges.end());
+  GuestReadRanges coverage;
+  for (const auto &[address, size] : ranges) {
+    Check(size != 0 && address <= std::numeric_limits<uint64_t>::max() - size,
+          "DMA metadata read has an empty or overflowing range");
+    if (!coverage.empty() && address <= coverage.back().first + coverage.back().second) {
+      const auto end = std::max(address + size,
+                               coverage.back().first + coverage.back().second);
+      coverage.back().second = end - coverage.back().first;
+    } else {
+      coverage.emplace_back(address, size);
+    }
+  }
+  return coverage;
+}
+
+bool CoversRead(const GuestReadRanges &ranges, uint64_t address, uint64_t size) {
+  const auto coverage = ReadCoverage(ranges);
+  return std::any_of(coverage.begin(), coverage.end(), [&](const auto &range) {
+    return range.first <= address && size <= range.second &&
+           address - range.first <= range.second - size;
+  });
+}
+
+Libs::Graphics::ShaderRecompiler::IR::ResourcePlan NestedDmaSrtPlan() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  Program program;
+  program.stage = Libs::Graphics::ShaderType::Compute;
+  program.srt_plan_complete = program.resource_tracking_complete = true;
+  program.info.uses_dma = true;
+  auto &block = AddValueBlock(program);
+  program.memory_info.push_back({.kind = ResourceKind::ScalarAddress,
+                                 .planning_only = true});
+  const auto user_data = [&](uint16_t reg) {
+    return Value(&block.AppendNewInst(ValueOpcode::GetUserData,
+                                      {Value(static_cast<ScalarReg>(reg))}));
+  };
+  auto &root = block.AppendNewInst(ValueOpcode::GetAddressResource,
+                                   {user_data(0), user_data(1)});
+  const auto read = [&](Inst &handle, uint32_t offset, uint32_t slot) {
+    auto &value = block.AppendNewInst(ValueOpcode::LoadAddressU32,
+        {Value(&handle), Value(offset), Value(0u), Value(true)});
+    value.SetFlags(MemoryFlags{.index = 0});
+    program.srt_reads.push_back({Value(&value), slot});
+    return Value(&value);
+  };
+  const auto child_low = read(root, 0u, 0u);
+  const auto child_high = read(root, 4u, 1u);
+  auto &child = block.AppendNewInst(ValueOpcode::GetAddressResource,
+                                    {child_low, child_high});
+  auto &srt = block.AppendNewInst(ValueOpcode::GetSrtResource);
+  DescriptorSource source;
+  source.dword_count = 4;
+  for (uint32_t word = 0; word < 4; ++word) {
+    read(child, word * 4u, 2u + word);
+    source.dwords[word] = Value(&block.AppendNewInst(ValueOpcode::ReadConst,
+        {Value(&srt), Value(2u + word)}));
+  }
+  // Two flat slots refer to the same guest DWORD. Residency must cover it even
+  // when the evaluator shares the value or a run/block serves both requests.
+  read(child, 0u, 6u);
+  program.descriptor_sources.push_back(source);
+  program.info.buffers.push_back({.source = 0});
+  return ExtractResourcePlan(program);
+}
+
+void TestDmaSrtReadsCoverNestedAndRepeatedSources() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  const auto plan = NestedDmaSrtPlan();
+  for (const auto offset : {0u, 0x30u}) {
+    for (const bool block_reads : {false, true}) {
+      MemoFixture fixture;
+      fixture.memory.base += offset;
+      fixture.user_data[0] = static_cast<uint32_t>(fixture.memory.base);
+      const auto child = fixture.memory.base + 128u;
+      fixture.memory.words[0] = static_cast<uint32_t>(child);
+      fixture.memory.words[1] = 0u;
+      fixture.memory.words[32] = 0x3000u;
+      fixture.memory.words[33] = 0u;
+      fixture.memory.words[34] = 3u;
+      fixture.memory.words[35] = 0u;
+      const SrtRuntime runtime{
+          .user_data = fixture.user_data,
+          .read_memory = TableMemory::DirectRead,
+          .userdata = &fixture.memory,
+          .read_memory_block = block_reads ? TableMemory::Read : nullptr};
+      Check(MaterializeResources(plan, runtime, fixture.snapshot,
+                                  fixture.specialization),
+            "nested DMA metadata failed to materialize");
+      Check(fixture.snapshot.buffers[0].dwords[0] == 0x3000u &&
+                fixture.snapshot.flattened_srt[2] == 0x3000u &&
+                fixture.snapshot.flattened_srt[6] == 0x3000u,
+            "nested DMA reads changed descriptor or repeated-slot values");
+      Check(CoversRead(fixture.snapshot.srt_memory_reads, fixture.memory.base, 8u) &&
+                CoversRead(fixture.snapshot.srt_memory_reads, child, 16u),
+            "DMA residency omitted a successfully read root or child");
+      for (const auto &[address, size] : fixture.snapshot.srt_memory_reads) {
+        Check(address >= fixture.memory.base &&
+                  address - fixture.memory.base <= sizeof(fixture.memory.words) &&
+                  size <= sizeof(fixture.memory.words) - (address - fixture.memory.base),
+              "DMA residency retained an unsuccessful whole-block read");
+      }
+    }
+  }
+}
+
+void TestDmaSrtReadsPreserveSpecializationUserdata() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  auto plan = MemoPlan(MemoPlanExtra::MemoryPredicate, false);
+  plan.info.uses_dma = true;
+  for (const bool block_reads : {false, true}) {
+    MemoFixture fixture;
+    struct StrictDomain {
+      TableMemory *memory;
+      uint32_t calls = 0;
+    } strict{&fixture.memory};
+    const SrtRuntime runtime{
+        .user_data = fixture.user_data,
+        .read_memory = TableMemory::DirectRead,
+        .userdata = &fixture.memory,
+        .read_specialization_memory = +[](void *data, uint64_t address,
+                                          std::span<uint32_t> words) {
+          auto &domain = *static_cast<StrictDomain *>(data);
+          ++domain.calls;
+          return TableMemory::Read(domain.memory, address, words);
+        },
+        .specialization_block_reads = block_reads,
+        .specialization_userdata = &strict};
+    Check(MaterializeResources(plan, runtime, fixture.snapshot,
+                                fixture.specialization),
+          "DMA read capture lost specialization-reader userdata");
+    Check(strict.calls != 0 && fixture.memory.direct_reads != 0 &&
+              fixture.snapshot.buffers[2].dwords[0] == 7u &&
+              CoversRead(fixture.snapshot.srt_memory_reads, fixture.memory.base, 20u),
+          "DMA read capture changed strict/ordinary reader selection or coverage");
+  }
+}
+
+void TestDmaSrtReadsRefreshUnderMemoAndClearOnFailure() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  auto plan = MemoPlan(MemoPlanExtra::None, false);
+  plan.info.uses_dma = true;
+  MemoFixture fixture;
+  Check(fixture.Refresh(plan) && !fixture.memo.reused &&
+            CoversRead(fixture.snapshot.srt_memory_reads, TableMemory::Base, 20u),
+        "initial memoized DMA refresh omitted metadata reads");
+  const auto descriptors = fixture.snapshot.buffers;
+  const auto specialization = fixture.specialization;
+  fixture.memory.base += 0x100u;
+  fixture.user_data[0] = static_cast<uint32_t>(fixture.memory.base);
+  Check(fixture.Refresh(plan) && fixture.memo.reused &&
+            fixture.snapshot.buffers == descriptors &&
+            fixture.specialization == specialization &&
+            CoversRead(fixture.snapshot.srt_memory_reads, fixture.memory.base, 20u) &&
+            !CoversRead(fixture.snapshot.srt_memory_reads, TableMemory::Base, 4u),
+        "equal-value relocated DMA source retained stale memo residency");
+  fixture.user_data[0] = 0x40u;
+  Check(!fixture.Refresh(plan) && !fixture.memo.valid &&
+            fixture.snapshot.srt_memory_reads.empty(),
+        "failed DMA refresh retained an earlier successful read set");
+  fixture.user_data[0] = static_cast<uint32_t>(fixture.memory.base);
+  Check(fixture.Refresh(plan) && !fixture.memo.reused &&
+            CoversRead(fixture.snapshot.srt_memory_reads, fixture.memory.base, 20u),
+        "DMA refresh after failure reused stale reads");
+}
+
+void TestDmaSrtReadCaptureIsScopedToCurrentDmaRefresh() {
+  using namespace Libs::Graphics::ShaderRecompiler::IR;
+  const auto non_dma = MemoPlan(MemoPlanExtra::None, false);
+  MemoFixture fixture;
+  fixture.snapshot.srt_memory_reads.emplace_back(0xdead0000u, 64u);
+  Check(fixture.Refresh(non_dma) && fixture.snapshot.srt_memory_reads.empty(),
+        "non-DMA refresh retained or collected shared-memory residency");
+  auto empty_dma = UnbasedFlatPlan();
+  fixture.snapshot.srt_memory_reads.emplace_back(0xdead0000u, 64u);
+  Check(MaterializeResources(empty_dma, {}, fixture.snapshot,
+                              fixture.specialization) &&
+            fixture.snapshot.srt_memory_reads.empty(),
+        "DMA refresh without metadata reads retained stale residency");
+  auto invalid_dma = NestedDmaSrtPlan();
+  invalid_dma.resource_tracking_complete = false;
+  fixture.snapshot.srt_memory_reads.emplace_back(0xdead0000u, 64u);
+  Check(!MaterializeResources(invalid_dma, {}, fixture.snapshot,
+                               fixture.specialization) &&
+            fixture.snapshot.srt_memory_reads.empty(),
+        "rejected DMA plan retained an earlier read set");
+}
+
 } // namespace
 
 namespace Common {
 
-int DbgExitHandler(const char *, int, std::string_view) { std::abort(); }
-
-int DbgExitHandler(const char *, int, fmt::text_style, std::string_view) {
+int DbgExitHandler(const char *file, int line, std::string_view text) {
+  std::fprintf(stderr, "ResourceMaterializationTests: EXIT %s:%d: ", file, line);
+  std::fwrite(text.data(), 1, text.size(), stderr);
+  std::fputc('\n', stderr);
+  std::fflush(stderr);
   std::abort();
 }
 
-int DbgExitIfHandler(const char *, const char *, int) { return 1; }
+int DbgExitHandler(const char *file, int line, fmt::text_style,
+                   std::string_view text) {
+  return DbgExitHandler(file, line, text);
+}
 
-void DbgExit(int) { std::abort(); }
+int DbgExitIfHandler(const char *expr, const char *file, int line) {
+  std::fprintf(stderr, "ResourceMaterializationTests: EXIT_IF %s:%d: %s\n",
+               file, line, expr);
+  std::fflush(stderr);
+  return 1;
+}
+
+void DbgExit(int code) {
+  std::fprintf(stderr, "ResourceMaterializationTests: DbgExit code=%d\n", code);
+  std::fflush(stderr);
+  std::abort();
+}
 
 } // namespace Common
 
-int main() {
+int main(int argc, char **argv) {
+  const bool residency_only =
+      argc == 2 && std::strcmp(argv[1], "--srt-residency-only") == 0;
+  Check(argc == 1 || residency_only,
+        "usage: resource_materialization_tests [--srt-residency-only]");
+  const auto run = [](const char *name, void (*test)()) {
+    std::printf("ResourceMaterializationTests: BEGIN %s\n", name);
+    std::fflush(stdout);
+    test();
+    std::printf("ResourceMaterializationTests: PASS %s\n", name);
+    std::fflush(stdout);
+  };
   // Every refresh below is also compared with the reference SrtWalker.
   Libs::Graphics::ShaderRecompiler::IR::SetResourceMaterializationVerification(
       true);
-  TestMappedSrtUsesDirectReaderByDefault();
-  TestIntegerRuntimeValueFollowsSrtReads();
-  TestUniformVectorDescriptorRead();
-  TestExactReciprocalDescriptorArithmetic();
-  TestUnbasedFlatCacheHitMaterializes();
-  TestWrittenDescriptorUsesStrictReaderOnce();
-  TestFailedMaterializationRejectsStage();
-  TestFiniteImageRefreshReusesScalarReads();
-  TestMixedSamplerDuplicatesTheCorrectSnapshot();
-  TestMemoTracksDescriptorInputs();
-  TestMemoTracksActiveSources();
-  TestMemoRejectsUntrackedInputs();
-  TestCleanBlockReads();
-  TestDirectConditions();
-  std::puts("ResourceMaterializationTests: all cases passed");
+  if (!residency_only) {
+    run("MappedSrtUsesDirectReaderByDefault", TestMappedSrtUsesDirectReaderByDefault);
+    run("IntegerRuntimeValueFollowsSrtReads", TestIntegerRuntimeValueFollowsSrtReads);
+    run("UniformVectorDescriptorRead", TestUniformVectorDescriptorRead);
+    run("ExactReciprocalDescriptorArithmetic", TestExactReciprocalDescriptorArithmetic);
+    run("UnbasedFlatCacheHitMaterializes", TestUnbasedFlatCacheHitMaterializes);
+    run("WrittenDescriptorUsesStrictReaderOnce", TestWrittenDescriptorUsesStrictReaderOnce);
+    run("FailedMaterializationRejectsStage", TestFailedMaterializationRejectsStage);
+    run("FiniteImageRefreshReusesScalarReads", TestFiniteImageRefreshReusesScalarReads);
+    run("MixedSamplerVariantsShareRuntimeDescriptor", TestMixedSamplerVariantsShareRuntimeDescriptor);
+    run("MemoTracksDescriptorInputs", TestMemoTracksDescriptorInputs);
+    run("MemoTracksActiveSources", TestMemoTracksActiveSources);
+    run("MemoRejectsUntrackedInputs", TestMemoRejectsUntrackedInputs);
+    run("CleanBlockReads", TestCleanBlockReads);
+    run("DirectConditions", TestDirectConditions);
+  }
+  run("DmaSrtReadsCoverNestedAndRepeatedSources", TestDmaSrtReadsCoverNestedAndRepeatedSources);
+  run("DmaSrtReadsPreserveSpecializationUserdata", TestDmaSrtReadsPreserveSpecializationUserdata);
+  run("DmaSrtReadsRefreshUnderMemoAndClearOnFailure", TestDmaSrtReadsRefreshUnderMemoAndClearOnFailure);
+  run("DmaSrtReadCaptureIsScopedToCurrentDmaRefresh", TestDmaSrtReadCaptureIsScopedToCurrentDmaRefresh);
+  std::puts(residency_only ? "ResourceMaterializationTests: 4 SRT residency cases passed"
+                          : "ResourceMaterializationTests: all cases passed");
   return 0;
 }
 

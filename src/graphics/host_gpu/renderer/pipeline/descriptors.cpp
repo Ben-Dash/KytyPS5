@@ -2890,6 +2890,15 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 	const auto& program  = *prepared.runtime->program;
 	const auto& snapshot = *prepared.runtime->resources;
 	auto&       cache    = m_context.GetBufferCache();
+	if (program.info.uses_dma) {
+		// These are validated reads actually made while materializing this SRT,
+		// not guessed pointers. Make their pages resident before the first FLAT
+		// consumer; scalar flattening alone does not register BDA cache owners.
+		for (const auto& [address, requested_size]: snapshot.srt_memory_reads) {
+			const auto size = LibKernel::Memory::ClampRangeSize(address, requested_size);
+			if (size != 0) (void)cache.FindBuffer(address, size);
+		}
+	}
 
 	// The previous draw's sources of this stage: consecutive draws mostly bind buffers the same
 	// cached buffer still covers, which RefindBuffer confirms without the page table.
