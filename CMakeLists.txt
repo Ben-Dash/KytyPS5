@@ -846,6 +846,9 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-neighbors-gpu)
 	add_test(NAME end_of_pipe_literal_publication_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-publication-cost)
+	add_test(NAME formatted_buffer_static_numeric
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --formatted-buffer-static-numeric-measurement)
+	set_tests_properties(formatted_buffer_static_numeric PROPERTIES TIMEOUT 45 RUN_SERIAL TRUE)
 	set_tests_properties(end_of_pipe_literal_publication_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME end_of_pipe_literal_publication_span_neighbors
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-publication-span-neighbors)

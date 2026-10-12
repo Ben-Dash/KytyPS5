@@ -1,5 +1,46 @@
 # Ghost of Yōtei: active integration and session resume
 
+## New measured direction and upstream options, 2026-10-13
+
+Read [new optimization options](yotei-optimization-options-2026-10-13.md) first.
+Latest native source fix `ff1a70e5` publishes OS thread names with Tracy disabled:
+CPU intended RED214049/58794710 -> unchanged GREEN214122/836A6F68; native build
+214146/install214256 PASS, EXE SHA256
+`BBBFE2070899F7436FCC84018F3EF1FF31E081900DEA17F6E7674CB78443758C`.
+
+Fresh default control214304-cd4b8a:30-second world-title mean2.472 FPS/exit0.
+Existing physical GPU-core reservation215150-1d8f79:30-second mean2.600,
+min2.4/max2.7/exit0. Both full rendering, neutral input, no menu or images.
+The5.2% single-run difference is small; no useful sustained improvement claimed.
+Valid20-second named sample in the reserved run:86 threads,47 active,
+Thread_Main87.462% of one core, Thread_Gpu34.875%, total2.707 logical cores.
+Thread_Main includes guest execution, HLE and memory-fault work; CPU attribution
+within it remains pending. Earlier unnamed88% must not be called Thread_Gpu.
+
+Static-format profile2 independently passed all4800 lanes/100 requests; generic0
+retains144 known UNorm8-one errors. These144 differences resolve the goldens,
+other4656 lanes agree. Final static matrix223120 and generic codegen neighbor
+223122 on5D01A13D PASS. No production shader-emitter change for these controls.
+Both private profile2 game attempts reached their300s compile/warm bounds before
+frame650:220310-20df2d forced cleanup/exit-1,221906-b32d7e exit0/frame429.
+New variants compiled/saved, but no complete30-second world benchmark. Never
+claim startup/menu15FPS as a gameplay gain. No more identical warming retries
+without a new decision; default profile remains the measured comparison basis.
+
+Important next candidate has a real native RED223050/5D01A13D: separate graphics
+family0/transfer family1, AGE diagnostics disabled. Conservative warm fallback and
+all native/backing controls pass; completed writer A is rejected by QueueReadback
+while unrelated writer B remains open. Opt-in fixture is saved, not a completed
+production correction. Before enabling this queue in game, cover binding-prep
+flush, native owner migration, image-copy writers and later generations.
+
+Other concrete new proposals: upstream recording-age submission to overlap CPU/GPU,
+proven ordinary-buffer DMA fills/copies, and late EXEC-select optimization after
+resource-plan detachment. Three-agent research saved exact upstream revisions and
+baseline-compatible fixtures. Native FP16 and normal workgroup LDS already exist;
+they are not missing toggles to port. Source-only findings and shader audits do
+not establish60FPS, actual1080 or complete effects. No push/issue update.
+
 ## Current checkpoint: three proposals, 30-second title FPS tests, 2026-10-13
 
 First proposal completed locally as `8c8d01319900427f3b61ab7d34e8c8649f27edd7`.

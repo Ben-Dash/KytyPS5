@@ -15,9 +15,9 @@ constexpr uint32_t GenericWordsPerAdditionalReadBudget = 1536u;
 constexpr uint32_t GenericNormalizationDividesBudget = 16u;
 constexpr std::array<uint32_t, 4> GenericInactive{0xacc00001u,0xacc00002u,0xacc00003u,0xacc00004u};
 
-void ConfigureGenericBufferTests() {
+void ConfigureGenericBufferTests(bool concrete_formats = false) {
   Require("GenericBuffer", "fixture environment setup",
-      _putenv_s("KYTY_BUFFER_SPECIALIZE", "0") == 0 &&
+      _putenv_s("KYTY_BUFFER_SPECIALIZE", concrete_formats ? "2" : "0") == 0 &&
       _putenv_s("KYTY_HALF_UNIFORM", "0") == 0 &&
       _putenv_s("KYTY_VTX_EXPLODE_CHECK", "0") == 0,
       "could not pin generic compiler profile before first getter; not a cost/numerical RED");
@@ -65,10 +65,14 @@ struct GenericCompilation {
   FetchGpuIR::ResourceSpecialization specialization;
   ShaderRecompiler::CompileResult compiled;
   uint32_t input_resource = UINT32_MAX, loads = 0, wave = 0;
-  GenericCompilation(uint32_t reads,uint32_t wave_size):code(GenericGuestCode(reads)),loads(reads),wave(wave_size) {
+  bool concrete_formats = false;
+  GenericCompilation(uint32_t reads,uint32_t wave_size,
+                     const std::array<uint32_t,4>* concrete_input = nullptr)
+      :code(GenericGuestCode(reads)),loads(reads),wave(wave_size),concrete_formats(concrete_input != nullptr) {
     constexpr const char* name = "GenericBufferCompiler";
-    const auto input = GenericInputDescriptor(Prospero::BufferFormat::k32_32_32_32UInt,16u,
-        DstSel(4,5,6,7),GenericInputBytes);
+    const auto input = concrete_input != nullptr ? *concrete_input :
+        GenericInputDescriptor(Prospero::BufferFormat::k32_32_32_32UInt,16u,
+            DstSel(4,5,6,7),GenericInputBytes);
     const auto output = FetchGpuDescriptor(FetchGpuGuest::Output,0u,reads*wave_size*16u);
     std::copy(input.begin(),input.end(),userdata.begin());
     std::copy(output.begin(),output.end(),userdata.begin()+4u);
@@ -103,13 +107,21 @@ struct GenericCompilation {
     });
     Require(name,"SPIR-V validation setup",validator.Validate(compiled.spirv),
         "module invalid before GPU; not a cost/numerical RED");
-    uint32_t generic=0u;
+    uint32_t generic=0u, input_matches=0u;
     for(uint32_t i=0;i<compiled.program.info.buffers.size();++i) {
-      if(compiled.program.info.buffers[i].descriptor_format!=FetchGpuIR::GenericBufferFormat)continue;
-      input_resource=i; ++generic;
+      generic += compiled.program.info.buffers[i].descriptor_format==FetchGpuIR::GenericBufferFormat;
+      const auto& value=resources.buffers.at(i).dwords;
+      const uint64_t address=value[0] | (uint64_t{value[1]&0xffffu}<<32u);
+      if(address==FetchGpuGuest::Input) { input_resource=i; ++input_matches; }
     }
-    Require(name,"actual generic profile setup",generic==1u && !compiled.program.bindings.table,
-        "must compile the real generic read-only formatted buffer, not a baked/BDA substitute");
+    Require(name,"actual input identity setup",input_matches==1u &&
+        input_resource<compiled.program.info.buffers.size(),
+        "must identify the real input SRD independently of generic/concrete format");
+    Require(name,"actual selected profile setup",!compiled.program.bindings.table &&
+        (concrete_formats
+          ? generic==0u && compiled.program.info.buffers[input_resource].descriptor_format!=FetchGpuIR::GenericBufferFormat
+          : generic==1u && compiled.program.info.buffers[input_resource].descriptor_format==FetchGpuIR::GenericBufferFormat),
+        "must compile the requested actual generic or per-case concrete read-only format");
     std::set<uint32_t> pcs;
     uint32_t stored=0u;
     for(const auto* block:compiled.program.blocks)for(const auto& inst:*block) {
@@ -353,11 +365,15 @@ public:
     auto normalized=shader.specialization;
     FetchGpuIR::NormalizeBufferSpecialization(normalized,ShaderType::Compute,shader.plan.info,
         shader.plan.shader_data_base_dwords);
-    Require(name,"same generic permutation setup",
-        normalized.buffers.at(shader.input_resource).descriptor_format==FetchGpuIR::GenericBufferFormat &&
-        normalized.buffers.at(shader.input_resource).packed_stride==
-            shader.compiled.program.info.buffers.at(shader.input_resource).packed_stride,
-        "case requires a different compiled permutation; not a numerical RED");
+    const auto& wanted=normalized.buffers.at(shader.input_resource);
+    const auto& actual=shader.compiled.program.info.buffers.at(shader.input_resource);
+    Require(name,"same exact selected-profile permutation setup",
+        wanted.descriptor_format==actual.descriptor_format &&
+        wanted.packed_stride==actual.packed_stride &&
+        wanted.descriptor_swizzle==actual.descriptor_swizzle &&
+        (shader.concrete_formats ? actual.descriptor_format==test.format
+                                 : actual.descriptor_format==FetchGpuIR::GenericBufferFormat),
+        "case requires a different exact compiled format/swizzle/stride permutation; not a numerical RED");
     std::memset(shader_input.data,0x5a,GenericPrefixBytes);
     std::memset(static_cast<uint8_t*>(shader_input.data)+GenericPrefixBytes,0,GenericInputBytes);
     Require(name,"bounded independent source",test.source_offset<=GenericInputBytes-sizeof(test.source),
@@ -536,7 +552,9 @@ void CheckGenericBufferNumeric(VulkanHarness& vulkan) {
 }
 // This collector does not certify the strict numerical suite. It retains all
 // original goldens, reports every lane, and returns a nonzero mismatch count.
-uint32_t MeasureGenericBufferNumeric(VulkanHarness& vulkan) {
+uint32_t MeasureGenericBufferNumeric(VulkanHarness& vulkan, bool concrete_format_profile = false) {
+  std::printf("[profile] actual-formatted-buffer mode=%u; concrete case modules compiled before binding\n",
+      concrete_format_profile ? 2u : 0u);
   uint32_t mismatches=0u;
   constexpr const char* name="GenericBufferGpu";
   auto& graphics=vulkan.RuntimeContext();
@@ -595,14 +613,28 @@ uint32_t MeasureGenericBufferNumeric(VulkanHarness& vulkan) {
   HW::Shader shaders{};
   vulkan.RuntimeRenderer().GetCommandScheduler().Begin(registers,user_config,shaders);
   for(const uint32_t wave:{32u,64u}) {
-    GenericCompilation shader(1u,wave);
     FetchGpuBuffer output(graphics,wave*16u+16u,vk::BufferUsageFlagBits::eStorageBuffer);
-    GenericGpuPipeline pipeline(vulkan,shader,input,output);
-    for(const auto& test:cases) {
-      mismatches+=pipeline.RunMeasurement(test,UINT32_MAX,UINT32_MAX);
-      // Odd low-half and even high-half lanes are active: both emulated halves
-      // retain their distinct original VGPRs when inactive, then publish stores.
-      mismatches+=pipeline.RunMeasurement(test,0xaaaaaaaau,0x55555555u);
+    if (!concrete_format_profile) {
+      GenericCompilation shader(1u,wave);
+      GenericGpuPipeline pipeline(vulkan,shader,input,output);
+      for(const auto& test:cases) {
+        mismatches+=pipeline.RunMeasurement(test,UINT32_MAX,UINT32_MAX);
+        mismatches+=pipeline.RunMeasurement(test,0xaaaaaaaau,0x55555555u);
+      }
+    } else {
+      // Never reuse one UInt-baked module for all later formats. Each case
+      // materializes its actual descriptor BEFORE compiling its native pipeline.
+      for(const auto& test:cases) {
+        const auto descriptor=GenericInputDescriptor(test.format,test.stride,test.selectors,test.range);
+        GenericCompilation shader(1u,wave,&descriptor);
+        const auto& compiled_input=shader.compiled.program.info.buffers.at(shader.input_resource);
+        Require(test.name,"actual case format baked before native pipeline",
+            compiled_input.descriptor_format==test.format,
+            "concrete pipeline did not compile this exact case's descriptor format");
+        GenericGpuPipeline pipeline(vulkan,shader,input,output);
+        mismatches+=pipeline.RunMeasurement(test,UINT32_MAX,UINT32_MAX);
+        mismatches+=pipeline.RunMeasurement(test,0xaaaaaaaau,0x55555555u);
+      }
     }
   }
   std::printf("[gpu-measurement] totalLaneMismatches=%u; all100 case/mask/wave requests observed; guest normalized precision remains unresolved\n",mismatches);

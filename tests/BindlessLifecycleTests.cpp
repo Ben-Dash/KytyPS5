@@ -47,7 +47,9 @@ public:
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
   };
 
-  explicit VulkanHarness(bool require_push_descriptors = false) { Init(require_push_descriptors); }
+  explicit VulkanHarness(bool require_push_descriptors = false, bool require_readback_queue = false) {
+    Init(require_push_descriptors, require_readback_queue);
+  }
   ~VulkanHarness() {
     if (m_graphics.device != nullptr) {
       RequireVulkanSuccess(m_graphics.device.waitIdle(), "lifecycle device cleanup");
@@ -153,7 +155,7 @@ public:
   }
 
 private:
-  void Init(bool require_push_descriptors) {
+  void Init(bool require_push_descriptors, bool require_readback_queue) {
     static vk::detail::DynamicLoader loader;
     const auto get_instance_proc_addr = loader.getProcAddress<PFN_vkGetInstanceProcAddr>(
         "vkGetInstanceProcAddr");
@@ -221,11 +223,26 @@ private:
       }
       const auto queues = physical.getQueueFamilyProperties();
       for (uint32_t index = 0; index < queues.size(); ++index) {
+        uint32_t transfer_family = UINT32_MAX;
+        if (require_readback_queue) {
+          for (uint32_t candidate = 0; candidate < queues.size(); ++candidate) {
+            if (candidate == index || queues[candidate].queueCount == 0 ||
+                !(queues[candidate].queueFlags & vk::QueueFlagBits::eTransfer)) continue;
+            transfer_family = candidate;
+            if (!(queues[candidate].queueFlags &
+                  (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute))) break;
+          }
+          if (transfer_family == UINT32_MAX) continue;
+        }
         constexpr auto flags = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
         if ((queues[index].queueFlags & flags) != flags) continue;
         m_graphics.physical_device = physical;
         m_graphics.physical_device_properties = properties;
         m_graphics.queue_family = index;
+        if (require_readback_queue) {
+          m_graphics.readback_family = transfer_family;
+          m_graphics.shared_queue_families = {index, transfer_family};
+        }
         m_graphics.max_push_descriptors = push_limit;
         break;
       }
@@ -264,18 +281,23 @@ private:
                 m_graphics.physical_device_properties.deviceName.data(),
                 m_graphics.physical_device_properties.driverVersion);
     float priority = 1.0f;
-    vk::DeviceQueueCreateInfo queue{};
-    queue.queueFamilyIndex = m_graphics.queue_family;
-    queue.queueCount = 1u;
-    queue.pQueuePriorities = &priority;
+    std::array<vk::DeviceQueueCreateInfo, 2> queue_infos{};
+    queue_infos[0].queueFamilyIndex = m_graphics.queue_family;
+    queue_infos[0].queueCount = 1u;
+    queue_infos[0].pQueuePriorities = &priority;
+    if (require_readback_queue) {
+      queue_infos[1].queueFamilyIndex = m_graphics.readback_family;
+      queue_infos[1].queueCount = 1u;
+      queue_infos[1].pQueuePriorities = &priority;
+    }
     vk::DeviceCreateInfo device{};
     // Enable only features reported supported by this selected device. These
     // are core Vulkan1.1/1.2/1.3 structures. The init mode also exercises the
     // actual parser's KHR push-descriptor path, queried separately above.
     device.pNext = &features13;
     device.pEnabledFeatures = &features.features;
-    device.queueCreateInfoCount = 1u;
-    device.pQueueCreateInfos = &queue;
+    device.queueCreateInfoCount = require_readback_queue ? 2u : 1u;
+    device.pQueueCreateInfos = queue_infos.data();
     const char* push_extension = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
     if (require_push_descriptors) {
       device.enabledExtensionCount = 1u;
@@ -287,6 +309,15 @@ private:
                          "lifecycle native device creation");
     VULKAN_HPP_DEFAULT_DISPATCHER.init(m_graphics.device);
     m_graphics.device.getQueue(m_graphics.queue_family, 0u, &m_graphics.queue);
+    if (require_readback_queue) {
+      m_graphics.device.getQueue(m_graphics.readback_family, 0u, &m_graphics.readback_queue);
+      Require("ReadbackQueueBootstrap", "actual distinct queues",
+          m_graphics.readback_queue != nullptr && m_graphics.readback_queue != m_graphics.queue &&
+          m_graphics.readback_family != m_graphics.queue_family,
+          "distinct native transfer queue unavailable; not the intended RED");
+      std::printf("[host] real readback queues: graphicsFamily=%u transferFamily=%u AGE=off\n",
+                  m_graphics.queue_family, m_graphics.readback_family);
+    }
     m_graphics.physical_device.getMemoryProperties(&m_graphics.physical_device_memory_properties);
     VmaVulkanFunctions functions{};
     functions.vkGetInstanceProcAddr = VULKAN_HPP_DEFAULT_DISPATCHER.vkGetInstanceProcAddr;
@@ -333,6 +364,7 @@ private:
 #include "EndOfPipeWriteGpuTests.inc"
 #include "EndOfPipeLiteralGpuTests.inc"
 #include "EndOfPipeLiteralNeighborTests.inc"
+#include "ReadbackQueueBootstrapTests.inc"
 #include "LiteralEopPublicationCostTests.inc"
 #include "LiteralEopPublicationSpanNeighbors.inc"
 #include "LateBdaImageFringeTests.inc"
@@ -364,6 +396,9 @@ int main(int argc, char **argv) {
     }
   } drain_stats_scope(drain_stats_mode);
   using namespace Libs::Graphics;
+  const bool readback_queue_mode = argc == 2 &&
+      std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0;
+  if (readback_queue_mode) ConfigureReadbackQueueBootstrapTests();
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   if (argc == 2 && std::strcmp(argv[1], "--native-thread-names-only") == 0) {
     CheckNativeThreadNamesWithoutProfiler();
@@ -384,6 +419,8 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0 ||
+                            std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0 ||
+                            std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-literal-neighbors-gpu") == 0 ||
@@ -423,7 +460,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
                             std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --eop-literal-publication-cost | --late-bda-image-fringe-gpu | --first-use-bda-pointer-chain-gpu | --first-use-bda-pointer-chain-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu | --ngg-vertex-count-gpu | --dispatch-snapshot-job-selector-only | --dispatch-snapshot-job-selector-frame-only | --dispatch-snapshot-job-selector-default-only | --dispatch-snapshot-job-inventory-only | --dispatch-snapshot-job-inventory-frame-only | --dispatch-snapshot-job-inventory-default-only | --dispatch-snapshot-job-inventory-cap-only]");
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --formatted-buffer-static-numeric-measurement | --readback-queue-ageoff-gpu | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --eop-literal-publication-cost | --late-bda-image-fringe-gpu | --first-use-bda-pointer-chain-gpu | --first-use-bda-pointer-chain-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu | --ngg-vertex-count-gpu | --dispatch-snapshot-job-selector-only | --dispatch-snapshot-job-selector-frame-only | --dispatch-snapshot-job-selector-default-only | --dispatch-snapshot-job-inventory-only | --dispatch-snapshot-job-inventory-frame-only | --dispatch-snapshot-job-inventory-default-only | --dispatch-snapshot-job-inventory-cap-only]");
   if (argc == 2 && (std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-frame-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-job-inventory-default-only") == 0 ||
@@ -485,6 +522,8 @@ int main(int argc, char **argv) {
                     std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
                     std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0))
     ConfigureGenericBufferTests();
+  if (argc == 2 && std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0)
+    ConfigureGenericBufferTests(true);
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -513,7 +552,7 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
-       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0));
+       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode);
   if (argc == 2 && std::strcmp(argv[1], "--dma-base-origins-only") == 0) {
     CheckDmaBaseOrigins();
     return 0;
@@ -597,6 +636,10 @@ int main(int argc, char **argv) {
     CheckGenericBufferNumeric(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0)
     return MeasureGenericBufferNumeric(vulkan) == 0u ? 0 : 2;
+  else if (argc == 2 && std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0)
+    return MeasureGenericBufferNumeric(vulkan, true) == 0u ? 0 : 2;
+  else if (readback_queue_mode)
+    CheckReadbackQueueBootstrap(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0)
     CheckEndOfPipeWriteGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0)

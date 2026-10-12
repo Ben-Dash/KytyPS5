@@ -2,6 +2,24 @@
 
 ## Performance cycle 3 diagnostics, 2026-10-13
 
+Real transfer-queue AGE-off bootstrap RED223050/5D01A13D now reproduced with
+distinct native families0/1. Unknown warm producer safely falls back; A is truly
+completed/CPU-old, B remains unsubmitted on another4KiB page of the same16KiB
+owner; all value/setup/cleanup controls pass before expected queue eligibility
+fails. Earlier duplicate test-accessor compile failure and old-executable CLI
+rejection are explicitly not RED. Production fix remains pending, fixture opt-in.
+Required safety neighbors: binding preparation followed by flush before native
+write, owner JoinOverlap copies, image-to-buffer copies, new writer/CPU overwrite,
+history reset and actual submitted-but-unfinished wait. Keep unsupported cases
+on the existing ordered graphics path; do not bypass the incomplete-log guard.
+
+Static-format mode2 collector223120/5D01A13D:4800 lanes/100 requests, all original
+goldens PASS. Generic0 baseline215050 has144 known endpoint errors; all144 profile
+differences improve those goldens, no new lane errors. Generic codegen neighbor
+223122 PASS. Dirty GPU metadata/zero-stride/swizzled cases remain outside this
+matrix. Two private300s warm attempts never reached a full world sample; no FPS
+or broad compatibility claim. Existing native-name regression remains proved.
+
 CPU diagnostic now has intended RED214049/58794710 at exact OS-name oracle;
 unchanged GREEN214122/836A6F68 passes ASCII/UTF8/null/no-Tracy-startup. Production
 change publishes native descriptions without starting Tracy; no guest/GPU ordering
