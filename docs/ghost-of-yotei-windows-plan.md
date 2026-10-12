@@ -43,6 +43,13 @@ native artifact, actual1920x1080 measurements, body/nearby-object screenshots an
 DA4 producer/VS witnesses. Original192 matrix holes and stable picture/~60FPS
 remain unproved. Historical original-game3/3 cap is retained; no fourth run occurred.
 
+Record238 lead: pre-Phi translated IR has7 distinct live buffer-descriptor operand
+groups/no image handles versus recorded6/0 (not a directly printed ShaderInfo count).
+Its15-block CFG meets older f2593c61's multi-block embedded-fetch lifting exclusion;
+the extra group appears to be retained vertex fetch. Verify actual resource counts
+and a synthetic multi-block fetch regression before changing that safeguard; this
+lead does not establish the cause of every246 record or the original192 matrix holes.
+
 ## Verified upstream mechanisms; final native audit preparing, 2026-10-12 12:22 UTC
 
 New user instruction "делай" authorized implementation and bounded native tests.

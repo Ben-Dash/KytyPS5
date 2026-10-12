@@ -17,6 +17,14 @@ Any production correction needs its own independent regression first. Current
 native replay rejects these mismatches before specialization; cold live paths
 use actual resources, but a successful game launch remains unproved.
 
+Record238 pre-Phi IR lead:7 distinct live buffer operand groups versus recorded6;
+15-block CFG prevents embedded-fetch lifting under older f2593c61. Required
+synthetic regression before modifying it: recognized embedded vertex fetch within
+multi-block control flow, preserved conditional/instance/vertex indexing and SSA
+dominance, accurate native-attribute versus ordinary-buffer resource cardinality,
+and unsupported CFG rejection. First prove actual ShaderInfo counts; the IR's
+operand-group count alone is not that invariant or proof for all246 failures.
+
 Original192 missing matrix rows, body/world stability and1920x1080/~60FPS remain
 pending. Historical3/3 original-run limit was not reset; no new game run occurred.
 Further game capture must use new explicit launch authorization. Sources restored
