@@ -37233,6 +37233,8 @@ TestCase VectorCompare64WaveMasks(u32 wave_size, bool integer_ne = false) {
   return test;
 }
 
+#include "Wave64WorkgroupLaneGroupingTests.inc"
+
 std::vector<TestCase> MakeCases() {
   std::vector<TestCase> cases;
   cases.reserve(128);
@@ -43431,6 +43433,11 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--gpu-tiler-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckGpuTilerCpuParity();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--wave64-workgroup-grouping-only") == 0) {
+    VulkanHarness vulkan;
+    CheckWave64WorkgroupLaneGrouping(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--bc-r64-texture-layout-only") == 0) {

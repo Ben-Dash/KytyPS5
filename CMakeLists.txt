@@ -784,6 +784,9 @@ if(BUILD_TESTING)
 	add_test(NAME shader_recompiler_compute COMMAND $<TARGET_FILE:shader_recompiler_compute_tests>)
 	add_test(NAME texture_r8_snorm
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --r8-snorm-texture-only)
+	add_test(NAME wave64_workgroup_grouping
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --wave64-workgroup-grouping-only)
+	set_tests_properties(wave64_workgroup_grouping PROPERTIES TIMEOUT 30)
 	set_tests_properties(texture_r8_snorm PROPERTIES TIMEOUT 30)
 	add_test(NAME texture_bc_r64_layout
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --bc-r64-texture-layout-only)
