@@ -270,6 +270,9 @@ private:
 	                                               bool page_overlap) const;
 	[[nodiscard]] OverlapResult ResolveOverlap(const ImageInfo& requested, BindingType binding,
 	                                           ImageId cached, ImageId merged);
+	[[nodiscard]] static bool IsBlockAlias(const ImageInfo& requested, const ImageInfo& cached);
+	[[nodiscard]] bool PublishBlockAlias(Image& image);
+	void ResolveBlockAlias(ImageId cached, ImageId merged);
 	[[nodiscard]] ImageId       ResolveDepthOverlap(const ImageInfo& requested, BindingType binding,
 	                                                ImageId cached);
 	[[nodiscard]] ImageId       ExpandImage(const ImageInfo& info, ImageId source);

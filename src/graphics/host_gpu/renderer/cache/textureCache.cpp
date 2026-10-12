@@ -972,6 +972,9 @@ void TextureCache::CopyImage(ImageId destination_id, ImageId source_id) {
 void TextureCache::CopyImageMip(ImageId destination_id, ImageId source_id, uint32_t mip,
                                 uint32_t layer) {
 	RefreshCopySource(source_id);
+	// A partial image copy must start from the current buffer-owned destination,
+	// otherwise untouched mips/layers retain stale bytes from the earlier upload.
+	if (m_slot_images[destination_id].IsBufferModified()) RefreshImage(destination_id);
 	auto& destination = m_slot_images[destination_id];
 	auto& source      = m_slot_images[source_id];
 	GpuZones::KeyScope zone_key(destination.info.data.address);
@@ -1137,11 +1140,41 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 	return replacement_id;
 }
 
+bool TextureCache::IsBlockAlias(const ImageInfo& requested, const ImageInfo& cached) {
+	return requested.guest_format != cached.guest_format &&
+	       requested.IsBlock() != cached.IsBlock() &&
+	       requested.tile_mode == cached.tile_mode &&
+	       requested.bytes_per_block == cached.bytes_per_block &&
+	       requested.samples == 1 && cached.samples == 1 &&
+	       (requested.data != cached.data || requested.resources != cached.resources ||
+	        requested.BlockExtent() != cached.BlockExtent()) &&
+	       !SameBacking(cached, requested, false);
+}
+
+void TextureCache::ResolveBlockAlias(ImageId cached_id, ImageId merged_id) {
+	auto& cached = m_slot_images[cached_id];
+	auto* merged = merged_id ? &m_slot_images[merged_id] : nullptr;
+	// A raw block image can cover several packed BC mips. Publish its guest
+	// footprint before retiring the incompatible native image, preserving bytes
+	// outside that footprint through the existing buffer ownership path.
+	if (cached.SafeToDownload()) {
+		if (merged && merged->SafeToDownload() && !PublishBlockAlias(*merged)) return;
+		if (!PublishBlockAlias(cached)) return;
+		if (merged) merged->MarkBufferModified();
+	}
+	cached.binding.needs_rebind |= cached.binding.is_bound || cached.binding.is_target;
+	FreeImage(cached_id);
+}
+
 TextureCache::OverlapResult TextureCache::ResolveOverlap(const ImageInfo& requested,
                                                          BindingType binding, ImageId cached_id,
                                                          ImageId merged_id) {
 	auto owner = m_slot_images.try_get(cached_id);
-	if (owner == nullptr) {
+	if (owner == nullptr || !owner->registered) {
+		return {merged_id};
+	}
+	if (IsBlockAlias(requested, owner->info) && !owner->IsCpuDirty()) {
+		ResolveBlockAlias(cached_id, merged_id);
 		return {merged_id};
 	}
 	auto&      cached       = *owner;
@@ -1375,6 +1408,17 @@ TextureCache::ImageDownload TextureCache::BuildDownload(const Image& image) cons
 	transfer.texture = BuildTextureTransfer(image, binding, TransferDirection::Download);
 	transfer.valid   = transfer.texture.valid;
 	return transfer;
+}
+
+bool TextureCache::PublishBlockAlias(Image& image) {
+	auto transfer = BuildDownload(image);
+	if (!transfer.valid) return false;
+	const auto [buffer, offset] =
+	    m_buffer_cache.ObtainBuffer(image.info.data.address, image.info.data.size, true);
+	DownloadImage(image, *buffer, offset, image.info.data.size, std::move(transfer));
+	image.ClearGpuModified();
+	image.MarkBufferModified();
+	return true;
 }
 
 void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_offset) {
@@ -2285,12 +2329,15 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 			backing_matches = 0;
 			const auto candidates =
 			    FindImagesInRegion(desc.info.data.address, desc.info.data.size, false);
+			bool block_alias = false;
 			only_candidate = candidates.size() == 1 ? candidates[0] : ImageId {};
 			for (const auto id: candidates) {
 				const auto& image = m_slot_images[id];
 				if (SameBacking(image.info, desc.info, exact_format)) {
 					result = id;
 					backing_matches++;
+				} else if (image.SafeToDownload() && IsBlockAlias(desc.info, image.info)) {
+					block_alias = true;
 				}
 			}
 			if (!result) {
@@ -2303,6 +2350,15 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* un
 						result     = overlap.image;
 						view_mip   = overlap.mip;
 						view_layer = overlap.layer;
+					}
+				}
+			}
+			if (result && block_alias) {
+				for (const auto candidate: candidates) {
+					const auto* owner = m_slot_images.try_get(candidate);
+					if (candidate != result && owner != nullptr && owner->registered &&
+					    !owner->IsCpuDirty() && IsBlockAlias(m_slot_images[result].info, owner->info)) {
+						ResolveBlockAlias(candidate, result);
 					}
 				}
 			}
