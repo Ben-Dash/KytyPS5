@@ -43446,6 +43446,12 @@ int main(int argc, char **argv) {
     CheckWave64StridedJobLoop(vulkan);
     return 0;
   }
+  if (argc == 2 && std::strcmp(argv[1], "--wave64-scalar-branch-only") == 0) {
+    VulkanHarness vulkan;
+    RunCase(&vulkan, Wave64RawMasksAndScalarBranch());
+    CheckWave64StridedJobLoop(vulkan);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--bc-r64-texture-layout-only") == 0) {
     VulkanHarness::CheckBcR64TextureAdmission();
     return 0;
