@@ -820,6 +820,12 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)
+	add_test(NAME ngg_vertex_count_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --ngg-vertex-count-gpu)
+	set_tests_properties(ngg_vertex_count_gpu PROPERTIES TIMEOUT 30)
+	add_test(NAME ngg_vertex_entry_metadata
+		COMMAND $<TARGET_FILE:shader_cfg_tests> --ngg-vertex-entry-only)
+	set_tests_properties(ngg_vertex_entry_metadata PROPERTIES TIMEOUT 30)
 	add_test(NAME packed_buffer_offset_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-gpu)
 	set_tests_properties(packed_buffer_offset_cost packed_buffer_offset_gpu PROPERTIES TIMEOUT 30)

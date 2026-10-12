@@ -1606,7 +1606,13 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 			}
 		} else if (options.stage == ShaderType::Vertex) {
 			// Vulkan owns primitive assembly; each vertex subgroup is one NGG wave.
-			// Keep its full lane extent: mbcnt(-1) uses lane ordinals, not active counts.
+			// ESVertCount is the input count of this guest wave. Its initial mask
+			// includes only launched native invocations; SGPR2 keeps the lane extent.
+			auto vertex_count = IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[0]}));
+			if (options.wave_size == 64u) {
+				vertex_count = entry_ir.IAdd(
+				    vertex_count, IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[1]})));
+			}
 			if (WaveHalvesInHostSubgroup(result)) {
 				// A 64-lane host subgroup holds two guest waves: one NGG subgroup of 64
 				// vertices, whose upper-half lanes are wave 1 (MERGED_WAVE_INFO bits 24-27), so
@@ -1618,25 +1624,14 @@ IR::Program TranslateProgram(const Decoder::Program& decoded, const CFG::Graph& 
 				entry_ir.SetScalarReg(
 				    static_cast<IR::ScalarReg>(3),
 				    entry_ir.BitwiseOr(
-				        IR::U32(IR::Value((2u << 28u) | options.wave_size)),
-				        entry_ir.ShiftLeftLogical(wave, IR::U32(IR::Value(24u)))));
+				        vertex_count, entry_ir.BitwiseOr(
+				            IR::U32(IR::Value(2u << 28u)),
+				            entry_ir.ShiftLeftLogical(wave, IR::U32(IR::Value(24u))))));
 			} else {
 				entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(2),
 				                      IR::U32(IR::Value(options.wave_size << 12u)));
-				// KYTY_NGG_VERTEX_COUNT=1 (upstream cf77fb43): ESVertCount is the number of active
-				// lanes (input vertices), not the wave size.
-				if (ShaderRecompiler::NggVertexCount()) {
-					auto vertex_count = IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[0]}));
-					if (options.wave_size == 64u) {
-						vertex_count = entry_ir.IAdd(
-						    vertex_count, IR::U32(entry_ir.Emit(IR::ValueOpcode::BitCount32, {entry_lanes[1]})));
-					}
-					entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
-					                      entry_ir.BitwiseOr(vertex_count, IR::U32(IR::Value(1u << 28u))));
-				} else {
-					entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
-					                      IR::U32(IR::Value((1u << 28u) | options.wave_size)));
-				}
+				entry_ir.SetScalarReg(static_cast<IR::ScalarReg>(3),
+				                      entry_ir.BitwiseOr(vertex_count, IR::U32(IR::Value(1u << 28u))));
 			}
 			entry_ir.SetVectorReg(static_cast<IR::VectorReg>(5),
 			                      builtin(IR::StageInputKind::VertexIndex));

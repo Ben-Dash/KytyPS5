@@ -319,6 +319,7 @@ private:
 #include "BindlessDescriptorRetirementTests.inc"
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
+#include "NggVertexCountTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
 #include "PackedBufferOffsetTests.inc"
@@ -363,8 +364,9 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--dispatch-snapshot-selector-frame-only") == 0 ||
                             std::strcmp(argv[1], "--dispatch-snapshot-selector-default-only") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
+                            std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0 ||
                             std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu]");
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu | --dispatch-snapshot-selector-only | --dispatch-snapshot-selector-frame-only | --dispatch-snapshot-selector-default-only | --packed-buffer-offset-cost | --packed-buffer-offset-gpu | --ngg-vertex-count-gpu]");
   if (argc == 2 && (std::strcmp(argv[1], "--dispatch-snapshot-selector-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-selector-frame-only") == 0 ||
                     std::strcmp(argv[1], "--dispatch-snapshot-selector-default-only") == 0)) {
@@ -377,6 +379,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && (std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0 ||
                     std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0))
     ConfigurePackedBufferOffsetTests();
+  if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0)
+    ConfigureNggVertexCountTests();
   if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
                     std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0))
     ConfigureFaultFirstBindingDeferredGpu();
@@ -422,6 +426,8 @@ int main(int argc, char **argv) {
     CheckVertexNonFiniteTraceGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0)
     CheckGenericBufferCodegenCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0)
+    CheckNggVertexCountGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-cost") == 0)
     CheckPackedBufferOffsetCodegenCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--packed-buffer-offset-gpu") == 0)
