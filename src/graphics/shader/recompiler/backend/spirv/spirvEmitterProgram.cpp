@@ -1410,6 +1410,7 @@ void EmitProgram(EmitterState& state) {
 	}
 	state.builder.AddFunction(spv::OpFunctionEnd);
 	EmitIndirectFormattedHelpers(state);
+	EmitVertexTraceNonFiniteHelper(state);
 	if (state.program.stage == ShaderType::Mesh) {
 		EmitMeshEntryPoint(state);
 	}

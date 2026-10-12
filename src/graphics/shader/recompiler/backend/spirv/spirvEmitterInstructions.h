@@ -10,6 +10,7 @@ void EmitVertexValueTrace(ValueEmitContext& ctx, uint32_t kind, uint32_t pc,
                          uint32_t resource, uint32_t sampler,
                          const std::array<uint32_t, 12>& payload);
 void EmitVertexTraceLiveResult(ValueEmitContext& ctx, const IR::Inst& inst);
+void EmitVertexTraceNonFiniteHelper(EmitterState& state);
 // Operand signatures distinguish SPIR-V IDs (uint32_t), raw literals/values
 // (IR::Value), and instructions whose metadata or operand loads must stay lazy.
 #define EMIT_NATIVE(name, opcode, type, ...)                                                       \

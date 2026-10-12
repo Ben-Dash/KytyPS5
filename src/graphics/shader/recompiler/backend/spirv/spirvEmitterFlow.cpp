@@ -8,6 +8,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <xxhash.h>
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
@@ -666,14 +670,17 @@ void EmitVertexValueTrace(ValueEmitContext& ctx, uint32_t kind, uint32_t pc,
 			const bool image = kind == static_cast<uint32_t>(IR::VertexTraceKind::Image);
 			const bool pre = kind == static_cast<uint32_t>(IR::VertexTraceKind::PreClip);
 			const bool post = kind == static_cast<uint32_t>(IR::VertexTraceKind::PostClip);
+			const bool nf = kind == static_cast<uint32_t>(IR::VertexTraceKind::NonFinite);
 			const auto count_pointer = header(image ? 4u : 3u);
-			const auto count = pre || post ? zero : load(count_pointer);
-			const auto capacity = ConstantU32(state, image ? 6u : 24u);
-			const auto available = pre || post ? state.builder.Constant(spv::OpConstantTrue, boolean)
-			                                      : Binary(state, spv::OpULessThan, boolean, count, capacity);
+			const auto count = pre || post || nf ? zero : load(count_pointer);
+			const auto capacity = ConstantU32(state, image ? 6u : IR::VertexValueTrace().nonfinite ? 23u : 24u);
+			const auto available = nf ? Binary(state, spv::OpIEqual, boolean, load(header(9)), zero)
+			    : pre || post ? state.builder.Constant(spv::OpConstantTrue, boolean)
+			                  : Binary(state, spv::OpULessThan, boolean, count, capacity);
 			EmitIfCondition(state, available, [&] {
-				if (!pre && !post) store(count_pointer, EmitBinaryU32(state, spv::OpIAdd, count, one));
-				const auto index = pre || post ? ConstantU32(state, pre ? 30u : 31u)
+				if (!pre && !post && !nf) store(count_pointer, EmitBinaryU32(state, spv::OpIAdd, count, one));
+				const auto index = nf ? ConstantU32(state, 23u)
+				    : pre || post ? ConstantU32(state, pre ? 30u : 31u)
 				                                    : EmitBinaryU32(state, spv::OpIAdd, count, ConstantU32(state, image ? 24u : 0u));
 				const auto record = EmitBinaryU32(state, spv::OpIAdd, base,
 				    EmitBinaryU32(state, spv::OpIAdd, ConstantU32(state, IR::VertexTraceHeaderWords),
@@ -697,8 +704,9 @@ void EmitVertexValueTrace(ValueEmitContext& ctx, uint32_t kind, uint32_t pc,
 				for (uint32_t i = 0; i < payload.size(); ++i) put(12u + i, payload[i]);
 				put(0, ConstantU32(state, IR::VertexTraceMarker));
 				if (pre || post) store(header(pre ? 7u : 8u), one);
+				if (nf) store(header(9), one);
 			});
-			EmitIfCondition(state, Unary(state, spv::OpLogicalNot, boolean, available), [&] {
+			if (!nf) EmitIfCondition(state, Unary(state, spv::OpLogicalNot, boolean, available), [&] {
 				// Saturated counts never wrap back into a live record slot.
 				store(header(5), one);
 			});
@@ -707,6 +715,96 @@ void EmitVertexValueTrace(ValueEmitContext& ctx, uint32_t kind, uint32_t pc,
 }
 
 namespace {
+void PrepareVertexTraceIrMap(EmitterState& state) {
+	if (state.value_trace_ir_ready) return;
+	state.value_trace_ir_ready = true;
+	std::string map = "VertexValueTrace exact emitted IR map v1; ordinal matches %ID (1-based, including void instructions)\n";
+	uint32_t ordinal = 1;
+	for (uint32_t block = 0; block < state.program.blocks.size(); ++block) {
+		for (const auto& inst: *state.program.blocks[block]) {
+			state.value_trace_ir_ids.emplace(&inst, std::array<uint32_t, 2> {block, ordinal});
+			map += fmt::format("%{} block={} cfg_id={} opcode={} opcode_id={} type={} type_id={} args={}\n",
+			                   ordinal++, block, state.program.block_info[block].id,
+			                   IR::ValueOpcodeName(inst.GetOpcode()), static_cast<uint32_t>(inst.GetOpcode()),
+			                   IR::TypeName(inst.GetType()), static_cast<uint32_t>(inst.GetType()), inst.NumArgs());
+		}
+	}
+	map += "\nIR:\n" + IR::ProgramToString(state.program);
+	state.value_trace_ir_hash = XXH3_64bits(map.data(), map.size());
+	// Bounded diagnostic artifacts; exhausted storage is reported, never a compile failure.
+	static std::mutex mutex;
+	static std::unordered_set<uint64_t> saved;
+	static uint64_t bytes = 0;
+	std::lock_guard lock(mutex);
+	if (saved.contains(state.value_trace_ir_hash)) return;
+	if (saved.size() >= 16u || map.size() > 32u * 1024u * 1024u - bytes) {
+		std::printf("VertexValueTrace: exact IR map quota exhausted; map=%016" PRIx64 " unavailable\n", state.value_trace_ir_hash);
+		return;
+	}
+	try {
+		const char* text = KYTY_GETENV("KYTY_VS_VALUE_TRACE_DIR");
+		const std::filesystem::path directory = text != nullptr && *text != '\0' ? text : "_vertex_value_traces";
+		std::filesystem::create_directories(directory);
+		const auto name = fmt::format("nf-ir-{:016x}-{:016x}.txt", state.program.shader_hash, state.value_trace_ir_hash);
+		std::ofstream file(directory / name, std::ios::binary);
+		file.write(map.data(), map.size());
+		if (!file) {
+			std::printf("VertexValueTrace: exact IR map write failed: %s\n", name.c_str());
+			return;
+		}
+		saved.insert(state.value_trace_ir_hash); bytes += map.size();
+	} catch (const std::exception& error) {
+		std::printf("VertexValueTrace: exact IR map unavailable: %s\n", error.what());
+	}
+}
+
+void EmitVertexTraceNonFinite(ValueEmitContext& ctx, const IR::Inst& inst) {
+	auto& state = ctx.state;
+	if (!IR::VertexValueTrace().nonfinite || inst.GetType() != IR::Type::F32) return;
+	// The compact helper has no emulated-half parameter. Vertex has no workgroup
+	// input and therefore one emitter lane; explicitly decline other configurations.
+	if (state.program.stage != ShaderType::Vertex || state.lane_count != 1u || ctx.half != 0u) {
+		if (!state.value_trace_nf_unsupported) {
+			state.value_trace_nf_unsupported = true;
+			std::printf("VertexValueTrace: compact NF diagnostic unavailable for stage=%u lane_count=%u half=%u\n",
+			            static_cast<uint32_t>(state.program.stage), state.lane_count, ctx.half);
+		}
+		return;
+	}
+	PrepareVertexTraceIrMap(state);
+	const auto result = ctx.Result(inst);
+	const auto invalid = Binary(state, spv::OpLogicalOr, TypeBool(state),
+	    Unary(state, spv::OpIsNan, TypeBool(state), result),
+	    Unary(state, spv::OpIsInf, TypeBool(state), result));
+	std::array<uint32_t, 12> payload;
+	payload.fill(ConstantU32(state, 0));
+	const auto ids = state.value_trace_ir_ids.at(&inst);
+	payload[0] = Unary(state, spv::OpBitcast, TypeU32(state), result);
+	payload[1] = ConstantU32(state, static_cast<uint32_t>(inst.GetOpcode()));
+	payload[2] = ConstantU32(state, ids[0]); payload[3] = ConstantU32(state, ids[1]);
+	payload[4] = ConstantU32(state, static_cast<uint32_t>(inst.NumArgs()));
+	uint32_t flags = inst.NumArgs() > 3u ? 1u : 0u;
+	for (uint32_t i = 0; i < std::min<size_t>(inst.NumArgs(), 3u); ++i) {
+		const auto type = inst.Arg(i).GetType();
+		payload[5u + 2u * i] = ConstantU32(state, static_cast<uint32_t>(type));
+		if (type == IR::Type::F32) payload[6u + 2u * i] = Unary(state, spv::OpBitcast, TypeU32(state), ctx.Arg(inst, i));
+		else if (type == IR::Type::U1) payload[6u + 2u * i] = Select(state, TypeU32(state), ctx.Arg(inst, i), ConstantU32(state, 1), ConstantU32(state, 0));
+		else if (type == IR::Type::U8 || type == IR::Type::U16 || type == IR::Type::U32 || type == IR::Type::F16)
+			payload[6u + 2u * i] = ctx.Arg(inst, i);
+		else flags |= 2u << i; // Wide/opaque argument is not represented by one DWORD.
+	}
+	payload[11] = ConstantU32(state, flags);
+	if (state.value_trace_nf_function == 0) state.value_trace_nf_function = state.builder.AllocateId();
+	// Keep the large bounded writer out of every expression site. Parameters are
+	// already-live raw values/metadata; this adds no guest load or result replacement.
+	EmitIfCondition(state, invalid, [&] {
+		std::vector<uint32_t> call {spv::OpFunctionCall, TypeVoid(state), state.builder.AllocateId(),
+		                            state.value_trace_nf_function};
+		call.insert(call.end(), payload.begin(), payload.end());
+		state.builder.AddFunction(call);
+	});
+}
+
 std::optional<IR::Value> ImageSelectedUsePredicate(const IR::Inst& image) {
 	std::optional<IR::Value> condition;
 	for (const auto& use: image.Uses()) {
@@ -723,9 +821,37 @@ std::optional<IR::Value> ImageSelectedUsePredicate(const IR::Inst& image) {
 }
 }
 
+void EmitVertexTraceNonFiniteHelper(EmitterState& state) {
+	if (state.value_trace_nf_function == 0) return;
+	const auto u32 = TypeU32(state);
+	const auto type = state.builder.Type(spv::OpTypeFunction, TypeVoid(state),
+	    u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
+	state.builder.AddFunction(spv::OpFunction, TypeVoid(state), state.value_trace_nf_function,
+	                          spv::FunctionControlDontInlineMask, type);
+	std::array<uint32_t, 12> payload;
+	for (auto& param: payload) {
+		param = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpFunctionParameter, u32, param);
+	}
+	const auto* previous_block = state.current_block;
+	const auto previous_half = state.lane_half;
+	state.current_block = nullptr;
+	state.lane_half = 0;
+	EmitLabel(state, state.builder.AllocateId());
+	ValueEmitContext ctx(state);
+	EmitVertexValueTrace(ctx, static_cast<uint32_t>(IR::VertexTraceKind::NonFinite), UINT32_MAX,
+	    ConstantBool(state, true), 3u, static_cast<uint32_t>(state.value_trace_ir_hash),
+	    static_cast<uint32_t>(state.value_trace_ir_hash >> 32u), payload);
+	state.builder.AddFunction(spv::OpReturn);
+	state.builder.AddFunction(spv::OpFunctionEnd);
+	state.current_block = previous_block;
+	state.lane_half = previous_half;
+}
+
 void EmitVertexTraceLiveResult(ValueEmitContext& ctx, const IR::Inst& inst) {
 	auto& state = ctx.state;
 	if (!state.program.bindings.vertex_value_trace) return;
+	EmitVertexTraceNonFinite(ctx, inst);
 	const auto opcode = inst.GetOpcode();
 	const bool image = opcode == IR::ValueOpcode::ImageSampleRaw;
 	const bool buffer = IR::BufferAccessOf(opcode) == IR::BufferAccess::Read;

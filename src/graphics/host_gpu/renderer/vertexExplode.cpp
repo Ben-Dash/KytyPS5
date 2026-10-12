@@ -482,6 +482,9 @@ uint64_t RegisterValueTrace(RenderContext& context, const DrawNote& note, uint64
 	    {"schema", 1}, {"token", draw.token}, {"submit", submit}, {"frame", note.frame},
 	    {"draw", DescribeDraw(note, state.draws)}, {"selected_shader", fmt::format("{:016x}", settings.hash)},
 	    {"selected_vertex", settings.vertex}, {"selected_instance", settings.instance},
+	    {"nf_trace_enabled", settings.nonfinite},
+	    {"nf_trace_protocol", 2},
+	    {"nf_trace_scope", "first invalid compiled scalar F32 expression for the owning invocation; guest EXEC unknown, may be inactive/unselected SSA"},
 	    {"first_admitted_frame", first_frame},
 	    {"selected_pcs", std::vector<uint32_t>(settings.pcs.begin(), settings.pcs.begin() + settings.pc_count)},
 	    {"events", nlohmann::json::array()}, {"stages", nlohmann::json::array()},
@@ -635,6 +638,7 @@ void ReportValueTrace(const uint32_t* region, uint64_t frame) {
 		draw.metadata["truncated"] = header[5] != 0;
 		draw.metadata["preclip_ready"] = header[7] != 0;
 		draw.metadata["postclip_ready"] = header[8] != 0;
+		draw.metadata["first_nonfinite_ready"] = header[9] != 0;
 		draw.metadata["events"] = nlohmann::json::array();
 		std::unordered_set<uint32_t> observed;
 		for (uint32_t i = 0; i < IR::VertexTraceEvents; ++i) {
@@ -642,17 +646,39 @@ void ReportValueTrace(const uint32_t* region, uint64_t frame) {
 			if (event[0] != IR::VertexTraceMarker) continue;
 			observed.insert(event[2]);
 			const bool image = event[1] == static_cast<uint32_t>(IR::VertexTraceKind::Image);
-			const char* predicate_origin = image
+			const bool nf = event[1] == static_cast<uint32_t>(IR::VertexTraceKind::NonFinite);
+			const char* predicate_origin = nf ? "compiled_expression" : image
 			    ? (event[7] == 1u ? "selected_use" : event[7] == 2u ? "adjacent_selected_use" : "unknown")
 			    : "guest_exec_operand";
 			draw.metadata["events"].push_back({{"kind", event[1]}, {"pc", event[2]}, {"sequence", event[3]},
 			    {"vertex", event[4]}, {"instance", event[5]}, {"half", event[6]},
 			    {"predicate_origin", predicate_origin}, {"predicate_origin_code", event[7]},
-			    {"guest_exec_proven", !image},
-			    {"guest_exec_active", image ? nlohmann::json(nullptr) : nlohmann::json(event[10] != 0)},
-			    {"resource", event[8]}, {"sampler", event[9]}, {"predicate_selected", event[10] != 0},
+			    {"guest_exec_proven", !image && !nf},
+			    {"guest_exec_active", image || nf ? nlohmann::json(nullptr) : nlohmann::json(event[10] != 0)},
+			    {"resource", nf ? nlohmann::json(nullptr) : nlohmann::json(event[8])},
+			    {"sampler", nf ? nlohmann::json(nullptr) : nlohmann::json(event[9])}, {"predicate_selected", event[10] != 0},
 			    {"physical_subgroup_invocation", event[11]},
 			    {"payload_bits", std::vector<uint32_t>(event + 12, event + 24)}});
+			auto& saved = draw.metadata["events"].back();
+			if (nf) {
+				const auto map_hash = uint64_t {event[8]} | (uint64_t {event[9]} << 32u);
+				const auto name = fmt::format("nf-ir-{:016x}-{:016x}.txt", IR::VertexValueTrace().hash, map_hash);
+				saved["pc_available"] = false;
+				saved["ir_map_xxh3_64"] = fmt::format("{:016x}", map_hash);
+				saved["ir_map_file"] = name;
+				std::error_code map_error;
+				saved["ir_map_available"] = std::filesystem::exists(ValueTraceDirectory() / name, map_error);
+				if (map_error) saved["ir_map_error"] = map_error.message();
+				saved["result_bits"] = event[12];
+				saved["opcode"] = event[13]; saved["block_index"] = event[14];
+				saved["ir_ordinal"] = event[15]; saved["arg_count"] = event[16];
+				saved["arg_flags"] = event[23]; saved["typed_args"] = nlohmann::json::array();
+				for (uint32_t arg = 0; arg < std::min(event[16], 3u); ++arg)
+					saved["typed_args"].push_back({{"type", event[17 + 2u * arg]},
+					                               {"bits", event[18 + 2u * arg]},
+					                               {"bits_available", (event[23] & (2u << arg)) == 0u}});
+				saved["scope"] = "first invalid compiled expression; not proven first executed guest operation or exported dependency";
+			} else saved["pc_available"] = true;
 		}
 		draw.metadata["missing_selected_pcs"] = nlohmann::json::array();
 		const auto& settings = IR::VertexValueTrace();

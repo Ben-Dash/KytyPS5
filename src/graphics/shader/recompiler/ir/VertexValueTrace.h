@@ -13,6 +13,7 @@ namespace Libs::Graphics::ShaderRecompiler::IR {
 // KYTY_VS_VALUE_TRACE=<hex hash>:<vertex>:<instance>[:<PC>,...] (PCs include 0x prefixes).
 struct VertexValueTraceSettings {
 	bool enabled = false;
+	bool nonfinite = false;
 	uint64_t hash = 0;
 	uint32_t vertex = 0, instance = 0;
 	std::array<uint32_t, 16> pcs {};
@@ -49,6 +50,8 @@ inline const VertexValueTraceSettings& VertexValueTrace() {
 			}
 		}
 		result.enabled = true;
+		const char* nf = KYTY_GETENV("KYTY_VS_NF_TRACE");
+		result.nonfinite = nf != nullptr && *nf != '\0' && *nf != '0';
 		return result;
 	}();
 	return settings;
@@ -71,10 +74,11 @@ inline std::string VertexTraceCacheSignature() {
 	auto text = "vtxtrace=1:" + std::to_string(settings.hash) + ":" +
 	            std::to_string(settings.vertex) + ":" + std::to_string(settings.instance);
 	for (uint32_t i = 0; i < settings.pc_count; ++i) text += ":" + std::to_string(settings.pcs[i]);
+	if (settings.nonfinite) text += ":nf=2";
 	return text + "\n";
 }
 
-enum class VertexTraceKind : uint32_t { Buffer = 1, Image = 2, PreClip = 3, PostClip = 4 };
+enum class VertexTraceKind : uint32_t { Buffer = 1, Image = 2, PreClip = 3, PostClip = 4, NonFinite = 5 };
 inline constexpr uint32_t VertexTraceDrawSlots = 2;
 inline constexpr uint32_t VertexTraceHeaderWords = 16;
 inline constexpr uint32_t VertexTraceEventWords = 24;
@@ -88,5 +92,8 @@ inline constexpr uint32_t VertexTraceMarker = 0x56540001u;
 // preclip ready, postclip ready. Ordinary events 0..23, images 24..29, exports 30/31.
 // Event word10 means the diagnostic predicate selected this event. For images word7
 // is selected_use(1) or adjacent_selected_use(2); neither proves guest EXEC provenance.
+// NF mode reserves ordinary slot23; header9 means first NF ready. Kind5 records an
+// invalid compiled F32 expression, not proven guest EXEC; pc is UINT32_MAX and
+// resource/sampler words carry the exact IR map's XXH3 low/high, not resources.
 
 } // namespace Libs::Graphics::ShaderRecompiler::IR

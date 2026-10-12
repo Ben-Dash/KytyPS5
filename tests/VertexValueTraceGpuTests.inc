@@ -2,6 +2,11 @@
 // uses real public translation/materialization/compilation and one indexed
 // point per request; no captured game shader or fabricated resource is used.
 #include "graphics/shader/recompiler/ir/VertexValueTrace.h"
+#include "xxhash.h"
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <fmt/format.h>
 
 namespace Libs::Graphics {
 namespace {
@@ -469,5 +474,578 @@ void CheckVertexValueTraceGpu(VulkanHarness& vulkan) {
   RunVertexTraceGpuModule(vulkan, native_vertices, shader_input, output, indices, faults, false);
   RunVertexTraceGpuModule(vulkan, native_vertices, shader_input, output, indices, faults, true);
 }
+
+constexpr uint32_t TraceNfGpuLoadPc = 0x2cu;
+struct TraceNfGpuDraw {
+  const char* label;
+  uint32_t input, token, raw;
+  bool active, nonfinite, preserve_previous;
+  FetchGpuIR::ValueOpcode first_opcode;
+};
+constexpr std::array<TraceNfGpuDraw, 11> TraceNfGpuDraws{{
+    {"finite-two", 0x40000000u, 1u, TraceGpuRaw, true, false, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"finite-zero", 0u, 1u, TraceGpuRaw, true, false, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"negative-sqrt", 0xbf800000u, 1u, TraceGpuRaw, true, true, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"finite-mul-overflow", 0x7f7fffffu, 1u, TraceGpuRaw, true, true, false, FetchGpuIR::ValueOpcode::FPMul32},
+    {"runtime-qnan-interpretation", 0x7fc12345u, 1u, TraceGpuRaw, true, true, false, FetchGpuIR::ValueOpcode::BitCastF32U32},
+    {"runtime-inf-interpretation", 0x7f800000u, 1u, TraceGpuRaw, true, true, false, FetchGpuIR::ValueOpcode::BitCastF32U32},
+    // ExecSelectSinking discards inactive register values before the masked
+    // load. Its actual inactive result is zero, so MUL/SQRT stay finite here.
+    {"inactive-load-sink-finite-control", 0xbf800000u, 1u, TraceGpuRaw, false, false, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"token0-negative-sqrt", 0xbf800000u, 0u, TraceGpuRaw, true, false, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"wrong-vertex-negative-sqrt", 0xbf800000u, 1u, TraceGpuRaw + 1u, true, false, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"immutable-nan-token1", 0xbf800000u, 1u, TraceGpuRaw, true, true, false, FetchGpuIR::ValueOpcode::FPSqrt},
+    {"immutable-inf-token2", 0x7f7fffffu, 2u, TraceGpuRaw, true, true, true, FetchGpuIR::ValueOpcode::FPMul32}}};
+
+void ConfigureVertexNonFiniteTraceGpuEnvironment() {
+  // Explicit artifact directory keeps the production map join reproducible.
+  const char* configured = std::getenv("KYTY_VS_VALUE_TRACE_DIR");
+  if (configured == nullptr || *configured == '\0') {
+    const char* capture = std::getenv("KYTY_CAPTURE_TEST_DIR");
+    const auto directory = (std::filesystem::path(capture != nullptr && *capture != '\0'
+        ? capture : "_Build/analysis/vertex-nf-gpu-fixture") / "nf-maps").string();
+    Require("VertexNonFiniteTraceGpu", "map artifact directory setup",
+        _putenv_s("KYTY_VS_VALUE_TRACE_DIR", directory.c_str()) == 0,
+        "could not configure exact IR map path before first getter; not a numeric RED");
+  }
+  Require("VertexNonFiniteTraceGpu", "fixture environment setup",
+      _putenv_s("KYTY_VTX_EXPLODE_CHECK", "1") == 0 &&
+      _putenv_s("KYTY_VS_VALUE_TRACE", "56544750524f4f46:0x001d0001:0:0x2c") == 0 &&
+      _putenv_s("KYTY_VS_NF_TRACE", "1") == 0,
+      "could not configure diagnostic selector before first getter; not a numeric RED");
+}
+
+void CheckTraceNfGpuRecord(const char* name, const uint32_t* slot,
+                         const TraceNfGpuDraw& request, const FetchGpuIR::Program& program) {
+  const auto* event = slot + FetchGpuIR::VertexTraceHeaderWords +
+      23u * FetchGpuIR::VertexTraceEventWords;
+  if (!request.nonfinite) {
+    Require(name, "finite/no-selection NF slot stays empty", slot[9] == 0u &&
+        std::all_of(event, event + FetchGpuIR::VertexTraceEventWords,
+                    [](uint32_t word) { return word == 0u; }),
+        "finite expression or unselected invocation wrote first-nonfinite data");
+    return;
+  }
+  Require(name, "first expression owner and unknown guest EXEC", slot[0] == 1u &&
+      slot[1] == request.token && slot[2] == 0u && slot[9] == 1u &&
+      event[0] == FetchGpuIR::VertexTraceMarker && event[1] == 5u &&
+      event[2] == UINT32_MAX && event[4] == TraceGpuRaw && event[5] == 0u &&
+      event[6] == 0u && event[7] == 3u && event[10] == 1u,
+      "NF must identify the actual compiled expression without claiming guest EXEC activity");
+  const uint64_t map = event[8] | (uint64_t{event[9]} << 32u);
+  const char* directory = std::getenv("KYTY_VS_VALUE_TRACE_DIR");
+  Require(name, "exact map artifact directory", directory != nullptr && *directory != '\0',
+      "first expression must have an explicit bounded artifact directory");
+  const auto path = std::filesystem::path(directory) /
+      fmt::format("nf-ir-{:016x}-{:016x}.txt", program.shader_hash, map);
+  Require(name, "bounded exact compiled IR map artifact", std::filesystem::exists(path) &&
+      std::filesystem::file_size(path) <= 32u * 1024u * 1024u,
+      "first expression has no bounded saved emitted map; not a numerical RED");
+  std::ifstream file(path, std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+  const auto marker = text.rfind("\nIR:\n");
+  Require(name, "exact compiled IR map identity", file.good() &&
+      XXH3_64bits(text.data(), text.size()) == map && marker != std::string::npos &&
+      text.substr(marker + 5u) == FetchGpuIR::ProgramToString(program),
+      "NF map checksum or emitted IR suffix does not match the actual compiled program");
+  const auto* payload = event + 12u;
+  const auto opcode = static_cast<FetchGpuIR::ValueOpcode>(payload[1]);
+  Require(name, "first nonfinite expression opcode/type/result", opcode == request.first_opcode &&
+      (payload[0] & 0x7f800000u) == 0x7f800000u && payload[4] >= 1u && payload[4] <= 3u &&
+      payload[11] == 0u,
+      "expected the first actual scalarF32 interpretation/arithmetic result, with complete typed args");
+  uint32_t ordinal = 1u, block_index = 0u;
+  const FetchGpuIR::Inst* found = nullptr;
+  for (const auto* block : program.blocks) {
+    for (const auto& inst : *block) {
+      if (ordinal == payload[3]) {
+        Require(name, "compiled block/ordinal lookup", block_index == payload[2],
+                "global IR body ordinal names the wrong compiled block");
+        found = &inst;
+      }
+      ++ordinal;
+    }
+    ++block_index;
+  }
+  Require(name, "actual emitted expression resolution", found != nullptr &&
+      found->GetOpcode() == opcode && found->NumArgs() == payload[4],
+      "reported first expression does not resolve to the actual compiled IR");
+  Require(name, "typed actual argument metadata", payload[5] ==
+      static_cast<uint32_t>(found->Arg(0).GetType()),
+      "first argument type differs from the actual compiled expression");
+  if (opcode == FetchGpuIR::ValueOpcode::FPSqrt) {
+    Require(name, "negative runtime arithmetic input", payload[5] ==
+        static_cast<uint32_t>(FetchGpuIR::Type::F32) && payload[6] == 0xc0000000u &&
+        (payload[0] & 0x007fffffu) != 0u,
+        "sqrt(-2) must identify NaN from the real finite negative operand");
+  } else if (opcode == FetchGpuIR::ValueOpcode::FPMul32) {
+    Require(name, "overflow runtime arithmetic inputs", payload[4] == 2u &&
+        payload[5] == static_cast<uint32_t>(FetchGpuIR::Type::F32) &&
+        payload[7] == static_cast<uint32_t>(FetchGpuIR::Type::F32) &&
+        ((payload[6] == 0x7f7fffffu && payload[8] == 0x40000000u) ||
+         (payload[8] == 0x7f7fffffu && payload[6] == 0x40000000u)) &&
+        payload[0] == 0x7f800000u,
+        "maxfinite*2 must retain actual finite inputs and its first infinity result");
+  } else {
+    Require(name, "runtime nonfinite interpretation", payload[4] == 1u &&
+        payload[5] == static_cast<uint32_t>(FetchGpuIR::Type::U32) &&
+        payload[6] == request.input && payload[0] == request.input,
+        "runtime NaN/Inf interpretation must preserve raw bits and must not be called arithmetic generation");
+  }
+}
+std::vector<std::array<uint32_t, 4>> RunVertexNonFiniteTraceGpuModule(VulkanHarness& vulkan, FetchGpuBuffer& native_vertices,
+                    FetchGpuBuffer& shader_input, FetchGpuBuffer& output,
+                    FetchGpuBuffer& indices, FetchGpuBuffer& faults, bool tracing, const std::vector<std::array<uint32_t, 4>>* baseline) {
+  const char* name = tracing ? "VertexNonFiniteTraceGpuEnabled" : "VertexNonFiniteTraceGpuOff";
+  auto& graphics = vulkan.RuntimeContext();
+  const auto device = vulkan.Device();
+  const auto input_descriptor = FetchGpuDescriptor(FetchGpuGuest::Input, 4u, 6u);
+  const auto output_descriptor = FetchGpuDescriptor(FetchGpuGuest::Output, 0u, 16u);
+  std::memcpy(reinterpret_cast<void*>(FetchGpuGuest::Base), input_descriptor.data(), sizeof(input_descriptor));
+  std::array<uint32_t, 11> userdata{};
+  userdata[8] = UINT32_MAX; // s16:s17 = runtime EXEC (low32 active, high32 zero)
+  userdata[0] = static_cast<uint32_t>(FetchGpuGuest::Base);
+  userdata[1] = static_cast<uint32_t>(FetchGpuGuest::Base >> 32u);
+  std::copy(output_descriptor.begin(), output_descriptor.end(), userdata.begin() + 4u);
+  ShaderVertexInputInfo vertex{};
+  vertex.logical_stage = ShaderType::Vertex;
+  vertex.fetch_embedded = true;
+  vertex.fetch_buffer_reg = 0;
+  vertex.fetch_attrib_reg = 2;
+  vertex.pa_cl_vs_out_cntl = (1u << 21u) | (1u << 16u);
+  vertex.clip_space.enabled = true;
+  vertex.clip_space.scale[0] = vertex.clip_space.scale[1] = 1.0f;
+  vertex.clip_space.offset[0] = 3.0f;
+  vertex.clip_space.offset[1] = 1.0f;
+  vertex.clip_space.half_extent[0] = vertex.clip_space.half_extent[1] = 2.0f;
+  vertex.resources_num = 1;
+  std::copy(input_descriptor.begin(), input_descriptor.end(), vertex.resources[0].fields);
+  vertex.resources_dst[0].attr_id = 0;
+  vertex.resources_dst[0].register_start = 9;
+  vertex.resources_dst[0].registers_num = 1;
+  ShaderRecompiler::CompileOptions options;
+  options.stage = ShaderType::Vertex;
+  options.wave_size = 32;
+  options.user_data_base = 8;
+  options.user_data = userdata;
+  options.input_info.vertex = &vertex;
+  options.dump_ir = false;
+  options.shader_hash = tracing ? TraceGpuHash : TraceGpuHash + 1u;
+  auto code = FetchGpuCode(true);
+  // S_MOV_B64 EXEC,s[16:17] is ordinary guest ISA. Its user-data value
+  // changes at draw time, retaining the real BufferRead's EXEC predicate.
+  // Initialize the inactive path before changing EXEC. Float SSA expressions
+  // can exist even when their guest destination write/store is inactive.
+  code.insert(code.begin() + 3u, (0x3fu << 25u) | (9u << 17u) | (1u << 9u) | 243u);
+  code.insert(code.begin() + 4u, 0xbefe0410u);
+  // Runtime finite/NaN/Inf bits feed real guest arithmetic, with both results live.
+  code.insert(code.begin() + 13u, (0x08u << 25u) | (9u << 17u) | (9u << 9u) | 244u);
+  code.insert(code.begin() + 14u, (0x3fu << 25u) | (9u << 17u) | (0x33u << 9u) | (256u + 9u));
+  auto translated = ShaderRecompiler::TranslateProgram(code, options);
+  Require(name, "actual guest translation", !translated.skip_dispatch,
+          "synthetic guest shader setup did not translate; not a semantic RED");
+  auto plan = FetchGpuIR::ExtractResourcePlan(translated.program);
+  FetchGpuIR::ResourceSnapshot resources;
+  FetchGpuIR::ResourceSpecialization specialization;
+  const FetchGpuIR::SrtRuntime runtime{.user_data = userdata,
+      .shader_base = reinterpret_cast<uint64_t>(code.data()),
+      .read_memory = ReadFetchGpuGuest, .read_specialization_memory = ReadFetchGpuGuest};
+  Require(name, "actual resource materialization",
+          FetchGpuIR::MaterializeResources(plan, runtime, resources, specialization),
+          "tracked synthetic SRDs could not materialize; not a semantic RED");
+  auto compiled = ShaderRecompiler::CompileProgram(std::move(translated), options, specialization);
+  Require(name, "actual vertex module", compiled.program.stage == ShaderType::Vertex &&
+              !compiled.spirv.empty(), "must execute the real compiled vertex stage");
+  spvtools::SpirvTools validator(SPV_ENV_VULKAN_1_3);
+  validator.SetMessageConsumer([](spv_message_level_t, const char*, const spv_position_t& position,
+                                  const char* message) {
+    std::fprintf(stderr, "VertexTraceGpu SPIR-V word%zu: %s\n", position.index, message);
+  });
+  Require(name, "SPIR-V validation before GPU", validator.Validate(compiled.spirv),
+          "compiled vertex SPIR-V invalid; not a semantic RED");
+  const auto& layout = compiled.program.bindings;
+  Require(name, "bounded ordinary buffer profile", !layout.table,
+          "this explicit native fixture requires ordinary buffers, not table/BDA mode");
+  Require(name, "actual trace layout setup", layout.vertex_value_trace == tracing &&
+              FetchGpuIR::FindBinding(layout, FetchGpuIR::DescriptorBindingKind::FaultBuffer) != nullptr,
+          "CHECK/trace selector did not produce the required reflected layout; not a numeric RED");
+  Require(name, "runtime EXEC shader-data input",
+          std::find(layout.user_data_registers.begin(), layout.user_data_registers.end(), 16u) !=
+              layout.user_data_registers.end(),
+          "encoded EXEC must remain a real runtime user-data input; not a numeric RED");
+  uint32_t load_resource = UINT32_MAX, load_count = 0, position_pc = UINT32_MAX;
+  for (const auto* block : compiled.program.blocks) for (const auto& inst : *block) {
+    if (FetchGpuIR::BufferAccessOf(inst.GetOpcode()) == FetchGpuIR::BufferAccess::Read &&
+        inst.Flags<FetchGpuIR::MemoryFlags>().pc == TraceNfGpuLoadPc) {
+      Require(name, "live buffer predicate setup", inst.NumArgs() == 5u &&
+                  inst.Arg(4).GetType() == FetchGpuIR::Type::U1,
+              "selected live read lacks the actual guest EXEC input; not a numeric RED");
+      load_resource = compiled.program.memory_info.at(inst.Flags<FetchGpuIR::MemoryFlags>().index).resource;
+      ++load_count;
+    }
+    if (inst.GetOpcode() == FetchGpuIR::ValueOpcode::SetAttribute) {
+      const auto flags = inst.Flags<FetchGpuIR::ExportFlags>();
+      const auto& exp = compiled.program.export_info.at(flags.index);
+      if (exp.kind == FetchGpuIR::ExportTargetKind::Position && exp.index == 0u)
+        position_pc = flags.pc;
+    }
+  }
+  Require(name, "live selected fetch setup", load_count == 1u && position_pc != UINT32_MAX,
+          "expected one selected actual buffer load and Position export; not a numeric RED");
+  std::vector<uint32_t> shader_data;
+  for (const auto reg : layout.user_data_registers)
+    shader_data.push_back(resources.user_data.at(reg - compiled.program.user_data_base));
+  shader_data.resize(layout.ShaderDataDwords()); // native binding byte offsets are0
+  for (uint32_t k = 0; k < layout.buffer_strides.size(); ++k)
+    shader_data[layout.BufferStrideDword() + k / 2u] |=
+        (FetchGpuIR::CanonicalPackedStride(resources.buffers.at(layout.buffer_strides[k])) & 0x3fffu)
+        << ((k % 2u) * 16u);
+  for (uint32_t k = 0; k < layout.buffer_formats.size(); ++k)
+    shader_data[layout.BufferFormatDword() + k] =
+        FetchGpuIR::RuntimeBufferSlotWord(resources.buffers.at(layout.buffer_formats[k]));
+  std::unique_ptr<FetchGpuBuffer> shader_data_buffer, flat_buffer;
+  std::vector<vk::DescriptorSetLayoutBinding> bindings;
+  std::vector<vk::DescriptorPoolSize> pool_sizes;
+  using Kind = FetchGpuIR::DescriptorBindingKind;
+  for (const auto& binding : layout.descriptors) {
+    Require(name, "supported actual bindings", binding.kind == Kind::Buffers ||
+                binding.kind == Kind::ShaderData || binding.kind == Kind::FlattenedSrt ||
+                binding.kind == Kind::FaultBuffer,
+            "unexpected actual binding needs explicit native fixture support; not a semantic RED");
+    const auto count = NativeDescriptorCount(binding);
+    const auto type = NativeDescriptorType(binding.kind);
+    bindings.push_back({FetchGpuIR::NativeBinding(ShaderType::Vertex, binding.kind), type,
+                        count, vk::ShaderStageFlagBits::eVertex, nullptr});
+    auto found = std::find_if(pool_sizes.begin(), pool_sizes.end(),
+                              [&](const auto& entry) { return entry.type == type; });
+    if (found == pool_sizes.end()) pool_sizes.push_back({type, count});
+    else found->descriptorCount += count;
+    if (binding.kind == Kind::ShaderData) {
+      Require(name, "actual shader data", !shader_data.empty(), "required shader data is missing");
+      shader_data_buffer = std::make_unique<FetchGpuBuffer>(graphics, shader_data.size() * 4u,
+                                                           vk::BufferUsageFlagBits::eStorageBuffer);
+      std::memcpy(shader_data_buffer->data, shader_data.data(), shader_data_buffer->size);
+      shader_data_buffer->Flush();
+    }
+    if (binding.kind == Kind::FlattenedSrt) {
+      Require(name, "actual flattened SRT", !resources.flattened_srt.empty(), "required SRT data is missing");
+      flat_buffer = std::make_unique<FetchGpuBuffer>(graphics, resources.flattened_srt.size() * 4u,
+                                                    vk::BufferUsageFlagBits::eStorageBuffer);
+      std::memcpy(flat_buffer->data, resources.flattened_srt.data(), flat_buffer->size);
+      flat_buffer->Flush();
+    }
+  }
+  vk::DescriptorSetLayout descriptor_layout = nullptr;
+  vk::DescriptorSetLayoutCreateInfo descriptor_info{};
+  descriptor_info.bindingCount = static_cast<uint32_t>(bindings.size());
+  descriptor_info.pBindings = bindings.data();
+  RequireVulkanSuccess(device.createDescriptorSetLayout(&descriptor_info, nullptr, &descriptor_layout),
+                       "vertex-fetch reflected descriptor layout");
+  vk::DescriptorPool pool = nullptr;
+  vk::DescriptorPoolCreateInfo pool_info{};
+  pool_info.maxSets = 1u;
+  pool_info.poolSizeCount = static_cast<uint32_t>(pool_sizes.size());
+  pool_info.pPoolSizes = pool_sizes.data();
+  RequireVulkanSuccess(device.createDescriptorPool(&pool_info, nullptr, &pool),
+                       "vertex-fetch descriptor pool");
+  vk::DescriptorSet set = nullptr;
+  vk::DescriptorSetAllocateInfo set_info{};
+  set_info.descriptorPool = pool;
+  set_info.descriptorSetCount = 1u;
+  set_info.pSetLayouts = &descriptor_layout;
+  RequireVulkanSuccess(device.allocateDescriptorSets(&set_info, &set), "vertex-fetch descriptor set");
+  for (const auto& binding : layout.descriptors) {
+    std::vector<vk::DescriptorBufferInfo> infos;
+    if (binding.kind == Kind::Buffers) {
+      for (const auto resource : binding.resources) {
+        // MaterializeResources stores each ordinary buffer at the same info
+        // resource index; this fixture explicitly excludes indirect children.
+        Require(name, "actual ordinary-buffer layout", resource < plan.info.buffers.size() &&
+                    resource < resources.buffers.size() &&
+                    compiled.program.info.buffers.at(resource).source == plan.info.buffers[resource].source &&
+                    compiled.program.info.buffers.at(resource).indirect_root ==
+                        FetchGpuIR::BufferResource::NoIndirectBuffer,
+                "reflected ordinary buffer does not match its materialized plan index");
+        const auto& descriptor = resources.buffers.at(resource);
+        const uint64_t address = descriptor.dwords[0] |
+            (static_cast<uint64_t>(descriptor.dwords[1] & 0xffffu) << 32u);
+        if (address == FetchGpuGuest::Input) infos.push_back({shader_input.buffer, 0u, shader_input.size});
+        else {
+          Require(name, "actual resource identity", address == FetchGpuGuest::Output,
+                  "unexpected buffer SRD; must not fabricate a fallback resource");
+          infos.push_back({output.buffer, 0u, output.size});
+        }
+      }
+    } else {
+      const auto* buffer = binding.kind == Kind::FaultBuffer ? &faults :
+          binding.kind == Kind::ShaderData ? shader_data_buffer.get() : flat_buffer.get();
+      Require(name, "actual reflected data buffer", buffer != nullptr, "required data buffer missing");
+      infos.push_back({buffer->buffer, 0u, buffer->size});
+    }
+    Require(name, "native descriptor count", infos.size() == NativeDescriptorCount(binding),
+            "actual reflected binding count differs from fixture resources");
+    vk::WriteDescriptorSet write{};
+    write.dstSet = set;
+    write.dstBinding = FetchGpuIR::NativeBinding(ShaderType::Vertex, binding.kind);
+    write.descriptorCount = static_cast<uint32_t>(infos.size());
+    write.descriptorType = NativeDescriptorType(binding.kind);
+    write.pBufferInfo = infos.data();
+    device.updateDescriptorSets(1u, &write, 0u, nullptr);
+  }
+  vk::PipelineLayout pipeline_layout = nullptr;
+  vk::PushConstantRange push_range{vk::ShaderStageFlagBits::eVertex, 0u, FetchGpuIR::NativePushConstantSize};
+  vk::PipelineLayoutCreateInfo pipeline_layout_info{};
+  pipeline_layout_info.setLayoutCount = 1u;
+  pipeline_layout_info.pSetLayouts = &descriptor_layout;
+  pipeline_layout_info.pushConstantRangeCount = layout.UsesPushData() ? 1u : 0u;
+  pipeline_layout_info.pPushConstantRanges = layout.UsesPushData() ? &push_range : nullptr;
+  RequireVulkanSuccess(device.createPipelineLayout(&pipeline_layout_info, nullptr, &pipeline_layout),
+                       "vertex-fetch pipeline layout");
+  vk::ShaderModule module = nullptr;
+  vk::ShaderModuleCreateInfo module_info{};
+  module_info.codeSize = compiled.spirv.size() * sizeof(uint32_t);
+  module_info.pCode = compiled.spirv.data();
+  RequireVulkanSuccess(device.createShaderModule(&module_info, nullptr, &module), "actual vertex module");
+  vk::PipelineShaderStageCreateInfo stage{};
+  stage.stage = vk::ShaderStageFlagBits::eVertex;
+  stage.module = module;
+  stage.pName = "main";
+  vk::VertexInputBindingDescription vertex_binding{0u, 4u, vk::VertexInputRate::eVertex};
+  vk::VertexInputAttributeDescription attribute{0u, 0u, vk::Format::eR32Uint, 0u};
+  vk::PipelineVertexInputStateCreateInfo vertex_input{};
+  vertex_input.vertexBindingDescriptionCount = vertex_input.vertexAttributeDescriptionCount = 1u;
+  vertex_input.pVertexBindingDescriptions = &vertex_binding;
+  vertex_input.pVertexAttributeDescriptions = &attribute;
+  vk::PipelineInputAssemblyStateCreateInfo assembly{};
+  assembly.topology = vk::PrimitiveTopology::ePointList;
+  vk::PipelineRasterizationStateCreateInfo raster{};
+  raster.rasterizerDiscardEnable = true;
+  raster.polygonMode = vk::PolygonMode::eFill;
+  raster.lineWidth = 1.0f;
+  vk::PipelineRenderingCreateInfo pipeline_rendering{};
+  vk::GraphicsPipelineCreateInfo pipeline_info{};
+  pipeline_info.pNext = &pipeline_rendering;
+  pipeline_info.stageCount = 1u;
+  pipeline_info.pStages = &stage;
+  pipeline_info.pVertexInputState = &vertex_input;
+  pipeline_info.pInputAssemblyState = &assembly;
+  pipeline_info.pRasterizationState = &raster;
+  pipeline_info.layout = pipeline_layout;
+  vk::Pipeline pipeline = nullptr;
+  RequireVulkanSuccess(device.createGraphicsPipelines(nullptr, 1u, &pipeline_info, nullptr, &pipeline),
+                       "real bounded vertex graphics pipeline");
+  auto* fault_words = static_cast<uint32_t*>(faults.data);
+  std::vector<std::array<uint32_t, 4>> results;
+  std::vector<uint32_t> retained_slot;
+  for (uint32_t draw = 0; draw < TraceNfGpuDraws.size(); ++draw) {
+    const auto& request = TraceNfGpuDraws[draw];
+    if (!request.preserve_previous || !tracing) {
+      std::fill_n(fault_words, faults.size / 4u, 0u);
+      for (uint32_t i = 0; i < TraceGpuGuardWords; ++i) {
+        fault_words[FetchGpuIR::VertexTraceBaseWord - TraceGpuGuardWords + i] = TraceGpuGuard;
+        fault_words[FetchGpuIR::VertexTraceBaseWord + FetchGpuIR::VertexTraceWords + i] = TraceGpuGuard;
+      }
+      faults.Flush();
+    }
+    // Same already-created pipeline, actual SRD and shader-data layout for all
+    // runtime cases. Every update occurs after the preceding Finish/readback.
+    static_cast<uint32_t*>(shader_input.data)[1] = request.input;
+    static_cast<uint32_t*>(shader_input.data)[2] = request.input;
+    std::memcpy(reinterpret_cast<void*>(FetchGpuGuest::Input), shader_input.data, shader_input.size);
+    shader_input.Flush();
+    for (uint32_t k = 0; k < layout.user_data_registers.size(); ++k)
+      if (layout.user_data_registers[k] == 16u) shader_data[k] = request.active ? UINT32_MAX : 0u;
+    if (tracing) {
+      shader_data[layout.VertexTraceDword()] = request.token;
+      shader_data[layout.VertexTraceDword() + 1u] = 0u;
+    }
+    if (shader_data_buffer) {
+      std::memcpy(shader_data_buffer->data, shader_data.data(), shader_data_buffer->size);
+      shader_data_buffer->Flush();
+    }
+    std::memcpy(indices.data, &request.raw, sizeof(request.raw));
+    indices.Flush();
+    const std::array<uint32_t, 4> sentinel{0xdeadbeefu, 0xdeadbeefu, 0xdeadbeefu, 0xdeadbeefu};
+    std::memcpy(output.data, sentinel.data(), sizeof(sentinel));
+    output.Flush();
+    auto& scheduler = vulkan.RuntimeRenderer().GetCommandScheduler();
+    auto command = scheduler.Current().Handle();
+    vk::MemoryBarrier ready{};
+    ready.srcAccessMask = vk::AccessFlagBits::eHostWrite;
+    ready.dstAccessMask = vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite |
+        vk::AccessFlagBits::eVertexAttributeRead | vk::AccessFlagBits::eIndexRead;
+    command.pipelineBarrier(vk::PipelineStageFlagBits::eHost,
+        vk::PipelineStageFlagBits::eVertexInput | vk::PipelineStageFlagBits::eVertexShader,
+        {}, 1u, &ready, 0u, nullptr, 0u, nullptr);
+    vk::RenderingInfo rendering{};
+    rendering.renderArea.extent = vk::Extent2D{1u, 1u};
+    rendering.layerCount = 1u;
+    command.beginRendering(rendering);
+    command.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
+    command.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, pipeline_layout, 0u, 1u, &set, 0u, nullptr);
+    if (layout.UsesPushData()) {
+      FetchGpuIR::PushData push;
+      std::copy(shader_data.begin(), shader_data.end(), push.dwords.begin() + layout.push_data_start_dword);
+      command.pushConstants(pipeline_layout, vk::ShaderStageFlagBits::eVertex, 0u, sizeof(push), push.dwords.data());
+    }
+    const vk::DeviceSize zero = 0;
+    command.bindVertexBuffers(0u, 1u, &native_vertices.buffer, &zero);
+    command.bindIndexBuffer(indices.buffer, 0u, vk::IndexType::eUint32);
+    FetchGpuIR::CompiledShaderInfo info{};
+    info.user_data_base = compiled.program.user_data_base;
+    info.info = compiled.program.info;
+    vertex.stage.program = &info;
+    vertex.stage.resources = &resources;
+    const auto [base_vertex, first_instance] = ResolveDrawOffsets(0u, vertex);
+    Require(name, "actual zero draw offsets", base_vertex == 0 && first_instance == 0u,
+            "no-offset fixture must not hide draw-wide builtin changes");
+    command.drawIndexed(1u, 1u, 0u, base_vertex, first_instance);
+    command.endRendering();
+    vk::MemoryBarrier done{};
+    done.srcAccessMask = vk::AccessFlagBits::eShaderWrite;
+    done.dstAccessMask = vk::AccessFlagBits::eHostRead;
+    command.pipelineBarrier(vk::PipelineStageFlagBits::eVertexShader, vk::PipelineStageFlagBits::eHost,
+        {}, 1u, &done, 0u, nullptr, 0u, nullptr);
+    scheduler.Finish();
+    output.Invalidate();
+    faults.Invalidate();
+    std::array<uint32_t, 4> actual{};
+    std::memcpy(actual.data(), output.data, sizeof(actual));
+    results.push_back(actual);
+    if (request.active) {
+      Require(name, "real guest output ownership", actual[1] == request.raw &&
+          actual[2] == (request.raw >> 16u) && actual[3] == 0x13579bdfu,
+          "actual shader store lost raw/high/marker outputs");
+      if (request.input == 0x40000000u || request.input == 0u)
+        Require(name, "independent finite arithmetic control", actual[0] == request.input,
+                "sqrt(2*x) finite2/zero control differs from its independent numerical result");
+      else if (request.input == 0xbf800000u || request.input == 0x7fc12345u)
+        Require(name, "actual numerical NaN control", (actual[0] & 0x7f800000u) == 0x7f800000u &&
+            (actual[0] & 0x007fffffu) != 0u,
+            "negative sqrt/runtime NaN must produce a real NaN before comparing diagnostic outputs");
+      else
+        Require(name, "actual numerical infinity control", actual[0] == 0x7f800000u,
+                "positive overflow/runtime infinity must produce infinity before diagnostic comparison");
+    } else {
+      Require(name, "inactive guest stores remain untouched", actual == sentinel,
+              "NF observation must not reactivate an inactive guest write");
+    }
+    if (baseline != nullptr)
+      Require(name, "bitwise unchanged trace-on output", baseline->size() == TraceNfGpuDraws.size() &&
+          actual == baseline->at(draw),
+          "selected NF diagnostic changed actual shader results compared with the same guest shader off");
+    CheckTraceGpuGuards(name, fault_words);
+    if (!tracing || request.token == 0u || request.raw != TraceGpuRaw) {
+      Require(name, "no trace for disabled selection/token", std::all_of(
+          fault_words + FetchGpuIR::VertexTraceBaseWord,
+          fault_words + FetchGpuIR::VertexTraceBaseWord + FetchGpuIR::VertexTraceWords,
+          [](uint32_t word) { return word == 0u; }),
+          "unselected hash, token0 or wrong vertex wrote diagnostic data");
+    } else {
+      const auto* slot = fault_words + FetchGpuIR::VertexTraceBaseWord +
+          (request.token - 1u) * FetchGpuIR::VertexTraceSlotWords;
+      const auto* nf_event = slot + FetchGpuIR::VertexTraceHeaderWords +
+          23u * FetchGpuIR::VertexTraceEventWords;
+      std::printf("[nf] %s owner=%u token=%u ordinary=%u images=%u sequence=%u pre=%u post=%u ready=%u marker=%08x opcode=%u result=%08x\n",
+          request.label, slot[0], slot[1], slot[3], slot[4], slot[6], slot[7], slot[8], slot[9],
+          nf_event[0], nf_event[13], nf_event[12]);
+      CheckTraceNfGpuRecord(name, slot, request, compiled.program);
+      if (!request.active)
+        Require(name, "inactive finite source leaves all trace slots empty", std::all_of(
+            fault_words + FetchGpuIR::VertexTraceBaseWord,
+            fault_words + FetchGpuIR::VertexTraceBaseWord + FetchGpuIR::VertexTraceWords,
+            [](uint32_t word) { return word == 0u; }),
+            "inactive zero load must not be recast as an evaluated NaN or guest execution proof");
+      Require(name, "preserved ordinary/image/export ranges", slot[3] == (request.active ? 1u : 0u) &&
+          slot[4] == 0u && slot[5] == 0u && slot[7] == (request.active ? 1u : 0u) &&
+          slot[8] == (request.active ? 1u : 0u),
+          "NF disturbed ordinary loads, images or pre/post export ownership");
+      Require(name, "single first expression sequence", slot[6] ==
+          (request.active ? 3u : 0u) + (request.nonfinite ? 1u : 0u),
+          "NF recorded another expression or changed the original event sequence count");
+      for (uint32_t index = 1u; index < 30u; ++index) {
+        if (index == 23u) continue;
+        const auto* unused = slot + FetchGpuIR::VertexTraceHeaderWords +
+            index * FetchGpuIR::VertexTraceEventWords;
+        Require(name, "preserved unused ordinary/image slots", std::all_of(unused,
+            unused + FetchGpuIR::VertexTraceEventWords, [](uint32_t word) { return word == 0u; }),
+            "one NF expression spilled into an ordinary/image event slot");
+      }
+      if (request.active) {
+        for (const uint32_t export_slot : {30u, 31u}) {
+          const auto* event = slot + FetchGpuIR::VertexTraceHeaderWords +
+              export_slot * FetchGpuIR::VertexTraceEventWords;
+          Require(name, "finite actual Position export preserved", event[0] == FetchGpuIR::VertexTraceMarker &&
+              event[2] == position_pc && event[12] == (export_slot == 30u ? 0u : 0x3f000000u) &&
+              event[13] == (export_slot == 30u ? 0u : 0xbf000000u) &&
+              event[14] == 0u && event[15] == 0x3f800000u,
+              "NF arithmetic observation changed pre/post finite Position or its slots");
+        }
+      }
+      if (draw + 2u == TraceNfGpuDraws.size()) retained_slot.assign(slot, slot + FetchGpuIR::VertexTraceSlotWords);
+      if (request.preserve_previous)
+        Require(name, "previous cached draw remains immutable", retained_slot.size() == FetchGpuIR::VertexTraceSlotWords &&
+            std::equal(retained_slot.begin(), retained_slot.end(), fault_words + FetchGpuIR::VertexTraceBaseWord),
+            "second NF token modified the first completed draw's slot");
+    }
+    std::printf("[gpu] %s %s result=%08x raw=%08x token=%u EXEC=%u NF=%u PASS\n",
+        name, request.label, actual[0], actual[1], request.token, request.active ? 1u : 0u,
+        tracing && request.nonfinite ? 1u : 0u);
+  }
+  device.destroyPipeline(pipeline, nullptr);
+  device.destroyShaderModule(module, nullptr);
+  device.destroyPipelineLayout(pipeline_layout, nullptr);
+  device.destroyDescriptorPool(pool, nullptr);
+  device.destroyDescriptorSetLayout(descriptor_layout, nullptr);
+  return results;
+}
+
+void CheckVertexNonFiniteTraceGpu(VulkanHarness& vulkan) {
+  constexpr const char* name = "VertexNonFiniteTraceGpu";
+  const auto& selected = FetchGpuIR::VertexValueTrace();
+  Require(name, "diagnostic selector setup", selected.enabled && selected.nonfinite && selected.hash == TraceGpuHash &&
+      selected.vertex == TraceGpuRaw && selected.instance == 0u && selected.pc_count == 1u &&
+      selected.pcs[0] == TraceNfGpuLoadPc,
+      "trace selector must be configured before fixture setup; not a numeric RED");
+  auto& graphics = vulkan.RuntimeContext();
+  Require(name, "vertex stores capability", graphics.physical_device.getFeatures().vertexPipelineStoresAndAtomics,
+      "device cannot store actual vertex results; unsupported is not a passing test");
+  vk::PhysicalDeviceSubgroupProperties subgroup{};
+  vk::PhysicalDeviceProperties2 properties{};
+  properties.pNext = &subgroup;
+  graphics.physical_device.getProperties2(&properties);
+  Require(name, "actual vertex subgroup", subgroup.subgroupSize == 32u &&
+      static_cast<bool>(subgroup.supportedStages & vk::ShaderStageFlagBits::eVertex) &&
+      static_cast<bool>(subgroup.supportedOperations & vk::SubgroupFeatureFlagBits::eBallot),
+      "fixture requires actual32-lane vertex ballot support; unsupported is not a passing test");
+  const auto format = graphics.physical_device.getFormatProperties(vk::Format::eR32Uint);
+  Require(name, "native UInt attribute", static_cast<bool>(format.bufferFeatures & vk::FormatFeatureFlagBits::eVertexBuffer),
+      "R32Uint vertex input unsupported; not a passing test");
+  ShaderRecompiler::SetTableMode(false);
+  ShaderRecompiler::SetHardwareStorageBufferBounds(false);
+  FetchGpuGuest guest;
+  const std::array<uint32_t, 6> words{};
+  FetchGpuBuffer native_vertices(graphics, (uint64_t{TraceGpuRaw} + 2u) * 4u, vk::BufferUsageFlagBits::eVertexBuffer);
+  FetchGpuBuffer shader_input(graphics, sizeof(words), vk::BufferUsageFlagBits::eStorageBuffer);
+  FetchGpuBuffer output(graphics, 16u, vk::BufferUsageFlagBits::eStorageBuffer);
+  FetchGpuBuffer indices(graphics, 4u, vk::BufferUsageFlagBits::eIndexBuffer);
+  FetchGpuBuffer faults(graphics,
+      (uint64_t{FetchGpuIR::VertexTraceBaseWord} + FetchGpuIR::VertexTraceWords + TraceGpuGuardWords) * 4u,
+      vk::BufferUsageFlagBits::eStorageBuffer);
+  std::memcpy(native_vertices.data, words.data(), sizeof(words));
+  static_cast<uint32_t*>(native_vertices.data)[TraceGpuRaw] = 0x55667788u;
+  std::memcpy(shader_input.data, words.data(), sizeof(words));
+  native_vertices.Flush();
+  shader_input.Flush();
+  HW::Context registers{};
+  HW::UserConfig user_config{};
+  HW::Shader shaders{};
+  vulkan.RuntimeRenderer().GetCommandScheduler().Begin(registers, user_config, shaders);
+  const auto baseline = RunVertexNonFiniteTraceGpuModule(vulkan, native_vertices, shader_input,
+      output, indices, faults, false, nullptr);
+  RunVertexNonFiniteTraceGpuModule(vulkan, native_vertices, shader_input,
+      output, indices, faults, true, &baseline);
+}
+
 } // namespace
 } // namespace Libs::Graphics

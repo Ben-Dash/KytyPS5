@@ -157,6 +157,12 @@ struct EmitterState {
 	uint32_t                                         fault_buffer_variable   = 0;
 	std::array<uint32_t, 2>                           value_trace_claimed {};
 	std::array<uint32_t, 2>                           value_trace_owner {};
+	// Diagnostic CPU metadata only, scoped to this emitter/compiled program.
+	bool                                              value_trace_ir_ready = false;
+	uint64_t                                          value_trace_ir_hash = 0;
+	uint32_t                                          value_trace_nf_function = 0;
+	bool                                              value_trace_nf_unsupported = false;
+	std::unordered_map<const IR::Inst*, std::array<uint32_t, 2>> value_trace_ir_ids;
 	uint32_t                                         bda_pointer_function    = 0;
 	// get_bda_load_pointer and the zero page's address read at entry (KYTY_BDA_ZERO_PAGE).
 	uint32_t                                         bda_load_pointer_function = 0;
