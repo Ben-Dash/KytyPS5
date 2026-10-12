@@ -1,5 +1,321 @@
 # Integration test debt
 
+## NGG partial native vertex-wave entry count (2026-10-12 05:30 UTC)
+
+Update05:50: original054138 (B048335F) endedexit0/300s, severegeometry persists
+in210sownedimage,FPS~3.3diagnostic/internalabove1080. CorrectNGGentry proof
+stands; doesnotresolvepalettezeros orprove~60FPS. Newactualreaderrows match
+before/aftercorrespondingCS, zeros predatethosewriters; missingproducerjob
+coverage requiresnewdiagnosticselection, notspeculativestore/mathfix.
+
+Update05:42: production1c9e3dfa committed; focusedCLI b026e202 separately.
+Unchangedfixture053446GREEN,422records/12cases,71C43725; embedded053448PASS.
+Existingmetadata/export/cacheguards053823PASS viafocusedmode(FD31DBBE).
+FullCFG053704 abortmatchesolder215846/6ba0computeempty-declarationsbaseline;
+fullsuite remainsred, oracleunchanged. Core053904/install054009PASS, original
+054138 nowACTIVE; actualgamecausality/host64/sparseinitialmasks notproved.
+
+Update05:32: nativebuild053046PASS,fresh96DFB5CC. SAMEfixture053122 intended
+REDafterall12nativecases andcleanup: wave32S3low8=32vsinitialactive1/17/31;
+wave64low8=64vs1/17/31/32. AllvertexIDs/records/sentinels/upperS3controls valid.
+Productioncommoninitialpopcount correction nowauthorized for BOTH ordinary
+andWaveHalves paths; preserveSGPR2capacity andupperS3group/waveID packing.
+SameunchangedGREEN plusCFGmetadata/exportguards andembeddedfetchneighbors
+pending. No actualgamecausality proven from this synthetic count regression.
+
+Upstream cf77fb43 active initial ESVertCount already exists behind an opt-in.
+Required loop-free native RED before any default change: public guest vertex
+compiler, point-list/discard pipeline; capture initial EXEC as FIRST guest
+instruction, before S3-derived mask changes, then rawS3 and VertexIndex into
+bounded independently ticketed records. CPU bitloop popcount of initial mask
+checks S3 low8, all requested indices/header/padding/sentinels/upperS3 fields.
+Draw1/17/31/33/64/65, guestwave32/64 on actualnative32; do not equate draw count
+with number of Vulkan invocations or use compute virtual-half semantics here.
+Fixture05B8A4A3 no loops and8192record guard; GPU cleanup before aggregate RED.
+Unrelated setup/compiler errors are not RED. Preserve merged-wave packing and
+neighbor metadata/cache guards. ActualVS2a staticS3 use is observed, but neither
+wrong live count nor zero-palette causality has been proved in the game.
+
+## BC R64 texture block layout (2026-10-12 05:08 UTC)
+
+Update05:17: committedf55ffc00. SAMElayout/GPU051227 bothGREEN (F6088272),
+BC1/BC7eightlayers/twodirections/padding verified. Broadtiler358cases/264pairs
+051559 PASS (0202862E) afterfixtureidentityupdate to current scheduler-lived
+scratchcontract (68a5d42f/59cb8b16). Original14numericDWORDoracle unchanged,
+no productiontilerchange; previous051233 obsoletegrown==reused fail explicit.
+Originalgamewithnewcore stillpending.
+
+Update05:11: build050920 PASS; fresh9FB012D0. Unchanged publiclayout
+RED051015 rejects compressed R64 admission beforeVulkan. Previous050742
+compile failure was only Windows small macro name collision, not RED; fixed
+fixture name without oracle changes. Shared correction now authorized; same
+layout/GPU roundtrip and existing tiler neighbors pending.
+
+Upstream b7b335ac already partly present behind an OFF opt-in gate. Before
+changing default public admission, run TEST-ONLY --bc-r64-texture-layout-only
+against current core: BC1/BC7 block elements must be admitted for render64KB,
+depth must reject compressed/multitexel and unsupported wide elements.
+Independent BC1 2048x2048x8 footprint: total0x1000000/slice0x200000, block128x64.
+Then bounded --bc-r64-texture-gpu-only must tile/detile BC1/BC7 67x51x8 through
+actual public layouts/copies, checking every layer and padding byte. Fixtures
+53CB9C63/giant858B8D61 frozen before RED; no production BC change yet. Preserve
+existing format bounds; do not transplant upstream's broader layout rewrite.
+
+## Packed buffer prefix loads (2026-10-12 05:04 UTC)
+
+Update05:10: committed3ebf42f8. SAMEcostGREEN050649 0/1/1/2 push+storage;
+GPU050651 all20fullbyte/sentinelchecksPASS after fixtureBegin setup, original
+independent oracle unchanged. Strictgenericneighbor050700 knownoneULP fails
+identicalold000321; fullmatrix050825/4800lanes/100requests bit-identical to
+baseline001759 (SHAe167dc0e). Precision debt NOT resolved; cost/GPU port verified,
+originalgame/FPS gain pending. Originalfrozen fixtures preserved under analysis.
+
+Update 05:05: build050330 PASS, executable77E02AF3. Intended RED050428
+validated all eight public modules and live stores: actual0/1/4/5 reads for
+push and storage, vs budget0/1/1/2. Aborted at explicit cost oracle. GPU
+baseline050433 stopped at scheduler inactive-current guard before dispatch;
+this is harness plumbing, not a reproduced emulator numeric defect. Preserve
+independent bytes/sentinels while establishing actual recording scope.
+
+Upstream 13e3ca31 reuses each packed DWORD for four host-buffer prefixes.
+Before adapting shared EmitMemoryOffsets, test public compilation with 0, 1,
+4 and 5 real descriptors in both push-data and storage fallback placement.
+Validate SPIR-V and count actual shader-data loads in the reflected offset
+interval: budget ceil(memory_offset_count/4), with positive load controls and
+all observable guest stores retained. Run intended cost RED before production
+changes. Independent bounded GPU readback must retain prefix/suffix sentinels
+and store values for 1/4/5 descriptors in both placements. This proves module
+cost and correctness; actual FPS benefit remains unmeasured.
+
+## Upstream R8 SNORM sampled texture admission (2026-10-12 04:53 UTC)
+
+Update 05:03: committed c38f1981. Native build 045841 PASS; fresh executable
+CFDC2E53, same numeric-class oracle plus seven GPU cases 050238 all PASS:
+signed sample/gather, swizzle, linear, 128-thread wave32/wave64, R8/RG8 scaled
+neighbors. Swizzle neighbor initially required sampled-view plumbing; original
+source B37B7404 preserved, basic admission/numeric oracle unchanged, final test
+5E20456B. CTest texture_r8_snorm registered; original game retry pending.
+
+Fresh peepostarexx main730e1a3c contains7e4e142aaebd2a5169ac73cb1a91b6c8d6fe2a7f.
+Local code has native R8 SNORM path behind opt-in gate but excludes sampled
+format by default. Ported synthetic sampler/gather/swizzle/linear/wave32+64
+fixtures plus public numeric-class oracle are frozen B37B7404. Native build
+045038 PASS, unchanged gate-unset RED045239 on774906dd: classification
+Unsupported0 vs expectedFloat1, before texture GPU allocation. Production
+sampling admission change is now authorized; SAME GREEN and actual GPU
+signed-normalized results/neighbors pending. Do not infer zero-bone causality
+or working textures/FPS from this format-level proof. Other formats/attachment
+eligibility and host capability errors remain intact.
+
+## First fault binding inside deferred recording reservation (2026-10-12 03:25 UTC)
+
+Update03:43: actual publicPrepareBindings→plannedCommit deferred DF052D1B
+oracle RED033923 exactguard321 withrouted/probe/planned controls1 andno GPU
+dispatch ->sameGREEN034220 exit0. Five-line earlyPrepareFaultBuffer acquisition
+is WIP. Graphics active-rendering/compute pending-chain neighbors after
+preparation, originalinitchecks and originalCSsnapshotretry pending.
+
+Init683172a8 original032417 with2CSsnapshot request ended after6.38s/exit321,
+before captures: commandHooks.cpp647 rejects a nested command between
+ReserveRecordedCall andCommitRecordedCall. New lazy first GetFaultBuffer
+records Buffer::Fill; deferred binding materializer calls this getter after
+reservation (descriptors.cpp3542..3595). Do not suppress transaction guard or
+omit initialization. Required TEST-ONLY regression: real first fault-resource
+CommitBindings with deferred command stream active, same native scheduling/
+resource preparation path; reservation mustcommit and actual producer results
+remain correct. First-use clear must precede reservation, observation stayspure,
+and repeat bindings preservependingfaults. Preserve existing init a27c and
+transport/queue goldens. CPU command-hook invariant fixture is acceptable if
+it exercises real binding path with bounded native cleanup; unrelated setup
+crashes or unenabled extensions are not intendedRED.
+
+## Initial BDA fault bitmap and readback visibility (2026-10-12 02:24 UTC)
+
+Update03:12: unchangeda27c oracle GREEN030802 onfreshd10b98cf afterfirstGPU
+binding init, poisonRegistered0/currentRegistered1. Same exactreuse/seed/pin
+setup asRED025856; testcleanupcomplete. Observation/repeatbinding/laterbatch
+neighbors and original retry stillpending; initproductionWIPuncommitted.
+
+Update03:00: native controlled-reuse oracle025856 intendedRED, actual same
+memory/offset/12582912bytes checked, predecessor zero+known positive poison,
+new actual atomicOr positive page, first binding plus actualparser. Aftercleanup
+poisonRegistered1/currentRegistered1; expectedpoisonabsent fails. Bootstrap
+KHRpush_descriptor explicitlyenabled/max32; oldbuild025236 notexecuted without
+it. Frozena27c1e28 oracle; production init correction now authorized, sameGREEN
+pending. Never first-parser clear that would erase genuine guest work.
+
+Independent source audit: DeviceLocal Buffer allocation (streamBuffer.cpp65–147)
+does not initialize contents; FaultManager constructor has no bitmap clear.
+Diagnostic explode clearing covers only the tail; first parser pass clears
+words after earlier guest GPU writes may already have occurred. Initial bitmap
+state is separate from proved quota RED and from unproved original page0 origin.
+Require a bounded actual initialization/lifecycle regression with a controlled
+nonzero allocation predecessor before changing this behavior. Clearing at first
+ProcessFaultBuffer would discard genuine guest faults and is not a correction.
+
+Parser host-visible output also needs explicit COMPUTE_SHADER/SHADER_WRITE to
+HOST/HOST_READ dependency before fence signal/wait/invalidation; existing
+bitmap-only barriers do not express this. Include output visibility and bitmap
+read/write atomic accesses in the pending proved quota/readback protocol fix,
+retain normal nonblocking scheduling and existing host-memory cache operations.
+
+## BDA fault batch capacity and pending-bit preservation (2026-10-12 02:16 UTC)
+
+Update02:37: unchanged726232c5 oracle GREEN022836 processes2049 bits in1023/
+1023/3 lossless bounded batches. Nine quota/bit-boundary neighbors023505 and
+existing EOP neighbors023506 PASS. Shared fix committed69b620a9; current native
+original retry and affected queue transport refresh pending. Original page0
+causality remains unproved; bitmap initialization and source4 are separate debts.
+
+Update02:22: actual unchanged parser GPU RED022201 gives count1087/exported1023/
+pending0 from2049 bits, all guards preserved.1026 requests lost; assertions
+follow native cleanup. This proves quota/count/conservation defect independently
+of original page0, whose actual overflowing pass was not captured. Native
+shared correction now authorized; same frozen726232c5 oracle GREEN pending.
+
+Original candidate020757 ended after29.66s/exit321 near frame292 before palette
+trace/screenshots. Exact core link map and matching PE/PDB identity show
+FaultManager::ProcessFaultBuffer deferred callback -> FindBuffer -> CreateBuffer;
+fault page0 becomes invalid cached range0+8000. No direct EOP write in this
+chain. Actual fault count/input bitmap is not captured; root cause of page0
+remains unproved. Do not bypass range validation or substitute zero resources.
+
+Separate concrete protocol lead: fault_buffer_process.comp increments a32-bit
+counter before quota checking, stores only slots1..1023, clears each inputword
+before returning on exhaustion. CPU callback trusts count and reads all slots
+through count. Require TEST-ONLY bounded actual parser SPV regression first:
+input >1023 known bits, output1024x8 bytes plus preserved sentinel guards;
+dispatch only allocated inputword count; independently inspect bounded count,
+exact exported addresses and remaining bits. Exported and pending sets must
+equal the original unique set; repeated bounded batches must eventually drain
+all bits without duplicates/loss/guard damage. No synthetic GPU stalls/loops.
+
+Only after intended RED correct reservation/publication protocol, retain all
+unexported bits for later processing and validate CPU count before reading.
+Saturating monotonic reservation is a candidate; clamping away work, enlarging
+capacity blindly or accepting page0 is not a correction. Runtime causality
+needs actual count/bitmap evidence and a fresh original retry separately.
+
+## End-of-pipe publication and timestamp ordering (2026-10-12 01:00 UTC)
+
+Update 02:04 UTC: core015853/private install020135 and writer-history CPU015700
+PASS. Existing giant queue target cannot yet build: stale18 image copy capacity
+arguments/missing sampled expectation fixed, then missing vector fixture defs/
+old DescriptorSource benchmark member found. Restore real tests, never fake
+them; affected queue checks remain pending. Standalone calibrated Vulkan probe
+supports required native domains/period/int64, but guest epoch and source4
+bridge remain unimplemented. No original retry or picture/FPS proof yet.
+
+Update 01:52 UTC: literal focused014742 and three registered/native-consumer/
+IRQ/repeated-write/real-compute32 neighbors015005 PASS with exact data goldens.
+Fixture teardown now performs normal renderer mapping/unmapping; original
+two-case oracle preserved. Existing affected queue tests and accurate source4
+calibrated native timestamp are still pending. Actual graphics causality unknown.
+
+Update 01:45 UTC: actual public64 BOTTOM literal/source4 early-publication
+RED is recorded in checks/20261012-012308-3986084-eop64-publication-nofault-native-red.
+No gate was needed: an unsubmitted real native fill supplies bounded pending
+work; TryReadBacking avoids a guest fault/readback during observation. Candidate
+014416 produces correct literal observations but fails fixture teardown with
+PageManager live state; GREEN and neighbors remain pending. Source4 native
+clock-stage/calibration remains uncorrected. These tests do not establish EOP
+causality for the original zero palettes or 4–5 FPS.
+
+Read-only source lead: graphicsRun.cpp WriteAtEndOfPipeCommon breaks compute
+chaining but writes32/64-bit values directly with memcpy at CPU packet parsing.
+Source4 samples the100MHz reference clock there. Sync::RecordEndOfPipeWrite
+records debug metadata/interrupt, rather than publishing the value at actual
+pipe completion. A registered/protected label page might incidentally force
+readback synchronization; verify that path before claiming actual early reuse.
+Current game palette capture observes valid active indices2098/2097 returning
+zero rows in one draw and finite rows in the next. EOP involvement is NOT proved.
+
+Before any production correction, require a bounded public guest EOP regression:
+native queue waits on a task-owned host-signalled timeline gate, then EOP32/64
+and source4 timestamp. Snapshot an ordinary unregistered guest label before
+releasing the gate: it must retain sentinel bytes. Signal the gate, drain and
+dispose ALL task resources before asserting an intended failure; never leave
+a GPU waiting after abort. After completion verify exact width/value and
+timestamp units/ordering independently. Compare interrupt delivery ordering,
+registered native buffer visibility and subsequent GPU reads; preserve cache
+actions and queue distinctions. Missing dependencies/setup crashes are not RED.
+
+Vulkan profiler nanosecond conversion and existing100MHz clock-scaling tests
+already agree with their contracts; do not alter frequency or guest resolution
+to hide the measured4–5FPS. Source4 capture must represent the required pipe
+stage, not parser or delayed callback time merely because both are monotonic.
+
+Primary stage clarification: PAL BOTTOM_OF_PIPE_TS=0x28; CS_DONE=0x2f.
+Use a legal64 bottom event for a transfer producer; internal normalized
+index0 differs from raw RELEASE_MEM EOP index5. The32 parser currently
+rewrites toCS_DONE/6, so a transfer-only32 test is not a completion oracle.
+An unsubmitted real native producer is already deterministic pending work
+and avoids a semaphore gate; assert observations only after Finish/cleanup.
+Existing GpuCommandLane immediate-label expectations encode the current
+approximation and need contract-based reconciliation after validRED, while
+their independent nonblocking-parser assertions must be preserved.
+
+## Repeated generic buffer conversion code cost (2026-10-11 23:54 UTC)
+
+Optimization candidate only: generic formatted loads inline the same
+normalization ladder for every returned component. Require a synthetic
+public-compiler fixture with1/8/32 distinct live XYZW reads from one runtime
+generic slot, all outputs retained. Before executing the baseline, freeze
+two independent cost budgets: additional reads grow the module by at most
+1536words/read, and repeated normalization for that shared format requires
+at most16 static FDiv instructions (no unrelated guest division). Any
+equivalent scalar/vector/shared conversion or reciprocal lowering is allowed;
+the fixture must not require a helper name or one exact opcode sequence.
+If a budget already passes, it is not RED. Distinguish code-cost RED from
+an emulated ISA correctness defect or a measured game speed improvement.
+
+Before a production optimization, preserve unchanged actual GPU numerical
+goldens for runtime format/stride/offset, signed/normalized/floating values,
+dst_sel constants, bounds/overflow/alignment and both wave64 halves with
+sparse EXEC. Never remove loads or required conversions to meet a budget.
+Inspect the actual host optimization path for helper re-inlining. Record
+native build and actual post-optimization size, then measure the original
+warm-cache game separately; smaller SPIR-V alone is not60FPS evidence.
+
+Cost RED000048 -> unchanged GREEN001747 is proved. Shared bodyde9a89cf
+reduces FDiv8/64/256 ->2/2/2 and32-load words48632 ->37015. Actual100-request/
+4800-lane measurements001124 and001759 are fully byte-identical, including
+the existing strict UNorm8 endpoint discrepancy (3f7fffff versus3f800000 on
+144 active lanes). All24 other cases/inactive lanes satisfy their independent
+goldens. This is numerical equivalence plus cost proof, NOT a full strict
+numerical pass. Guest normalized-conversion precision remains unproved;
+do not silently add tolerance or infer its connection to the game defect.
+
+NFv1 actual2a CPU002120 validates but grows to1942548 words; original retry
+is withheld for that diagnostic version. Compact shared writer NFv2 must
+retain the fixed6272-byte bounds and pass actual GPU/map/output controls.
+The inactive-load fixture correction derives from exact emitted IR sinking
+to load0/MUL0/SQRT0, not an emulator correction or proof of skipped arithmetic.
+
+## Independent near/far clipping and bad-vertex attribution (2026-10-11 23:45 UTC)
+
+Diagnostic lead only: ClipControl retains distinct min_z_clip_disable and
+max_z_clip_disable, whereas IsZClipEnabled returns the AND of both enabled
+planes. Native Vulkan chains depthClipEnable separately from depthClampEnable.
+Disabling one guest Z plane therefore currently disables both host planes.
+This has not been linked to the actual stretched scene; capture copied flags
+on exact admitted draws first. Preserve raw-word unavailable labels rather
+than reconstructing discarded PA_CL_CLIP_CNTL bits.
+
+Before any correction, require independent synthetic plane truth-table and
+bounded rasterized pixel cases: both planes, neither plane, near-only,
+far-only, finite points on/inside/outside each plane, DX/non-DX clip range,
+negative/zero W and existing guest clip/cull distance capacity. Guest API/AMD
+and Vulkan contracts must define the oracle; a screenshot is not that oracle.
+Do not apply a blanket invalid-position guard or alter arithmetic semantics.
+
+Actual trace14 and0 exports are finite. Nonfinite reporter's heuristic lastdraw
+is not exact attribution; the next metadata-only change must expose the
+already-written immutable token and verify selected shader/stage/CPU token
+before joining. If a selected vertex changes between runs, capture the actual
+failing invocation with a bounded diagnostic protocol instead of assuming its
+previous vertex ID remains stable. No new semantic RED or fix is claimed here.
+
 ## DX10 instruction CLAMP portability (2026-10-11 22:49 UTC)
 
 Primary AMD ISA defines NaN-to-zero for the decoded instruction CLAMP under

@@ -1,5 +1,838 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: REA research and concrete binary baseline saved, 2026-10-12 06:00 UTC
+
+- Currentnativebranchb026e202/core1c9, fourports committed/tested; no game,
+  test orbuild process active after054138 ended0. Stableimage/~60FPS remains
+  unachieved; actual210s image stretched/title3.3. Same-run BADmatrixzeros
+  predatecapturedwriters; nextmissingproducercoverage stillrequired.
+- UserREAlead researched at3bdc8730/package.json6.4.0. Saved Russianplan
+  [REA debugging plan](rea-yotei-debugging-plan.md), plusignoredsourceaudit.
+  WindowsGhidra nativePE-only, requiresGhidra12.1/JDK21+, notfoundlocally;
+  SELFdirectopen unsupported, oldSept6extractedSCEELF provenanceunverified.
+  No npm/provider/setup/MCPconfiguration execution. CPUjob-builder dossier
+  remainscandidate, notRDNA/BDAreplacement orFPSproof.
+- ConcreteexistingLLVMbaseline onehiddenboundedPEreadobj exit0/~66ms:
+  exactB048335FAMD64/ImageBase140000000; PDBCodeView GUID/ageMATCH. Native
+  sourcefunctionTileGetTextureBlockLayout RVA49880 givesfirstdossiertarget.
+  Evidence `rea-review-20261012/own-pe-readobj.run.json` andPDBidentity preserved.
+- Newdata lead: first549count349 fillslast285rows, leavesfirst64zero; eighth
+  fillsall349. CapturedreadonlyinputSRDbytes identicalinclfirst64, butdynamic
+  SRT/writtenstate differ; nofullinputequivalence/pagefaultcausality claimed.
+  Loopfree multiwaveREADLANE31/63/READFIRST+logicalIDs64/128/512 regression
+  TESTONLY draftassigned, unused/uncompiled. Existing2wave47/LDS coverage
+  retained; avoidduplicateoracles. No productionwavechangebeforeintendedRED.
+- Docs anduniquehandoffs preserveevidence; no externalissuecomment orpush.
+
+## Latest checkpoint: four ports tested in game; row producer remains missing, 2026-10-12 05:50 UTC
+
+- HEADb026e202, core1c9e3dfa withfourselectiveupstreamports: R8sampling,
+  packedprefixreuse, BC-R64 andactiveNGGcount. FocusedRED/GREEN/GPU/CPU
+  evidence below. No source WIP beyonddocs, no push or externalmilestone.
+- Original054138 ended05:46:43.443 exit0/300s/graceful/noRAMguard,min9.95GiB,
+  root98703 drained andownedPID43164 ended. B048335F exactnativecore; worker4/
+  replay1 trial. Actual210s screenshot hasseverestretchedforeground/small
+  backgroundvisible,titleframe330/FPS3.3. Internal3328x1872/3840x2160 still
+  differs1920x1080window. Stablepicture/~60FPS NOT achieved; no improvement
+  claim fromunlikecache/diagnosticruns. Inputlog neutral/autoswipe0.
+- EightcompleteCSsnapshots/150refs/98unique blobs PASS; readback nowcomplete:
+  BADtoken1/frame288->289/base200a0d7bc0 first7CS, sixvalidrows2097/2098 zero;
+  FINITEtoken2/frame289->290/base20032e2020 lastCS, same sixrows finite. All24
+  readerDWORDs exactly equalbefore ANDafter capturedCS. BADzero predatesthese
+  capturedwriters: no late nonzero-loss proof. FirstCS changes285 otherrows;
+  selected2097/2098 outsideeverycapturedjobinterval. NEXT capture must select
+  actualoutputjob coverage beforequota, notonly124224size. Do notsanitizeRSQ.
+- Raw-rootproof sixofeight: root+24 child; child+56 descriptor=slot2/flat12,
+  child+120=slot25/flat188; root396=flatc4. NativeboundflattenedSRT matches
+  metadatainall8; actualprimaryhashes match decoded1158/549. BOTHbankoutput
+  bases flatc4; firstgate initialactive &&j<count(flat17), finalgatealsoflatc5.
+  Missingrawrootpages in2/6 andallcountchildpages explicit, no fabricateddata.
+  Purefileevidence `writer-history-diagnostic-20261012/cs-review-game-20261012-054138-integration-upstream-ngg-1080-89c844-20261012T054551384243Z/`.
+- Latestuser asksinspectmorluto/rea. Freshread-onlyaudit pins3bdc8730/package
+  6.4.0; WindowsGhidranativeprovider PE x86/x64 only, originalebootSELF magic
+  4F153D1D unsupported directroute. Usefulcandidate: targetedCPUfunction/job
+  metadata investigation withnativePE/PDB/map orboundedexportedguestx64
+  segment viaappropriateGhidraloader. DoesnotprovideRDNA/SPIRV/BDAsemantics.
+  No setup/globalMCP config/install/provider execution; concreteplan pending.
+
+## Latest checkpoint: four ports committed; NGG original retry active, 2026-10-12 05:42 UTC
+
+- HEADb026e202 (CPU-neighbor CLI); productionNGG1c9e3dfa after unchanged
+  native053122RED ->053446GREEN, all422records/12cases. Embedded053448PASS;
+  focusedexistingNGGmetadata/export/cacheguards053823PASS. FullCFG053704 has
+  EXACTold215846/6ba0 computeempty-declarations baselinefailure beforeNGG;
+  unchangedassertions remain, fullsuite notgreen. Hostnative64/sparseinitial
+  graphicsmasks andcrossgame runtime notcovered. No title/hash fix selection.
+- Nativecore053904 PASS from1c9; install054009 PASS, src/CMake/3rdparty tree
+  identical torecordHEADb026 verified (onlyCPUtestCLI differs). ExactEXE
+  B048335F3F72D7EE90DB1EE976B0A496E324DD1BC8159D987A7D32ABA84390B0,
+  runtime-upstream-ngg-1080 preservedsave/cachecopies,symbols/provenance/hashes.
+- Original ACTIVE root98703/PID43164, `_Build/runs/game-20261012-054138-integration-upstream-ngg-1080-89c844`,
+  300s/manual/autoswipe0/window1920x1080/timestamp100/selector2:124224/max4.
+  Runtime-onlyworker4/replay1 trial reducescompilerconcurrency; no equal-cache
+  A/B speedupclaim. Usual memory/cleanupguards, actualinternaltargets separate.
+- Sourcefrozen untilrunends. Actualpixels/NGGgameeffect/paletterootjoin pending;
+  stablepicture/~60FPS remainsunachieved. No push or externalmilestone update.
+
+## Latest checkpoint: eight captured producers; NGG count RED to GREEN, 2026-10-12 05:36 UTC
+
+- Three-port warm052352 ended05:29:06.754 exit0/300s/graceful, noRAMguard,
+  min11.21GiB; cache116781013bytes. Latestowned210/late screenshots showblack
+  loadingindicator (frame289/title12FPS), notmenu/gameplay/stablepicture.
+  Framecounter alone remains no FPS proof; internalRT3840x2160.
+- EightcompletefilteredCSsnapshots/136refs/87blobs checksum+sizePASS. First7
+  base2003119d80/slot2 plusadjacentbank25 unchanged. Eighth549 base200a035650
+  writes16698bytes(slot2)+12325bytes(slot25), row2239 zero-to-finite bothbanks.
+  flagflatc5 belongs finalbank, notfirstslot2; exactresource/rootjoin needed
+  beforeassumingstorefailure. Currentreaderframe294 samefirstbase butstatus
+  PENDING/events0: zero/NF notobserved. Finalpurefileevidence/report saved
+  `writer-history-diagnostic-20261012/filtered-capture-052352-final-review.md`.
+- Nextupstreamcf77fb43 contract independentlyREPRODUCED: all12boundednative
+  draws/wavecases053122 RED (96DFB5CC) reportES32/64 vsinitialactive1/17/31/32.
+  SharedTranslate.cpp commoninitialmaskpopcount29C4916D replacesfullcapacity
+  for BOTH ordinary/WaveHalves S3; SGPR2capacity andupperS3packing unchanged.
+  SAME05B8A4A3fixture053446GREEN (71C43725), all12cases/zero mismatches;
+  embeddedfetch053448PASS. CFGmetadata/exportneighbor buildACTIVE; commit/
+  nativecore/originalretry stillpending. NoNGGgamecausalityclaim.
+- Debugstartup: old403953/174082 compile49–71s now7.5–13.5ms withcompatible
+  cachedartifacts, CPUreplay548ms; remainingnewdrivercompiles dominate.
+  Runtime-only4workers/replay1 A/B candidate recorded; unmeasured. Separate
+  Vulkanopaque compatibility domain fromSTRICTcompiler/v9journal key needs
+  ownsyntheticheader+GPU regressions; no sourcekeywaiver applied.
+- Manualinput/autoswipe0; stableimage/~60FPS unresolved. No push/publication.
+
+## Latest checkpoint: cold-cache budget exhausted; same-core warm retry active, 2026-10-12 05:25 UTC
+
+- Firstthree-port051816 ended05:23:20.639 exit0/300s/graceful,noRAMguard,
+  minavailable17.07GiB. Four30/90/150/210screensblack; no selectedVS/CS captures.
+  Lateframe179 exists inlogs butnotvisiblepixelproof.403953/174082 pipelines
+  49–71s drivercachemiss vs03502822–31ms cachehit: unlikecachecomparison
+  cannotprovea regression or speedup. Normal sourcekey changed afterports;
+  no cachewaiver or arithmetic sanitizer. Coldrun didnotreachpalettecollector.
+- SAME sourcef55ffc00/EXEc9d501f3/args warmretry ACTIVE root94033/PID25988:
+  `_Build/runs/game-20261012-052352-integration-palette-writer-span-1080-08eb2f`,
+  300s/manual/noinputautomation/window1920x1080/max4/selector2:124224.
+  Around65–80s more sceneVS/PS/CS and1158drivercompile reached; actualcompleted
+  snapshots/readerjoins/renderedscene/internalresolution stillpending.
+- UnusedTESTONLY NggVertexCountTests.inc05B8A4A3 drafted separately, noglue,
+  production or nativechange. LOOPFREE firstEXECcapture+rawS3, perinvocation
+  atomicrecords/independentmaskpopcount; ordinaryVS/native32scope. Do not
+  enableopt-in/default before intendedRED. Requireddebt/glue report saved.
+- Stablepicture/~60FPS remainsunachieved, notinferredfromstartupframecounter.
+  Allsourceinputs frozen untilwarmrunends; keepone native execution slot.
+
+## Latest checkpoint: three-port native original retry active, 2026-10-12 05:19 UTC
+
+- HEADf55ffc00 local-only, committed coreclean/docsWIP. Nativebuild051614 and
+  privateinstall051725 PASS; exactEXEc9d501f339c051d409452c42012786f066f2524bc01c5f67ae0eb6a0ce0e3bfe,
+  symbols/inputhashes/sourceprovenance preserved inruntime-upstream-ports-1080.
+- Actualrun `_Build/runs/game-20261012-051816-integration-palette-writer-span-1080-dd4a83`
+  ACTIVE root7611/PID47904,300s/42GiB+8GiBavailableguards, window1920x1080,
+  timestamp100/manual/autoswipe0. Dispatchselector2:124224/max4 pereach1158/549;
+  originalscreenshot30/90/150/210s planned, buffers forcesdrains/timingperturbation.
+  Dryrun051809 didnotexecute. This is not cleanFPS benchmark. Sourcefrozen.
+- Threeports RED/GREEN proofspreviouscheckpoint. Stableimage/~60FPS remains
+  unproved; actualrender/internalresolution andnewCScoverage/readerjoins
+  pending aftercaptures. No new menu/gameplay milestone or externalpost.
+
+## Latest checkpoint: three upstream ports verified; native core rebuild, 2026-10-12 05:17 UTC
+
+- HEADf55ffc00: R8sampling c38f1981; packedprefixloads3ebf42f8; BC-R64f55ffc00.
+  Upstreammain730e1a3c selectively integrated, no wholesale merge or push.
+  BC publiclayout intendedRED051015 -> sameCPU/GPU051227 GREEN onF6088272;
+  BC1/BC7eightlayers/twodirections/fullpadding checked. Broad358cases/264pairs
+  051559 PASS onfresh0202862E, including SAME14scratchnumericDWORDs. Updated
+  obsolete grown==reused assertion to current scheduler-lived distinct-live
+  allocation/spans/capacity/input-exclusion contract; no tilerproductionchange.
+- Native corebuild ACTIVE with frozen source; next privateinstall andexact
+  provenance/hash, then original300s manual1920x1080 windowed run. Actual
+  internal targets recorded separately. WrittenSRDselector2:124224,CaptureMax4
+  (up to8CS snapshots) increases chance of actual2097/2098 coverage; does not
+  guarantee BADbasejoin. Snapshots force drains, so diagnosticFPS not benchmark.
+- Private runtime-upstream-ports-1080 has preserved save/cache copies; runner
+  guards source/PE/coreinputs/originaleboot. Generic purefile analyzer ready
+  `writer-history-diagnostic-20261012/analyze-cs-snapshots-generic.py`; verified
+  preserved035028 evidence only. No new game outcome yet.
+- Next upstreamNGGpartial-wave count lead: ordinaryVS wave64/native32 has
+  one physical lane/context (not computevirtualhalves); actual2a initialS3
+  low8 affects subsequentEXEC construction. LOOPFREE synthetic test-only
+  design captures initialEXEC beforeguestwrites andrawS3/VertexIndex; no
+  productiondefaultenable before intendedRED. Staticusage is not causality.
+- Stableimage/~60FPS stillunachieved. Manualinput/autoswipe0; no external
+  milestone publication. Docs WIP persists with unique shared handoffs.
+
+## Latest checkpoint: two upstream fixes committed; BC texture RED next, 2026-10-12 05:10 UTC
+
+- HEAD3ebf42f8 on yotei-integration-native, local-only. R8 SNORM c38f1981
+  seven GPU cases passed. Packed prefix loads13e3ca31 adapted to actual local
+  memory_offset_count: cost RED050428 -> sameGREEN050649, 0/1/4/5 reads now
+  0/1/1/2 for both push and storage. GPU050651 all20 complete byte/sentinel
+  readbacks PASS, fresh9933603A. Originalcost fixture unchanged; GPU helper
+  needed scheduler.Begin setup after nondispatch baselineguard050433.
+- Existing numeric neighbors050700 fail known UNorm8-one oneULP; original
+  000321 has identical actual/expected/SRD/prefix. Full100request/4800lane
+  measurement050825 exit2, comparison is BIT-IDENTICAL to001759 baseline
+  (both stdoutSHAe167dc0e, zerochangedlanes). Precision debt remains explicit;
+  do not call full numerical suite green. No measuredFPS gain yet.
+- BC-R64 reusable test-only include5B0B1CA7/giant858B8D61 frozen; build050742
+  failed Windows small macro collision, not RED. Renamed only fixturevariable.
+  Freshgiantbuild ACTIVE, publiclayout RED next before production default.
+- Fresh guarded bounded runner prepared in ignored artifacts: window1920x1080
+  (removedfullscreen), normal timestamp100, writtenSRD2:124224/MAX1 explicit,
+  private copied saves/cache. Corebuild/game stillpending. ATTRIBUTE3bit4 is
+  alreadyset: advertised1080 does not explain observed3840x2160 mainRT.
+  No generic internal-render override found; measure actualtargets separately.
+- Stablepicture/~60FPS stillunachieved; manualinput/autoswipe0. No push or
+  external issue milestone. Native execution remains serialized.
+
+## Latest checkpoint: upstream R8 SNORM extracted and GPU verified, 2026-10-12 05:05 UTC
+
+- Native branch HEAD c38f1981: exact upstream7e4e142a R8 SNORM sampling
+  admission enabled by default, redundant opt-in removed. Public admission
+  RED045239 before correction; build045841 PASS, fresh CFDC2E53 executable.
+  Run050238 exit0: native sample/gather, reordered components, linear filtering,
+  128-thread wave32/wave64, R8/RG8 scaled neighbors all PASS. CTest registered.
+  Original B37B7404 fixture preserved; swizzle neighbor plumbing corrected to
+  use actual sampled image view, independent values unchanged. No game/FPS
+  claim from format proof; original retry remains pending.
+- Fresh main730e1a3c remains comparison source, not a full backend merge.
+  Next separate BC-R64 public-layout regression is test-only work. Packed
+  prefix-load13e3ca31 candidate has reusable 0/1/4/5 descriptor push/storage
+  cost and bounded GPU tests; bindless native build ACTIVE, production emitter
+  unchanged pending intended cost RED. Test debt recorded before correction.
+- Next original capture uses validated written span selector2:124224 before
+  quota consumption, fresh guarded core executable and1920x1080 window.
+  Internal guest resolution must be recorded separately. Automatic input off.
+  Palette-zero producer coverage, stable image and~60FPS still unresolved.
+- No push or new external menu/gameplay milestone publication. Docs/test WIP
+  preserved; source inputs for the current native build are frozen.
+
+## Latest checkpoint: fresh upstream audit and first texture regression, 2026-10-12 04:53 UTC
+
+- User asked to extract useful fixes from fresh peepostarexx/KytyPS5/main;
+  fetched isolated ref `refs/remotes/peepostarexx/main-review-20261012` at
+ 730e1a3cf39d50c787d477e813e0bef92006a063, mergebase77d7722173. No branch
+  checkout, merge/push or source overwrite. Work continues on native branch.
+- DPP8/row_share/F64 work already present; missing scalarzero-count/search and
+  signed64GT/GE not used by captured1158/549. Full-wave branch architecture
+  differs, so no blind flag activation. NGG/R8SNORM/BC-R64 already partly
+  present behind opt-in switches; latest original launch cleared those flags.
+  First useful candidate: upstream7e4e142a R8SNORM default sampling admission,
+  next separateb7b335ac BC-R64 layout. Staticpacked-offset reuse13e3ca31 is a
+  smaller code-cost candidate, not demonstrated FPS gain. Reports saved under
+  `upstream-main-review-20261012/`; minimaltests precede behavioral ports.
+- SelectorWIP reviewed/frozen; build044652 PASS and three CPU-only modes
+ 044845/044846/044847 PASS on8323a52b (noGPUsetup). Wrong579024 span does not
+  consumeMAX1/frame choice; true124224 admitted once; defaults unchanged.
+  Diagnostic committed8995db65; targeted original capture still pending.
+- Giant test-only R8 fixtures ported/frozenB37B7404; build045038 PASS,
+  gate-unset public format RED045239 on774906dd:Unsupported0 vsFloat1 before
+  textureallocation. Native owner now ports exact supported sampling admission;
+  sameunchanged GPU GREEN/wave32+64/swizzle/bilinear neighbors pending.
+  No claim R8 caused bonezeros or rendered~60FPS.
+- Current HEAD8995db65, docs and R8test/port WIP. No active nativeprocess,
+  no automaticinput or externalmilestone. FPS target1920×1080; actual guest
+  targets stillrecord separately. Stable image/~60FPS remains unachieved.
+
+## Latest checkpoint: first CS spans differ; generic admission filter and 1080p target, 2026-10-12 04:02 UTC
+
+- User explicitly selected1920×1080 as the main FPS benchmark target. Future
+  launches set that window target and record actual guest internal/main targets
+  separately;3840×2160/3328×1872 are not1080p evidence. Generic existing guest
+  display/resolution behavior is being audited read-only; no title-specific
+  resolution/frequency hacks or~60FPS claim. Stable picture remains unachieved.
+- Original035028 ended03:55:34.785Z graceful0/300s/noRAMguard,min23.21GiB,
+  root75998 drained. Actual4screens30/90/150/210s and palette trace preserved;
+  late title~2.9–3.3 diagnostic/cold. New first-binding guard does not recur.
+- First two CS input/output snapshots are valid but DIFFERENT span:slot2
+  stride48/count12063/579024bytes vsBAD2588/124224.1158frame150 base200292ab60,
+ 549frame153 base200962ab60, bothdisjoint from currentVS BAD200a16d8d0/
+  finite2003485440. Flatc4(outputindexbase)11351/10535, flatc5(lastbankflag)0;
+  flat17(count)24/396. Lastbank gate disabled; unchanged slot2 is not a proved
+  failedstore.549anotherwrittenregionchanges142bytes, proving dispatch effect.
+- Purefile37blobrefs/29uniqueblobs checksum/size checks PASS; capturedactual
+  globals hw_bounds/nativeFP16true/tablefalse supersede reconstructedCPUflags.
+  NativeLocalSize32/256 representslogical64/512 asconfigured. Bloboffset96 is
+  artificialreadback-regionorigin, not shaderprefix. IncompleteBDA pagecoverage
+  prevents complete replay. Evidence `cs-snapshots-035028-review/` and snapshot
+  contract review; no new math/store defect proved from these data.
+- Native owner implements OPTIONAL diagnostic writtenbuffer selector
+  `KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER=2:124224`, actualSRD declaredsize/written
+  predicate BEFORE frame/hash quota consumed and CaptureInputs id/readbacks.
+  Default/history/workload unchanged; strictparse+CPU actualSRD/budget boundary
+  tests first. This is instrumentation, not a rendering fix; no artificialRED.
+  No nativeprocess now; sourcefreeze required before nextbuild. Next capture
+  firstmatchingBAD-sized producer spans, then establish index/count/flag coverage
+  and actualpostdispatch matrices before fixing outputorlatememoryloss.
+
+## Latest checkpoint: caller fix committed; actual two-CS captures complete, 2026-10-12 03:53 UTC
+
+- HEAD `e19d83fb1b000ac03c1720026ba904ade938e685`, coreclean/docWIP. Local
+  caller correction5lines sharedPrepareBindings plus reusable tests. Unchanged
+  deferredDF052D1B GREEN034220; rendering/chain034543 and init034544PASS.
+  New giant034723/queue034847PASS (1faa2ddb), nativecore034855/install034952PASS.
+- Current private EXE `083fa96b217fa7f0511676d5acc298b7548ed5f85317d688e181fe4133666acd`
+  in `runtime-palette-writer-cs-v2`, source/provenance/15inputhashes/symbols
+  preserved. Run `game-20261012-035028-integration-palette-writer-cs-v2-317cb7`
+  ACTIVE root75998/PID30564,300s/manual/autoswipe0, no concurrent nativework.
+- Previous nested-command abort no longer blocks capture. Actual first two
+  completed input/output snapshots `00001_1158e78fa2c7a20e_f150` and
+  `00002_54904fb419d79e49_f153` exist under run/dispatch-snapshots. First
+  occurrence/MAX1 perhash; not guaranteed sameBAD palette span. Collectors
+  explicitly force drains/perturb timing. Agents inspect actual userdata,
+  descriptors/rootoffset/count/flags and output rows; no expectedvalues inferred
+  from bare journal/reconstructed flags. Rootkeeps sourcefrozen.
+- Observed frame496/title2.9FPS at~130s diagnostic/cold, manynewshaders;
+  rendering/NF errors remain. Stable picture/~60FPS NOT achieved. Original
+  palette trace/nextscreens/runtime cleanup afterboundedrun remain to check.
+  No input automation, push or externalmenu/gameplay milestone publication.
+
+## Latest checkpoint: deferred first binding RED→GREEN, neighbors next, 2026-10-12 03:43 UTC
+
+- HEAD683172a8; five-line shared caller correction in PrepareBindings WIP.
+  First FaultBuffer acquisition now happens with Gds/resource preparation
+  before rendering/chain/reservation. No guard or bitmap lifetime changes.
+  Stable image/~60FPS stillunachieved; no new game after032417 regression.
+- Real deferred firstbinding DF052D1B oracle RED033923 on5cf93e43: positive
+  routed/probe/planned controls all1, no shaderdispatch/gates, exact nested
+  reservation guard321. Same unchanged oracle GREEN034220 on628251d9/exit0,
+  build034023PASS. This verifies actual public PrepareBindings→planned
+  CommitBindings under asynchronous recorder, not a synthetic getter alone.
+- Native owner promotes separate graphics/compute state neighbors; first
+  preparation may end previous state because it touches memory. AFTER prepare,
+  graphics binding must retain active rendering, compute_chain binding retain
+  pending chain. Original init a27c unchanged; no GPU arithmetic claim from
+  no-dispatch state fixtures. CTest registration prepared; no nativeprocess now.
+- Next bounded neighbors+existinginitchecks, separate callerfix commit, native
+  corebuild/install then guarded originaltwoCShash snapshots max1perhash.
+  Actualroot396/count/flag/descriptors/input rows and postdispatch palette
+  still needed to distinguish input/EXEC resultzeros from later memory loss.
+
+## Latest checkpoint: initialization caller regression blocks CS capture, 2026-10-12 03:25 UTC
+
+- Init completed local683172a8 with valid samea27c GREEN030802; independent
+  observation/rebinding/newbatch031437, NF11off/on031438 and quota031439PASS.
+  Current giantbuild031659/queue031906PASS on3c378ffa; native core031913/
+  privateinstall032310PASS, EXEdd175ab6 in `runtime-palette-writer-cs`.
+- Original `game-20261012-032417-integration-palette-writer-cs-a1d6cc`
+  ended03:24:23.867Z exit321 after6.38s,noRAMguard,min38.06GiB; stdout/stderr/
+  kyty/run saved andstreamsdrained. No palette/CSsnapshots or screenshots yet.
+  Regression: lazyGetFaultBuffer Fill records a GPU command inside deferred
+  ReserveRecordedCall..CommitRecordedCall. Guard atcommandHooks.cpp647 correctly
+  rejects nested packet recording. Deferred descriptor path reserves3542 then
+  callsGet3595. Initialization must occur before this transaction; guard stays.
+- New synthetic firstfault binding/deferred reservation regression recorded
+  FIRST in testdebt; Native owner preparesTESTONLY actualbinding fixture before
+  caller correction. Preserve bitmapfirst-use andpending-bit/queue contracts;
+  do not revert initialization or fabricate successful payloads.
+- No native process remains. Stable picture/~60FPS stillunachieved; previous
+ 69b/024230 showszero palette/corruptgeometry/3–4FPS diagnostic. Writerdata
+  remains needed. CPU549decode031551PASS7844ISA/nohardwareID/clockops but
+  reconstructed flags/no currentuserdata or GPUoutput equivalence. Actual549
+  outputindex=rootDWORD396+groupX*512+localX; unknown actualoffset/count and
+  branchselection prevent an expectedactive2098 result. Rawstore/noformat.
+- Next same firstbindingRED→caller fix→GREEN+existinginitneighbors, native
+  originaltwoCScapture, then distinguish producerzeros fromlaterloss. No push,
+  input automation, externalmilestone or concurrency. Source683coreclean/docWIP.
+
+## Latest checkpoint: unchanged initialization oracle GREEN, neighbors pending, 2026-10-12 03:12 UTC
+
+- HEAD69b620a9/local only; shared initialization correction is WIP, not yet
+  committed or retried in game. Stable picture/~60FPS remains unachieved.
+  Latest original69b/024230 images remain corrupt with zero active palette.
+- Build030624 PASS; unchanged controlled-reuse oraclea27c1e28 run
+  `checks/20261012-030802-7513891-fault-bitmap-init-native-green` PASS/exit0
+  on freshd10b98cf. Exact reused memory/offset/size, seeded/pinned checks pass;
+  poisonRegistered0/currentRegistered1. Same actual parser and first-binding
+  producer contract as valid RED025856. No initialization at first parser pass.
+- Shared first GPU GetFaultBuffer initializes bitmap once with transfer
+  visibility; observational debug-owner enumeration and snapshot size use
+  PeekFaultBuffer. No-exposure parser returns because no producer has bound
+  the allocation; later parsing retains pending faults. No perframeclear or
+  Finish. Two metadata friends/test bootstrap remain test-only; source freeze
+  before next native build. Native adds separate repeat-get/new-batch/observation
+  neighbors, original oracle unchanged. CTest registration prepared by root.
+- No native process currently. Next: neighbor/affected diagnostics checks,
+  separate init commit and fresh native core; actual549+1158 snapshots max1
+  perhash with original userdata/output. Decode549 exact journal body under
+  explicitly reconstructed CPU profile only; this does not supply live input
+  or GPU proof. Initial fixed quota/count and EOP proofs remain preserved.
+
+## Latest checkpoint: controlled bitmap initialization RED proved, 2026-10-12 03:00 UTC
+
+- HEAD69b620a9; original acab/024230 rendering remains corrupt,3–4FPS
+  diagnostic outcome. Stable image/~60FPS unachieved. No native process now,
+  push, automatic input or external milestone. WIP test-only two metadata
+  friends/init fixture/bootstrap; native initialization correction starts now.
+- Init build025735 PASS. `checks/20261012-025856-5730280-fault-bitmap-init-native-red`
+  intended semantic RED on fresh31699757: actualKHR push_descriptor advertised
+  and enabled/max32; predecessor/fresh VkDeviceMemory, offset12603456 and
+ 12582912-byte size MATCH, pinned/seeded/exactReuse all1. After first real
+  binding, independent positive-page atomicOr producer and actual parser,
+  poisonRegistered1/currentRegistered1. Drain/unmap/dispose precedes assertion.
+  New fault is present but old allocation bit is incorrectly treated as current.
+  Frozen oraclea27c1e28 unchanged; no production init correction beforeRED.
+- Earlier025236 compiled but was NOT executed with missing standalone
+  extension bootstrap; it is not a semantic result. Native mode-specific
+  device extension query/limit/enable fixes test setup, other modes unchanged.
+- Required correction: initialize transport before first GPU writer/binding,
+  once per allocation, with transfer-to-shader read/write visibility. Inspect
+  observational statistics getter calls and recording lifecycle; never clear
+  on first parser pass because that would lose genuine new requests. Same
+  unchanged controlled-reuse oracle GREEN and preservation neighbors pending.
+- Real palette writer join remains1158 then549 slot2; source shapes contain
+  raw matrix-shaped DWORDX4 stores, no proved conversion or half-mapping bug.
+  Latest frame343/344 usesGuestGpu counter, reader369/370 usespresented counter:
+  not26-frame-age evidence. Reliable CPU sequence/submit order only, no reader
+  tick or GPU-completion proof. Next targeted two-hash input/output snapshots
+  max1 perhash initially, with synchronization perturbation explicitly recorded.
+
+## Latest checkpoint: current image still corrupt; actual palette writers identified, 2026-10-12 02:54 UTC
+
+- HEAD69b620a9/local only. Original committed source69b with private EXE
+  `acab5cf96871f57c9b4d0c313b6c38045aac904bf4cd14120a0b78c819237081`:
+  run `game-20261012-024230-integration-fault-batches-a944b2` ended02:47:35.377Z
+  graceful0 after300s/noRAMguard,min23.21GiB. Root5508 drained. Native core
+ 023834/install023934 PASS; current queue023826/scheduler023829 PASS on411b5774.
+- Four actual captures30/90/150/210s preserved. Visually inspected90s: missing
+  world/grey surfaces;210s: stretched triangles across image. Titles3.2–3.5FPS
+  late in diagnostic/cold run,7.7startup. Stable picture/~60FPS NOT achieved;
+  no performance improvement/regression inferred from unlike cache/scenes.
+  Pad log stays neutral; no input automation or menu/gameplay publication.
+- Same216751-word live2a SPV/map: BADtoken1/frame369/base2009efdf40 has zero
+  six active palette rows2098/2097, RSQ(0)=Inf and NaNPosition. FINITEtoken2/
+  frame370/base200334b6e0 has sameindices/nonzero rows/noNF. Quota fix does
+  not by itself correct this rendering defect. History identifies prior exact
+ 124224-byte declared writes in BOTH: latestCS54904fb419d79e49 slot2,
+  earlier1158e78fa2c7a20e slot2, direct1×1×1.28matches/8saved/truncated;
+  eviction and CPU-order scope explicit. Different writer/reader nativehandles
+  occur inBOTH, so this does not prove lost merge data or actual written values.
+- Complete new original v9 journal:1881records/11052085bytes, allXXH3/tail
+  checks pass in pure file analysis. Original bodies205/226 extracted with
+  exact hashes under `writer-history-diagnostic-20261012/writer-code-024230/`.
+ 1158local64×1×1/LDS512 and549local512×1×1/LDS3200, bothwave64/host32;
+  byteidentical earlier actual bodies. Live userdata/output still needs a
+  targeted dispatch snapshot; no fabricated reconstruction is runtime proof.
+- Source WIP now TEST-ONLY allocation metadata friends plus init fixture,
+  no bitmap initialization behavior fix. Build025236 PASS, NOT executed:
+  actual parser requires enabledKHR push descriptors, missing from standalone
+  harness. Native owner adds mode-specific advertised/max2 extension bootstrap,
+  then freezes. Controlled old-poison/new-real-page init RED remains pending.
+- Next: bounded init regression without first-parser work dropping; current
+  actual549/1158 input/output snapshots and wave/dirty-ownership diagnosis.
+  Accurate source4 prototype is saved ignored/CPU-only; native conversion,
+  calibration/ordering and real FPS optimization remain pending. No active
+  native process currently; serialize next build/test/game and preserve WIP.
+
+## Latest checkpoint: quota fix and neighbors pass; fixes committed locally, 2026-10-12 02:37 UTC
+
+- Active branch `yotei-integration-native`, HEAD `69b620a9`; production source
+  clean, docs WIP only. Local completed commits:8c6c9019 literal ordered EOP,
+  5247bd14 bounded diagnostic writer history,69b620a9 lossless bounded BDA
+  fault batches. No push or external menu/gameplay milestone. Stable picture
+  and~60FPS NOT achieved; current candidate original retry still pending.
+- Unchanged frozen726232c5 protocol oracle RED022201 -> GREEN022836/exit0
+  on8b45438f: count1023/1023/3, retained pending1026/3/0, all2049 unique bits
+  accounted for and guard bytes intact. Shared atomicExchange/CAS/residual
+  atomicOr mechanism, CPU count precondition and explicit output HOST_READ
+  dependency; no limit increase, lost work or page0 acceptance. Initial bitmap
+  initialization is deliberately separate unproved regression debt.
+- Build023327 PASS, EXE4c9db263. Quota neighbors023505 PASS/exit0:0/1/31/32/
+ 1023/1024, first positive/last represented/sparse-edge bits. EOP registered/
+  native-consumer/IRQ/repeated-write/compute32 neighbors023506 still PASS.
+  Input barrier queue families explicitly IGNORE; original oracle unchanged.
+- Original candidate histories remain020757 (faultcallback fatal before
+  palette capture) and021738 (60s nofatal, black/loading screenshots, no target
+  palette token). Quota defect is proved, original exact causal join unproved.
+  Do not present startup16–30FPS or cached pipeline success as gameplay.
+- Root giant affected target build ACTIVE session41495, source69b620a9/frozen;
+  no other native execution. Next run queue/scheduler once on new transport,
+  build/install current private native core,300s original retry/screenshots
+  and current palette-writer join. Old GC fixture mismatch and accurate source4
+  remain explicit pending; no full numerical/cross-game suite claim.
+
+## Latest checkpoint: bounded fault-parser quota regression proved, 2026-10-12 02:22 UTC
+
+- TEST-ONLY actual production parser SPV build022056 PASS, fresh EXE
+  `65577444f5c28f38defc9b5db80d35d9ee444cc7c97e7aea64c4962bc0e8da99`.
+  `checks/20261012-022201-8595207-fault-buffer-capacity-native-red` intended
+  semantic RED:2049 unique synthetic bits, pass0 count1087 despite1023 slots,
+  exported1023/pending0/guards preserved;1026 requests lost. Bounded2 groups
+  with every invocation/input in range; cleanup completed before assertion.
+  Frozen test SHA726232c5; no production correction existed for this RED.
+- Native owner now corrects shared saturating reservation and preservation of
+  unexported bits, keeps CPU count/address validation and native barriers. Same
+  oracle GREEN and quota neighbors required before new native original retry.
+  No game/hash-specific logic, enlarged limits, dropped work or zero resources.
+- Second original021738 ended02:18:42.375Z graceful0 at60s/noRAMguard,
+  min29.5GiB free; root1767 drained. Existing BDA diagnostic first200 rows show
+  small batches (e.g24/2), no captured overflow/fatal repeat. Four screenshots
+ 10/20/30/40s: black screen, then loading spinner. Startup titles28–30FPS and
+  later~16FPS are not steady gameplay/60FPS proof. No selected palette token;
+  zero-palette producer and exact original overflow causality remain unproved.
+- All native processes ended; source inputs frozen except native owner's new
+  parser correction following RED. No external milestone or push. Stable
+  picture/~60FPS unachieved; root continues original retry after focused proof.
+
+## Latest checkpoint: original retry faults in BDA batch callback, 2026-10-12 02:16 UTC
+
+- Original020757 ended02:08:27.687Z, exit321 after29.66s, no timeout/RAMguard,
+  min29.31GiB free; root70196 drained. Early frame200/title9FPS was startup
+  only. Abort nearframe292 precedes requested palette trace and60s screenshot:
+  no trace/tokenJSON or image captured, no stable picture/~60FPS proof.
+- Fatal cached range0+8000/buffer1074; last-create request is logged AFTER
+  alignment and does not reveal original byte range. Exact frozen coreEXE/
+  matching PE/PDB GUID-age/link map proves FaultManager::ProcessFaultBuffer
+  deferred lambda -> FindBuffer -> CreateBuffer, invoked by pending operations
+  during DispatchIndirect. No direct WriteOrderedMemory/EOP frame in chain.
+  Evidence `writer-history-diagnostic-20261012/failed-run-020757-readonly/stack-identity/`.
+- Actual fault count/bitmap not yet captured; page0 origin and EOP causal
+  involvement unknown. Concrete independent fault quota lead: GPU parser
+  increments before limit, clears word before exhausted return; CPU trusts
+  count. Required actual parser SPV bounded overflow/pending-bit regression
+  recorded FIRST in test debt; native owner prepares TEST-ONLY fixture before
+  correction. Range/count checks stay intact, no zero resources/work dropping.
+- Literal focused/registered/native-consumer/IRQ and affected queue/scheduler/
+  ring/range tests remain verified. Broader GC failure is an old fixture with
+  two-range stride assumption despite current widened readback covering four
+  ranges; no EOP call and unchanged RecordReadback/Download source. Actual
+  reservation offset/atom not printed; no production GC defect established.
+- Next: capture raw BDA count using existing diagnostic switch if useful,
+  get intended bounded parser-protocol RED, fix shared saturation/retained
+  bits after proof, then retry original/screenshots and palette-writer join.
+  Accurate source4 and clean warm FPS remain separate pending work. No push,
+  external milestone, automated input or concurrent native execution.
+
+## Latest checkpoint: affected queue checks pass; original retry active, 2026-10-12 02:08 UTC
+
+- Native original run `game-20261012-020757-integration-eop-history-53d889`
+  ACTIVE, root session70196/PID39156,300s/manual/autoswipe0/privateEXEfc961019.
+  Same palette125/NF trace plus bounded writer history; captures60/120 planned.
+  Early title frame200/9.0FPS is startup evidence only; stable image/~60FPS
+  NOT achieved. Do not run another native build/test/game until this ends.
+- Giant test build020552 PASS, fresh EXE
+  `6e16602f2d91179505e53fa771b53daac58c42b2cf5d0ef0b7ba649aa1169eed`.
+  Queue020652 PASS including nonblocking parser, mapped EOP publication,
+  exact literals, IRQ routing, polling/wait/rewind/CE and shutdown cleanup.
+  Accurate source4 stage is deliberately still tested separately as pending;
+  routine queue clock scope is broad preparse-to-postFinish publication only.
+- Scheduler020709, stream-ring020710 and buffer ranges020711 PASS/exit0.
+  Broader GC020713 fails adjacent download reservation stride expectation;
+  native owner is diagnosing unchanged old mechanism/fixture, no correction
+  or full suite claim. Native test fixture restoration is test-only: actual
+  original vector definitions restored from581dad7d/0d0b215f/b8946fef,
+  not FP64 production semantics; benchmark uses current indirect_descriptor.
+- Next after bounded original completion: exact current palette/writer join,
+  visual captures, neutral-pad and process cleanup audit; commit completed
+  literal fix separately from diagnostic/test-plumbing changes and record
+  actual rendering/FPS outcome. Preserve failed original inputs and debt.
+
+## Latest checkpoint: native candidate ready; queue-test API restoration pending, 2026-10-12 02:04 UTC
+
+- HEAD `b50bb1c8`, production literal fix and opt-in diagnostic remain WIP;
+  all source owners frozen. Stable picture/~60 FPS NOT achieved. No native
+  process or game currently running; no input automation, push or publication.
+- Writer-history fixed32768-entry CPU ring joins admitted current reader SRDs
+  to up-to8 preceding declared CS/PM4 writers per range, with CPU cutoff,
+  eviction/truncation/native-identity limitations. No guest loads/readbacks or
+  execution semantics changed. Target build015641 PASS, boundary/cutoff/
+  relocation/wrap check015700 PASS, EXE `c7117b6d7fc3d8265ffc68407ff850535662b2ba8191ce9481e851e0e716a1cd`.
+- Native core015853 and private install020135 PASS. Candidate EXE
+  `fc96101919ca77f2455cf1ad675d9e5ed6a2db0f0a4b2f22b737d0575b3aa2a8`
+  in `runtime-eop-history`; frozen tracked diff plus explicit10-file hashes
+  cover new untracked writerHistory.h. Source/hash-guarded diagnostic and clean
+  runners prepared;020228 was DryRun only. Original retry not yet executed.
+- Existing giant affected target failed build015715 due stale test APIs
+  (distinct sampled mip expectation field, mandatory actual image-buffer
+  capacity); fixes are test-only. Next015942 failed missing actual synthetic
+  vector fixture definitions and removed DescriptorSource benchmark member.
+  Native owner restores original definitions from581dad7d, without FP64 core
+  port or zero stubs. These are build limitations, not valid emulator RED.
+  Queue/nonblocking/literal/IRQ checks remain pending until target builds.
+- Standalone clock capability probe `clock-audit/runs/20261012T0156047541417Z-abfb455d`
+  build/run PASS; EXE5cbca9d9. Actual RTX5060Ti supports both calibrated aliases,
+  DEVICE+QPC domains, family0 64 validbits/1ns period, int64. KHR-enabled samples
+  have2.752–2.816us reported max deviation and QPC10MHz anchors within observed
+  CPU brackets. No GPU commands, guest KernelTSC link or implemented clock
+  bridge; do not treat raw device epoch as guest100MHz. Source4 debt remains.
+- Next: finish minimal affected-test restoration and run queue/scheduler/ring
+  checks, then original bounded writer-history retry/screenshots; identify
+  current zero-palette producer. Preserve independent rendering and clean warm
+  FPS acceptance checks. Literal tests and existing pixel neighbors already pass.
+
+## Latest checkpoint: literal EOP GPU regression and neighbors pass, 2026-10-12 01:52 UTC
+
+- Shared literal correction remains uncommitted on HEAD `b50bb1c8` pending
+  affected queue tests. Stable picture/~60 FPS and original retry still pending.
+  No task native process remains. No push, input automation or issue publication.
+- Focused `checks/20261012-014742-5354561-eop-literal-cleanup-green` PASS/exit0,
+  EXE `9582a189dbb87e6c9aed7626f70bf0ec63314607f76641d79fc6d2940c2f2275`:
+  unchanged literal semantic goldens now pass with correct renderer mapping
+  setup/teardown and explicit priority-publication drain. Original two-case
+  `cb1888cb` oracle preserved; accurate source4 remains separate pending debt.
+- Build014928 PASS, fresh test EXE
+  `795795a7be1b1b0ce7f1956ef6fc58649f3ce5d58780f48b3fc780f108c2b37c`.
+  `checks/20261012-015005-5127285-eop-literal-neighbors-registered` PASS/exit0:
+  registered clean64 plus same-command-buffer native consumer and real IRQ
+  backing observer; prior GPU-dirty label with repeated writes, preserved newer
+  dirty ownership and both native values; real bounded compute producer before
+  public32 CS_DONE with exact-width result. All native work and mappings disposed.
+  Prior014749 failed registration setup, not data semantics; fixture now uses
+  actual FindBuffer/SynchronizeBuffersInRange rather than read-only stream upload.
+- `checks/20261012-015045-6065118-eop-bindless-retirement-neighbors` PASS/exit0,
+  actual red/green/blue pixel retirement neighbors on the same new executable.
+  Existing unrefreshed resource_tracking EXE8acd47fc check014814 fails unrelated
+  indirect-image numeric-class invariant; do not claim full suite pass.
+- Root registered two bounded literal cases in CTest. Native owner is replacing
+  old queue fixture host-stack EOP labels and immediate-value expectations with
+  tracked guest labels and post-completion values while preserving nonblocking
+  parser/submission checks. Writer-history diagnostic implementation is active
+  in separate owned files; no build while inputs are being edited.
+- Private `runtime-eop-history` SaveData/cache copy and source/hash-guarded runner
+  prepared, no game executed. Next: freeze both owners, run focused affected
+  queue tests, commit completed literal fix, build private native core and retry
+  original with bounded current-reader/earlier-writer attribution. EOP/palette
+  causality and performance gain remain unproved.
+
+## Latest checkpoint: literal EOP ordering reproduced; candidate cleanup pending, 2026-10-12 01:45 UTC
+
+- Branch `yotei-integration-native`, HEAD `b50bb1c8`; literal EOP source/test
+  correction is uncommitted. No push or external milestone update. Stable
+  picture/~60 FPS remains unachieved; last clean original run reached 4.7 FPS
+  with missing/covering geometry. All native processes from the checks below ended.
+- Unfixed native regression `checks/20261012-012308-3986084-eop64-publication-nofault-native-red`
+  proves actual public64 BOTTOM literal publication before submission: backing
+  already holds `1122334455667788` while native producer tick is pending and
+  unchanged. Producer completes before assertion/cleanup. Timestamp source4 is
+  also sampled before its required completion stage. Original frozen oracle
+  SHA `cb1888cbade113045534d857fcda854703daacf9f825804bb4af14f352bde45b` preserved.
+- Candidate uses shared BufferCache queue-ordered staging copy, tracked backing
+  publication and existing owner/token retirement before IRQ. No title/hash
+  guards, direct deferred guest-VA memcpy or global GPU drain. Source4 still
+  uses the old parser-time sample and is explicitly not corrected by this work.
+- Build `checks/20261012-014334-8744062-build-target` PASS, fresh test EXE
+  SHA `e50b368e31999271795b0909d5daa92fea286a6f568e65bd0426b7a6d71bc9dc`.
+  Focused `checks/20261012-014416-7029249-eop-literal-first-green` observes
+  sentinel before submit, exact literal after Finish, completed real producer.
+  Exit -1073741787: PageManager live-state destruction during fixture teardown;
+  this is NOT yet a passing test. Native owner is correcting fixture cleanup
+  without changing semantic expectations; registered/GPU-consumer/IRQ/repeated
+  write/actual compute32 neighbors follow before commit and original retry.
+- Zero palette producer remains unidentified. Existing write-watch diagnostics
+  are the next low-cost attribution tool; EOP involvement in zero palette or
+  poor FPS is unproved. Accurate source4 requires native stage timestamps and
+  a calibrated clock bridge; proposal is saved in `clock-audit/`, capability
+  probe and synthetic regression remain pending and separate from graphics proof.
+
+## Latest checkpoint: valid palette loads return zero; EOP regression next, 2026-10-12 01:11 UTC
+
+- Sourceb50bb1c8/native409065e9 remains current; no new production fix after
+  the shared code-cost optimization and bounded diagnostic commits. Stable
+  image/~60FPS still NOT achieved (clean late frame1099/title4.7FPS).
+- Original palette005519 ended01:00:24.716Z exit0/graceful300s/noRAMguard,
+  min21.84GiB. Root42514 drained; no emulator/test/build process remains.
+  Neutral pad log; screenshot60s(frame294/coldblack) and120s(frame528/3.9FPS)
+  preserved. No visual menu/gameplay milestone or automatic input.
+- Actual SAME216751-word SPIR-V (SHA461bca6b16b790cd94afd5b8bcdea206ddf3ab8329d51a75d62ea3f501d0beec)
+  selected125: BADtoken1 has six active raw palette rows/24 DWORDs allZERO,
+  valid indices2098/2097, stride48/count2588/range124224, offsets0/16/32.
+  FINITEtoken2 has sameindices but different palette base/native handle and
+  finite nonzero matrices. Inactive indicesffffffff returnzero inBOTHdraws
+  withzero weights. No missingPC/truncation. BADzero-length basis ->correct
+  RSQ(0)=Inf ->NaNPosition; finite nextdraw has noNF and finitePosition.
+- BAD actual guest base0x20032508c0; active rows0x2003269220/2230/2240 and
+  0x20032691f0/9200/9210 fit declared span. Native views also contain these
+  offsets. Zero return does NOT by itself prove expected nonzero source
+  contents, a descriptor/producer/coherence defect or improper game initialization.
+  Evidence `vertex-value-trace-stage1-20261011/live-005519-palette-review/`.
+- Concrete shared source lead: EOP direct CPU memcpy before native completion;
+  source4 timestamp is sampled during parsing, Sync records metadata/IRQ.
+  Ordinary label pages are unprotected; GPU-dirty palette pages may still
+  wait through fault/readback tracking. EOP involvement in the zero palette
+  is NOT proved. A naive deferred memcpy can fault in completion callbacks;
+  registered-label/GPU-consumer/IRQ neighbors are required for any correction.
+- Primary PAL BOTTOM=0x28, CS_DONE=0x2f; do NOT call2f a bottom-of-pipe event.
+  Public64 normalizes supportedBOTTOM index0; actual raw packet usesindex5.
+  Public32 currently normalizes toCS_DONE/6. Initial test must use legal
+  64BOTTOM with a queued unsubmitted native producer, or real rawBOTTOM
+  packet. A transfer-only producer does not prove CS_DONE ordering.
+- Next authorized TEST-ONLY native EOP64 literal/source4 ordering regression,
+  no source correction until intended RED. Drain/dispose before assertions.
+  Native agent owns fixture, Sharp primary/source audit only. Separate raw
+  vector repeated-address cost fixture stays an ignored draft. Root executes
+  serialized native checks. No source limits/sync/clock/resolution hacks.
+
+## Latest checkpoint: zero-length basis identified; palette capture active, 2026-10-12 00:56 UTC
+
+- Engine commitsde9a89cf (shared conversion cost) andb50bb1c8 (compact bounded
+  diagnostics) are local. Native core003500/install003626 PASS, private EXE
+ 409065e99e608237a188e50acfcd29e05cdf9a75b0962dae0ab4748d3e4ccf46.
+  Core source is clean; only plan/debt documentation remains WIP. No push.
+- CompactNF GPU003151 fresh99081740 passes all11 off/on cases. Actual2a
+  reconstructed-profile CPU003359 validates215142words instead of unused
+  inline1942548; actual original live module is215292words. Build002923's
+  enum spelling error was corrected before successful003112. Stale003029
+  ran old23850 and is explicitly INVALID as compact-v2 proof inrun.json.
+- OriginalNF003728 ended00:41:33.266Z exit0/graceful240s/noRAMguard,min26.61.
+  Actual token1/frame292 vertex125: first recorded invalid expression is
+  %2456 FPRecipSqrt32(%2455=+0) ->+Inf, ordinal2456/block12/map378cec32bd6e6bf4.
+  Pre/post Position both7fffffff×4. Token2 has no invalid event and finite
+  Position; exact liveSPV matches. RSQ(0)->Inf is CORRECT ISA behavior, not
+  a reason to sanitize arithmetic. The squared-length input comes from a
+  zero accumulated bone basis; palette values/indices are the next lead.
+  Export predicate%21 is observedtrue for this invocation; static ancestry
+  with its false arms excluded exists, other Phi/branch choices untraced.
+- Clean original004532 disablesCHECK/NF/trace/snapshots/zones/drain stats;
+  same EXE/manual/eager1/keybounds1/chain0/defaultformats,300s. End00:50:37.609Z
+  exit0/graceful/noRAMguard,min22.22. Lateframe1099/title4.7FPS, image has
+  character but missing background/covering geometry still visible. No
+  demonstrated FPS gain; initial pipelines were cold, repeat warm measurement
+  remains pending. Neutral pad log, no automatic input. Captures60s/120s/late
+  preserved; NF003728 manual captures287/293 were black during cold startup.
+- Same-profile top3 compute CPU004339/40/41 PASS:824238/783994/790817words
+  ->796797/764833/771656, only~2.4–3.3% reduction for these reconstructions.
+  Do not extend the synthetic32-load23.89% result to whole-game performance.
+- ACTIVE original palette005519: PID46528/root42514,300s boundto01:00:19UTC,
+  `_Build/runs/game-20261012-005519-integration-palette-trace-4a8b2d`.
+  SAME EXE/sourceb50, selected125/instance0/NF2/frame0,16-PC selector
+  980..9d8(raw12palette loads)+90c/914/10c/1dc. No new source or cache waiver.
+  Exactly copied SRDs and returned row bits/indices/offsets will distinguish
+  addressing/bounds, contents and initialization leads. Root alone executes;
+  no native build/audit/test may overlap this game. Other agents read-only.
+- Stable picture and approximately60FPS remain NOT achieved. Next verified
+  semantic defect must first get an independent synthetic RED. Separate
+  proposed raw-vector address cost regression and clock-unit audit are leads,
+  not source corrections. No new issue/menu/gameplay milestone is authorized.
+
+## Latest checkpoint: shared conversion code validated; compact diagnostic pending, 2026-10-12 00:28 UTC
+
+- Local completed optimizationde9a89cf shares the existing generic formatted
+  conversion body; address/bounds/EXEC/dst_sel/D16 remain at callers. Cost
+  RED000048 -> SAME GREEN001747 retains all1/8/32 live loads/four outputs:
+  words3349/13568/48632 ->3140/10783/37015, normalizationFDiv8/64/256 ->2/2/2.
+  The32-load synthetic module is23.89% smaller; no game FPS improvement claimed.
+- Actual baseline001124 vs candidate001759:100 requests/4800 lanes/25 cases,
+  no missing/extra/changed results. Entire measured outputs are byte-identical
+  SHAe167dc0e9bfebed2b9374a2eb1e0f14d1f714aaa7e2997f5a34dd25e6b165068.
+  Both measurements exit2 for the SAME144 active UNorm8 fullscale discrepancies;
+  strict numerical suite is NOT a pass, its oracle is unchanged. All24 other
+  cases and inactive lanes match independent goldens. Precision debt remains.
+- New diagnostic actual GPU001806 passes NaN/Inf/finite/output controls before
+  a fixture expectation fails: legal SinkExecSelects makes inactive load0 ->
+  MUL0 -> SQRT0, so no invalid expression is expected. Fixture is corrected
+  to a finite inactive-load control (ED816263), old input preserved; this is
+  setup correction, NOT a production semantic RED. Native rerun pending.
+- Actual2a reconstructed-profile CPU002120 validates NFv1 but emits1942548
+  words, roughly27x the earlier diagnostic module. Do NOT launch that version.
+  NFv2 uses one shared bounded writer, caller invalid predicate, unchanged
+  slot23/header9/6272bytes and explicit unknownEXEC/IR-map scope. Source WIP
+  needs native GPU protocol and actual2a CPU size/validation before original retry.
+- Native tests23850a04, auditor7866b795; compiled artifacts preserve exact
+  source WIP at their times. Original235345 remains latest game, defective
+  picture/title4.1FPS; clean warm223508 was5.1FPS. Stable image/~60FPS remain
+  NOT achieved. Root executes alone; no active game, no autoswipe/push/issue post.
+- Proof `_Build/analysis/yotei-integration-20261011/generic-buffer-output-comparison/bodyreuse-report.json`,
+  `generic-buffer-baseline-immutable-20261012T0013051540004Z/`, checks001747,
+  001759,001806 and002120. Next validate compactNF, build private native
+  runtime, bounded bad-vertex retry, then clean warm performance measurement.
+
+## Latest checkpoint: conversion cost RED; first-invalid trace in progress, 2026-10-12 00:08 UTC
+
+- SourceHEADa1de46a5, branchyotei-integration-native; original235345 completed
+  with an exact bad vertex125 capture as described below. Stable picture and
+  approximately60FPS still NOT achieved. No native job currently active.
+- TEST-ONLY generic-buffer fixture build235825 PASS. CPU/public-SPIR-V cost
+  run000048 on54c1a177 validates actual1/8/32 live XYZW loads and all outputs:
+ 3349/13568/48632words,8/64/256 static normalizationFDiv. The predeclared
+ 1536word/read growth budget already passes; normalization budget<=16 fails
+  as intended. This is code-cost RED, not an emulated ISA correctness defect
+  or an original-game speed measurement. Memory.cpp remains unchanged.
+- Actual GPU numerical baseline000006 and diagnostic-output-only rerun000321
+  pass eight integer/scaled controls then fail strict UNorm8-fullscale:
+  actual3f7fffff vs ideal3f800000. Updated EXEf257ff91, no timeout/hang/reset.
+  Vulkan permits approximate FDiv; guest formatted-conversion endpoint
+  precision is still unverified. Do NOT call this semantic RED or loosen the
+  frozen strict oracle. Complete measurement of all unchanged cases next;
+  keep any pre-existing precision discrepancy separate from body reuse.
+- Diagnostic-only first-invalid scalarF32 hook is being implemented for the
+  selected exact draw: actual result/typed operands, content-addressed emitted
+  IR map and explicit unknown guestEXEC provenance. Preserve the fixed6272
+  byte trace allocation; reserve slot23 for first invalid intermediate while
+  images24..29 and pre/post30/31 remain bounded. No guest loads or output
+  substitutions. Actual GPU protocol proof is required before original retry.
+- Evidence `_Build/analysis/yotei-integration-20261011/checks/20261012-000048-5009848-generic-buffer-codegen-cost-red`,
+  `20261012-000321-9148760-generic-buffer-numeric-baseline-detail`, and
+  `generic-buffer-codegen-oracle-20261011T2359070566596Z/`. WIP test/diagnostic
+  source edits are unvalidated until their native runs; root retains sole
+  serialized execution, autoswipeOFF, no push/public milestone.
+
+## Latest checkpoint: exact bad vertex captured, 2026-10-11 23:57 UTC
+
+- Stable picture/~60FPS remain NOT achieved. Current manual screenshot
+  `game-20261011-235345-integration-trace-joined-aa0568/window-joined-1.png`
+  shows missing geometry/floating objects atframe560, title4.1FPS. It is a
+  diagnostic run, not a clean performance measurement. Clean warm223508 was5.1FPS.
+- Local45f855be copies decoded clip/rawVGT-wave settings and joins immutable
+  legacy trace tokens. Locala1de46a5 clears optional legacy identity words9..12
+  on every first record writer; FaultManager only clears counters, so unused
+  words previously could retain stale identity. These are diagnostics, not
+  claimed guest rendering fixes. Same six actual GPU protocol cases235212
+  PASS on4d094e6d; no dedicated legacy-fault overwrite GPU case is claimed.
+- Native configure235124/build235223/install235342 PASS. Private EXE
+  12f57773204470f5152e951c95ad79f20f9ea35818db59760f2ba74180a585f5,
+  sourcea1de46a5, unpinned computed cache identity; all old artifacts retained.
+  Original235345 selected125/instance0 fromframe0,180s, explicit sync pipelines,
+  eager1/keybounds1/chain0/manual/autoswipe0. End23:56:50.259Z exit0/gracefulbound,
+  no RAM guard/min25.27GiB; root96926 drained, no native process remains.
+- Token1 draw#19478/frame296 yields vertex125 pre AND post Position
+  (7fffffff,7fffffff,7fffffff,7fffffff), all NaNs. Legacy fault independently
+  joins the same token/draw, first writer109/hits178 atreadback297. Token2
+  selected125 is finite. All seven recorded ordinary-load payloads and all
+  three sample payloads match bit-for-bit between these two calls. Typed
+  SInt70 negative values are integers, not float-NaN loads; selected reads
+  are in range. Missing scalar/palette/SRT reads and arithmetic remain unobserved.
+- Actual selected draw has both min/max Z planes ENABLED, DX clip space,
+  effective native depthClipEnabletrue/depthClamptrue; rawGSwaveflag64 agrees
+  with input/compiledwave64 onhost32. One-sided-plane gap is separate debt,
+  not demonstrated as the cause here. No blanket NaN/Inf arithmetic repair.
+- Next: locate first invalid intermediate/unrecorded reads with bounded
+  diagnostics on the now-reproduced bad invocation. Parallel generic-buffer
+  code-cost/numerical fixture remains test-only draft pending native RED.
+  Root alone owns serialized native execution. No automatic input, push,
+  issue milestone, stable picture or60FPS claim.
+
+## Latest checkpoint: exact draw tracing works; visual defect remains, 2026-10-11 23:44 UTC
+
+- User objective remains stable picture and approximately60FPS. It is NOT
+  achieved: clean warm-cache run223508 observed5.1FPS; screenshot from233156
+  still shows large stretched covering surfaces. No new public milestone.
+- Native sourcea502617d, private EXEd37be5d75c5cebe4dd20f2f8c45a54efdd0c98f9033d732bccb28cb69e9a0cb8.
+  Original bounded manual runs233156 (vertex14/frame298,300s) and233855
+  (vertex0/frame0,240s) both ended gracefully with exit0 after their bounds,
+  no RAM guard. All native processes are drained. Automatic pad input wasOFF;
+  captured pad logs were neutral. No build/test overlapped either game.
+- Actual GPU/host traces admit two immutable draws each, twelve events/draw,
+  ready pre/post exports, no truncation. Selected14 and0 both export finite
+  positions; all three selected volume samples have finite coordinates/red+0.
+  Actual SPIR-V and copied draw/resource descriptions are saved beside JSON.
+  Missing load PCs, inferred image-use predicates and uncaptured half1 remain
+  explicit limits. These traces do NOT reproduce the bad vertex themselves.
+- In233855 the first2a nonfinite record names vertex125/readbackframe300,
+  unlike the earlier run's vertex0. Its heuristic lastdraw is insufficient
+  attribution. Next diagnostic: expose already-written legacy trace-token
+  words11/12 and copied decoded clip/stage flags; join GPU fault to exact CPU
+  draw before selecting another vertex or changing arithmetic/clipping.
+  Investigate bounded first-nonfinite capture to avoid chasing changing IDs.
+- Evidence: `_Build/runs/game-20261011-233156-integration-vertex-value-trace-9a4dc2`,
+  `_Build/runs/game-20261011-233855-integration-vertex-value-trace-v0-338bd3`,
+  `_Build/analysis/yotei-integration-20261011/vertex-value-trace-stage1-20261011/live-233156-review/`
+  and `live-233855-v0-review/`. Metadata changes pending validation are
+  diagnostic only; no clipping fix or performance improvement is claimed.
+- Parallel next work: independent generic-buffer codegen cost/numerical
+  regression design for top compute shaders. Root retains the sole native
+  execution slot. Resolution clarification remains unanswered; provisional
+  performance target1080p, with guest internal render size recorded separately.
+
 ## Latest checkpoint: trace GPU protocol and selected shader validation pass, 2026-10-11 23:27 UTC
 
 - GraphicsCLAMP correction is local699ececf, portable numerical RED231105 ->
@@ -27,6 +860,18 @@
   pipelines/manual input, bounded original retry and actual per-draw trace
   readback. Verify live pre/post position and sample/address results before
   further semantic corrections. Root owns all execution; no active native job.
+
+Native continuation23:32UTC: trace source/test commit e4f586c0, test-only line
+ending normalization a502617d (test semantic contents unchanged). Native core
+configure232822/build232907/install233147 pass. New private
+runtime-vertex-value-trace EXEd37be5d75c5cebe4dd20f2f8c45a54efdd0c98f9033d732bccb28cb69e9a0cb8,
+sourcea502617d clean core. Original300s retry233156 ACTIVE PID10824/root
+session33270, `_Build/runs/game-20261011-233156-integration-vertex-value-trace-9a4dc2`.
+Explicit async-pipelinesfalse, eager1/keybounds1/chain0/manual/autoswipe0,
+CHECK1 plus2a14/instance0 selected-PC trace fromframe298. No snapshots or
+layout/provenance statistics this retry. Trace-specific caches/journal and
+per-draw artifacts live in private runtime/run. Native slot occupied; no
+build/test may overlap. Current visual/value outcome pending, noFPS claim.
 
 ## Latest checkpoint: instruction CLAMP portable GREEN; trace GPU validation next, 2026-10-11 23:22 UTC
 
