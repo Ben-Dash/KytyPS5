@@ -297,7 +297,7 @@ void BufferCache::DescribeDeviceAddress(uint64_t address) const {
 	    {"device buffer", &m_device_buffer},     {"stream buffer", &m_stream_buffer},
 	    {"staging buffer", &m_staging_buffer},   {"download buffer", &m_download_buffer},
 	    {"draw record buffer", &m_draw_record_buffer}, {"GDS buffer", &m_gds_buffer},
-	    {"fault buffer", m_fault_manager.GetFaultBuffer()},
+	    {"fault buffer", m_fault_manager.PeekFaultBuffer()},
 	    {"BDA zero page", &m_bda_zero_page},
 	};
 	for (const auto& [name, buffer]: internal) {

@@ -83,6 +83,9 @@ protected:
 	[[nodiscard]] CommandScheduler& Scheduler() const noexcept { return *m_scheduler; }
 
 private:
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+	friend struct FaultBitmapInitializationTestAccess;
+#endif
 	[[nodiscard]] vk::BufferMemoryBarrier Barrier(uint64_t offset, uint64_t size,
 	                                              vk::AccessFlags source,
 	                                              vk::AccessFlags destination) const;

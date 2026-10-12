@@ -45,7 +45,7 @@ public:
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
   };
 
-  VulkanHarness() { Init(); }
+  explicit VulkanHarness(bool require_push_descriptors = false) { Init(require_push_descriptors); }
   ~VulkanHarness() {
     if (m_graphics.device != nullptr) {
       RequireVulkanSuccess(m_graphics.device.waitIdle(), "lifecycle device cleanup");
@@ -151,7 +151,7 @@ public:
   }
 
 private:
-  void Init() {
+  void Init(bool require_push_descriptors) {
     static vk::detail::DynamicLoader loader;
     const auto get_instance_proc_addr = loader.getProcAddress<PFN_vkGetInstanceProcAddr>(
         "vkGetInstanceProcAddr");
@@ -198,6 +198,25 @@ private:
           !features12.descriptorBindingPartiallyBound ||
           !features12.descriptorBindingSampledImageUpdateAfterBind ||
           !features12.descriptorBindingUpdateUnusedWhilePending) continue;
+      uint32_t push_limit = 0u;
+      if (require_push_descriptors) {
+        uint32_t extension_count = 0u;
+        RequireVulkanSuccess(physical.enumerateDeviceExtensionProperties(nullptr, &extension_count, nullptr),
+                             "fault init extension count");
+        std::vector<vk::ExtensionProperties> extensions(extension_count);
+        RequireVulkanSuccess(physical.enumerateDeviceExtensionProperties(nullptr, &extension_count, extensions.data()),
+                             "fault init extension query");
+        const bool advertised = std::any_of(extensions.begin(), extensions.end(), [](const auto& extension) {
+          return std::string_view(extension.extensionName.data()) == VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
+        });
+        if (!advertised) continue;
+        vk::PhysicalDevicePushDescriptorPropertiesKHR push_properties{};
+        vk::PhysicalDeviceProperties2 push_query{};
+        push_query.pNext = &push_properties;
+        physical.getProperties2(&push_query);
+        push_limit = push_properties.maxPushDescriptors;
+        if (push_limit < 2u) continue;
+      }
       const auto queues = physical.getQueueFamilyProperties();
       for (uint32_t index = 0; index < queues.size(); ++index) {
         constexpr auto flags = vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute;
@@ -205,10 +224,15 @@ private:
         m_graphics.physical_device = physical;
         m_graphics.physical_device_properties = properties;
         m_graphics.queue_family = index;
+        m_graphics.max_push_descriptors = push_limit;
         break;
       }
       if (m_graphics.physical_device != nullptr) break;
     }
+    if (require_push_descriptors)
+      Require("FaultBitmapInitializationGpu", "actual parser push-descriptor capability",
+              m_graphics.physical_device != nullptr,
+              "no device advertises VK_KHR_push_descriptor with maxPushDescriptors >= 2; unsupported setup, not a passing regression");
     Require("BindlessLifecycle", "required native capabilities",
             m_graphics.physical_device != nullptr,
             "no Vulkan1.3 graphics/compute device with production buffer and bindless UAB features; not a passing regression");
@@ -244,11 +268,19 @@ private:
     queue.pQueuePriorities = &priority;
     vk::DeviceCreateInfo device{};
     // Enable only features reported supported by this selected device. These
-    // are core Vulkan1.1/1.2/1.3 structures, with no optional extension dependency.
+    // are core Vulkan1.1/1.2/1.3 structures. The init mode also exercises the
+    // actual parser's KHR push-descriptor path, queried separately above.
     device.pNext = &features13;
     device.pEnabledFeatures = &features.features;
     device.queueCreateInfoCount = 1u;
     device.pQueueCreateInfos = &queue;
+    const char* push_extension = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
+    if (require_push_descriptors) {
+      device.enabledExtensionCount = 1u;
+      device.ppEnabledExtensionNames = &push_extension;
+      std::printf("[host] init parser VK_KHR_push_descriptor enabled; maxPushDescriptors=%u\n",
+                  m_graphics.max_push_descriptors);
+    }
     RequireVulkanSuccess(m_graphics.physical_device.createDevice(&device, nullptr, &m_graphics.device),
                          "lifecycle native device creation");
     VULKAN_HPP_DEFAULT_DISPATCHER.init(m_graphics.device);
@@ -294,6 +326,8 @@ private:
 #include "EndOfPipeLiteralNeighborTests.inc"
 #include "FaultBufferProtocolGpuTests.inc"
 #include "FaultBufferProtocolNeighborTests.inc"
+#include "FaultBitmapInitializationGpuTests.inc"
+#include "FaultBitmapInitializationNeighborTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -316,8 +350,10 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-literal-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--fault-buffer-protocol-gpu") == 0 ||
-                            std::strcmp(argv[1], "--fault-buffer-protocol-neighbors-gpu") == 0)),
-          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu]");
+                            std::strcmp(argv[1], "--fault-buffer-protocol-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0)),
+          "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu]");
   if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     ConfigureVertexTraceGpuEnvironment();
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
@@ -337,7 +373,9 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Log::Lifecycle>();
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
-  VulkanHarness vulkan;
+  VulkanHarness vulkan(argc == 2 &&
+      (std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
+       std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0));
   if (argc == 2 && std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0)
     CheckBindlessPreparationNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0)
@@ -372,6 +410,10 @@ int main(int argc, char **argv) {
     CheckFaultBufferProtocolGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--fault-buffer-protocol-neighbors-gpu") == 0)
     CheckFaultBufferProtocolNeighborsGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0)
+    CheckFaultBitmapInitializationGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0)
+    CheckFaultBitmapInitializationNeighborsGpu(vulkan);
   else
     CheckBindlessLifecycle(vulkan);
   return 0;

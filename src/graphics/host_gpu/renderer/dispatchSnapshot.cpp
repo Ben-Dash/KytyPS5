@@ -1024,7 +1024,7 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 		// Not captured (v1): the replay binds zeroed buffers of these sizes.
 		auto& buffers = context.GetBufferCache();
 		const auto* page_table = buffers.GetBdaPageTableBuffer();
-		const auto* faults     = buffers.GetFaultBuffer();
+		const auto* faults     = buffers.PeekFaultBuffer();
 		meta["bda_page_table"] = page_table != nullptr ? page_table->Size() : 0;
 		meta["fault_buffer"]   = faults != nullptr ? faults->Size() : 0;
 	}

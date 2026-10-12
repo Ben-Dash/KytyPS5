@@ -105,7 +105,22 @@ FaultManager::~FaultManager() {
 	m_graphics.device.destroyDescriptorSetLayout(m_fault_process_desc_layout, nullptr);
 }
 
+Buffer* FaultManager::GetFaultBuffer() noexcept {
+	if (!m_bitmap_initialized) {
+		EXIT_IF(!m_scheduler.Active() || m_scheduler.Current().IsInvalid());
+		// Clear only the bitmap; diagnostics after it have their own initialization.
+		// Fill records the transfer and makes it visible to subsequent shader readers/writers.
+		m_fault_buffer.Fill(0, FaultBitmapSize, 0);
+		m_bitmap_initialized = true;
+	}
+	return &m_fault_buffer;
+}
+
 void FaultManager::ProcessFaultBuffer() {
+	if (!m_bitmap_initialized) {
+		// No GPU binding has exposed this allocation, so no current producer exists.
+		return;
+	}
 	if (const auto wait_tick = m_fault_areas[m_current_area]; wait_tick != 0) {
 		DrainStats::ReasonScope reason(DrainStats::Reason::FaultBuffer);
 		m_scheduler.Wait(wait_tick);

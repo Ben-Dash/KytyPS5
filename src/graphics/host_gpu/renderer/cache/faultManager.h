@@ -20,18 +20,24 @@ public:
 	~FaultManager();
 	KYTY_CLASS_NO_COPY(FaultManager);
 
-	[[nodiscard]] Buffer* GetFaultBuffer() noexcept { return &m_fault_buffer; }
-	[[nodiscard]] const Buffer* GetFaultBuffer() const noexcept { return &m_fault_buffer; }
+	// GPU binding: initialize this allocation before any producer can see it.
+	[[nodiscard]] Buffer* GetFaultBuffer() noexcept;
+	// Observation must not record GPU work or change first-use state.
+	[[nodiscard]] const Buffer* PeekFaultBuffer() const noexcept { return &m_fault_buffer; }
 	void                  ProcessFaultBuffer();
 	// KYTY_VTX_EXPLODE_CHECK: once per presented frame, copies the explode region after the page
 	// bitmap back and clears its counters; VertexExplode::Report prints it after the GPU is done.
 	void                  ProcessExplodeLog();
 
 private:
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+	friend struct FaultBitmapInitializationTestAccess;
+#endif
 	GraphicContext&                            m_graphics;
 	CommandScheduler&                          m_scheduler;
 	BufferCache&                               m_buffer_cache;
 	Buffer                                     m_fault_buffer;
+	bool                                       m_bitmap_initialized = false;
 	Buffer                                     m_download_buffer;
 	std::array<uint64_t, MaxPendingFaults>      m_fault_areas {};
 	uint32_t                                   m_current_area = 0;

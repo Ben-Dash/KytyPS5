@@ -116,6 +116,7 @@ public:
 	// Debugging aid: prints the cache buffer owning that guest page and its page-table entry.
 	void DebugDescribePage(uint64_t vaddr);
 	[[nodiscard]] Buffer* GetFaultBuffer() noexcept { return m_fault_manager.GetFaultBuffer(); }
+	[[nodiscard]] const Buffer* PeekFaultBuffer() const noexcept { return m_fault_manager.PeekFaultBuffer(); }
 	[[nodiscard]] std::pair<Buffer*, uint64_t> ObtainBufferForImage(uint64_t vaddr, uint64_t size);
 	void FillBuffer(uint64_t vaddr, uint64_t size, uint32_t value, bool is_gds);
 	// Records a queue-ordered write and publishes its backing after native completion.
