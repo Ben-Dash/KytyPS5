@@ -1,5 +1,19 @@
 # Performance cycle 1: checked changes and comparisons
 
+Latest checkpoint: local `faa5d3ac`, published `a73b9592`. Native generic-conversion
+build/install passed; full world runs still show roughly2.5–2.6FPS, without a
+demonstrated useful improvement. User now requires **30-second title FPS samples
+directly in the game**, no menus, images only after FPS growth, and three agents
+proposing distinct changes while root implements/tests them sequentially.
+
+Uninstrumented same-executable runtime experiments: direct recording mean2.532,
+direct submission2.542, speculation disabled2.592FPS over first matched30s windows.
+All exited0 with no guards; complete rendering and neutral input were retained.
+Baseline first matched window2.435 contains a startup hitch (min1.1); later warm
+title mean was2.55. These samples do not establish a useful gain or select a new
+default. Exact UTC parsing and artifacts are saved in ignored performance-cycle2
+`title-fps-config-comparison.json`. No images or input navigation in these trials.
+
 Native Windows, `yotei-integration-native`, baseline `a73b9592` with c0 production
 source. User now explicitly requested WSL shutdown and three-agent suggestions
 with sequential root-owned implementation/testing. WSL shutdown returned0,

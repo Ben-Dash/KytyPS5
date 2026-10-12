@@ -1,5 +1,28 @@
 # Integration test debt
 
+## Performance cycle 2 required regressions, 2026-10-13
+
+- Known ordered EOP literals: actual GPU producer/store/consumer must agree for
+  32/64-bit labels; CPU label and following WAIT-dependent work stay old before
+  the native fence. After completion, exact literal bytes and interrupt ordering
+  match baseline without a redundant download-ring allocation/copy for that span.
+  Keep pending ownership even when no unknown-byte copies remain. Cover mixed
+  dirty pages, newer GPU writers, CPU overwrites, repeated labels, partial masks
+  and false WAIT conditions. An early predicted WAIT success is not a fix.
+- Repeated subgroup votes: compile a real bounded scalar-loop module and prove
+  duplicate constant-true subgroup votes on the supported wave64/native32 path.
+  Preserve low/high EXEC halves, partial waves, helper masking and native numerical
+  loop/guard cases. Driver optimization may eliminate the cost; FPS is unproved.
+- Resource-cache invalidation: call the actual IsRegionGpuModified predicate;
+  show that unrelated image registrations cause redundant scans while returning
+  correct answers. Relevant image writers, range collisions, GPU/CPU dirty state
+  and lifecycle changes must still invalidate the cache. Instrumentation alone
+  does not prove an optimization or runtime gain.
+
+Root owns all native operations. User requests recurring three-agent proposals,
+sequential correctness checks and 30-second in-game window-title FPS measurements,
+without menu navigation; inspect images only after a measured FPS increase.
+
 ## Generic conversion reduced work; precision debt preserved, 2026-10-12
 
 Actual-helper9-path cost RED195324/E74AEA7B -> unchanged GREEN195549/0ADF5A1B.

@@ -1,5 +1,36 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: three proposals, 30-second title FPS tests, 2026-10-13
+
+Active native branch `yotei-integration-native`, local HEAD `faa5d3ac`; published
+head remains `a73b9592`. PM4 clean-packet reads (`7823f07f`) and selective generic
+format conversions (`faa5d3ac`) have recorded RED/GREEN evidence. Neither has
+demonstrated a useful world FPS improvement. Native faa5 build/install passed;
+installed EXE SHA256 `0F3F14B064DBA30E341CBE79335A20808D4732581649E4F7DC79D98C65FB5511`.
+
+Latest explicit user constraints: three agents propose separate changes; root
+implements/tests them sequentially. Measure FPS in the window title directly in
+the game for **30 seconds** per variant. Do not navigate menus. Inspect images
+only after FPS increases. Loading/cache warm-up precedes the measured interval;
+keep it bounded separately. WSL was explicitly stopped; no native task remains
+running at this checkpoint. Preserve complete rendering and existing guards.
+
+Same faa5 executable, title-only/full rendering, neutral input: direct recording
+2.532 FPS, direct submission 2.542 FPS, speculation disabled 2.592 FPS (means of
+logged title values over the first 30-second frame>=650 interval). Normal title
+baseline first interval 2.435 includes a 1.1 FPS sample; its later warm interval
+was about 2.55. These small differences do not establish a useful speedup.
+All runs exited0, without memory guards; no screenshots were taken for these
+variants. Exact records: performance-cycle2 `title-fps-config-comparison.json`
+and `_Build/runs/game-20261012-{202909,203850,204403,204938}-*`.
+
+Next three proposals: fence-ordered publication of already-known EOP literals
+without redundant GPU readback; repeated wave64 subgroup votes; spatial resource
+cache invalidation. Each requires a production-path regression before fixing.
+Unknown GPU bytes, native fences, writer generations and unsupported-case errors
+must remain intact. Stable60 FPS, actual1080 rendering and full effect correctness
+remain pending. No new push or issue publication is authorized by this cycle.
+
 ## GPU generic conversion validated; next world comparison, 2026-10-12
 
 Shared generic formatted BUFFER helper now evaluates only the selected runtime
