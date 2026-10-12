@@ -1,5 +1,22 @@
 # Integration test debt
 
+## First64 matrix rows: wave grouping baseline and unresolved inputs (2026-10-12 06:16 UTC)
+
+Newreusable fa7ee9fb TESTONLYgroupingfixture64866D5B: nativebuild060754PASS,
+run061225 C41A4AE1 allsixWG64/128/512 full/sparseEXECcasesPASS, independent
+logicalIDs/READLANE31/63/first/fullsentinels. No groupingRED, no productionfix.
+Existingtwo-wave47/LDS tests retained. Count349 is a workquota, notWG349;
+native64/generalallowedVulkan subgroup permutations remaincoverage limits.
+
+Capturedfirst64-zero vsremaining285finite shape remains a lead. Elevenfixed
+assetinputs match/nonzero first64XYZ, but42SRTwords/dynamicpalette/written
+scratch differ; fullinputequivalence notproved. MissingBDAcapturepage is not
+actual host-unmapped/fault proof. Requirednextcapture filtersjobcoverage2097/
+2098 beforequota, keepsactual page/fault/EXEC/inputmetadata. First-useBDA
+zero-until-next-frame behavior is a sourcelead, notdemonstrated549causality.
+Anysharedresidency/ordering fix needs knownfinite boundedfirst-useGPU RED,
+sameGREEN andneighbor atomic/side-effect safety; never blindlyreplay work.
+
 ## NGG partial native vertex-wave entry count (2026-10-12 05:30 UTC)
 
 Update05:50: original054138 (B048335F) endedexit0/300s, severegeometry persists

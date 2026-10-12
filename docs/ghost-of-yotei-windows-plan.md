@@ -1,5 +1,26 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: REA plan committed; grouping hypothesis passed baseline, 2026-10-12 06:16 UTC
+
+- HEADfa7ee9fb: reusable TESTONLY multiwavegrouping test committed after
+  build060754 andnative061225PASS onC41A4AE1. SAME64866D5B independentoracles
+  allsix64/128/512 full/sparse casesPASS: actuallogicalIDs, READLANE31/63/
+  READFIRST, restoredEXEC andfullsentinels. No intendedRED, therefore no
+  productiongroupingfix. Count349 is outputjobquota, notWG349. Native64 and
+  arbitraryVulkan subgroup/local-index permutations remainseparatecoverage.
+- Russian[REA plan](rea-yotei-debugging-plan.md) andpriorcompleteevidence
+  committedc68d324c. Currentcorestillfourports1c9e3dfa; nativeoriginal054138
+  failedstablepicture(~3.3diagnostic/internal>1080) butended0. No furthergame
+  orproductionchangeafterit. Allnativeprocessesended; no activebuild/test/game.
+- Nextrequiredwork: optionaldiagnostic outputjobcoverage beforequota to capture
+  actual2097/2098 producer, includingdynamicSRT/writtenstate andactualBDA
+  page/faultmapping. Missingcapturepage isnotunmappedhostpageproof. Generic
+  first-use BDA behavior mayreturnzero untilnextframe (sourcelead), butactual
+  currentcause needsmappedaddress/readback correlation andsyntheticRED.
+- REA sourcepin/localPE-PDBbaseline complete; engine/provider executionpending
+  prerequisites. No installation/globalconfig/publish/push, no automaticinput.
+  Stableimage/~60FPS remainsunachieved. Sharedhandoffupdates preserve state.
+
 ## Latest checkpoint: REA research and concrete binary baseline saved, 2026-10-12 06:00 UTC
 
 - Currentnativebranchb026e202/core1c9, fourports committed/tested; no game,
