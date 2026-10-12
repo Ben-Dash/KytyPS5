@@ -4214,6 +4214,8 @@ void TestMalformedMemoryKindsRejected() {
   }
 }
 
+#include "DynamicSamplerPlanningTests.inc"
+
 } // namespace
 
 int main(int argc, char *argv[]) {
@@ -4222,10 +4224,11 @@ int main(int argc, char *argv[]) {
                    selected != "--pointer-source-identity-only" &&
                    selected != "--pointer-mask-neighbors-only" &&
                    selected != "--descriptor-phi-only" &&
-                   selected != "--descriptor-phi-neighbors-only")) {
+                   selected != "--descriptor-phi-neighbors-only" &&
+                   selected != "--dynamic-sampler-only")) {
     std::cerr << "Usage: resource_tracking_tests [--masked-pointer-record-only | "
                  "--pointer-source-identity-only | --pointer-mask-neighbors-only | "
-                 "--descriptor-phi-only | --descriptor-phi-neighbors-only]\n";
+                 "--descriptor-phi-only | --descriptor-phi-neighbors-only | --dynamic-sampler-only]\n";
     return 2;
   }
   try {
@@ -4244,7 +4247,13 @@ int main(int argc, char *argv[]) {
            !std::string_view(name).starts_with("descriptor phi ")) ||
           (selected == "--descriptor-phi-neighbors-only" &&
            std::ranges::find(descriptor_phi_neighbors, std::string_view(name)) ==
-               std::ranges::end(descriptor_phi_neighbors))) return;
+               std::ranges::end(descriptor_phi_neighbors)) ||
+          (selected == "--dynamic-sampler-only" &&
+           !std::string_view(name).starts_with("dynamic sampler ") &&
+           std::string_view(name) != "images and samplers" &&
+           std::string_view(name) != "SampleAdjust sampler scratch" &&
+           std::string_view(name) != "gather LOD sampler validation" &&
+           std::string_view(name) != "malformed memory kinds")) return;
       try {
         test();
         if (selected == "--descriptor-phi-neighbors-only")
@@ -4253,6 +4262,9 @@ int main(int argc, char *argv[]) {
         throw std::runtime_error(std::string(name) + ": " + exception.what());
       }
     };
+    // Pending feature reproduction is opt-in until the shared sampler planner is fixed.
+    if (selected == "--dynamic-sampler-only")
+      Run("dynamic sampler planning and materialization", TestDynamicSamplerPlanningAndMaterialization);
     Run("dense buffers", TestDenseBufferTracking);
     Run("compute buffer fill", TestComputeBufferFill);
     Run("scalar/vector alias", TestScalarAndVectorBufferAlias);

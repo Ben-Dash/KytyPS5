@@ -1,5 +1,38 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Three shared FX corrections proved; WSL must stay running, 2026-10-12 15:43 UTC
+
+Completedlocal0f40da8a BCpartialBUFFER/statistics,63c97d04 registeredHTile,
+14f2a886 nativebasicAlphaCoverage. See [effect validation](yotei-effects-validation-2026-10-12.md)
+for exact intendedRED/unchangedGREEN, hashes/artifacts, supportedscope and debts.
+Hardened32A2C RED152819/5349 ->unchangedGREEN153233/9FB1;64earlyZneighbors153721,
+60CPUrequestfields153722, depth/color neighbors153722/153723 PASS. Final native
+CTest154203:11/11PASS,7.59s; no fullsuite/cross-game gameplay/effect claim.
+Exactfractional/dither/EQAA nativecoverage is a logged diagnostic approximation;
+actualsource routing/swizzle andforceddepthfirst unsupported errors preserved.
+
+New dynamicS# planner152233/C7BD is intendedCPU RED: validindependent imageheap
+control passes, sampler becomesdefault. Opt-in savedfixture/CLI; productionfix
+and actualGPUwrap/clamp/coherence controls still pending. Source-causal water/
+fog/vegetation attribution not established.
+
+Last three newruntime9A17/e776 retries150515,151125,151503 all gracefullyexit0
+on unchanged physicalmemoryguard7.42/7.88/6.48GiB, before worldcomparison. Third
+retainsrecording/modules but creates actual GPU pipelines on demand; not enough
+headroom. WSL had restarted~20GiB; clean-cache reclamation insufficient.
+Latest user explicitly says **leave WSL running**. No shutdown/restart/otherprocess
+stop or memorylimit changes. Prefer privatefresh scene journal/on-demand modules,
+preserve archives/nativecache and recording. Test/game lifetimes and8GiB/2GiB/
+42GiB guards remain. Old3-attempt cap removed, but do not repeat unchanged memory
+failures without a materially different profile/new evidence.
+
+Next nativebuild/install/game must include14f2a886 source. Its computedshaderkey
+6f054404617705c2f27ebf7aed08c493be6328b4059c1c9eb75f47e459abd0ca differs frome776;
+no keypin or incompatiblejournal/cache acceptance. Continue effectpass collection
+when worldvisible, then next sampler/rejectedsource regressions. FPS60actual1080
+and fullrequested effects remain unproved. Issue108game-entry comment posted once
+https://github.com/KytyPS5/KytyPS5/issues/108#issuecomment-6126916747 ; no push.
+
 ## Native FX package and published game-entry milestone, 2026-10-12 15:10 UTC
 
 Build-core145804 on e77684c9 PASS; private install145942 and help145944 PASS.

@@ -1,5 +1,25 @@
 # Integration test debt
 
+## Dynamic material sampler identity and mirror coherence, 2026-10-12
+
+Required regression BEFORE production: scalar-buffer-loaded four-word genuine S#
+with independently GPU-computed image/sampler selectors and separate bounded roots.
+The current default-sampler substitution must be distinguished from valid image
+heap/control planning. CPU planner/materializer must preserve exact sampler root,
+16-byte record stride/prefix and raw byte bound48/32/31/49, original selectors and
+compiled/reference equality. A baseline image/setup failure is not sampler RED.
+
+Bounded real GPU proof then uses genuine nearest wrap versus clamp on two2x2
+images at UV(-0.25,0.25), independent imagekey/samplerkey, four static S# controls,
+real producer atomiconce1, native image/output readbacks and all guards. Dynamic
+wrap image controls must pass before clamp mismatch is counted as intended RED.
+Before enabling the dormant host mirror broadly, require same-frame CPU S# change,
+bound shrink2->1, GPU-written S# after earlier successful mirror, and unreadable/
+incomplete record rejection. Current mirror identity omits bounds and can retain
+old region/count on dirty/unreadable input; do not silently use those stale records.
+Logged fallback CS sites prove substitution but no water/fog/vegetation attribution.
+Ignored CPU/GPU proposals: _Build/analysis/yotei-effects-20261012/.
+
 ## Effects review: statistics lock and alpha coverage, 2026-10-12
 
 Required statistics reproduction BEFORE correcting lock ownership: enable real
