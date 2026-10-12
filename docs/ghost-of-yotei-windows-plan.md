@@ -1,5 +1,39 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Native FX package and published game-entry milestone, 2026-10-12 15:10 UTC
+
+Build-core145804 on e77684c9 PASS; private install145942 and help145944 PASS.
+`_Build/analysis/yotei-effects-20261012/runtime-e77684c9/kyty_emulator.exe`
+SHA2569A17D30BB5744AA90E737FCB509DE3EF1FF96BB662E5AD90121BF8F2A78C0A91.
+Head5709d7bb differs only in a test-file ending. Recompiler/pipeline source key
+387dd6feeabb9aebf9950db2dead1d17f45f33bc16554c441fe39ace8f59acef is unchanged;
+prior compatible private native cache/savedata copied and original preserved.
+Copied v9journal hash697AE223783348613D59C349BA98E5B91D2F64F8E0C7201ED9365433895D08B4.
+Native CTest150447 on freshly built tests150213/150257:8/8 PASS,5.53s; real BC
+partial writes+8neighbors+stats,121HTile state/GPU/registration,DCCstats,ordinaryCOUNT.
+Test hashesC7C3F65F(bindless) and146E29FA(shader), full hashes in run.json.
+
+Game150515-cycle1-bc-htile-effects-neutral-1080-234af3:9A17/e776,neutral,noauto
+buttons,depth-only/samples diagnostics,drainstats30/GPUzones/framepass trigger2.
+Closed gracefully15:06:15UTC/exit0 by unchanged8GiB physical-free guard at7.42GiB
+(commit headroom9.49). WSL had independently restarted and now held20.57GiB;
+Linux inspection shows~19.6GiB clean buffers/cache,~5GiB actual used. No other
+user process stopped; safe cache reclamation investigated before retry.
+Loading-only window30/frame186/title8.0FPS; visibleFX comparison NOTestablished.
+Replay508compute/hits508; only2sync/taken2. BC6H102-layerreflectionarray now receives
+nonbasebufferinvalidations in actual log(+0x6000/0x10000); notvisualproof.
+All captured earlydepth-only draws haveA2M0, so syntheticA2Cdefect still lacks an
+actual foliage/pass causal witness. Originalrun _kyty.txt absent; stdout/stderr/
+run.json+window30 retained. No framepass trigger was created before guard.
+
+Authorized game-entry milestone published once asfxpw after reading all5 latest
+comments and verifying currentPR497head5664f3ff/effectiveaccount. PreviousOct5menu
+checkpoint retained; no duplicate menu/intermediatefix posts.
+[Game-entry comment](https://github.com/KytyPS5/KytyPS5/issues/108#issuecomment-6126916747)
+reports tested5b231fdf/B284 village+character+SETTINGS,900s/manualcleanexit,local-only
+scope,4Ktargets/lowFPS andeffectsremaining. It does NOTclaim newFXpackage visually
+works or currentpublishedPRhead/CIpasses. Only next localverification work remains.
+
 ## BC/HTile committed; actual alpha-coverage RED, 2026-10-12 14:58 UTC
 
 Completed local fixes0f40da8a (BC partialbuffer+publication statistics) and63c97d04
