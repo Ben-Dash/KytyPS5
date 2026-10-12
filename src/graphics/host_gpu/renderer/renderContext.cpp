@@ -230,6 +230,27 @@ void RenderContext::AdvanceBdaEpochForGpuWrite() noexcept {
 // later draws starts an epoch: a submission starting or resuming, packets that read guest memory
 // (waits, conditions, predication), new page-table entries (buffer registration), GPU mappings,
 // kernel invalidations and the GPU thread's own writes.
+void RenderContext::CacheDmaBases(const ShaderStageRuntime& runtime) {
+	EXIT_IF(!runtime);
+	const auto& program = *runtime.program;
+	const auto& user_data = runtime.resources->user_data;
+	std::shared_lock lock(m_mapped_ranges_mutex);
+	for (const auto& source: program.info.dma_base_registers) {
+		if (source.reg < program.user_data_base) continue;
+		const auto index = static_cast<uint64_t>(source.reg) - program.user_data_base;
+		if (index + 1u >= user_data.size()) continue;
+		const auto base = user_data[index] |
+		                  (static_cast<uint64_t>(user_data[index + 1u] & source.high_mask) << 32u);
+		// Only decoded address roots qualify. Inactive paths can have stale values;
+		// validate their whole window and acquire only its currently mapped bytes.
+		if (!GuestRange {base, BufferCache::CACHING_PAGESIZE}.Valid()) continue;
+		m_mapped_ranges.ForEachInRange(base, BufferCache::CACHING_PAGESIZE,
+		    [this](uint64_t start, uint64_t end) {
+			    (void)m_buffer_cache.FindBuffer(start, end - start);
+		    });
+	}
+}
+
 void RenderContext::PrepareBda() {
 	RecordUpload(UploadSource::BdaPass, 0, 0);
 	m_fault_process_pending = true;

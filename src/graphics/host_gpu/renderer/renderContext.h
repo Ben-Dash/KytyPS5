@@ -63,6 +63,7 @@ public:
 	[[nodiscard]] bool IsMapped(uint64_t vaddr, uint64_t size) const noexcept;
 	void               MapMemory(uint64_t vaddr, uint64_t size);
 	void               UnmapMemory(uint64_t vaddr, uint64_t size);
+	void               CacheDmaBases(const ShaderStageRuntime& runtime);
 	void               PrepareBda();
 	// Starts a new epoch for PrepareBda (see there): the next draw that reads memory through
 	// addresses uploads every CPU write made so far.

@@ -586,6 +586,17 @@ struct ShaderInfo {
 	std::vector<SampledResourcePair> sampled_pairs;
 	std::vector<StageInput>          inputs;
 	std::vector<StageOutput>         outputs;
+	struct DmaBaseRegister {
+		uint32_t reg = 0;
+		// Raw FLAT/GLOBAL addresses retain the complete high dword. Indirect
+		// buffer descriptors use its low 16 bits as the address, per the ISA.
+		uint32_t high_mask = UINT32_MAX;
+		bool operator==(const DmaBaseRegister& other) const = default;
+	};
+	// Adjacent user-data SGPR pairs contributing an additive base to a live
+	// DMA operation. A mapped first-use window can be prepared without reading
+	// arbitrary user data or following pointers loaded by the shader.
+	std::vector<DmaBaseRegister> dma_base_registers;
 	std::array<uint8_t, 32>          vertex_fetch_components {};
 	int32_t                          vertex_offset_sgpr = -1;
 	int32_t                          instance_offset_sgpr = -1;

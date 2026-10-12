@@ -286,6 +286,181 @@ void CollectComputeInputs(const ShaderComputeInputInfo* compute, ShaderInfo& inf
 	}
 }
 
+struct DmaAddressSources {
+	std::vector<uint32_t> registers;
+	std::vector<uint32_t> bases;
+	bool complete = true;
+};
+
+// Track only known integer address/value semantics. `registers` includes
+// scaled offset inputs too; `bases` excludes inputs whose value was scaled,
+// permuted, or used only as a carry/condition. Loaded pointers are values,
+// not the addresses from which they were loaded.
+DmaAddressSources DmaAddressUserDataSources(Value root, uint32_t preserved_mask) {
+	constexpr size_t MaxVisited = 256;
+	struct Visit { const Inst* inst; bool base; };
+	std::vector<Visit> pending;
+	DmaAddressSources result;
+	const auto append_register = [](std::vector<uint32_t>& registers, uint32_t reg) {
+		if (std::find(registers.begin(), registers.end(), reg) == registers.end())
+			registers.push_back(reg);
+	};
+	const auto visit = [&](Value value, bool base) {
+		const auto* inst = value.Resolve().TryInstruction();
+		if (inst == nullptr || inst->GetType() == Type::U1) return;
+		if (std::any_of(pending.begin(), pending.end(), [=](const Visit& prior) {
+			return prior.inst == inst && prior.base == base;
+		})) return;
+		if (pending.size() == MaxVisited) { result.complete = false; return; }
+		pending.push_back({inst, base});
+	};
+	visit(root, true);
+	for (size_t next = 0; next < pending.size(); ++next) {
+		const auto [inst, base] = pending[next];
+		const auto op = inst->GetOpcode();
+		if (op == ValueOpcode::GetUserData) {
+			if (inst->Arg(0).GetType() != Type::ScalarReg) { result.complete = false; continue; }
+			const auto reg = RegIndex(inst->Arg(0).ScalarRegister());
+			append_register(result.registers, reg);
+			if (base) append_register(result.bases, reg);
+			continue;
+		}
+		if (BufferAccessOf(op) != BufferAccess::None ||
+		    AddressOpcodeInfoOf(op).access != AddressAccess::None ||
+		    ImageOpcodeInfoOf(op).access != ImageAccess::None) continue;
+		if (op == ValueOpcode::CompositeExtractU32x2 ||
+		    op == ValueOpcode::CompositeExtractU32x3 ||
+		    op == ValueOpcode::CompositeExtractU32x4 ||
+		    op == ValueOpcode::CompositeExtractU64) {
+			const auto index = inst->Arg(1).Resolve();
+			const auto* source = inst->Arg(0).Resolve().TryInstruction();
+			if (!index.IsImmediate() || index.GetType() != Type::U32 || source == nullptr) {
+				result.complete = false; continue;
+			}
+			const auto source_op = source->GetOpcode();
+			if (source_op == ValueOpcode::CompositeConstructU32x2 ||
+			    source_op == ValueOpcode::CompositeConstructU32x3 ||
+			    source_op == ValueOpcode::CompositeConstructU32x4 ||
+			    source_op == ValueOpcode::CompositeConstructU64) {
+				if (index.U32() >= source->NumArgs()) { result.complete = false; continue; }
+				visit(source->Arg(index.U32()), base);
+			} else if (source_op == ValueOpcode::IAddCarry32 && index.U32() < 2u) {
+				// The sum retains an additive base; carry depends on both inputs
+				// but neither input's raw value is an address high dword.
+				visit(source->Arg(0), base && index.U32() == 0u);
+				visit(source->Arg(1), base && index.U32() == 0u);
+			} else if (BufferAccessOf(source_op) == BufferAccess::None &&
+			           AddressOpcodeInfoOf(source_op).access == AddressAccess::None &&
+			           ImageOpcodeInfoOf(source_op).access == ImageAccess::None) {
+				result.complete = false;
+			}
+			continue;
+		}
+		switch (op) {
+			case ValueOpcode::Phi:
+				for (size_t i = 0; i < inst->NumArgs(); ++i) visit(inst->Arg(i), base);
+				break;
+			case ValueOpcode::SelectU32:
+			case ValueOpcode::SelectF32:
+				visit(inst->Arg(1), base); visit(inst->Arg(2), base); break;
+			case ValueOpcode::BitCastU32F32:
+			case ValueOpcode::BitCastF32U32:
+				visit(inst->Arg(0), base); break;
+			case ValueOpcode::IAdd32:
+				visit(inst->Arg(0), base); visit(inst->Arg(1), base); break;
+			case ValueOpcode::ISub32:
+				visit(inst->Arg(0), base); visit(inst->Arg(1), false); break;
+			case ValueOpcode::BitwiseAnd32:
+			case ValueOpcode::BitwiseOr32:
+			case ValueOpcode::BitwiseXor32:
+				for (size_t i = 0; i < 2; ++i) {
+					const auto other = inst->Arg(1u - i).Resolve();
+					const bool constant = other.IsImmediate() && other.GetType() == Type::U32;
+					const bool preserve = constant &&
+					    (op == ValueOpcode::BitwiseAnd32 ? (other.U32() & preserved_mask) == preserved_mask
+					                                      : (other.U32() & preserved_mask) == 0u);
+					visit(inst->Arg(i), base && preserve);
+				}
+				break;
+			case ValueOpcode::IMul32:
+			case ValueOpcode::UDiv32:
+			case ValueOpcode::SMulHi:
+			case ValueOpcode::UMulHi:
+			case ValueOpcode::ShiftLeftLogical32:
+			case ValueOpcode::ShiftRightLogical32:
+			case ValueOpcode::ShiftRightArithmetic32:
+			case ValueOpcode::BitFieldInsert:
+			case ValueOpcode::BitFieldUExtract:
+			case ValueOpcode::BitFieldSExtract:
+			case ValueOpcode::BitwiseNot32:
+			case ValueOpcode::BitReverse32:
+			case ValueOpcode::BitCount32:
+			case ValueOpcode::FindUMsb32:
+			case ValueOpcode::FindILsb32:
+			case ValueOpcode::SMin32:
+			case ValueOpcode::UMin32:
+			case ValueOpcode::SMax32:
+			case ValueOpcode::UMax32:
+				for (size_t i = 0; i < inst->NumArgs(); ++i) visit(inst->Arg(i), false);
+				break;
+			case ValueOpcode::UndefU32:
+			case ValueOpcode::GetBuiltin:
+			case ValueOpcode::GetAttribute:
+			case ValueOpcode::GetDispatchThreadExtent:
+				break;
+			default: result.complete = false; break;
+		}
+	}
+	if (!result.complete) result.bases.clear();
+	return result;
+}
+
+void CollectDmaBaseRegisters(const Program& program, ShaderInfo& info) {
+	info.dma_base_registers.clear();
+	if (!info.uses_dma) return;
+	const auto collect = [&](Value low_value, Value high_value, uint32_t high_mask) {
+		const auto low = DmaAddressUserDataSources(low_value, UINT32_MAX);
+		const auto high = DmaAddressUserDataSources(high_value, high_mask);
+		if (!low.complete || !high.complete) return;
+		for (const auto reg: low.bases) {
+			if (reg == UINT32_MAX ||
+			    std::find(high.bases.begin(), high.bases.end(), reg + 1u) == high.bases.end() ||
+			    std::find(low.registers.begin(), low.registers.end(), reg + 1u) != low.registers.end()) continue;
+			const ShaderInfo::DmaBaseRegister source {reg, high_mask};
+			if (std::find(info.dma_base_registers.begin(), info.dma_base_registers.end(), source) == info.dma_base_registers.end())
+				info.dma_base_registers.push_back(source);
+		}
+	};
+	for (const auto* block: program.blocks) {
+		for (const auto& inst: *block) {
+			const auto op = inst.GetOpcode();
+			const bool address = AddressOpcodeInfoOf(op).access != AddressAccess::None;
+			const bool buffer = BufferAccessOf(op) != BufferAccess::None;
+			if (!address && !buffer) continue;
+			const auto index = inst.Flags<MemoryFlags>().index;
+			if (index >= program.memory_info.size()) return Fail("DMA metadata index is out of range");
+			const auto& memory = program.memory_info[index];
+			if (memory.planning_only) continue;
+			if (address && (memory.kind == ResourceKind::Flat || memory.kind == ResourceKind::Global || memory.kind == ResourceKind::ScalarAddress)) {
+				if (memory.address_is_full) {
+					collect(inst.Arg(1), inst.Arg(2), UINT32_MAX);
+				} else {
+					const auto* handle = inst.Arg(0).Resolve().TryInstruction();
+					if (handle != nullptr && handle->GetOpcode() == ValueOpcode::GetAddressResource && handle->NumArgs() == 2u)
+						collect(handle->Arg(0), handle->Arg(1), UINT32_MAX);
+				}
+			} else if (buffer && memory.kind == ResourceKind::IndirectBuffer) {
+				const auto* handle = inst.Arg(0).Resolve().TryInstruction();
+				if (handle != nullptr && handle->GetOpcode() == ValueOpcode::GetBufferResource && handle->NumArgs() == 4u)
+					collect(handle->Arg(0), handle->Arg(1), 0xffffu);
+			}
+		}
+	}
+	std::sort(info.dma_base_registers.begin(), info.dma_base_registers.end(), [](const auto& a, const auto& b) {
+		return a.reg < b.reg || (a.reg == b.reg && a.high_mask < b.high_mask);
+	});
+}
+
 void CollectBuiltinInputs(const Program& program, ShaderInfo& info) {
 	for (const auto* block: program.blocks) {
 		for (const auto& inst: *block) {
@@ -450,6 +625,7 @@ void CollectShaderInfo(Program& program, ShaderStageInputInfo input_info) {
 	auto& next = program.info;
 	next.inputs.clear();
 	next.outputs.clear();
+	CollectDmaBaseRegisters(program, next);
 	next.has_bitwise_xor =
 	    std::any_of(program.blocks.begin(), program.blocks.end(), [](const auto* block) {
 		    return std::any_of(block->begin(), block->end(), [](const auto& inst) {

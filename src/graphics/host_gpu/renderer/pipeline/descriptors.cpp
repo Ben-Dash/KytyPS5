@@ -2891,6 +2891,7 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 	const auto& snapshot = *prepared.runtime->resources;
 	auto&       cache    = m_context.GetBufferCache();
 	if (program.info.uses_dma) {
+		m_context.CacheDmaBases(*prepared.runtime);
 		// These are validated reads actually made while materializing this SRT,
 		// not guessed pointers. Make their pages resident before the first FLAT
 		// consumer; scalar flattening alone does not register BDA cache owners.

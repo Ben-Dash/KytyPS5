@@ -106,7 +106,8 @@ struct FirstUseBdaCompilation {
 class FirstUseBdaNativePipeline {
 public:
   PipelineCache::Pipeline native{};
-  FirstUseBdaNativePipeline(VulkanHarness& vulkan, const FirstUseBdaCompilation& shader) : device(vulkan.Device()) {
+  template <typename Compilation>
+  FirstUseBdaNativePipeline(VulkanHarness& vulkan, const Compilation& shader) : device(vulkan.Device()) {
     native.uses_push_descriptors = true;
     std::vector<vk::DescriptorSetLayoutBinding> bindings;
     uint32_t count = 0u;
