@@ -24,6 +24,9 @@
 //     require a known 1D job interval from these actual flattened-SRT words to contain the whole
 //     requested interval (strict decimal uint32 fields). This is a diagnostic admission hint,
 //     not evidence of executed stores. Unknown indirect groups are not admitted.
+//   KYTY_DISPATCH_SNAPSHOT_JOB_INVENTORY_MAX=<0..4096>  optional bounded CPU admission inventory
+//     before job/span rejection and capture quotas. Zero disables it; repeated tuples are
+//     deduplicated without consuming capture limits. No extra guest reads or GPU work.
 // A snapshot holds the permutation's journal record and live SPIR-V, the host contents of every
 // buffer, image and sampler the dispatch binds, its push data and group counts, and afterwards
 // the contents the dispatch wrote. The inputs reach the disk before the dispatch is submitted, so
@@ -69,6 +72,21 @@ struct JobRangeSelector {
 [[nodiscard]] bool MatchesJobRangeSelector(const JobRangeSelector& selector,
                                           const ShaderComputeInputInfo& input,
                                           std::array<uint32_t, 3> groups) noexcept;
+// Strict decimal software record budget; failure leaves output unchanged.
+[[nodiscard]] bool ParseJobInventoryMaximum(std::string_view text, uint32_t& maximum) noexcept;
+struct JobInventoryStatistics {
+	uint32_t maximum = 0;
+	uint32_t retained = 0;
+	uint64_t observed_calls = 0;
+	uint64_t duplicates = 0;
+	uint64_t overflow_calls = 0;
+	bool enabled = false;
+	bool cap_exhausted = false;
+	// Only retained keys are stored. Repeated unretained tuples count as overflow calls.
+	bool unretained_dedup_unknown = false;
+};
+// Observes only the CPU diagnostic ledger, without capture/quota/resource/GPU operations.
+[[nodiscard]] JobInventoryStatistics GetJobInventoryStatistics();
 
 // Whether this dispatch is snapshotted (counts it). Cheap when snapshots are off.
 // The runtime-only form has no trusted group dimensions and declines an enabled job filter.

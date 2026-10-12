@@ -3,11 +3,25 @@
 
 namespace Libs::Graphics {
 namespace {
-void CheckDispatchSnapshotJobSelector(bool frame_mode = false, bool default_mode = false) {
+void CheckDispatchSnapshotJobSelector(bool frame_mode = false, bool default_mode = false,
+                                      uint32_t inventory_maximum = 0u) {
   constexpr const char* name = "DispatchSnapshotJobSelector";
   using DispatchSnapshot::JobRangeSelector;
   using DispatchSnapshot::ParseJobRangeSelector;
   using DispatchSnapshot::MatchesJobRangeSelector;
+  uint32_t maximum = 7u;
+  Require(name, "bounded inventory maximum parser",
+      DispatchSnapshot::ParseJobInventoryMaximum("0", maximum) && maximum == 0u &&
+      DispatchSnapshot::ParseJobInventoryMaximum("00256", maximum) && maximum == 256u &&
+      DispatchSnapshot::ParseJobInventoryMaximum("4096", maximum) && maximum == 4096u,
+      "disabled/representative/bounded maximum rejected");
+  for (const std::string_view text : {"", "-1", "+1", " 1", "1 ", "0x10", "1x", "4097",
+                                     "4294967295", "4294967296"}) {
+    maximum = 7u;
+    Require(name, "invalid inventory budget preserves output",
+        !DispatchSnapshot::ParseJobInventoryMaximum(text, maximum) && maximum == 7u,
+        "malformed/unbounded inventory budget accepted or changed output");
+  }
   JobRangeSelector selector{7u, 9u, 11u, 13u};
   Require(name, "strict decimal parser",
       ParseJobRangeSelector("23:196:2097:2", selector) &&
@@ -153,6 +167,7 @@ void CheckDispatchSnapshotJobSelector(bool frame_mode = false, bool default_mode
   _putenv_s("KYTY_DISPATCH_SNAPSHOT_RING", "0");
   _putenv_s("KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER", "2:124224");
   _putenv_s("KYTY_DISPATCH_SNAPSHOT_JOB_RANGE", default_mode ? "" : "23:196:2097:2");
+  _putenv_s("KYTY_DISPATCH_SNAPSHOT_JOB_INVENTORY_MAX", std::to_string(inventory_maximum).c_str());
   set_descriptor(2588u);
   set_job(349u, 2239u); // Same-sized real metadata shape, independently wrong job interval.
   const bool legacy = default_mode ? false : DispatchSnapshot::Wanted(input.stage, 10u);
@@ -169,10 +184,42 @@ void CheckDispatchSnapshotJobSelector(bool frame_mode = false, bool default_mode
       !legacy && !unknown && !wrong_span && !second && !repeated &&
       (default_mode ? (wrong_job && !first) : (!wrong_job && first)),
       "rejected job/span consumed frame/quota or default/overload quota changed");
+  // Repeat the original tuple at another frame: inventory dedup ignores frame, and neither
+  // enabled nor disabled inventory may make an exhausted/unknown capture eligible.
+  set_job(349u, 2239u);
+  const bool duplicate = default_mode
+      ? DispatchSnapshot::Wanted(input, groups, 11u)
+      : DispatchSnapshot::Wanted(input.stage, 11u);
+  Require(name, "inventory does not change capture admission", !duplicate,
+      "diagnostic repeat changed a capture result");
+  const auto inventory = DispatchSnapshot::GetJobInventoryStatistics();
+  if (inventory_maximum == 0u) {
+    Require(name, "disabled inventory does no ledger work",
+        !inventory.enabled && inventory.maximum == 0u && inventory.retained == 0u &&
+        inventory.observed_calls == 0u && inventory.duplicates == 0u &&
+        inventory.overflow_calls == 0u && !inventory.cap_exhausted &&
+        !inventory.unretained_dedup_unknown, "disabled inventory allocated/observed records");
+  } else {
+    const uint32_t expected_retained = std::min(inventory_maximum, default_mode ? 3u : 6u);
+    const uint64_t expected_observed = default_mode ? 6u : 8u;
+    const uint64_t expected_duplicates = default_mode ? 3u : 1u + (inventory_maximum >= 5u ? 1u : 0u);
+    const uint64_t expected_overflow = expected_observed - expected_retained - expected_duplicates;
+    Require(name, "actual bounded inventory and frame-independent dedup",
+        inventory.enabled && inventory.maximum == inventory_maximum &&
+        inventory.retained == expected_retained && inventory.observed_calls == expected_observed &&
+        inventory.duplicates == expected_duplicates && inventory.overflow_calls == expected_overflow &&
+        inventory.cap_exhausted == (expected_overflow != 0u) &&
+        inventory.unretained_dedup_unknown == (expected_overflow != 0u),
+        "inventory dedup/cap/counters or default/frame behavior changed");
+  }
   std::printf("[cpu] DispatchSnapshotJobSelector parser=%zu malformed cases; frame=%u default=%u legacy=%u unknown=%u wrong_job=%u wrong_span=%u first=%u repeated=%u; GPU_setup=0\n",
       std::size(invalid), frame_mode ? 1u : 0u, default_mode ? 1u : 0u,
       legacy ? 1u : 0u, unknown ? 1u : 0u, wrong_job ? 1u : 0u,
       wrong_span ? 1u : 0u, first ? 1u : 0u, repeated ? 1u : 0u);
+  std::printf("[cpu] DispatchSnapshotJobInventory maximum=%u retained=%u observed=%llu duplicates=%llu overflow=%llu cap=%u unretained_unknown=%u; GPU_setup=0\n",
+      inventory.maximum, inventory.retained, static_cast<unsigned long long>(inventory.observed_calls),
+      static_cast<unsigned long long>(inventory.duplicates), static_cast<unsigned long long>(inventory.overflow_calls),
+      inventory.cap_exhausted ? 1u : 0u, inventory.unretained_dedup_unknown ? 1u : 0u);
 }
 } // namespace
 } // namespace Libs::Graphics

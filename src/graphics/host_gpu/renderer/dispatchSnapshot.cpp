@@ -35,6 +35,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vulkan/vulkan_format_traits.hpp>
 #include <xxhash.h>
 
@@ -56,6 +57,7 @@ struct Settings {
 	std::filesystem::path directory;
 	std::optional<WrittenBufferSelector> written_buffer;
 	std::optional<JobRangeSelector> job_range;
+	uint32_t job_inventory_max = 0;
 };
 
 const Settings& GetSettings() {
@@ -115,6 +117,11 @@ const Settings& GetSettings() {
 			}
 			s.job_range = selector;
 		}
+		if (const char* inventory = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_JOB_INVENTORY_MAX");
+		    inventory != nullptr && !ParseJobInventoryMaximum(inventory, s.job_inventory_max)) {
+			EXIT("dispatch-snapshot: malformed KYTY_DISPATCH_SNAPSHOT_JOB_INVENTORY_MAX; "
+			     "expected decimal uint32 record budget 0..4096\n");
+		}
 		std::printf("dispatch-snapshot: on (%s), max %u, dir %s\n", text, s.max,
 		            s.directory.string().c_str());
 		if (s.written_buffer) {
@@ -126,6 +133,10 @@ const Settings& GetSettings() {
 			            "required_count=%u (whole interval; not executed-store proof)\n",
 			            s.job_range->count_dword, s.job_range->base_dword,
 			            s.job_range->first_index, s.job_range->required_count);
+		}
+		if (s.job_inventory_max != 0u) {
+			std::printf("dispatch-snapshot: CPU job inventory max=%u (no GPU drains; pre-quota)\n",
+			            s.job_inventory_max);
 		}
 		std::fflush(stdout);
 		return s;
@@ -463,6 +474,19 @@ bool MatchesJobRangeSelector(const JobRangeSelector& selector, const ShaderCompu
 	const uint64_t end = base + count;
 	const uint64_t required_end = uint64_t {selector.first_index} + selector.required_count;
 	return count != 0u && end <= IndexLimit && base <= selector.first_index && required_end <= end;
+}
+
+bool ParseJobInventoryMaximum(std::string_view text, uint32_t& maximum) noexcept {
+	if (text.empty() || !std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; })) {
+		return false;
+	}
+	uint32_t parsed = 0;
+	const auto value = std::from_chars(text.data(), text.data() + text.size(), parsed);
+	if (value.ec != std::errc{} || value.ptr != text.data() + text.size() || parsed > 4096u) {
+		return false;
+	}
+	maximum = parsed;
+	return true;
 }
 
 namespace {
@@ -942,6 +966,165 @@ void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& 
 }
 
 namespace {
+using InventoryKey = std::array<uint64_t, 20>;
+struct InventoryKeyHash {
+	size_t operator()(const InventoryKey& key) const noexcept {
+		uint64_t hash = 0xcbf29ce484222325ull;
+		for (const auto value: key) {
+			hash = (hash ^ value) * 0x100000001b3ull;
+		}
+		return static_cast<size_t>(hash);
+	}
+};
+
+void PrintInventoryStatistics(const char* kind, const JobInventoryStatistics& stats) {
+	std::printf("dispatch-job-inventory-%s: {\"maximum\":%u,\"retained\":%u,"
+	            "\"observed_calls\":%" PRIu64 ",\"duplicates\":%" PRIu64 ","
+	            "\"overflow_calls\":%" PRIu64 ",\"cap_exhausted\":%s,"
+	            "\"unretained_dedup_unknown\":%s}\n", kind, stats.maximum, stats.retained,
+	            stats.observed_calls, stats.duplicates, stats.overflow_calls,
+	            stats.cap_exhausted ? "true" : "false",
+	            stats.unretained_dedup_unknown ? "true" : "false");
+	std::fflush(stdout);
+}
+
+struct InventoryLedger {
+	JobInventoryStatistics stats;
+	std::unordered_set<InventoryKey, InventoryKeyHash> keys;
+	InventoryLedger() {
+		const auto& settings = GetSettings();
+		stats.maximum = settings.job_inventory_max;
+		stats.enabled = settings.enabled && stats.maximum != 0u;
+	}
+	~InventoryLedger() {
+		if (stats.enabled) PrintInventoryStatistics("summary", stats);
+	}
+};
+
+InventoryLedger& GetInventoryLedger() {
+	static InventoryLedger ledger;
+	return ledger;
+}
+
+void RecordJobInventory(const ShaderStageRuntime& runtime, const ShaderComputeInputInfo* input,
+                         std::array<uint32_t, 3> groups, uint64_t frame) {
+	const auto& s = GetSettings();
+	if (!s.enabled || s.job_inventory_max == 0u) return;
+	const auto* program = runtime.program;
+	const auto* resources = runtime.resources;
+	const uint64_t hash = program != nullptr ? program->shader_hash : 0u;
+	// This is an independent CPU observation, before capture frame choice or per-hash quota.
+	if (s.frame >= 0) {
+		if (frame < static_cast<uint64_t>(s.frame)) return;
+	} else if (program == nullptr || std::ranges::find(s.hashes, hash) == s.hashes.end()) {
+		return;
+	}
+	const uint32_t stage = program != nullptr ? static_cast<uint32_t>(program->stage) : UINT32_MAX;
+	const uint64_t flat_size = resources != nullptr ? resources->flattened_srt.size() : 0u;
+	const bool count_available = s.job_range && resources != nullptr && s.job_range->count_dword < flat_size;
+	const bool base_available = s.job_range && resources != nullptr && s.job_range->base_dword < flat_size;
+	const uint32_t count = count_available ? resources->flattened_srt[s.job_range->count_dword] : 0u;
+	const uint32_t base = base_available ? resources->flattened_srt[s.job_range->base_dword] : 0u;
+	const std::array<uint32_t, 3> threads = input != nullptr
+	    ? std::array<uint32_t, 3> {input->threads_num[0], input->threads_num[1], input->threads_num[2]}
+	    : std::array<uint32_t, 3> {};
+	const bool threads_known = input != nullptr && std::ranges::all_of(threads, [](uint32_t v) { return v != 0u; });
+	const bool groups_known = input != nullptr && std::ranges::all_of(groups, [](uint32_t v) { return v != 0u; });
+	const bool one_dimensional = threads_known && groups_known && threads[1] == 1u && threads[2] == 1u &&
+	                             groups[1] == 1u && groups[2] == 1u;
+	const bool capacity_known = one_dimensional;
+	const uint64_t capacity = capacity_known ? uint64_t {threads[0]} * groups[0] : 0u;
+	const bool effective_known = count_available && capacity_known;
+	const uint64_t effective = effective_known ? std::min<uint64_t>(count, capacity) : 0u;
+	const bool end_known = effective_known && base_available;
+	const uint64_t end = end_known ? uint64_t {base} + effective : 0u;
+	constexpr uint64_t IndexLimit = uint64_t {1} << 32u;
+	const uint64_t target_end = s.job_range ? uint64_t {s.job_range->first_index} + s.job_range->required_count : 0u;
+	const bool coverage_known = s.job_range && end_known && end <= IndexLimit;
+	const bool first_covered = coverage_known && base <= s.job_range->first_index && s.job_range->first_index < end;
+	const bool last_covered = coverage_known && base <= target_end - 1u && target_end - 1u < end;
+	const bool whole_covered = coverage_known && base <= s.job_range->first_index && target_end <= end;
+	const bool job_match = !s.job_range || (input != nullptr && MatchesJobRangeSelector(*s.job_range, *input, groups));
+	const char* job_reason = "job_filter_disabled";
+	if (s.job_range) {
+		if (!runtime) job_reason = "missing_runtime";
+		else if (program->stage != ShaderType::Compute) job_reason = "non_compute_stage";
+		else if (input == nullptr) job_reason = "unknown_compute_input";
+		else if (!count_available || !base_available) job_reason = "missing_flat_words";
+		else if (!threads_known || !groups_known) job_reason = "unknown_shape";
+		else if (!one_dimensional) job_reason = "non_1d_shape";
+		else if (capacity > IndexLimit) job_reason = "capacity_exceeds_u32";
+		else if (effective == 0u) job_reason = "zero_jobs";
+		else if (end > IndexLimit) job_reason = "job_range_wrap";
+		else if (!job_match) job_reason = first_covered || last_covered ? "partial_interval" : "interval_miss";
+		else job_reason = "job_match";
+	}
+	const bool written_known = s.written_buffer && program != nullptr &&
+	                           s.written_buffer->slot < program->info.buffers.size();
+	const bool written = written_known && program->info.buffers[s.written_buffer->slot].written;
+	const bool descriptor_available = s.written_buffer && resources != nullptr &&
+	    s.written_buffer->slot < resources->buffers.size() && resources->buffers[s.written_buffer->slot].dword_count >= 4u;
+	const auto descriptor = descriptor_available
+	    ? DecodeNativeDescriptor<ShaderBufferResource>(resources->buffers[s.written_buffer->slot]) : ShaderBufferResource {};
+	const uint64_t descriptor_base = descriptor_available ? descriptor.Base48() : 0u;
+	const uint64_t descriptor_size = descriptor_available ? descriptor.GetSize() : 0u;
+	const bool written_match = !s.written_buffer || MatchesWrittenBufferSelector(*s.written_buffer, runtime);
+	const char* reason = !job_match ? job_reason : !written_match ? "written_buffer_mismatch" : "prefilter_match";
+	const uint64_t available = (program != nullptr ? 1u : 0u) | (resources != nullptr ? 2u : 0u) |
+	    (count_available ? 4u : 0u) | (base_available ? 8u : 0u) | (input != nullptr ? 16u : 0u) |
+	    (descriptor_available ? 32u : 0u) | (written_known ? 64u : 0u) | (s.job_range ? 128u : 0u) |
+	    (s.written_buffer ? 256u : 0u) | (threads_known ? 512u : 0u) | (groups_known ? 1024u : 0u);
+	const InventoryKey key {hash, stage, available, flat_size, descriptor_base, descriptor_size,
+	                        written, written_match, count, base, threads[0], threads[1], threads[2],
+	                        groups[0], groups[1], groups[2], descriptor.fields[0], descriptor.fields[1],
+	                        descriptor.fields[2], descriptor.fields[3]};
+	auto& ledger = GetInventoryLedger();
+	++ledger.stats.observed_calls;
+	if (ledger.keys.contains(key)) {
+		++ledger.stats.duplicates;
+		return;
+	}
+	if (ledger.stats.retained == ledger.stats.maximum) {
+		++ledger.stats.overflow_calls;
+		ledger.stats.unretained_dedup_unknown = true;
+		if (!ledger.stats.cap_exhausted) {
+			ledger.stats.cap_exhausted = true;
+			PrintInventoryStatistics("cap", ledger.stats);
+		}
+		return;
+	}
+	ledger.keys.insert(key);
+	++ledger.stats.retained;
+	const auto observed = [](bool known, uint64_t value) -> Json { return known ? Json(value) : Json(nullptr); };
+	const auto covered = [](bool known, bool value) -> Json { return known ? Json(value) : Json(nullptr); };
+	Json entry = {
+	    {"sequence", ledger.stats.retained}, {"phase", "CPU admission before capture quota; not GPU execution"},
+	    {"shader", program != nullptr ? Json(fmt::format("{:016x}", hash)) : Json(nullptr)},
+	    {"frame", frame}, {"stage", observed(program != nullptr, stage)}, {"runtime_valid", bool(runtime)},
+	    {"flat_size", observed(resources != nullptr, flat_size)}, {"job_filter_enabled", bool(s.job_range)},
+	    {"count_dword", observed(bool(s.job_range), s.job_range ? s.job_range->count_dword : 0u)},
+	    {"base_dword", observed(bool(s.job_range), s.job_range ? s.job_range->base_dword : 0u)},
+	    {"count", observed(count_available, count)}, {"base", observed(base_available, base)},
+	    {"threads", input != nullptr ? Json(threads) : Json(nullptr)},
+	    {"groups", input != nullptr ? Json(groups) : Json(nullptr)},
+	    {"threads_known", threads_known}, {"groups_known", groups_known}, {"one_dimensional", one_dimensional},
+	    {"capacity", observed(capacity_known, capacity)}, {"effective_jobs", observed(effective_known, effective)},
+	    {"job_end_exclusive", observed(end_known, end)},
+	    {"target_first", observed(bool(s.job_range), s.job_range ? s.job_range->first_index : 0u)},
+	    {"target_last", observed(bool(s.job_range), target_end != 0u ? target_end - 1u : 0u)},
+	    {"target_end_exclusive", observed(bool(s.job_range), target_end)},
+	    {"first_covered", covered(coverage_known, first_covered)},
+	    {"last_covered", covered(coverage_known, last_covered)}, {"whole_covered", covered(coverage_known, whole_covered)},
+	    {"job_match", job_match}, {"job_reason", job_reason}, {"reason", reason},
+	    {"written_slot", observed(bool(s.written_buffer), s.written_buffer ? s.written_buffer->slot : 0u)},
+	    {"required_written_size", observed(bool(s.written_buffer), s.written_buffer ? s.written_buffer->declared_bytes : 0u)},
+	    {"written_declared", covered(written_known, written)}, {"written_selector_match", written_match},
+	    {"descriptor_available", descriptor_available}, {"descriptor_base", observed(descriptor_available, descriptor_base)},
+	    {"descriptor_size", observed(descriptor_available, descriptor_size)}};
+	std::printf("dispatch-job-inventory: %s\n", entry.dump().c_str());
+	std::fflush(stdout);
+}
+
 bool WantedRuntime(const ShaderStageRuntime& runtime, uint64_t frame) {
 	const auto& s = GetSettings();
 	if (!s.enabled) [[likely]] {
@@ -969,13 +1152,19 @@ bool WantedRuntime(const ShaderStageRuntime& runtime, uint64_t frame) {
 }
 } // namespace
 
+JobInventoryStatistics GetJobInventoryStatistics() {
+	return GetInventoryLedger().stats;
+}
+
 bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame) {
+	RecordJobInventory(runtime, nullptr, {}, frame);
 	if (GetSettings().job_range) return false;
 	return WantedRuntime(runtime, frame);
 }
 
 bool Wanted(const ShaderComputeInputInfo& input, std::array<uint32_t, 3> groups, uint64_t frame) {
 	const auto& s = GetSettings();
+	RecordJobInventory(input.stage, &input, groups, frame);
 	if (s.job_range && !MatchesJobRangeSelector(*s.job_range, input, groups)) return false;
 	return WantedRuntime(input.stage, frame);
 }

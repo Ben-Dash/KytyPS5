@@ -839,6 +839,16 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-only)
 	add_test(NAME dispatch_snapshot_job_selector
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-selector-only)
+	add_test(NAME dispatch_snapshot_job_inventory
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-inventory-only)
+	add_test(NAME dispatch_snapshot_job_inventory_frame
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-inventory-frame-only)
+	add_test(NAME dispatch_snapshot_job_inventory_default
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-inventory-default-only)
+	add_test(NAME dispatch_snapshot_job_inventory_cap
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-inventory-cap-only)
+	set_tests_properties(dispatch_snapshot_job_inventory dispatch_snapshot_job_inventory_frame
+		dispatch_snapshot_job_inventory_default dispatch_snapshot_job_inventory_cap PROPERTIES TIMEOUT 10)
 	add_test(NAME dispatch_snapshot_job_selector_frame
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-job-selector-frame-only)
 	add_test(NAME dispatch_snapshot_job_selector_default
