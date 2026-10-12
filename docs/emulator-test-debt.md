@@ -1,5 +1,30 @@
 # Integration test debt
 
+## Generic format control cost validated; game comparison pending, 2026-10-13
+
+Actual emitted shared conversion helper, nine legal format inputs, bounded taken
+CFG walk counts evaluated selection decisions after unchanged lazy-conversion
+goldens. Mutually exclusive integer/normalized/scaled format should require one
+selection; Float can require one further width decision. Current sequential six
+checks fail only this work budget: native235420/D38503A9. The same fixture handles
+both10-flag and5-parameter ABI before RED. Unchanged GREEN235504/0F796FBD has one
+decision for integer/scaled/normalized, two for Float. Native235421/235505 each
+100requests/4800lanes are byte-identical (0 changed/missing/extra);144 existing
+UNorm precision errors remain in both. Static mode2 neighbor235544 has0 errors;
+generic codegen neighbor235507 and focused CTests2/2 PASS0.79s. Game gain pending.
+
+## Ordinary native buffer fill required reproduction, 2026-10-13
+
+Public DispatchDirect synthetic full literal UInt fill after independently verified
+nonuniform GPU primer; retain CPU-old before fence, native dirty owner, exact64
+words and neighboring sentinels after real completion. Only then the baseline
+GameDispatch1 should fail expected0; candidate must keep actual transfer work.
+Native intended RED235325/A23D7856 verified the real GPU primer, CPU-old and all
+native/golden/sentinel controls, then GameDispatch1/BufferCopy0 fails expected0.
+No production fill change. Saved hot kernels representing95.967ms/65.5% of
+146.43ms compute profile are excluded by current pure-fill proof; remaining runtime
+coverage unknown. Generic conversion hotspot is the next implementation priority.
+
 ## Recording budget validated; gameplay measurement pending, 2026-10-13
 
 Next independent performance candidate: two real load/add/store dispatches with

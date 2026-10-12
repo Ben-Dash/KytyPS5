@@ -146,9 +146,9 @@ struct EmitterState {
 		uint32_t end_offset = 0; // element size - 1
 		uint32_t align_mask = 0; // ~(min(size, 4) - 1)
 		uint32_t valid = 0, one = 0, float_like = 0;
-		uint32_t is_sint = 0, is_uscaled = 0, is_sscaled = 0, is_unorm = 0, is_snorm = 0;
+		uint32_t component_type = 0;
 		std::array<uint32_t, 4> from_memory {}, constant_one {}, bits {}, bit_offset {};
-		std::array<uint32_t, 4> unsigned_max {}, signed_max {}, half {};
+		std::array<uint32_t, 4> unsigned_max {}, signed_max {};
 	};
 	std::array<GenericBufferFormatValues, IR::ShaderInfo::MaxBuffers> generic_buffer_formats {};
 	// One pure component conversion body for all generic formatted load sites.

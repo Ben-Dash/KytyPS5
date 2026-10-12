@@ -1,5 +1,32 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: generic format dispatch validated, 2026-10-13
+
+Shared runtime formatted-buffer converter selects one mutually exclusive category
+instead of six successive checks. Arithmetic/format metadata/keys, bounds, EXEC,
+D16 and format specialization policy unchanged. Native intended RED235420/D38503A9
+-> same GREEN235504/0F796FBD, decision budget6 ->1 (Float2). Native baseline235421
+and candidate235505 each100requests/4800lanes are byte-identical;144 pre-existing
+UNorm precision errors retained. Static neighbor235544 has0 golden errors,
+codegen neighbor235507 PASS, focused CTests2/2 PASS0.79s. Peer review found no
+contract change. Native core/private install and30-second game FPS pending.
+
+Recording-age sourcebc93628e native core234318/install234404 PASS; installed
+EXE80E746E146459D8D58E09189A0B42D5580718BFFA3DC70865EC45F25B558ABD4.
+Neutral matched runs with same executable/full rendering/title30s fromframe650:
+age1000 game234413-fa4053 mean2.7393/min2.6/max2.9; age0 game234809-2c5488
+mean2.6148/min2.6/max2.7. Both exit0, no guards, no menu/buttons/images. Difference
+4.76% in one pair is small; no useful sustained gain. Keep default age0 for the
+next comparison. Stable60/actual1080/full effects remain pending.
+
+Three-agent immutable audit: saved main journal492CS permutations/472hashes.
+95.967ms/frame of146.43ms compute (=65.5%) is excluded by current pure-fill proof;
+four complex ordinary-buffer kernels54.070ms include hottestfc6f35.137ms. Exact
+remaining ordinary-fill hits unknown because runtimeSGPR/groups are absent.
+Valid native ordinary-fill RED235325/A23D7856 retained for future work; production
+port deferred to prioritize these measured hot kernels. Transfer queue remains
+disabled pending native read/write dependency proof. No push/issue publication.
+
 ## Current checkpoint: recording-age policy validated, 2026-10-13
 
 Opt-in shared scheduler budget `KYTY_RECORDING_AGE_US=1000` submits an aged recording

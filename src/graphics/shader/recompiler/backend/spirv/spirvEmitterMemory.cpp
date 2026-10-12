@@ -1913,7 +1913,7 @@ uint32_t NormalizeDynamicBufferComponent(EmitterState& state, uint32_t raw, uint
 
 // Share only the existing pure component conversion body. Address extraction,
 // bounds, dst_sel constants, D16 packing and guest EXEC stay at each load site.
-uint32_t GenericFormattedConversionBody(EmitterState& state, const std::array<uint32_t, 10>& params) {
+uint32_t GenericFormattedConversionBody(EmitterState& state, const std::array<uint32_t, 5>& params) {
 	const auto u32 = TypeU32(state);
 	const auto raw = params[0];
 	const auto bits = params[1];
@@ -1924,40 +1924,41 @@ uint32_t GenericFormattedConversionBody(EmitterState& state, const std::array<ui
 		                          ConstantU32(state, 0), bits);
 		return value;
 	};
-	// Format flags come from this buffer's runtime descriptor. Evaluate only its
-	// selected conversion, retaining the existing normalization arithmetic and ABI.
-	// Address/bounds, dst_sel, D16 and guest EXEC remain at each load site.
-	auto converted = EmitValueOrDefaultIfCondition(state, params[2], u32, raw, [&] {
-		return EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw));
+	// Runtime descriptor kinds are mutually exclusive. One shared selection
+	// avoids six sequential conditional joins without baking any format.
+	// Keep the existing conversion arithmetic and all load-site checks.
+	return EmitIndexSwitch(state, params[2], 8u, u32, [&](uint32_t kind) {
+		switch (static_cast<Format::ComponentType>(kind)) {
+			case Format::ComponentType::Sint:
+				return Unary(state, spv::OpBitcast, u32, signed_raw());
+			case Format::ComponentType::Uscaled:
+				return Unary(state, spv::OpBitcast, u32,
+				             Unary(state, spv::OpConvertUToF, TypeF32(state), raw));
+			case Format::ComponentType::Sscaled:
+				return Unary(state, spv::OpBitcast, u32,
+				             Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()));
+			case Format::ComponentType::Unorm: {
+				const auto value = Binary(state, spv::OpFDiv, TypeF32(state),
+				                          Unary(state, spv::OpConvertUToF, TypeF32(state), raw), params[3]);
+				return Unary(state, spv::OpBitcast, u32, value);
+			}
+			case Format::ComponentType::Snorm: {
+				const auto normalized = Binary(state, spv::OpFDiv, TypeF32(state),
+				                               Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()),
+				                               params[4]);
+				const auto value = state.builder.AllocateId();
+				state.builder.AddFunction(spv::OpExtInst, TypeF32(state), value,
+				                          GlslStd450(state), GLSLstd450FMax, normalized,
+				                          ConstantF32Value(state, -1.0f));
+				return Unary(state, spv::OpBitcast, u32, value);
+			}
+			case Format::ComponentType::Float:
+				return EmitValueOrDefaultIfCondition(state,
+				    Binary(state, spv::OpIEqual, TypeBool(state), bits, ConstantU32(state, 16)), u32, raw,
+				    [&] { return EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw)); });
+			default: return raw;
+		}
 	});
-	converted = EmitValueOrDefaultIfCondition(state, params[3], u32, converted, [&] {
-		return Unary(state, spv::OpBitcast, u32, signed_raw());
-	});
-	converted = EmitValueOrDefaultIfCondition(state, params[4], u32, converted, [&] {
-		return Unary(state, spv::OpBitcast, u32,
-		             Unary(state, spv::OpConvertUToF, TypeF32(state), raw));
-	});
-	converted = EmitValueOrDefaultIfCondition(state, params[5], u32, converted, [&] {
-		return Unary(state, spv::OpBitcast, u32,
-		             Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()));
-	});
-	converted = EmitValueOrDefaultIfCondition(state, params[6], u32, converted, [&] {
-		const auto value = Binary(state, spv::OpFDiv, TypeF32(state),
-		                          Unary(state, spv::OpConvertUToF, TypeF32(state), raw),
-		                          params[8]);
-		return Unary(state, spv::OpBitcast, u32, value);
-	});
-	converted = EmitValueOrDefaultIfCondition(state, params[7], u32, converted, [&] {
-		const auto normalized = Binary(state, spv::OpFDiv, TypeF32(state),
-		                               Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()),
-		                               params[9]);
-		const auto value = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpExtInst, TypeF32(state), value,
-		                          GlslStd450(state), GLSLstd450FMax, normalized,
-		                          ConstantF32Value(state, -1.0f));
-		return Unary(state, spv::OpBitcast, u32, value);
-	});
-	return converted;
 }
 
 uint32_t CallGenericFormattedConversion(EmitterState& state, uint32_t raw, uint32_t bits,
@@ -1969,8 +1970,7 @@ uint32_t CallGenericFormattedConversion(EmitterState& state, uint32_t raw, uint3
 	const auto result = state.builder.AllocateId();
 	state.builder.AddFunction(spv::OpFunctionCall, TypeU32(state), result,
 	                          state.generic_formatted_conversion_function, raw, bits,
-	                          format.half[output], format.is_sint, format.is_uscaled,
-	                          format.is_sscaled, format.is_unorm, format.is_snorm,
+	                          format.component_type,
 	                          format.unsigned_max[output], format.signed_max[output]);
 	return result;
 }
@@ -1978,16 +1978,14 @@ uint32_t CallGenericFormattedConversion(EmitterState& state, uint32_t raw, uint3
 void EmitGenericFormattedConversionHelper(EmitterState& state) {
 	if (state.generic_formatted_conversion_function == 0) return;
 	const auto u32 = TypeU32(state);
-	const auto boolean = TypeBool(state);
 	const auto f32 = TypeF32(state);
-	const auto type = state.builder.Type(spv::OpTypeFunction, u32, u32, u32,
-	                                     boolean, boolean, boolean, boolean, boolean, boolean, f32, f32);
+	const auto type = state.builder.Type(spv::OpTypeFunction, u32, u32, u32, u32, f32, f32);
 	state.builder.AddFunction(spv::OpFunction, u32, state.generic_formatted_conversion_function,
 	                          spv::FunctionControlMaskNone, type);
-	std::array<uint32_t, 10> params {};
+	std::array<uint32_t, 5> params {};
 	for (uint32_t i = 0; i < params.size(); ++i) {
 		params[i] = state.builder.AllocateId();
-		state.builder.AddFunction(spv::OpFunctionParameter, i < 2u ? u32 : i < 8u ? boolean : f32,
+		state.builder.AddFunction(spv::OpFunctionParameter, i < 3u ? u32 : f32,
 		                          params[i]);
 	}
 	EmitLabel(state, state.builder.AllocateId());
@@ -3242,13 +3240,10 @@ void EmitGenericBufferFormats(EmitterState& state) {
 		                                  is_type(Format::ComponentType::Sint)),
 		                           ConstantU32(state, 1), ConstantU32(state, 0x3f800000));
 		const auto is_float = is_type(Format::ComponentType::Float);
-		format.is_sint      = is_type(Format::ComponentType::Sint);
-		format.is_uscaled   = is_type(Format::ComponentType::Uscaled);
-		format.is_sscaled   = is_type(Format::ComponentType::Sscaled);
-		format.is_unorm     = is_type(Format::ComponentType::Unorm);
-		format.is_snorm     = is_type(Format::ComponentType::Snorm);
+		format.component_type = info.type;
 		format.float_like   = Binary(state, spv::OpLogicalOr, boolean, is_float,
-		                             Binary(state, spv::OpLogicalOr, boolean, format.is_unorm, format.is_snorm));
+		                             Binary(state, spv::OpLogicalOr, boolean,
+		                                    is_type(Format::ComponentType::Unorm), is_type(Format::ComponentType::Snorm)));
 		for (uint32_t output = 0; output < 4u; ++output) {
 			const auto selector = field(word, 7u + output * 3u, 3);
 			format.from_memory[output] = AndCondition(
@@ -3274,8 +3269,7 @@ void EmitGenericBufferFormats(EmitterState& state) {
 			format.unsigned_max[output] = Unary(state, spv::OpConvertUToF, f32, mask);
 			format.signed_max[output]   = Unary(state, spv::OpConvertUToF, f32,
 			                                    Binary(state, spv::OpShiftRightLogical, u32, mask, ConstantU32(state, 1)));
-			format.half[output]         = AndCondition(
-			    state, is_float, Binary(state, spv::OpIEqual, boolean, bits, ConstantU32(state, 16)));
+
 		}
 	}
 }
