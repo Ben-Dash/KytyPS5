@@ -798,6 +798,10 @@ if(BUILD_TESTING)
 	set_tests_properties(texture_bc_r64_layout texture_bc_r64_gpu PROPERTIES TIMEOUT 30)
 	add_test(NAME performance_memory
 	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --performance-memory-only)
+	add_test(NAME ShaderRecompilerPm4CleanPacketReads
+	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --pm4-clean-packet-reads)
+	set_tests_properties(ShaderRecompilerPm4CleanPacketReads
+	                     PROPERTIES TIMEOUT 45)
 	add_test(NAME shader_precompile_gpu
 	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --shader-precompile-only)
 	add_test(NAME shader_recompiler_helper_quad

@@ -1,5 +1,46 @@
 # Ghost of Yōtei: active integration and session resume
 
+## PM4 false dependency proved/fixed; actual-world comparison pending, 2026-10-12
+
+See [performance cycle1](yotei-performance-cycle1-2026-10-12.md) for current commands,
+hashes, baseline and coverage. Current source fix removes unnecessary protected-page
+PM4 reads through existing byte ownership. Controlled4-case RED192851/F1A166EF,
+unchanged GREEN194021/002DECF3; real GPU-modified headers/payload still wait and
+consume new bytes. PM4 WAIT/rewind/scheduler and command-stream neighbors PASS.
+Aggregate performance-memory failureConservativeImagePressure independently
+repeats with this production correction absent (control193905); no full-suite claim.
+
+New WSL-off c0 baseline191212-e5d801 closed19:19:53UTC/exit0, world visible in
+180/300/450s screenshots, no memory guard, maxWS17.91GiB/minfree27.86GiB. Two
+adjacent world intervals:77presents/30s/~2.6FPS, GPUbusy229ms, gap160ms and
+full-drain154–155ms (overlap). Actual main3328×1872 andpostprocess3840×2160.
+Latest user explicitly authorizes WSL shutdown; do not apply old keep-running rule.
+
+Next build/install this separately committed PM4 fix, then a bounded neutral world
+comparison using compatible cache, identical4workers and full rendering. Inspect
+DISPLAY settings afterward if needed. Other agent proposals are saved but not
+production fixes; exact-prefetch reproduction RED is opt-in pending coherence
+tests, and GPU formatted-conversion proposal requires cost/numerical regression.
+Stable60/actual1080/completeeffects remain pending; no new status post or push.
+
+## WSL stopped by new user instruction; three performance proposals, 2026-10-12
+
+Latest user explicitly requested stopping WSL and continuing with three agents
+proposing solutions while root fixes/tests them sequentially. This supersedes
+older leave-WSL-running instructions below. Native wsl.exe --shutdown returned0;
+vmmemWSL absent and free physical RAM39.33GiB. Active branch is published
+a73b95921fb6c40111505ba7e539927df3b5ccbc; production source equals committed c0.
+Installed c0 EXE SHA256 DC6B68AD628D172B718E0359FE2A20BD0BE7BB871CD2DC2763B43D8B7BB3A2AB
+was checked again. No build/test/game was still running on resume.
+
+Three read-only agents investigate warm PM4/readback waits, exact pipeline
+prefetch/readiness and GPU tiling/transfer/resolution. Root owns all production
+edits and the native slot. Required synthetic reproductions recorded in test debt;
+no production fix applied yet. First collect a bounded neutral-input c0 baseline
+with WSL off, normal complete rendering and unchanged8GiB/2GiB/42GiB guards.
+Then evaluate proposals sequentially with intended RED/unchanged GREEN and actual
+world comparison. Actual1920x1080/60FPS and full effects remain unproved.
+
 ## Useful changes retained; incomplete sampler archived, 2026-10-12
 
 User authorized publishing useful work and cleaning the active branch. The fetched

@@ -1,0 +1,80 @@
+# Performance cycle 1: checked changes and comparisons
+
+Native Windows, `yotei-integration-native`, baseline `a73b9592` with c0 production
+source. User now explicitly requested WSL shutdown and three-agent suggestions
+with sequential root-owned implementation/testing. WSL shutdown returned0,
+vmmemWSL absent, initially39.33GiB free. Older keep-WSL instructions are superseded.
+
+## Current-world baseline
+
+`_Build/runs/game-20261012-191212-perf-cycle1-wsl-off-baseline-1080-e5d801`
+used private cloned c0 runtime, EXE SHA256
+`DC6B68AD628D172B718E0359FE2A20BD0BE7BB871CD2DC2763B43D8B7BB3A2AB`.
+Compile workers4, normal rendering/async-pipelines=false, neutral input,
+drain30/GPUzones; unchanged8GiB physical/2GiB commit/42GiB owned guards.
+Run closed19:19:53UTC/exit0 by task-owned stop-request, no guard; maxWS17.91GiB,
+minphysical27.86GiB/mincommit23.70GiB. Village world visible in180/300/450s
+captures. Source remained frozen throughout. Trigger captured two world frames.
+
+Two adjacent world intervals report77presents/30s, about2.6FPS. GPU command interval
+union about229ms/present, gaps160–161ms, CPU full-drain154–155ms; overlapping
+categories must not be summed. GPU zones: game dispatch148–150ms, tiler26ms,
+buffer copy18ms, draw18ms, image copy11–12ms. Counts are merged zone segments,
+not actual dispatch counts. Main targets3328×1872/postprocessing3840×2160;
+actual1080 and60FPS not achieved. Details in ignored `worldbaselinequick.md`.
+
+## PM4 clean-byte fetching
+
+Defect: a CPU-owned packet sharing a protected page with unrelated GPU-written
+bytes forced a readback/drain through ordinary guest pointer loads. The existing
+byte ownership model already supports checked clean-backing reads.
+
+New synthetic `Pm4CleanPacketReadTests.inc` runs actual Thread_Gpu with lookahead
+enabled, independent native GPU fills, output and sibling canaries. Four cases:
+clean packet, GPU-written payload, cross-page clean packet, GPU-written header
+changing NOP to WRITE_DATA together with new payload. All producer/setup/value
+controls are checked before the expected no-unrelated-submission assertion;
+every resource is finished/published/unmapped before assertions can abort.
+
+Controlled RED192851/F1A166EF: all4setup and numerical controls pass; clean cases
+advance tick1→2 and retire the unrelated sibling. Exact same fixture GREEN193537
+and final restored GREEN194021/002DECF3: clean cases tick1→1/sibling remains pending;
+actual GPU-owned header/payload cases tick1→2 and consume new9abcdef0 values.
+Diagnostic recent-PM4 mode GREEN193610 also passes. Full hashes, commands,
+source diffs and output retained in performance-cycle1 `checks/` folders.
+
+Shared fix uses bounded per-packet clean snapshots only when protected pages are
+involved. Actual producers keep ordinary fault/wait coherence; lookahead stops
+at unavailable packet bytes instead of publishing them. Guest packet identity,
+cursor/resume spans and COND_EXEC advancement remain original. Legacy AA centroid
+bundle and unbounded PushMarker diagnostic keep original payload; predictive
+lookahead conservatively stops at those bundles. No title/hash/path selection.
+
+Neighbor194022–194023: PM4 WAIT/mask/resume, rewind/mutable resume and scheduler
+timeline PASS; command-stream193613 PASS. The aggregate performance-memory suite
+reaches ConservativeImagePressure and fails safe on-demand recovery. Scoped
+unfixed-source control193905/81597725 repeats the identical failure, so it is a
+separate existing debt; no full-suite PASS claim. Restored source timestamp was
+advanced before native rebuilding to avoid Copy-Item retaining an older timestamp.
+
+PM4 build/install and actual performance comparison are pending at this checkpoint.
+Passing regressions proves removed false dependencies, not an FPS improvement.
+
+## Remaining proposals
+
+- Exact compute prefetch: controlled RED192852/F1A166EF proves a valid distinct
+  zero-stride permutation is suppressed after an earlier source was seen; ordinary
+  nonzero strides correctly share identity. No production change yet. Keep this
+  test opt-in/out of registered CTest until its correction passes. Required
+  indirect/dirty metadata safeguards are separate from inline-only proposals.
+- GPU generic formatted conversion: top current journal compute sources have many
+  runtime-format buffers. Existing helper computes two normalization divisions and
+  other-format conversions even for UInt/Float paths. New path-cost/numerical
+  proposals remain ignored and unrun. Keep existing one-ULP UNorm debt distinct.
+- Driver cache compatibility, broad barrier changes and subword tiler packing are
+  still research proposals. Dominant current tiler formats are4/8bytes, so the
+  R8/R16 packing proposal does not directly address measured world cost.
+
+Proposals/artifacts: `_Build/analysis/yotei-performance-cycle1-20261012/`.
+Sampler archive remains preserved and unapplied. No game compatibility or complete
+effects claim follows from this cycle; no push or issue update during these fixes.

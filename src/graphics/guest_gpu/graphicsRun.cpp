@@ -140,10 +140,13 @@ static void RecordRecentPm4(const uint32_t* packet, uint32_t remaining_dw) {
 	}
 	auto& slot = t_recent_pm4[t_recent_pm4_next++ % t_recent_pm4.size()];
 	slot.count = std::min<uint32_t>(remaining_dw, static_cast<uint32_t>(slot.dwords.size()));
-	if ((packet[0] >> 30u) == 3u) {
-		slot.count = std::min<uint32_t>(slot.count, KYTY_PM4_LEN(packet[0]));
+	uint32_t header = 0;
+	LibKernel::Memory::ReadGuestOnGpuThread(reinterpret_cast<uint64_t>(packet), &header, sizeof(header));
+	if ((header >> 30u) == 3u) {
+		slot.count = std::min<uint32_t>(slot.count, KYTY_PM4_LEN(header));
 	}
-	std::copy_n(packet, slot.count, slot.dwords.begin());
+	LibKernel::Memory::ReadGuestOnGpuThread(reinterpret_cast<uint64_t>(packet), slot.dwords.data(),
+	                                    slot.count * sizeof(uint32_t));
 }
 
 void DebugDumpRecentPm4() {
@@ -1020,10 +1023,52 @@ static bool IsDispatchOpcode(uint32_t opcode) {
 	return opcode == Pm4::IT_DISPATCH_DIRECT || opcode == Pm4::IT_DISPATCH_INDIRECT;
 }
 
+// These legacy handlers consume a following centroid packet or an unbounded
+// diagnostic string. Keep their original guest span until they have bounded APIs.
+static bool Pm4NeedsOriginalPayload(uint32_t header, uint32_t first_word) {
+	return ((header & ~1u) == 0xc0106900u &&
+	        (first_word & ~0x70000000u) == Pm4::PA_SC_AA_SAMPLE_LOCS_PIXEL_X0Y0_0) ||
+	       (((header >> 8u) & 0xffu) == Pm4::IT_NOP && KYTY_PM4_R(header) == Pm4::R_PUSH_MARKER);
+}
+
+static const uint32_t* Pm4ExecutionPayload(RenderContext& renderer, const uint32_t* packet,
+                                         uint32_t header, uint32_t packet_dw,
+                                         std::vector<uint32_t>& snapshot) {
+	const auto address = reinterpret_cast<uint64_t>(packet);
+	const uint64_t bytes = uint64_t {packet_dw} * sizeof(uint32_t);
+	if (!renderer.IsMapped(address, bytes)) {
+		return packet;
+	}
+	const auto& buffers = renderer.GetBufferCache();
+	const auto last_page = (address + bytes - 1u) & ~uint64_t {0xfff};
+	bool protected_page = false;
+	for (auto page = address & ~uint64_t {0xfff}; page <= last_page; page += 0x1000u) {
+		protected_page |= buffers.IsPageGpuDirtyHint(page);
+	}
+	if (!protected_page) {
+		return packet;
+	}
+	uint32_t first_word = 0;
+	if ((header & ~1u) == 0xc0106900u) {
+		LibKernel::Memory::ReadGuestOnGpuThread(address + sizeof(uint32_t), &first_word, sizeof(first_word));
+	}
+	if (Pm4NeedsOriginalPayload(header, first_word)) {
+		return packet;
+	}
+	snapshot.resize(packet_dw);
+	// Page protection is only a hint. The checked backing read proves that every
+	// copied byte is CPU-owned; actual GPU-written commands retain the fault/wait.
+	if (!LibKernel::Memory::TryReadGpuCleanBacking(address, snapshot.data(), bytes)) {
+		LibKernel::Memory::ReadGuestOnGpuThread(address, snapshot.data(), bytes);
+	}
+	return snapshot.data();
+}
+
 void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 	// KYTY_DEBUG_DRAW_PHASES: the time in each handler and between them (see Pm4OpTimer).
 	static const bool timed       = DrawPhaseTimer::Hash() != 0;
 	uint64_t          handler_end = 0;
+	std::vector<uint32_t> packet_snapshot;
 	while (!execution.m_buffer_stack.empty()) {
 		if (g_gpu_state != nullptr) {
 			g_gpu_state->ProcessCommands();
@@ -1038,7 +1083,9 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 		const auto* const packet        = cursor.commands.data() + cursor.offset_dw;
 		const auto        total_dw      = static_cast<uint32_t>(cursor.commands.size());
 		const auto        remaining_dw  = total_dw - cursor.offset_dw;
-		const auto        packet_header = packet[0];
+		uint32_t packet_header = 0;
+		LibKernel::Memory::ReadGuestOnGpuThread(reinterpret_cast<uint64_t>(packet), &packet_header,
+		                                    sizeof(packet_header));
 		const auto        opcode        = (packet_header >> 8u) & 0xffu;
 		EXIT_NOT_IMPLEMENTED(remaining_dw > total_dw);
 		RecordRecentPm4(packet, remaining_dw);
@@ -1050,6 +1097,8 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 		}
 
 		EXIT_NOT_IMPLEMENTED(remaining_dw < 2);
+		const auto decoded_packet_dw = Pm4::PacketSizeDw(packet_header);
+		EXIT_NOT_IMPLEMENTED(decoded_packet_dw > remaining_dw);
 
 		if (GraphicsRunDebugDumpEnabled()) {
 			LOGF("CP packet: offset=0x%05" PRIx32 " cmd_id=0x%08" PRIx32 " op=0x%02" PRIx32
@@ -1142,8 +1191,10 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 			}
 			g_pm4_ops.outcome = Pm4OpTimer::Drawn;
 		}
+		const auto* payload_packet = Pm4ExecutionPayload(m_renderer, packet, packet_header,
+		                                               decoded_packet_dw, packet_snapshot);
 		const auto packet_dw =
-		    handler(*this, packet_header & ~1u, packet + 1, remaining_dw, total_dw) + 1;
+		    handler(*this, packet_header & ~1u, payload_packet + 1, remaining_dw, total_dw) + 1;
 		if (timed) [[unlikely]] {
 			handler_end       = DrawPhaseTimer::Now();
 			const auto ticks = handler_end - handler_start;
@@ -1264,6 +1315,7 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 	auto     stack     = execution.m_buffer_stack;
 	draws = 0;
 	parts = 0;
+	std::vector<uint32_t> packet_snapshot;
 	for (uint32_t packets = 0; !stack.empty() && draws < MaxDraws && packets < MaxPackets;
 	     packets++) {
 		auto& cursor = stack.back();
@@ -1274,7 +1326,16 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 		const auto* packet    = cursor.commands.data() + cursor.offset_dw;
 		const auto  total_dw  = static_cast<uint32_t>(cursor.commands.size());
 		const auto  remaining = total_dw - cursor.offset_dw;
-		const auto  header    = packet[0];
+		uint32_t header = 0;
+		const auto address = reinterpret_cast<uint64_t>(packet);
+		const bool guest_packet = m_renderer.IsMapped(address, sizeof(header));
+		if (guest_packet) {
+			if (!LibKernel::Memory::TryReadGpuCleanBacking(address, &header, sizeof(header))) {
+				break;
+			}
+		} else {
+			std::memcpy(&header, packet, sizeof(header));
+		}
 		if (header == 0x80000000u) {
 			cursor.offset_dw++;
 			continue;
@@ -1283,6 +1344,17 @@ void CommandProcessor::LookaheadPass(const Pm4Execution& execution, ProgramWait 
 		const auto packet_dw = KYTY_PM4_LEN(header);
 		if ((header >> 30u) != 3u || remaining < 2 || packet_dw > remaining) {
 			break;
+		}
+		if (guest_packet) {
+			packet_snapshot.resize(packet_dw);
+			if (!LibKernel::Memory::TryReadGpuCleanBacking(address, packet_snapshot.data(),
+			                                            uint64_t {packet_dw} * sizeof(uint32_t)) ||
+			    Pm4NeedsOriginalPayload(header, packet_snapshot[1])) {
+				// Prediction must not publish GPU data or invoke a handler whose reads
+				// extend beyond this validated packet. Actual execution keeps its span.
+				break;
+			}
+			packet = packet_snapshot.data();
 		}
 		const auto opcode = (header >> 8u) & 0xffu;
 		switch (opcode) {

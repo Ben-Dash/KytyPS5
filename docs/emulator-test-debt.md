@@ -1,5 +1,64 @@
 # Integration test debt
 
+## Performance cycle: current proved/remaining scope, 2026-10-12
+
+PM4 protected-page false sharing has intended controlled RED192851/F1A166EF and
+unchanged4-case GREEN194021/002DECF3, including GPU-modified header/payload and
+cross-page controls. WAIT/resume, rewind and scheduler neighbors PASS. Legacy AA
+centroid bundle/PushMarker retain original payload; their nonblocking prediction
+is conservatively deferred, not a new bounded-read correctness claim.
+
+ConservativeImagePressure fails safe on-demand recovery in aggregate
+performance-memory suite193611 and again in scoped unfixed-source control193905.
+Separate existing debt; the PM4 correction is absent in the latter build.
+Native data is finished/unmapped before assertion; no GPU-reset reproduction.
+
+Compute prefetch controlled RED192852 proves true distinct zero-stride program
+identity before the suppressed queue request. Production fix pending. Indirect
+metadata/cached memo must be tested with GPU-old/raw-new/once/tick and CPU mutation
+controls before allowing speculative clean-backing reads or inline policy changes.
+
+Required generic-conversion cost regression BEFORE production: compile public
+synthetic generic-format BUFFER input and walk actual helper CFG under legal
+format flags. UInt32/Float32 path must avoid unrelated normalization/half/signed
+conversions; native4800-case results must match baseline byte-for-byte under
+unchanged denominators/rounding, including a separately recorded strictUNorm1ULP
+baseline debt. Path-cost proposals are not yet executed or a measured GPU gain.
+
+## Performance cycle: PM4 page sharing and exact pipeline prefetch, 2026-10-12
+
+Latest user now authorizes WSL shutdown and recurring three-agent proposals with
+root-owned sequential native fixes/tests/game comparisons. This supersedes older
+leave-WSL-running records. Begin from clean published a73b9592/c0 source; archived
+sampler drafts are not active production changes.
+
+Required PM4 reproduction BEFORE production: a CPU-owned, byte-exact clean
+WRITE_DATA packet shares a protected page with unrelated pending GPU-written bytes.
+Run the actual GuestGpu parser/lookahead; correct packet/output and dirty sibling
+canaries must survive without advancing submission/full-drain solely for fetching
+the clean packet. GPU-written packet/header/payload controls must instead observe
+the producer's new bytes with normal coherence. Preserve original guest packet
+identity for speculation and read fresh bounded packets across wait/resume; do
+not snapshot a whole mutable command buffer or read unbacked/dirty ranges directly.
+Current direct packet dereference is a page-false-sharing lead, not yet proven.
+Saved PM4 fault attribution may describe the previous opcode because header access
+precedes SetPm4Op; do not assume every R_RELEASE_MEM-labelled fault is in its handler.
+
+Required pipeline reproduction BEFORE production: after compiling a genuine
+compute source, prefetch the same source with a different supported buffer/static
+state permutation. Its actual pipeline must be queued/prepared rather than
+discarded solely because source address/wave was already seen. Repeated exact
+requests deduplicate; unsupported/dirty specialization metadata does not trigger
+speculative host faults or admit stale input. Use real cache/program keys and
+observable dispatch/once/canaries, plus bounded queue completion. Current coarse
+m_compute_sources gate is a lead for known-source late synchronous misses.
+
+Third candidate: subword detile currently uses two atomics per element. Before any
+word-owned store optimization, prove complete aligned-word destination ownership
+and retain atomic tail/padding paths; run numerical CPU/GPU parity for 8/16-bit
+formats, odd rows, arrays/mips, tiling families and untouched padding. Loading-only
+tiler timing does not prove steady world cost; collect an actual world profile first.
+
 ## Dynamic material sampler identity and mirror coherence, 2026-10-12
 
 Required regression BEFORE production: scalar-buffer-loaded four-word genuine S#

@@ -42897,6 +42897,7 @@ namespace {
 
 #include "AttachmentFeedbackTests.inc"
 #include "PerformanceMemoryTests.inc"
+#include "Pm4CleanPacketReadTests.inc"
 #include "ShaderPrecompileGpuTests.inc"
 #include "SrtMaterializationBenchmark.inc"
 
@@ -42957,6 +42958,11 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--performance-memory-only") == 0) {
     VulkanHarness vulkan;
     CheckPerformanceMemory(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--pm4-clean-packet-reads") == 0) {
+    VulkanHarness vulkan;
+    CheckPm4CleanPacketReads(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--bda-benchmark") == 0) {
