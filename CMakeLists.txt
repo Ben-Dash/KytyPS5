@@ -813,6 +813,14 @@ if(BUILD_TESTING)
 	add_test(NAME end_of_pipe_literal_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-neighbors-gpu)
 	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
+	add_test(NAME dispatch_snapshot_selector
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-only)
+	add_test(NAME dispatch_snapshot_selector_frame
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-frame-only)
+	add_test(NAME dispatch_snapshot_selector_default
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dispatch-snapshot-selector-default-only)
+	set_tests_properties(dispatch_snapshot_selector dispatch_snapshot_selector_frame
+		dispatch_snapshot_selector_default PROPERTIES TIMEOUT 10)
 	add_test(NAME fault_buffer_protocol_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-buffer-protocol-gpu)
 	add_test(NAME fault_buffer_protocol_neighbors_gpu

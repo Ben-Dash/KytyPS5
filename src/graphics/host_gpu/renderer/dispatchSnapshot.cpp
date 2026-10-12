@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <deque>
 #include <cinttypes>
 #include <cstdio>
@@ -29,6 +30,7 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -52,6 +54,7 @@ struct Settings {
 	uint32_t              max   = 0;
 	uint32_t              ring  = 0; // KYTY_DISPATCH_SNAPSHOT_RING: keep only the last n snapshots
 	std::filesystem::path directory;
+	std::optional<WrittenBufferSelector> written_buffer;
 };
 
 const Settings& GetSettings() {
@@ -93,8 +96,21 @@ const Settings& GetSettings() {
 		const char* dir = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_DIR");
 		s.directory     = dir != nullptr && *dir != '\0' ? dir : "_snapshots";
 		s.enabled       = s.frame >= 0 || !s.hashes.empty();
+		if (const char* filter = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER");
+		    filter != nullptr) {
+			WrittenBufferSelector selector;
+			if (!ParseWrittenBufferSelector(filter, selector)) {
+				EXIT("dispatch-snapshot: malformed KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER; "
+				     "expected decimal uint32 slot:uint64 nonzero bytes\n");
+			}
+			s.written_buffer = selector;
+		}
 		std::printf("dispatch-snapshot: on (%s), max %u, dir %s\n", text, s.max,
 		            s.directory.string().c_str());
+		if (s.written_buffer) {
+			std::printf("dispatch-snapshot: written buffer filter slot=%u declared_bytes=%" PRIu64 "\n",
+			            s.written_buffer->slot, s.written_buffer->declared_bytes);
+		}
 		std::fflush(stdout);
 		return s;
 	}();
@@ -350,6 +366,45 @@ std::unordered_map<uint32_t, Json>& OpenSnapshots() {
 }
 
 } // namespace
+
+bool ParseWrittenBufferSelector(std::string_view text, WrittenBufferSelector& selector) noexcept {
+	const auto colon = text.find(':');
+	if (colon == std::string_view::npos || colon == 0 || colon + 1 == text.size() ||
+	    text.find(':', colon + 1) != std::string_view::npos) {
+		return false;
+	}
+	const auto slot_text = text.substr(0, colon);
+	const auto bytes_text = text.substr(colon + 1);
+	const auto decimal = [](std::string_view value) {
+		return std::ranges::all_of(value, [](char c) { return c >= '0' && c <= '9'; });
+	};
+	if (!decimal(slot_text) || !decimal(bytes_text)) return false;
+	WrittenBufferSelector parsed;
+	const auto slot = std::from_chars(slot_text.data(), slot_text.data() + slot_text.size(), parsed.slot);
+	const auto bytes = std::from_chars(bytes_text.data(), bytes_text.data() + bytes_text.size(),
+	                                   parsed.declared_bytes);
+	if (slot.ec != std::errc{} || slot.ptr != slot_text.data() + slot_text.size() ||
+	    bytes.ec != std::errc{} || bytes.ptr != bytes_text.data() + bytes_text.size() ||
+	    parsed.declared_bytes == 0) {
+		return false;
+	}
+	selector = parsed;
+	return true;
+}
+
+bool MatchesWrittenBufferSelector(const WrittenBufferSelector& selector,
+                                  const ShaderStageRuntime& runtime) noexcept {
+	if (!runtime || selector.declared_bytes == 0) return false;
+	const auto slot = selector.slot;
+	const auto& program = *runtime.program;
+	const auto& resources = *runtime.resources;
+	if (slot >= program.info.buffers.size() || slot >= resources.buffers.size() ||
+	    !program.info.buffers[slot].written || resources.buffers[slot].dword_count < 4) {
+		return false;
+	}
+	const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[slot]);
+	return descriptor.GetSize() == selector.declared_bytes;
+}
 
 namespace {
 struct DrawSettings {
@@ -827,11 +882,16 @@ void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& 
 	}
 }
 
-bool Wanted(uint64_t shader_hash, uint64_t frame) {
+bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame) {
 	const auto& s = GetSettings();
 	if (!s.enabled) [[likely]] {
 		return false;
 	}
+	if (s.written_buffer && !MatchesWrittenBufferSelector(*s.written_buffer, runtime)) {
+		return false;
+	}
+	EXIT_IF(!runtime);
+	const auto shader_hash = runtime.program->shader_hash;
 	if (s.frame >= 0) {
 		// The first frame from n on that dispatches anything.
 		static uint32_t taken  = 0;
@@ -853,6 +913,9 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
                       uint64_t frame, vk::Buffer args, uint64_t args_offset) {
 	static uint32_t next_id = 0;
 	const auto&     s       = GetSettings();
+	if (s.written_buffer && !MatchesWrittenBufferSelector(*s.written_buffer, input.stage)) {
+		return {};
+	}
 	const auto&     program = *input.stage.program;
 	const auto&     resources = *input.stage.resources;
 	Pending         pending;
@@ -870,6 +933,10 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	Json meta;
 	meta["version"]  = 1;
 	meta["shader"]   = fmt::format("{:016x}", program.shader_hash);
+	if (s.written_buffer) {
+		meta["admission_written_buffer"] = {{"index", s.written_buffer->slot},
+		                                     {"declared_bytes", s.written_buffer->declared_bytes}};
+	}
 	meta["frame"]    = frame;
 	meta["tick"]     = context.GetCommandScheduler().CurrentTick();
 	meta["groups"]   = {groups[0], groups[1], groups[2]};

@@ -330,6 +330,7 @@ private:
 #include "FaultBitmapInitializationNeighborTests.inc"
 #include "FaultFirstBindingDeferredGpuTests.inc"
 #include "FaultFirstBindingDeferredNeighborTests.inc"
+#include "DispatchSnapshotSelectorTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
@@ -356,8 +357,18 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
                             std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
-                            std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0)),
+                            std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--dispatch-snapshot-selector-only") == 0 ||
+                            std::strcmp(argv[1], "--dispatch-snapshot-selector-frame-only") == 0 ||
+                            std::strcmp(argv[1], "--dispatch-snapshot-selector-default-only") == 0)),
           "usage: bindless_lifecycle_tests [--bindless-lifecycle-only | --bindless-preparation-neighbors | --bindless-feedback-neighbors | --bindless-image-access-age | --bindless-image-access-neighbors | --bindless-descriptor-retirement-readback | --bindless-descriptor-retirement-neighbors | --embedded-fetch-gpu-readback | --vertex-value-trace-gpu-readback | --vertex-nf-trace-gpu-readback | --generic-buffer-codegen-cost | --generic-buffer-numeric-readback | --generic-buffer-numeric-measurement | --eop-write-ordering-gpu | --eop-literal-ordering-gpu | --eop-literal-neighbors-gpu | --fault-buffer-protocol-gpu | --fault-buffer-protocol-neighbors-gpu | --fault-bitmap-initialization-gpu | --fault-bitmap-initialization-neighbors-gpu | --fault-first-binding-deferred-gpu | --fault-first-binding-state-neighbors-gpu]");
+  if (argc == 2 && (std::strcmp(argv[1], "--dispatch-snapshot-selector-only") == 0 ||
+                    std::strcmp(argv[1], "--dispatch-snapshot-selector-frame-only") == 0 ||
+                    std::strcmp(argv[1], "--dispatch-snapshot-selector-default-only") == 0)) {
+    CheckDispatchSnapshotSelector(std::strcmp(argv[1], "--dispatch-snapshot-selector-frame-only") == 0,
+                                  std::strcmp(argv[1], "--dispatch-snapshot-selector-default-only") == 0);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0)
     ConfigureVertexTraceGpuEnvironment();
   if (argc == 2 && (std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||

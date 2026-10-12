@@ -1014,7 +1014,7 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 		                               {thread_group_x, thread_group_y, thread_group_z});
 	}
 	DispatchSnapshot::Pending snapshot;
-	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
+	if (DispatchSnapshot::Wanted(input_info.stage, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
 		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings,
 		                                           {thread_group_x, thread_group_y, thread_group_z},
 		                                           m_context.GetGpu().GetFrameNum());
@@ -1167,7 +1167,7 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 		                                input_info.workgroup_counts[2]}, true);
 	}
 	DispatchSnapshot::Pending snapshot;
-	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
+	if (DispatchSnapshot::Wanted(input_info.stage, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
 		std::array<uint32_t, 3> groups {};
 		LibKernel::Memory::TryReadBacking(args_addr, groups.data(), sizeof(groups));
 		snapshot = DispatchSnapshot::CaptureInputs(m_context, input_info, bindings, groups,

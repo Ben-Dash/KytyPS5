@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // KYTY_DISPATCH_SNAPSHOT (diagnostic, off by default): writes compute dispatches to disk so that
@@ -17,6 +18,8 @@
 //   KYTY_DISPATCH_SNAPSHOT=1                   what dispatch_snapshot.txt names, else frame:600
 //   KYTY_DISPATCH_SNAPSHOT_MAX=<n>             snapshots per shader (8) or per frame (4000)
 //   KYTY_DISPATCH_SNAPSHOT_DIR=<dir>           where they go (_snapshots)
+//   KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER=<slot>:<bytes>  require this written buffer's declared
+//     SRD size (decimal, nonzero bytes); rejected dispatches do not consume capture limits.
 // A snapshot holds the permutation's journal record and live SPIR-V, the host contents of every
 // buffer, image and sampler the dispatch binds, its push data and group counts, and afterwards
 // the contents the dispatch wrote. The inputs reach the disk before the dispatch is submitted, so
@@ -40,8 +43,18 @@ struct Source {
 
 [[nodiscard]] bool Enabled();
 
+struct WrittenBufferSelector {
+	uint32_t slot = 0;
+	uint64_t declared_bytes = 0;
+};
+// Strict decimal slot:bytes; failure leaves the output unchanged.
+[[nodiscard]] bool ParseWrittenBufferSelector(std::string_view text,
+                                             WrittenBufferSelector& selector) noexcept;
+[[nodiscard]] bool MatchesWrittenBufferSelector(const WrittenBufferSelector& selector,
+                                               const ShaderStageRuntime& runtime) noexcept;
+
 // Whether this dispatch is snapshotted (counts it). Cheap when snapshots are off.
-[[nodiscard]] bool Wanted(uint64_t shader_hash, uint64_t frame);
+[[nodiscard]] bool Wanted(const ShaderStageRuntime& runtime, uint64_t frame);
 
 struct Pending {
 	uint32_t id = 0; // 0: nothing captured.
