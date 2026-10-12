@@ -3,7 +3,7 @@
 // No intermediate-alpha/dither oracle is fabricated. Raw2222/round0 is the AMD
 // documented nondithered configuration. Explicit EXEC_ON_NOOP isolates pipeline
 // A2C from the separate PS-retention path. No artificial color attachment.
-  void CheckAlphaCoverageEndpoints() {
+  void CheckAlphaCoverageEndpoints(bool early_neighbors = false) {
     constexpr const char* name = "AlphaCoverageEndpoints";
     constexpr uintptr_t base = 0x0000000207800000ull;
     constexpr uint64_t bytes = 0x100000u, vertex_address = base + 0x10000u;
@@ -38,7 +38,7 @@
         "setup mapping failure; not semantic RED");
     std::memset(mapped,0,bytes);
     std::memcpy(reinterpret_cast<void*>(vertex_address),vertices.data(),sizeof(vertices));
-    struct Result {u32 samples,alpha;bool enabled,override_off,force_ps,correct,guards;
+    struct Result {u32 samples,alpha,z_order;bool enabled,override_off,force_ps,correct,guards;
                    std::array<u32,4> actual;};
     std::vector<Result> results;
     {
@@ -121,16 +121,21 @@
           auto readback=CreateHostBuffer(name,(side*side+8u)*sizeof(u32),
               vk::BufferUsageFlagBits::eTransferDst|vk::BufferUsageFlagBits::eStorageBuffer,
               std::vector<u32>(side*side+8u,guard));
+          // Default remains the same32cases; only the separate neighbor mode
+          // adds an early-Z preference. Endpoint depth expectations are identical.
+          for(u32 z_order=0u;z_order<(early_neighbors?2u:1u);++z_order)
           for(bool force_ps:{false,true})for(bool enabled:{false,true})
             for(bool override_off:{false,true})for(u32 alpha:{0u,1u}) {
               const u32 raw=0x0000aa00u|(enabled?1u:0u);
               set_context(Pm4::DB_ALPHA_TO_MASK,raw);
               const u32 db=(override_off?(1u<<Pm4::DB_SHADER_CONTROL_ALPHA_TO_MASK_DISABLE_SHIFT):0u)|
-                           (force_ps?(1u<<Pm4::DB_SHADER_CONTROL_EXEC_ON_NOOP_SHIFT):0u);
+                           (force_ps?(1u<<Pm4::DB_SHADER_CONTROL_EXEC_ON_NOOP_SHIFT):0u)|
+                           (z_order<<Pm4::DB_SHADER_CONTROL_Z_ORDER_SHIFT);
               set_context(Pm4::DB_SHADER_CONTROL,db);
               Require(name,"decoded A2C fixture controls",regs.GetAlphaToMaskRaw()==raw &&
                   regs.GetShaderRegisters().db_shader_control.alpha_to_mask_disable==override_off &&
                   regs.GetShaderRegisters().db_shader_control.shader_execute_on_noop==force_ps &&
+                  regs.GetShaderRegisters().db_shader_control.shader_z_behavior==z_order &&
                   regs.GetEqaaControl().alpha_to_mask_num_samples==encoded &&
                   regs.GetRenderTargetMask()==0u,"fixture register decoder mismatch; not semantic RED");
               shaders.SetPsShaderBase(reinterpret_cast<uint64_t>(pixels[alpha].data()));
@@ -139,6 +144,23 @@
                   {vk::ImageAspectFlagBits::eDepth,0u,1u,0u,1u},clear);
               cp.DrawIndexAuto({.vertex_count=3u,.instance_count=1u});
               scheduler.EndRendering();
+              // Poison every generation so an omitted observer/copy cannot inherit
+              // a previous case's otherwise-correct depth readback.
+              auto poison_command=scheduler.Current().Handle();
+              poison_command.fillBuffer(readback.buffer,0u,readback.size,guard);
+              vk::BufferMemoryBarrier2 poison_ready{};
+              poison_ready.srcStageMask=vk::PipelineStageFlagBits2::eTransfer;
+              poison_ready.srcAccessMask=vk::AccessFlagBits2::eTransferWrite;
+              poison_ready.dstStageMask=vk::PipelineStageFlagBits2::eTransfer|
+                                         vk::PipelineStageFlagBits2::eComputeShader;
+              poison_ready.dstAccessMask=vk::AccessFlagBits2::eTransferWrite|
+                                          vk::AccessFlagBits2::eShaderWrite;
+              poison_ready.srcQueueFamilyIndex=poison_ready.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+              poison_ready.buffer=readback.buffer;poison_ready.offset=0u;poison_ready.size=readback.size;
+              vk::DependencyInfo poison_dependency{};
+              poison_dependency.bufferMemoryBarrierCount=1u;
+              poison_dependency.pBufferMemoryBarriers=&poison_ready;
+              poison_command.pipelineBarrier2(poison_dependency);
               auto& image=cache.GetImage(depth.image_id);
               if(samples==1u) {
                 const vk::BufferImageCopy copy{0u,0u,0u,
@@ -176,7 +198,7 @@
                   [=](u32 value){return value==expected;});
               const bool canaries=std::ranges::all_of(std::span{words}.subspan(side*side,8u),
                   [=](u32 value){return value==guard;});
-              results.push_back({samples,alpha,enabled,override_off,force_ps,correct,canaries,
+              results.push_back({samples,alpha,z_order,enabled,override_off,force_ps,correct,canaries,
                                 {words[0],words[1],words[2],words[3]}});
               RenderExecutorTestAccess::ResetBindings(executor);
           }
@@ -191,10 +213,12 @@
     }
     Require(name,"task guest cleanup",LibKernel::Memory::KernelMunmap(base,bytes)==0 &&
         LibKernel::Memory::KernelReleaseDirectMemory(direct,bytes)==0,"mapping cleanup failed");
+    Require(name,"all bounded endpoint cases ran",results.size()==(early_neighbors?64u:32u),
+            "fixture did not execute every requested case; not intended coverage RED");
     bool controls=true,coverage=true,retention=true,canaries=true;
     for(const auto& r:results) {
-      std::printf("[a2c-endpoint] samples=%u alpha=%u enable=%u override=%u forcePS=%u correct=%u guard=%u depth=%08x,%08x,%08x,%08x\n",
-          r.samples,r.alpha,r.enabled,r.override_off,r.force_ps,r.correct,r.guards,
+      std::printf("[a2c-endpoint] samples=%u alpha=%u zOrder=%u enable=%u override=%u forcePS=%u correct=%u guard=%u depth=%08x,%08x,%08x,%08x\n",
+          r.samples,r.alpha,r.z_order,r.enabled,r.override_off,r.force_ps,r.correct,r.guards,
           r.actual[0],r.actual[1],r.actual[2],r.actual[3]);
       canaries&=r.guards;
       if(!r.enabled||r.override_off||r.alpha==1u)controls&=r.correct;

@@ -1750,7 +1750,8 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	const auto  color_output_mask = DrawColorOutputMask(buffer.GetRegisters());
 	state.ps_active = buffer.GetShaders().GetPs().ps_regs.data_addr != 0 &&
 	                  (color_output_mask != 0 ||
-	                   PixelShaderHasDepthOrCoverageSideEffects(shader_regs));
+	                   PixelShaderHasDepthOrCoverageSideEffects(shader_regs) ||
+	                   buffer.GetRegisters().AlphaToCoverageEnabled());
 	RefreshShaders(buffer, draw, color_output_mask, state);
 	if (state.programs.pending) {
 		// Asynchronous pipelines: a shader is still translating; skip the draw until it is ready.
@@ -1890,8 +1891,8 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 
 	// KYTY_DEBUG_DEPTHONLY=1: one line per distinct depth-only draw setup (no colour output or no
 	// pixel shader bound on the host): whether the guest set a pixel shader at all, its kill and
-	// export controls, and the alpha-to-mask register (not emulated). Ghost of Yotei: grass tufts
-	// in the sun shadow cascade drawn as solid blocks.
+	// export controls, alpha-to-mask register, and coverage/depth sample counts.
+	// This separates absent pixel-stage work from coverage configuration.
 	static const bool depthonly_log = KYTY_GETENV("KYTY_DEBUG_DEPTHONLY") != nullptr;
 	if (depthonly_log && state.depth_info.image_id && (!state.ps_active || color_output_mask == 0))
 	    [[unlikely]] {

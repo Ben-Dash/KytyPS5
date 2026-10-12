@@ -906,10 +906,18 @@ public:
 	void SetStencilMask(const StencilMask& mask) { m_stencil_mask = mask; }
 	[[nodiscard]] const ColorControl& GetColorControl() const { return m_color_control; }
 	void SetColorControl(const ColorControl& control) { m_color_control = control; }
-	// DB_ALPHA_TO_MASK as the guest wrote it (alpha-to-coverage is not emulated; kept for
-	// KYTY_DEBUG_DEPTHONLY).
+	// Keep every guest quad offset/rounding bit for diagnostics and future exact coverage.
 	[[nodiscard]] uint32_t GetAlphaToMaskRaw() const { return m_alpha_to_mask_raw; }
 	void SetAlphaToMaskRaw(uint32_t value) { m_alpha_to_mask_raw = value; }
+	[[nodiscard]] bool AlphaToCoverageEnabled() const {
+		// DB_ALPHA_TO_MASK enable is overridden by DB_SHADER_CONTROL. COL0 must
+		// provide a noninteger alpha channel; an integer/no-alpha stale export
+		// does not make a depth-only draw run its pixel shader.
+		const auto mode = m_sh_regs.target_output_mode[0];
+		const bool alpha_export = mode == 3u || mode == 4u || mode == 5u || mode == 6u || mode == 9u;
+		return (m_alpha_to_mask_raw & 1u) != 0 &&
+		       !m_sh_regs.db_shader_control.alpha_to_mask_disable && alpha_export;
+	}
 	[[nodiscard]] const ScanModeControl& GetScanModeControl() const { return m_scan_mode_control; }
 	void SetScanModeControl(const ScanModeControl& control) { m_scan_mode_control = control; }
 	[[nodiscard]] const AaSampleControl& GetAaSampleControl() const { return m_aa_sample_control; }

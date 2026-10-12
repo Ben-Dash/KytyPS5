@@ -967,6 +967,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --dcc-clear-stats-only)
 	add_test(NAME gpu_counted_multi_draw_srd
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-counted-multi-draw-srd)
+	add_test(NAME alpha_coverage_endpoints_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --alpha-coverage-endpoints)
+	add_test(NAME alpha_coverage_early_neighbors_gpu
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --alpha-coverage-neighbors)
+	add_test(NAME alpha_coverage_predicate_neighbors
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --alpha-coverage-predicate-neighbors)
+	set_tests_properties(alpha_coverage_endpoints_gpu alpha_coverage_early_neighbors_gpu
+		alpha_coverage_predicate_neighbors PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	set_tests_properties(bc_partial_buffer_gpu bc_partial_buffer_neighbors_gpu
 		bc_partial_buffer_statistics_gpu texture_cache_htile_high_state
 		texture_cache_htile_high_gpu texture_cache_htile_registration_neighbors

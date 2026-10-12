@@ -42,6 +42,7 @@ struct GraphicsStageRegisters {
 	std::array<float, 4>                           viewport0; // xscale, yscale, xoffset, yoffset
 	std::array<Prospero::ColorComponentMapping, 8> export_mapping;
 	uint32_t                                       shader_stages    = 0;
+	uint32_t                                       alpha_to_mask    = 0;
 	uint32_t                                       prim_type        = 0;
 	bool                                           rt0_blend_bypass = false;
 	bool                                           pixel_active     = false;

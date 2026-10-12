@@ -42891,6 +42891,7 @@ namespace {
 #include "ScalarBranchDescriptorWritesTests.inc"
 #include "HighSliceHtileTests.inc"
 #include "HighSliceHtileRegistrationNeighbors.inc"
+#include "AlphaCoveragePredicateTests.inc"
 }
 }
 
@@ -42906,6 +42907,10 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && std::strcmp(argv[1], "--alpha-coverage-predicate-neighbors") == 0) {
+    CheckAlphaCoveragePredicateNeighbors();
+    return 0;
+  }
   if (argc == 2 && (std::strcmp(argv[1], "--htile-high-state-only") == 0 ||
                    std::strcmp(argv[1], "--htile-high-gpu-only") == 0 ||
                    std::strcmp(argv[1], "--htile-registration-neighbors") == 0)) {
@@ -43736,9 +43741,10 @@ int main(int argc, char **argv) {
     vulkan.CheckRenderExecutorStencilBindingDiscovery();
     return 0;
   }
-  if (argc == 2 && std::strcmp(argv[1], "--alpha-coverage-endpoints") == 0) {
+  if (argc == 2 && (std::strcmp(argv[1], "--alpha-coverage-endpoints") == 0 ||
+                   std::strcmp(argv[1], "--alpha-coverage-neighbors") == 0)) {
     VulkanHarness vulkan;
-    vulkan.CheckAlphaCoverageEndpoints();
+    vulkan.CheckAlphaCoverageEndpoints(std::strcmp(argv[1], "--alpha-coverage-neighbors") == 0);
     return 0;
   }
   if (argc == 2 && (std::strcmp(argv[1], "--gpu-counted-multi-draw") == 0 ||

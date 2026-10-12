@@ -2105,6 +2105,7 @@ static void CaptureGraphicsStageRegisters(
 	std::memcpy(registers.export_mapping.data(), target_export_mapping.data(),
 	            sizeof(registers.export_mapping));
 	registers.shader_stages    = context.GetShaderStages();
+	registers.alpha_to_mask    = context.GetAlphaToMaskRaw();
 	registers.prim_type        = static_cast<uint32_t>(user_config.GetPrimType());
 	registers.rt0_blend_bypass = context.GetRenderTarget(0).info.blend_bypass;
 	registers.pixel_active     = pixel_active;
@@ -2126,6 +2127,7 @@ static bool SameGraphicsStageRegisters(
 	const std::array<float, 4> viewport0 {viewport.xscale, viewport.yscale, viewport.xoffset,
 	                                      viewport.yoffset};
 	return captured.shader_stages == context.GetShaderStages() &&
+	       captured.alpha_to_mask == context.GetAlphaToMaskRaw() &&
 	       captured.prim_type == static_cast<uint32_t>(user_config.GetPrimType()) &&
 	       captured.pixel_active == pixel_active &&
 	       captured.rt0_blend_bypass == context.GetRenderTarget(0).info.blend_bypass &&
@@ -2176,6 +2178,12 @@ static std::array<ShaderParams, 3> PrepareGraphicsStages(
 	g_draw_phases.Mark(DrawPhaseTimer::VertexParams);
 	if (pixel_active) {
 		pixel_params      = PrepareProgram(pixel_regs, sh, target_export_mapping, pixel_info);
+		// Alpha-derived coverage must run before depth commits. Raw coverage state
+		// participates in prepared-stage identity above so an early-Z result cannot
+		// be adopted after this state changes.
+		if (context.AlphaToCoverageEnabled()) {
+			pixel_info.ps_early_z = false;
+		}
 		// KYTY_PIXEL_PROVOKING_VERTEX=1 (upstream b38b7454, A/B): flat inputs read through raw
 		// vertices take the provoking vertex the context selects, not always the first.
 		static const bool provoking_switch = [] {
@@ -2421,6 +2429,45 @@ bool PipelineStaticParameters::operator==(const PipelineStaticParameters& other)
 	return std::memcmp(this, &other, sizeof(*this)) == 0;
 }
 
+
+// Native alpha-to-coverage consumes floating Location0/Index0 alpha. The guest
+// export ordinal and host physical MRT location can differ, and output swizzling
+// can move logical alpha into another physical channel. Those require a distinct
+// coverage-export mechanism, not a relabelled or overwritten real color output.
+static bool HasNativeAlphaCoverageSource(const ShaderPixelInputInfo& pixel) {
+	const auto mode = pixel.target_output_mode[0];
+	const bool float_alpha = mode == 3u || mode == 4u || mode == 5u || mode == 6u || mode == 9u;
+	if (!float_alpha || pixel.id_buffer_slot == 0u || pixel.stage.program == nullptr ||
+	    pixel.target_export_mapping[0].Map(3u) != 3u) {
+		return false;
+	}
+	return std::ranges::any_of(pixel.stage.program->info.outputs, [](const auto& output) {
+		return output.kind == ShaderRecompiler::IR::StageOutputKind::Mrt &&
+		       output.index == 0u && output.location == 0u;
+	});
+}
+
+static bool ForcedDepthBeforeShader(const HW::Context& context) {
+	// Kept by the decoder in other_bits; its interaction with alpha coverage is
+	// separate from an early-Z preference and is not implemented by this provider.
+	return (context.GetShaderRegisters().db_shader_control.other_bits & (1u << 12u)) != 0;
+}
+
+static void NoteNativeAlphaCoverage(const HW::Context& context, uint32_t samples) {
+	const uint32_t raw = context.GetAlphaToMaskRaw();
+	const uint32_t quality_log2 = context.GetEqaaControl().alpha_to_mask_num_samples;
+	const uint64_t key = raw | (uint64_t {samples} << 32u) | (uint64_t {quality_log2} << 48u);
+	static std::mutex mutex;
+	static std::unordered_set<uint64_t> seen;
+	std::scoped_lock lock(mutex);
+	if (seen.size() < 64u && seen.insert(key).second) {
+		Log::WriteToConsoleAndLog(fmt::format(
+		    "A2C: native basic alpha coverage raw=0x{:08x} quality_samples={} attachment_samples={}; "
+		    "exact guest fractional/dither/EQAA coverage unsupported (diagnostic host approximation)\n",
+		    raw, 1u << quality_log2, samples));
+	}
+}
+
 PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
     std::span<const RenderColorInfo> colors, const RenderDepthInfo& depth,
     std::span<const ShaderVertexInputInfo> vertex_info, CommandBuffer& command,
@@ -2559,6 +2606,17 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
 	static_params.topology                 = topology;
 	static_params.primitive_restart_enable = primitive_restart_enable;
 	static_params.samples                  = attachment_samples;
+	static_params.alpha_to_coverage_enable = ps_active && ctx.AlphaToCoverageEnabled();
+	if (static_params.alpha_to_coverage_enable) {
+		if (ForcedDepthBeforeShader(ctx)) {
+			EXIT("Pipeline: alpha coverage with forced DEPTH_BEFORE_SHADER is unsupported\n");
+		}
+		if (!HasNativeAlphaCoverageSource(*ps_input_info)) {
+			EXIT("Pipeline: native alpha coverage requires noninteger logical EXP0 alpha at "
+			     "host Location0/Index0 without moving alpha through color swizzle\n");
+		}
+		NoteNativeAlphaCoverage(ctx, attachment_samples);
+	}
 	static_params.sample_shading_enable =
 	    ps_active && attachment_samples > 1 && ps_input_info->ps_sample_shading;
 	if (static_params.sample_shading_enable && !m_graphics.sample_rate_shading_enabled) {
@@ -2754,7 +2812,7 @@ static bool PredictGraphicsDraw(
 	                         db.shader_execute_on_noop;
 	const auto target_mask = ctx.GetRenderTargetMask();
 	ps_active              = ps.ps_regs.data_addr != 0 &&
-	            ((target_mask & sh_regs.m_cbShaderMask) != 0 || side_effect);
+	            ((target_mask & sh_regs.m_cbShaderMask) != 0 || side_effect || ctx.AlphaToCoverageEnabled());
 	export_mapping = {};
 	for (uint32_t slot = 0; slot < RENDER_COLOR_ATTACHMENTS_MAX; slot++) {
 		const auto& rt = ctx.GetRenderTarget(slot);
@@ -2897,6 +2955,13 @@ uint32_t PipelineCache::PrefetchGraphicsPipeline(const HW::Context& ctx, const H
 	                                            ? vk::PrimitiveTopology::ePatchList
 	                                            : vk::PrimitiveTopology::eTriangleList;
 	static_params.samples                 = samples;
+	static_params.alpha_to_coverage_enable = ps_active && ctx.AlphaToCoverageEnabled();
+	if (static_params.alpha_to_coverage_enable &&
+	    (ForcedDepthBeforeShader(ctx) || !HasNativeAlphaCoverageSource(pixel_info))) {
+		// Prediction must not submit an invalid host pipeline. The actual draw
+		// retains the explicit unsupported-source error in GetGraphicsPipeline.
+		return 0;
+	}
 	static_params.sample_shading_enable   = ps_active && samples > 1 && pixel_info.ps_sample_shading;
 	if (!DynamicDepthBoundsEnabled()) {
 		static_params.depth_bounds_test_enable = with_depth && dc.depth_bounds_enable;

@@ -498,6 +498,7 @@ void BuildGraphicsPipelineState(GraphicsPipelineState& state, GraphicContext& gr
 	multisampling.sampleShadingEnable  = static_params.sample_shading_enable ? VK_TRUE : VK_FALSE;
 	multisampling.rasterizationSamples = vulkan_sample_count(static_params.samples);
 	multisampling.minSampleShading     = 1.0f;
+	multisampling.alphaToCoverageEnable = static_params.alpha_to_coverage_enable ? VK_TRUE : VK_FALSE;
 
 	auto& color_blend_attachment = state.blend;
 	for (uint32_t i = 0; i < rendering.color_count; i++) {
@@ -795,6 +796,7 @@ LibraryPartKeys BuildLibraryPartKeys(const GraphicsPipelineState&           stat
 	AppendKey(fragment_key, state.fragment_stage_count != 0 ? programs.pixel.id : uint64_t {0});
 	AppendKey(fragment_key, state.multisampling.rasterizationSamples);
 	AppendKey(fragment_key, state.multisampling.sampleShadingEnable);
+	AppendKey(fragment_key, state.multisampling.alphaToCoverageEnable);
 	AppendKey(fragment_key, keys.depth_stencil.depthBoundsTestEnable);
 	AppendKey(fragment_key, keys.depth_stencil.minDepthBounds);
 	AppendKey(fragment_key, keys.depth_stencil.maxDepthBounds);
@@ -816,6 +818,7 @@ LibraryPartKeys BuildLibraryPartKeys(const GraphicsPipelineState&           stat
 	AppendKey(output_key, state.rendering.stencilAttachmentFormat);
 	AppendKey(output_key, state.multisampling.rasterizationSamples);
 	AppendKey(output_key, state.multisampling.sampleShadingEnable);
+	AppendKey(output_key, state.multisampling.alphaToCoverageEnable);
 	AppendKey(output_key, state.dynamic_state.dynamicStateCount);
 	return keys;
 }
