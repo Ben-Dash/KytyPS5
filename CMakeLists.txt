@@ -806,16 +806,21 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --command-stream-only)
 	add_test(NAME shader_recompiler_compute_hw_bounds
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --hardware-buffer-bounds)
-	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
-	set_tests_properties(shader_writer_history PROPERTIES TIMEOUT 10)
 	add_test(NAME gpu_command_lane
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
 	add_test(NAME end_of_pipe_literal_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
 	add_test(NAME end_of_pipe_literal_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-neighbors-gpu)
+	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
+	add_test(NAME fault_buffer_protocol_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-buffer-protocol-gpu)
+	add_test(NAME fault_buffer_protocol_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fault-buffer-protocol-neighbors-gpu)
 	set_tests_properties(end_of_pipe_literal_gpu end_of_pipe_literal_neighbors_gpu
+		fault_buffer_protocol_gpu fault_buffer_protocol_neighbors_gpu
 		PROPERTIES TIMEOUT 30)
+	set_tests_properties(shader_writer_history PROPERTIES TIMEOUT 10)
 	add_test(NAME pm4_context_state
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --context-state-only)
 	add_test(NAME gpu_tiler
@@ -848,9 +853,9 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --buffer-cache-range-only)
 
 	add_custom_target(kyty_tests DEPENDS
+		ime_dialog_tests
 		bindless_lifecycle_tests
 		shader_writer_history_tests
-		ime_dialog_tests
 		shader_cfg_tests
 		embedded_fetch_index_tests
 		scalar_provenance_tests

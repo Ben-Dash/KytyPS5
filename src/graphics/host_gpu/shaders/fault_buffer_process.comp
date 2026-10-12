@@ -17,14 +17,29 @@ layout(std430, binding = 1) buffer output_buf32 {
     uint download_buffer32[];
 };
 
+// Slot zero holds the count. Failed reservations leave both the counter and
+// the fault bitmap intact for the next pass. Every failed CAS observes a larger
+// count, so retries are bounded by the available record slots.
+uint reserve_fault_slot() {
+    uint count = atomicAdd(download_buffer32[0], 0u);
+    while (count < MAX_PAGE_FAULTS - 1u) {
+        const uint observed = atomicCompSwap(download_buffer32[0], count, count + 1u);
+        if (observed == count) {
+            return count + 1u;
+        }
+        count = observed;
+    }
+    return 0u;
+}
+
 void main() {
     const uint id = gl_GlobalInvocationID.x;
-    uint word = fault_buffer[id];
-    fault_buffer[id] = 0u;
+    uint word = atomicExchange(fault_buffer[id], 0u);
     const uint base_bit = id * 32u;
     while (word != 0u) {
-        const uint store_index = atomicAdd(download_buffer32[0], 1u) + 1u;
-        if (store_index >= MAX_PAGE_FAULTS) {
+        const uint store_index = reserve_fault_slot();
+        if (store_index == 0u) {
+            atomicOr(fault_buffer[id], word);
             return;
         }
         const uint bit = findLSB(word);

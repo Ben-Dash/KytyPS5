@@ -121,7 +121,9 @@ void FaultManager::ProcessFaultBuffer() {
 	pre_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
 	pre_barrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
 	pre_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
-	pre_barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+	pre_barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
+	pre_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	pre_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	pre_barrier.buffer        = m_fault_buffer.Handle();
 	pre_barrier.offset        = 0;
 	pre_barrier.size           = m_fault_buffer.Size();
@@ -129,7 +131,7 @@ void FaultManager::ProcessFaultBuffer() {
 	post_barrier.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
 	post_barrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
 	post_barrier.dstStageMask  = vk::PipelineStageFlagBits2::eAllCommands;
-	post_barrier.dstAccessMask = vk::AccessFlagBits2::eShaderWrite;
+	post_barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
 
 	const vk::DescriptorBufferInfo infos[] {
 	    {m_fault_buffer.Handle(), 0, m_fault_buffer.Size()},
@@ -157,7 +159,19 @@ void FaultManager::ProcessFaultBuffer() {
 	const auto num_threads    = BufferCache::CACHING_NUMPAGES / 32;
 	const auto num_workgroups = (num_threads + 63) / 64;
 	command.dispatch(static_cast<uint32_t>(num_workgroups), 1, 1);
-	dependency.pBufferMemoryBarriers = &post_barrier;
+	// The deferred host reader waits for this submission, then invalidates this slice.
+	// Make the parser's count and records available to that host read before signaling it.
+	auto output_barrier                = post_barrier;
+	output_barrier.dstStageMask         = vk::PipelineStageFlagBits2::eHost;
+	output_barrier.dstAccessMask        = vk::AccessFlagBits2::eHostRead;
+	output_barrier.srcQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+	output_barrier.dstQueueFamilyIndex  = VK_QUEUE_FAMILY_IGNORED;
+	output_barrier.buffer              = m_download_buffer.Handle();
+	output_barrier.offset              = offset;
+	output_barrier.size                = PageFaultAreaSize;
+	const std::array post_barriers {post_barrier, output_barrier};
+	dependency.bufferMemoryBarrierCount = post_barriers.size();
+	dependency.pBufferMemoryBarriers    = post_barriers.data();
 	command.pipelineBarrier2(dependency);
 
 	const auto area = m_current_area;
@@ -166,6 +180,9 @@ void FaultManager::ProcessFaultBuffer() {
 		RangeSet    fault_ranges;
 		const auto* faults = std::bit_cast<const uint64_t*>(mapped);
 		const auto  count  = static_cast<uint32_t>(faults[0]);
+		if (count >= MaxPageFaults) {
+			EXIT("FaultManager: fault count %u exceeds record capacity %zu\n", count, MaxPageFaults - 1);
+		}
 		for (uint32_t index = 1; index <= count; ++index) {
 			const auto address = BufferCache::GuestAddress(faults[index]);
 			fault_ranges.Add(address, BufferCache::CACHING_PAGESIZE);
