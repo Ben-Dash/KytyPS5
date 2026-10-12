@@ -14904,10 +14904,16 @@ void TestNewShaderRecompilerSpirvSizeBaselines() {
 } // namespace
 } // namespace Libs::Graphics
 
-int main() {
+int main(int argc, char** argv) {
   using namespace Libs::Graphics;
 
   EnsureConfigInitialized();
+  if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-entry-only") == 0) {
+    TestNggVertexEntryState();
+    std::puts("ShaderCfgTests: NGG entry metadata/export neighbors passed");
+    return 0;
+  }
+  Check(argc == 1, "usage: shader_cfg_tests [--ngg-vertex-entry-only]");
   TestRayTracingInstructions();
   TestResourceDescriptorClassification();
   TestShaderBufferResourceSize();
