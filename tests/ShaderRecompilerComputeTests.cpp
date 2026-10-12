@@ -34061,6 +34061,126 @@ template <bool rg> TestCase ImageSampleUScaled8() {
   return test;
 }
 
+// Ported from upstream 7e4e142a; unlike scaled formats, native SNORM
+// sampling and gathering return normalized signed values without shader scaling.
+TestCase ImageSampleR8SNorm(u32 wave_size = 64, u32 threads = 1,
+                           bool reordered = false, bool linear = false) {
+  using O = ShaderOpcode;
+  TestCase test;
+  test.name = linear ? "ImageSampleR8SNormLinear"
+                    : reordered ? "ImageSampleR8SNormReordered"
+                    : threads > 1 ? (wave_size == 32
+                                         ? "ImageSampleR8SNorm128ThreadsWave32"
+                                         : "ImageSampleR8SNorm128ThreadsWave64")
+                                  : "ImageSampleR8SNorm";
+  // IMAGE_SAMPLE overwrites v0, so retain the input local thread ID first.
+  test.code.push_back(EncodeVop1(0x01, 24, Vgpr(0)));
+  AppendVMovLiteral(&test.code, 20, std::bit_cast<u32>(0.375f));
+  AppendVMovLiteral(&test.code, 21, std::bit_cast<u32>(0.375f));
+  test.code.push_back(EncodeMimg0(0x20, 0xf));
+  test.code.push_back(EncodeMimg1(0, 20));
+  test.code.push_back(EncodeMimg0(0x47, 0x1));
+  test.code.push_back(EncodeMimg1(4, 20));
+  test.code.push_back(EncodeMimg0(0x47, 0x8));
+  test.code.push_back(EncodeMimg1(8, 20));
+  for (u32 component = 0; component < 12; ++component) {
+    AppendStoreVgprAtLaneDwordOffset(&test.code, component, 24,
+                                    component * threads);
+  }
+  AppendEnd(&test.code);
+
+  // Four independent signed endpoints/interior values, stored as bytes:
+  // -128 and -127 both normalize to -1; -64 becomes -64/127; +127 becomes +1.
+  test.image_width = test.image_height = 2;
+  test.sampled_image_rgba = {0x7fc08180u};
+  test.sampled_image_format = vk::Format::eR8Snorm;
+  test.sampled_image_dwords_per_pixel = 1;
+  test.sampler_filter = linear ? vk::Filter::eLinear : vk::Filter::eNearest;
+  test.expected_float_tolerance = linear ? 0.01f : 0.00002f;
+  test.user_data = MakeSampledTextureData(Prospero::BufferFormat::k8SNorm);
+  test.user_data[1] |= 1u << 30u;
+  test.user_data[2] = 1u << 14u;
+  test.user_data[50] = 12u * threads * sizeof(u32);
+  test.user_data[51] = 3u << 28u;
+  test.has_user_data = true;
+  test.image_descriptor_swizzle = reordered ? DstSel(7, 6, 4, 5)
+                                            : DstSel(4, 5, 6, 7);
+  constexpr float midpoint = -64.0f / 127.0f;
+  // At coordinates .375,.375, a bilinear sample weights the row-major texels
+  // 9/16,3/16,3/16,1/16; the independent normalization precedes interpolation.
+  constexpr float linear_sample = -11.0f / 16.0f - 12.0f / 127.0f;
+  const std::array<float, 12> expected = reordered
+      ? std::array<float, 12>{1, 0, -1, 0, 1, 1, 1, 1, 0, 0, 0, 0}
+      : std::array<float, 12>{linear ? linear_sample : -1, 0, 0, 1,
+                             midpoint, 1, -1, -1, 1, 1, 1, 1};
+  for (const float value : expected) {
+    test.expected.insert(test.expected.end(), threads,
+                         std::bit_cast<u32>(value));
+  }
+  test.initial.assign(test.expected.size(), 0xdeadbeefu);
+  test.compute_info.threads_num[0] = threads;
+  test.compute_info.threads_num[1] = test.compute_info.threads_num[2] = 1;
+  test.compute_info.thread_ids_num = 1;
+  test.compute_info.wave_size = wave_size;
+  test.has_compute_info = true;
+  test.opcodes = {O::V_MOV_B32, O::IMAGE_SAMPLE, O::IMAGE_GATHER4_LZ,
+                  O::V_LSHLREV_B32, O::V_ADD_NC_U32,
+                  O::BUFFER_STORE_DWORD, O::S_ENDPGM};
+  test.required_spirv = {"OpImageSampleExplicitLod", "OpImageGather"};
+  return test;
+}
+
+void RunR8SNormSampledViewSwizzle(VulkanHarness* vulkan) {
+  const auto test = ImageSampleR8SNorm(64, 1, true);
+  const auto compiled = CompileCase(test, vulkan->SubgroupSize());
+  Require(test.name, "sampled resource specialization",
+          compiled.program.info.images.size() == 1 &&
+              compiled.resources.images.size() == 1 &&
+              compiled.program.info.images[0].resource_class ==
+                  ShaderRecompiler::IR::ImageResourceClass::Sampled &&
+              compiled.program.info.images[0].shader_swizzle ==
+                  ShaderRecompiler::IR::ShaderImageIdentitySwizzle,
+          "native sampled textures must apply component mapping in the view");
+  const auto& captured = compiled.resources.images[0];
+  ShaderTextureResource descriptor{};
+  std::copy_n(captured.dwords.begin(), 8, descriptor.fields);
+  Require(test.name, "sampled descriptor swizzle",
+          captured.dword_count == 8 &&
+              descriptor.DstSelXYZW() == test.image_descriptor_swizzle,
+          "sampled descriptor component mapping was lost during materialization");
+  auto image = vulkan->CreateImageMips(
+      test.name, 2, 2, vk::Format::eR8Snorm,
+      vk::ImageUsageFlagBits::eSampled, {test.sampled_image_rgba}, 1,
+      vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageType::e2D,
+      vk::ImageViewType::e2D, 1);
+  auto device = vulkan->Device();
+  device.destroyImageView(image.view, nullptr);
+  image.view = nullptr;
+  vk::ImageViewCreateInfo view{};
+  view.image = image.image;
+  view.viewType = vk::ImageViewType::e2D;
+  view.format = image.format;
+  // Use the same guest descriptor -> native mapping helper as DescribeTextureView.
+  const auto surface = TextureGetSurfaceFormatInfo(descriptor.Format());
+  view.components = TextureGetComponentMapping(descriptor.DstSelXYZW(),
+                                                surface.host_to_storage);
+  view.subresourceRange = {vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1};
+  RequireVk(test.name, "sampled native view",
+            device.createImageView(&view, nullptr, &image.view),
+            "vkCreateImageView(R8 SNORM swizzle)");
+  auto output = vulkan->CreateStorageBuffer(test.name, test.initial,
+                                           test.expected.size());
+  const auto sampler = vulkan->CreateSampler(test.name);
+  vulkan->Dispatch(test, compiled, output, nullptr, &image, nullptr, nullptr,
+                    sampler);
+  const auto actual = vulkan->ReadBuffer(test.name, output, test.expected.size());
+  device.destroySampler(sampler, nullptr);
+  vulkan->DestroyBuffer(&output);
+  vulkan->DestroyImage(&image);
+  CompareWords(test, "sampled view swizzle readback", test.expected, actual);
+  std::printf("[compute] %-32s ok\n", test.name);
+}
+
 TestCase ImageLoadR128IgnoresAdjacentMaskSgprs() {
   using O = ShaderOpcode;
 
@@ -37556,6 +37676,7 @@ std::vector<TestCase> MakeCases() {
   AddCase(ImageSamplePackedUintConvertsSampleAndGather);
   AddCase(ImageSampleUScaled8<false>);
   AddCase(ImageSampleUScaled8<true>);
+  AddCase([] { return ImageSampleR8SNorm(); });
   AddCase(ImageLoadR128IgnoresAdjacentMaskSgprs);
   AddCase(ImageLoad1DUsesScalarCoordinate);
   AddCase(ImageGather2DInstructionWith1DDescriptor);
@@ -42983,6 +43104,26 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--scaled-texture-only") == 0) {
     VulkanHarness vulkan;
+    RunCase(&vulkan, ImageSampleUScaled8<false>());
+    RunCase(&vulkan, ImageSampleUScaled8<true>());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--r8-snorm-texture-only") == 0) {
+    const auto numeric_class =
+        Prospero::SampledTextureNumericClass(Prospero::BufferFormat::k8SNorm);
+    std::printf("[texture] R8 SNORM numeric class: %u (expected Float=%u)\n",
+                static_cast<u32>(numeric_class),
+                static_cast<u32>(Prospero::TextureNumericClass::Float));
+    std::fflush(stdout);
+    Require("R8SNormSampledTextureAdmission", "public format classification",
+            numeric_class == Prospero::TextureNumericClass::Float,
+            "signed-normalized R8 texture is not admitted for native sampling");
+    VulkanHarness vulkan;
+    RunCase(&vulkan, ImageSampleR8SNorm());
+    RunR8SNormSampledViewSwizzle(&vulkan);
+    RunCase(&vulkan, ImageSampleR8SNorm(64, 1, false, true));
+    RunCase(&vulkan, ImageSampleR8SNorm(32, 128));
+    RunCase(&vulkan, ImageSampleR8SNorm(64, 128));
     RunCase(&vulkan, ImageSampleUScaled8<false>());
     RunCase(&vulkan, ImageSampleUScaled8<true>());
     return 0;

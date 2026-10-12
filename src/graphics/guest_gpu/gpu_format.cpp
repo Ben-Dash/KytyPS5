@@ -23,7 +23,7 @@ struct FormatInfo {
 constexpr FormatInfo kFormatInfo[] = {
 	{BufferFormat::k8UNorm, 1, 0, 1, true, false},
 	{BufferFormat::k8UScaled, 1, 0, 0, true, false},
-	{BufferFormat::k8SNorm, 1, 0, 1, false, false},
+	{BufferFormat::k8SNorm, 1, 0, 1, true, false},
 	{BufferFormat::k8UInt, 1, 0, 1, true, true},
 	{BufferFormat::k8SInt, 1, 0, 1, true, false, true},
 	{BufferFormat::k16UNorm, 2, 0, 2, true, false},
@@ -229,14 +229,6 @@ bool IsFmaskTextureFormat(BufferFormat format) {
 
 TextureNumericClass SampledTextureNumericClass(BufferFormat format) {
 	const auto* info = FindFormatInfo(format);
-	// KYTY_R8_SNORM_SAMPLING=1 (upstream 7e4e142a): R8 SNORM textures are sampled natively.
-	static const bool r8_snorm = [] {
-		const char* text = KYTY_GETENV("KYTY_R8_SNORM_SAMPLING");
-		return text != nullptr && std::strcmp(text, "0") != 0;
-	}();
-	if (r8_snorm && format == BufferFormat::k8SNorm) {
-		return TextureNumericClass::Float;
-	}
 	if (info == nullptr || !info->sampled_texture) {
 		return TextureNumericClass::Unsupported;
 	}

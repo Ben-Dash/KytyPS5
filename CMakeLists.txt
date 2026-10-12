@@ -782,6 +782,9 @@ if(BUILD_TESTING)
 	add_test(NAME save_data_dialog COMMAND $<TARGET_FILE:save_data_dialog_tests>)
 	add_test(NAME http_uri_parse COMMAND $<TARGET_FILE:http_uri_parse_tests>)
 	add_test(NAME shader_recompiler_compute COMMAND $<TARGET_FILE:shader_recompiler_compute_tests>)
+	add_test(NAME texture_r8_snorm
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --r8-snorm-texture-only)
+	set_tests_properties(texture_r8_snorm PROPERTIES TIMEOUT 30)
 	add_test(NAME performance_memory
 	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --performance-memory-only)
 	add_test(NAME shader_precompile_gpu
