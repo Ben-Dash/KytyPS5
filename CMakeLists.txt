@@ -481,6 +481,9 @@ target_compile_definitions(shader_batch_audit PRIVATE KYTY_RESOURCE_REGRESSION=1
 # Real bindless allocator host-state regression with a minimal native Vulkan bootstrap.
 add_kyty_full_emulator_test(bindless_lifecycle_tests "${KYTY_TESTS_DIR}/BindlessLifecycleTests.cpp")
 target_compile_definitions(bindless_lifecycle_tests PRIVATE KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS=1)
+add_executable(shader_writer_history_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/ShaderWriterHistoryTests.cpp")
+target_include_directories(shader_writer_history_tests PRIVATE "${KYTY_SOURCE_DIR}")
 
 # Public frontend translation regression for embedded vertex-fetch eligibility.
 add_kyty_full_emulator_test(embedded_fetch_index_tests "${KYTY_TESTS_DIR}/EmbeddedFetchIndexTests.cpp")
@@ -803,6 +806,8 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --command-stream-only)
 	add_test(NAME shader_recompiler_compute_hw_bounds
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --hardware-buffer-bounds)
+	add_test(NAME shader_writer_history COMMAND $<TARGET_FILE:shader_writer_history_tests>)
+	set_tests_properties(shader_writer_history PROPERTIES TIMEOUT 10)
 	add_test(NAME gpu_command_lane
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
 	add_test(NAME end_of_pipe_literal_gpu
@@ -844,6 +849,7 @@ if(BUILD_TESTING)
 
 	add_custom_target(kyty_tests DEPENDS
 		bindless_lifecycle_tests
+		shader_writer_history_tests
 		ime_dialog_tests
 		shader_cfg_tests
 		embedded_fetch_index_tests

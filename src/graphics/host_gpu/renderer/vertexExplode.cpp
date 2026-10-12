@@ -562,6 +562,21 @@ void NoteValueTraceBindings(uint64_t token, std::span<PreparedBindings* const> s
 	auto& state = GetState();
 	std::lock_guard lock(state.mutex);
 	auto& draw = state.value_traces[token - 1u];
+	const bool writer_history_enabled = DispatchSnapshot::WriterHistoryEnabled();
+	const auto writer_stats = writer_history_enabled ? DispatchSnapshot::WriterHistoryStats()
+	                                                : WriterHistory::Stats {};
+	const auto writer_cutoff = writer_stats.last_sequence;
+	if (writer_history_enabled) {
+		draw.metadata["writer_history"] = {
+		    {"enabled", true}, {"capacity", writer_stats.capacity}, {"retained", writer_stats.retained},
+		    {"first_retained_sequence", writer_stats.first_retained_sequence},
+		    {"reader_cutoff_sequence", writer_cutoff}, {"dropped", writer_stats.dropped},
+		    {"rejected_invalid_ranges", writer_stats.rejected},
+		    {"point", "admitted trace bindings before draw CommitBindings"},
+		    {"order_scope", "CPU observation order; not GPU execution/completion"},
+		    {"writer_scope", "declared written CS buffer ranges and existing PM4 write hooks; no guest CPU stores, untracked/BDA stores or optimized early-return paths"},
+		    {"absence_interpretation", "no retained overlap does not prove no producer: eviction, untracked writer, address/range mismatch or CPU initialization are possible"}};
+	}
 	for (const auto* stage: stages) {
 		if (stage == nullptr || stage->runtime == nullptr || stage->runtime->program == nullptr) continue;
 		const auto& program = *stage->runtime->program;
@@ -599,6 +614,58 @@ void NoteValueTraceBindings(uint64_t token, std::span<PreparedBindings* const> s
 				entry["image_descriptors"].push_back(descriptor.dwords);
 			for (const auto& descriptor: inputs.samplers)
 				entry["sampler_descriptors"].push_back(descriptor.dwords);
+			if (writer_history_enabled && program.bindings.vertex_value_trace) {
+				constexpr size_t MaxReaderRanges = 64;
+				entry["writer_history_reader_ranges"] = nlohmann::json::array();
+				entry["writer_history_reader_ranges_skipped"] =
+				    inputs.buffers.size() > MaxReaderRanges ? inputs.buffers.size() - MaxReaderRanges : 0;
+				for (size_t i = 0; i < std::min(inputs.buffers.size(), MaxReaderRanges); ++i) {
+					const auto& words = inputs.buffers[i];
+					if (words.dword_count < 4) continue;
+					const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(words);
+					const auto address = descriptor.Base48();
+					const auto size = descriptor.GetSize();
+					const auto query = DispatchSnapshot::QueryWriterHistory(address, size, writer_cutoff);
+					nlohmann::json range = {
+					    {"buffer_index", i}, {"guest_address", address}, {"guest_size", size},
+					    {"valid_range", query.valid_range}, {"reader_cutoff_sequence", query.cutoff_sequence},
+					    {"matching_records", query.matches}, {"matches_truncated", query.truncated},
+					    {"scan_first_retained_sequence", query.stats.first_retained_sequence},
+					    {"scan_last_sequence", query.stats.last_sequence},
+					    {"scan_dropped", query.stats.dropped}, {"writers", nlohmann::json::array()}};
+					for (const auto& writer: query.records) {
+						nlohmann::json observation = {
+						    {"sequence", writer.sequence}, {"source", writer.source.data()},
+						    {"source_truncated", writer.source_truncated},
+						    {"kind", writer.kind == WriterHistory::Kind::ComputeBuffer ? "compute_buffer" : "packet"},
+						    {"guest_address", writer.address}, {"guest_size", writer.size},
+						    {"detail", writer.detail}, {"overlap_address", std::max(address, writer.address)},
+						    {"overlap_size", std::min(address + size, writer.address + writer.size) -
+						                         std::max(address, writer.address)},
+						    {"frame", writer.context_available ? nlohmann::json(writer.frame) : nlohmann::json(nullptr)},
+						    {"tick_before_commit", writer.context_available ? nlohmann::json(writer.tick) : nlohmann::json(nullptr)},
+						    {"submit", writer.context_available ? nlohmann::json(writer.submit) : nlohmann::json(nullptr)},
+						    {"shader", writer.context_available ? nlohmann::json(fmt::format("{:016x}", writer.shader)) : nlohmann::json(nullptr)},
+						    {"slot", writer.context_available ? nlohmann::json(writer.slot) : nlohmann::json(nullptr)},
+						    {"groups", writer.context_available ? nlohmann::json(writer.groups) : nlohmann::json(nullptr)},
+						    {"group_scope", !writer.context_available ? "unavailable at packet hook" :
+						                    writer.indirect ? "CPU indirect input; actual command may differ" : "direct dispatch groups"},
+						    {"phase", writer.context_available ? "dispatch_pre_commit" : "packet_hook"},
+						    {"table", writer.table}, {"native_available", writer.native_available}};
+						if (writer.native_available) {
+							observation["native_buffer_handle"] = fmt::format("{:016x}", writer.native_buffer);
+							observation["native_offset"] = writer.native_offset;
+							observation["native_range"] = writer.native_range;
+							observation["native_range_whole_size"] = writer.native_range == VK_WHOLE_SIZE;
+							if (!program.bindings.table && i < entry["buffers"].size())
+								observation["native_same_buffer_as_reader"] =
+								    observation["native_buffer_handle"] == entry["buffers"][i]["buffer_handle"];
+						}
+						range["writers"].push_back(std::move(observation));
+					}
+					entry["writer_history_reader_ranges"].push_back(std::move(range));
+				}
+			}
 		}
 		if (program.bindings.vertex_value_trace && program.snapshot_source) {
 			const auto source = std::static_pointer_cast<const DispatchSnapshot::Source>(program.snapshot_source);

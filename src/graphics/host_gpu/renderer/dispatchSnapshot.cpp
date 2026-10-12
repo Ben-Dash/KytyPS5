@@ -28,6 +28,7 @@
 #include <fmt/format.h>
 #include <fstream>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
@@ -699,6 +700,21 @@ bool Enabled() {
 }
 
 namespace {
+struct WriterHistoryState {
+	std::mutex mutex;
+	WriterHistory::History history;
+	WriterHistoryState() {
+		std::printf("writer-history: on, capacity=%zu bytes=%zu; CPU declared writes, no GPU completion proof\n",
+		            WriterHistory::Capacity, WriterHistory::Capacity * sizeof(WriterHistory::Record));
+		std::fflush(stdout);
+	}
+};
+
+WriterHistoryState& GetWriterHistory() {
+	static WriterHistoryState state;
+	return state;
+}
+
 const std::vector<std::pair<uint64_t, uint64_t>>& WatchRanges() {
 	static const auto ranges = [] {
 		std::vector<std::pair<uint64_t, uint64_t>> list;
@@ -721,38 +737,93 @@ const std::vector<std::pair<uint64_t, uint64_t>>& WatchRanges() {
 	}();
 	return ranges;
 }
-} // namespace
 
-bool WatchActive() {
-	return !WatchRanges().empty();
-}
-
-void WatchWrite(const char* source, uint64_t address, uint64_t size, uint64_t detail) {
-	if (size == 0) return;
+void RecordAndWatchWrite(const char* source, WriterHistory::Record record) {
+	if (WriterHistoryEnabled()) {
+		const auto name = std::string_view(source != nullptr ? source : "unknown");
+		const auto count = std::min(name.size(), record.source.size() - 1u);
+		std::memcpy(record.source.data(), name.data(), count);
+		record.source_truncated = count != name.size();
+		auto& state = GetWriterHistory();
+		std::lock_guard lock(state.mutex);
+		(void)state.history.Add(record);
+	}
+	if (record.size == 0) return;
 	for (const auto& [watched, length]: WatchRanges()) {
-		if (address < watched + length && watched < address + size) {
+		if (WriterHistory::Overlaps(watched, length, record.address, record.size)) {
 			static std::atomic<uint32_t> lines {0};
 			if (lines.fetch_add(1, std::memory_order_relaxed) < 2000u) {
 				std::printf("\x1b[91mwrite-watch: %s writes 0x%llx+0x%llx (watched 0x%llx) detail=0x%llx\x1b[0m\n",
-				            source, static_cast<unsigned long long>(address),
-				            static_cast<unsigned long long>(size), static_cast<unsigned long long>(watched),
-				            static_cast<unsigned long long>(detail));
+				            source != nullptr ? source : "unknown", static_cast<unsigned long long>(record.address),
+				            static_cast<unsigned long long>(record.size), static_cast<unsigned long long>(watched),
+				            static_cast<unsigned long long>(record.detail));
 				std::fflush(stdout);
 			}
 			return;
 		}
 	}
 }
+} // namespace
 
-void WatchDispatch(const ShaderComputeInputInfo& input) {
+bool WriterHistoryEnabled() {
+	static const bool enabled = [] {
+		const auto* text = KYTY_GETENV("KYTY_WRITER_HISTORY");
+		return text != nullptr && *text != '\0' && std::strcmp(text, "0") != 0;
+	}();
+	return enabled;
+}
+
+WriterHistory::Stats WriterHistoryStats() {
+	if (!WriterHistoryEnabled()) return {};
+	auto& state = GetWriterHistory();
+	std::lock_guard lock(state.mutex);
+	return state.history.Snapshot();
+}
+
+WriterHistory::Query QueryWriterHistory(uint64_t address, uint64_t size, uint64_t cutoff_sequence) {
+	if (!WriterHistoryEnabled()) return {};
+	auto& state = GetWriterHistory();
+	std::lock_guard lock(state.mutex);
+	return state.history.Read(address, size, cutoff_sequence);
+}
+
+bool WatchActive() {
+	return WriterHistoryEnabled() || !WatchRanges().empty();
+}
+
+void WatchWrite(const char* source, uint64_t address, uint64_t size, uint64_t detail) {
+	if (!WatchActive()) return;
+	WriterHistory::Record record;
+	record.address = address; record.size = size; record.detail = detail;
+	RecordAndWatchWrite(source, record);
+}
+
+void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& bindings,
+                   uint64_t frame, uint64_t tick, uint64_t submit,
+                   std::array<uint32_t, 3> groups, bool indirect) {
 	const auto& program   = *input.stage.program;
 	const auto& resources = *input.stage.resources;
 	for (size_t i = 0; i < program.info.buffers.size() && i < resources.buffers.size(); i++) {
 		if (!program.info.buffers[i].written || resources.buffers[i].dword_count < 4) continue;
 		const auto descriptor = DecodeNativeDescriptor<ShaderBufferResource>(resources.buffers[i]);
 		const auto source     = fmt::format("cs {:016x} buffer {}", program.shader_hash, i);
-		WatchWrite(source.c_str(), descriptor.Base48(), descriptor.GetSize(),
-		           uint64_t {input.workgroup_counts[0]} | (uint64_t {input.workgroup_counts[1]} << 32u));
+		WriterHistory::Record record;
+		record.kind = WriterHistory::Kind::ComputeBuffer;
+		record.address = descriptor.Base48(); record.size = descriptor.GetSize();
+		record.detail = uint64_t {groups[0]} | (uint64_t {groups[1]} << 32u);
+		record.shader = program.shader_hash; record.slot = static_cast<uint32_t>(i);
+		record.frame = frame; record.tick = tick; record.submit = submit;
+		record.context_available = true; record.groups = groups;
+		record.indirect = indirect; record.table = program.bindings.table;
+		if (!record.table && i < bindings.buffers.size()) {
+			const auto& buffer = bindings.buffers[i];
+			const auto handle = static_cast<VkBuffer>(buffer.buffer);
+			static_assert(sizeof(handle) <= sizeof(record.native_buffer));
+			std::memcpy(&record.native_buffer, &handle, sizeof(handle));
+			record.native_offset = buffer.offset; record.native_range = buffer.range;
+			record.native_available = buffer.buffer != nullptr;
+		}
+		RecordAndWatchWrite(source.c_str(), record);
 	}
 }
 

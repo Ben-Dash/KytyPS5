@@ -2,6 +2,7 @@
 #define EMULATOR_SRC_GRAPHICS_HOST_GPU_RENDERER_DISPATCHSNAPSHOT_H_
 
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
+#include "graphics/host_gpu/renderer/writerHistory.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <array>
@@ -115,8 +116,18 @@ void CaptureDraw(RenderContext& context, const DrawCapture& draw);
 // written buffer over it. Finds who writes (or never writes) a value the GPU reads.
 [[nodiscard]] bool WatchActive();
 void               WatchWrite(const char* source, uint64_t address, uint64_t size, uint64_t detail = 0);
-// Every written buffer of a compute dispatch against the watched ranges.
-void WatchDispatch(const ShaderComputeInputInfo& input);
+// KYTY_WRITER_HISTORY=1 retains a bounded CPU history of declared writer ranges,
+// independent of watched addresses/console limits. Sequence is CPU observation
+// order, not GPU execution/completion; no guest reads or GPU commands are added.
+[[nodiscard]] bool WriterHistoryEnabled();
+[[nodiscard]] WriterHistory::Stats WriterHistoryStats();
+[[nodiscard]] WriterHistory::Query QueryWriterHistory(uint64_t address, uint64_t size,
+                                                     uint64_t cutoff_sequence);
+// Every written buffer; context is before CommitBindings. Indirect group counts
+// are CPU input metadata, not a readback of the actual GPU indirect command.
+void WatchDispatch(const ShaderComputeInputInfo& input, const PreparedBindings& bindings,
+                   uint64_t frame, uint64_t tick, uint64_t submit,
+                   std::array<uint32_t, 3> groups, bool indirect = false);
 
 } // namespace DispatchSnapshot
 } // namespace Libs::Graphics

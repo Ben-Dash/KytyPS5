@@ -1009,7 +1009,9 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}
 	RebindBuffers(bindings);
 	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
-		DispatchSnapshot::WatchDispatch(input_info);
+		DispatchSnapshot::WatchDispatch(input_info, bindings, m_context.GetGpu().GetFrameNum(),
+		                               m_context.GetCommandScheduler().CurrentTick(), submit_id,
+		                               {thread_group_x, thread_group_y, thread_group_z});
 	}
 	DispatchSnapshot::Pending snapshot;
 	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
@@ -1159,7 +1161,10 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	EXIT_IF(args_buffer == nullptr || (args_offset & 3u) != 0);
 	RebindBuffers(bindings);
 	if (DispatchSnapshot::WatchActive()) [[unlikely]] {
-		DispatchSnapshot::WatchDispatch(input_info);
+		DispatchSnapshot::WatchDispatch(input_info, bindings, m_context.GetGpu().GetFrameNum(),
+		                               m_context.GetCommandScheduler().CurrentTick(), submit_id,
+		                               {input_info.workgroup_counts[0], input_info.workgroup_counts[1],
+		                                input_info.workgroup_counts[2]}, true);
 	}
 	DispatchSnapshot::Pending snapshot;
 	if (DispatchSnapshot::Wanted(program.shader_hash, m_context.GetGpu().GetFrameNum())) [[unlikely]] {
