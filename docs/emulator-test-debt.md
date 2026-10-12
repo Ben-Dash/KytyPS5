@@ -1,5 +1,39 @@
 # Integration test debt
 
+## Late image-backed BDA fringe: regression resolved, 2026-10-12 07:50 UTC
+
+The actual production graphics preparation phase reproduced the defect before
+changing production: `checks/20261012-074808-0238556-late-bda-production-phase-red`,
+C07E7549 executable, child -1073740791. The new owner/PTE, image pixel,
+ordinary SRD, preserved GPU marker and atomic counter=1 passed; the first
+FLAT fringe read returned zero instead of 0x71335599.
+
+The identical fixture (SHA256 7B870F50792AABA38291127E3651FD890447DEABE7A50C23D18950C13156CB86)
+passed after final BDA synchronization following resource acquisition:
+`checks/20261012-074940-4760654-late-bda-production-phase-green`, D3CC0DE5,
+child 0. Graphics and both direct/indirect compute use this ordering before
+snapshot/command handles/chains. Existing image-binding, first-fault deferred,
+rendering/chain protocol and ordered EOP neighbors passed at 075016/075025/075026/075027.
+
+Still pending: original game retry; direct/indirect compute integration variants;
+late vertex/index owners created after graphics preparation; forced upload-ring wrap.
+This image-backed reproduction does not establish the zero-matrix producer cause:
+the previously captured 549 dispatches had no image bindings.
+
+
+## Late image-backed BDA owner fringe (2026-10-12 07:24 UTC)
+
+RequiredTESTONLYrealmaterialization reproduction beforeanysharedsyncfix:
+earlierlegitimateGPUwrite inregisteredpageA; freshsampledlinearimage8KiB
+crossesA/B; FindBuffers registersA beforePrepareBda, RebindImages mustactually
+merge32KiBownerAB AFTERprepare. KnownmappedCPUfringeB+0x2000 isoutsideall
+requestedimage/SRDspans. PublicCompiledguestFLAT/image/ordinaryloads andatomic
+oncecounter: image/ordinaryvalues+GPUmarker/PTE/sentinels positive, Babsent
+afterprepare thenPTEactualnewowner nonzero beforedispatch. Knownnonzerofringe
+mustreadcorrectly onfirstdispatch, counter1 forbidsblindproducerreplay.
+Noactual lateowner =>invalidsetup, notRED. FrozenB445DB3A .inc, defaultcore
+unchanged. Thisgeneralimagecase doesnotprove549cause (itscapturesimages0).
+
 ## First64 matrix rows: wave grouping baseline and unresolved inputs (2026-10-12 06:16 UTC)
 
 Newreusable fa7ee9fb TESTONLYgroupingfixture64866D5B: nativebuild060754PASS,

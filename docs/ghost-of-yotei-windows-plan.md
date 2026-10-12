@@ -1,5 +1,54 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Latest checkpoint: late image-backed BDA fringe fixed, 2026-10-12 07:50 UTC
+
+A native GPU regression now proves one real shared residency defect fixed.
+A sampled image merges an aligned buffer after the early BDA pass; its mapped
+CPU-dirty fringe was visible through a valid PTE but still read as zero.
+Final BDA synchronization follows all stage image/buffer acquisitions in graphics
+and direct/indirect compute, before command handles, chain decisions and captures.
+Unchanged epochs retain the existing cheap return; GPU writes are preserved.
+
+- Baseline source b7fb1c92 plus test-only changes: intended RED at
+  `checks/20261012-074808-0238556-late-bda-production-phase-red` (C07E7549).
+- Same fixture/oracle GREEN at `checks/20261012-074940-4760654-late-bda-production-phase-green`
+  (D3CC0DE5). First fringe 0 -> 0x71335599; PTE/image/ordinary input/once-only
+  atomic counter and prior GPU marker controls all pass.
+- Four affected image/deferred/rendering-chain/EOP neighbor modes pass at
+  075016/075025/075026/075027; native build 074848 succeeds.
+- CPU job inventory b7fb1c92 was verified in seven runs 072104 through 072109:
+  selected rejected job intervals are logged before capture quotas, bounded at
+  256 retained keys, without new GPU work. Previous 063813 original run captured
+  no matching CS with required_count=2; actual rejected shapes were unavailable.
+- Next: fresh native core/install and bounded manual 1920x1080 original retry,
+  inventory256 and range23:196:2097:1. This correction is not yet a visual fix
+  claim. Stable picture and ~60 FPS remain pending. No push or external milestone.
+
+
+## Latest checkpoint: output-job capture selector verified, 2026-10-12 06:36 UTC
+
+- HEADca01a56e, local-only diagnostic. OptionalJOB_RANGE strictdecimal
+  count_dw:base_dw:first:required count, known1D logicalcapacity, widened
+  nonwrappingWHOLEinterval; matchesBEFOREchosenframe/hashMAX andCaptureInputs
+  id/directories/drains. Directcaller passesactualinput/groups; indirectunknown
+  callers declineenabledjobcapturebeforequota, normaldispatch unchanged.
+  Runtimeconfig `KYTY_DISPATCH_SNAPSHOT_JOB_RANGE=23:196:2097:2`
+  (flat0x17=23decimal, flat0xc4=196), composedwithslot2:124224. Metadata labels
+  thisadmissionhint, notexecutedstoreproof. No title/hash/address behaviorfix.
+- Nativebindlessbuild063054PASS,C64D8AB0. Threejobselector063435/063435/063436
+  plusoldwrittenselector063437/063438/063438 neighbor modes allchildexit0,
+ 26malformedparser+stage/shape/flatbounds/U32capacity/wrap/wholeinterval;
+  actualMAX1/frame/defaultcontrols pass, GPU_setup=0. SourcechecksPASS.
+- Nativecorebuild ACTIVE sourcefrozen; nextfreshinstall/hash/privatecache/
+  provenance, boundedoriginalmanual1920x1080withsamefourverifiedcoreports,
+  worker4/replay1 andtargetedjobcoverage. Shadercachehash inputdirectories
+  graphics/shader andrenderer/pipeline untouched by thisinstrumentation;
+  no keypin/waiver. Originalpicture/~60FPS stillunachieved.
+- BDAprecisemetadata research: guestPTE page16KiB (separate4KiBdirtytracking),
+  PTE8bytes/faultword4bytes; CPUhostPagePeek isnotGPUtablevisibility. Capturing
+  selectedACTUALaddresses before/after inline couldbebounded; no newBDAprobe/
+  productionfix yet, source observer mustnotGetFaultBuffer/FindBuffer/drain.
+
 ## Latest checkpoint: REA plan committed; grouping hypothesis passed baseline, 2026-10-12 06:16 UTC
 
 - HEADfa7ee9fb: reusable TESTONLY multiwavegrouping test committed after
