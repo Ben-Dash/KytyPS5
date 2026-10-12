@@ -2860,13 +2860,59 @@ vk::ImageView TextureCache::FindDepthTarget(ImageId id, const ImageDesc& desc) {
 	BumpImageCleanEpoch();
 	image.info.metadata = desc.info.metadata;
 	if (desc.info.HasMetadata()) {
+		const auto layers = desc.info.resources.layers;
+		const auto range  = desc.info.metadata.range;
+		EXIT_IF(desc.info.metadata.kind != ImageMetadataKind::Htile || !range.Valid() ||
+		        !desc.info.data.Valid() || layers == 0 || layers > image.info.resources.layers ||
+		        range.size % layers != 0 ||
+		        desc.info.data.size % layers != 0);
+		const auto metadata_layer_size = range.size / layers;
+		const auto depth_layer_size    = desc.info.data.size / layers;
+		const auto low_mask = [](uint32_t count) {
+			return count >= 32 ? UINT32_MAX : count == 0 ? 0u : (1u << count) - 1u;
+		};
 		const auto [meta, inserted] = m_surface_metas.emplace(
-		    desc.info.metadata.range.address,
-		    MetaDataInfo {.type       = MetaDataInfo::Type::HTile,
-		                  .clear_mask = image.info.htile_clear_mask});
-		meta->second.owner_address = desc.info.data.address;
-		if (inserted) {
-			m_surface_meta_generation.fetch_add(1, std::memory_order_relaxed);
+		    range.address, MetaDataInfo {.type = MetaDataInfo::Type::HTile});
+		auto& state = meta->second;
+		const vk::Extent2D depth_extent {desc.info.extent.width, desc.info.extent.height};
+		const bool same_layout = !inserted && state.type == MetaDataInfo::Type::HTile &&
+		                         state.owner_address == desc.info.data.address &&
+		                         state.metadata_layer_size == metadata_layer_size &&
+		                         state.depth_layer_size == depth_layer_size &&
+		                         state.depth_extent == depth_extent &&
+		                         state.depth_samples == desc.info.samples &&
+		                         state.depth_format == desc.info.guest_format;
+		const bool geometry_changed = !same_layout || layers > state.layer_count;
+		if (!same_layout) {
+			state.type             = MetaDataInfo::Type::HTile;
+			state.layer_count      = layers;
+			state.clear_mask       = image.info.htile_clear_mask & low_mask(layers);
+			state.high_clear_masks.assign((static_cast<size_t>(layers) - 1) / 32,
+			                              image.info.htile_clear_mask == UINT32_MAX ? UINT32_MAX : 0u);
+			if (layers % 32 != 0 && !state.high_clear_masks.empty()) {
+				state.high_clear_masks.back() &= (1u << (layers % 32)) - 1u;
+			}
+		} else if (layers > state.layer_count) {
+			// A smaller view must not discard the known allocation. Growth preserves consumed
+			// slices and initializes only newly registered slices from the image's initial state.
+			state.high_clear_masks.resize((static_cast<size_t>(layers) - 1) / 32, 0u);
+			for (uint32_t slice = state.layer_count; slice < layers; ++slice) {
+				const auto seed = image.info.htile_clear_mask;
+				if (seed == UINT32_MAX || (slice < 32 && (seed & (1u << slice)) != 0)) {
+					auto& mask = slice < 32 ? state.clear_mask : state.high_clear_masks[slice / 32 - 1];
+					mask |= 1u << (slice % 32);
+				}
+			}
+			state.layer_count = layers;
+		}
+		state.owner_address       = desc.info.data.address;
+		state.metadata_layer_size = metadata_layer_size;
+		state.depth_layer_size    = depth_layer_size;
+		state.depth_extent        = depth_extent;
+		state.depth_samples       = desc.info.samples;
+		state.depth_format        = desc.info.guest_format;
+		if (geometry_changed) {
+			m_surface_meta_generation.fetch_add(1, std::memory_order_release);
 		}
 		if (desc.info.metadata.kind == ImageMetadataKind::Htile) {
 			MarkHtileStale(desc, id);
@@ -3779,10 +3825,17 @@ bool TextureCache::IsMetaCleared(uint64_t address, uint32_t slice) {
 		        .surface_generation = surfaces,
 		        .clear_generation   = clears,
 		        .clear_mask         = found != m_surface_metas.end() ? found->second.clear_mask : 0,
+		        .layer_count        = found != m_surface_metas.end() ? found->second.layer_count : 0,
+		        .high_clear_masks   = found != m_surface_metas.end()
+		                                  ? found->second.high_clear_masks : std::vector<uint32_t> {},
 		        .found              = found != m_surface_metas.end(),
 		        .valid              = true};
 	}
-	return memo.found && slice < 32 && (memo.clear_mask & (1u << slice)) != 0;
+	if (!memo.found || slice >= memo.layer_count) {
+		return false;
+	}
+	const auto mask = slice < 32 ? memo.clear_mask : memo.high_clear_masks[slice / 32 - 1];
+	return (mask & (1u << (slice % 32))) != 0;
 }
 
 bool TextureCache::MetaClearLogEnabled() {
@@ -3821,10 +3874,16 @@ bool TextureCache::ClearMeta(uint64_t address) {
 	if (found == m_surface_metas.end()) {
 		return false;
 	}
-	found->second.clear_mask = UINT32_MAX;
+	auto& state = found->second;
+	state.clear_mask = state.layer_count >= 32 ? UINT32_MAX : (1u << state.layer_count) - 1u;
+	std::ranges::fill(state.high_clear_masks, UINT32_MAX);
+	const auto tail_bits = state.layer_count % 32;
+	if (tail_bits != 0 && !state.high_clear_masks.empty()) {
+		state.high_clear_masks.back() &= (1u << tail_bits) - 1u;
+	}
 	m_meta_clear_generation.fetch_add(1, std::memory_order_release);
 	if (MetaClearLogEnabled()) [[unlikely]] {
-		LogMetaClear("recorded clear (all layers)", address, -1, UINT32_MAX, found->second.owner_address);
+		LogMetaClear("recorded clear (all layers)", address, -1, state.clear_mask, state.owner_address);
 	}
 	return true;
 }
@@ -3835,8 +3894,11 @@ bool TextureCache::ExpandMeta(uint64_t address) {
 	if (found == m_surface_metas.end()) {
 		return false;
 	}
-	if (found->second.clear_mask != 0) {
-		found->second.clear_mask = 0;
+	auto& state = found->second;
+	if (state.clear_mask != 0 || std::ranges::any_of(state.high_clear_masks,
+	                                               [](uint32_t mask) { return mask != 0; })) {
+		state.clear_mask = 0;
+		std::ranges::fill(state.high_clear_masks, 0u);
 		m_meta_clear_generation.fetch_add(1, std::memory_order_release);
 	}
 	return true;
@@ -3851,20 +3913,23 @@ uint64_t TextureCache::MetaOwner(uint64_t address) {
 bool TextureCache::TouchMeta(uint64_t address, uint32_t slice, bool is_clear) {
 	std::scoped_lock lock {m_lock};
 	const auto       found = m_surface_metas.find(address);
-	if (found == m_surface_metas.end() || slice >= 32) {
+	if (found == m_surface_metas.end() || slice >= found->second.layer_count) {
 		return false;
 	}
-	const auto previous = found->second.clear_mask;
+	auto& state = found->second;
+	auto& mask  = slice < 32 ? state.clear_mask : state.high_clear_masks[slice / 32 - 1];
+	const auto previous = mask;
+	const auto bit      = 1u << (slice % 32);
 	if (is_clear) {
-		found->second.clear_mask |= 1u << slice;
+		mask |= bit;
 	} else {
-		found->second.clear_mask &= ~(1u << slice);
+		mask &= ~bit;
 	}
-	if (found->second.clear_mask != previous) {
+	if (mask != previous) {
 		m_meta_clear_generation.fetch_add(1, std::memory_order_release);
 		if (is_clear && MetaClearLogEnabled()) [[unlikely]] {
 			LogMetaClear("recorded clear (one layer)", address, static_cast<int32_t>(slice),
-			             found->second.clear_mask, found->second.owner_address);
+			             mask, state.owner_address);
 		}
 	}
 	return true;

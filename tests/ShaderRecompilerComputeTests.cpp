@@ -7854,6 +7854,14 @@ public:
       // R-Type Final 3 reuses an old color allocation inside a new stencil plane,
       // with the same metadata address changing from DCC to HTile.
       auto reused_depth = MakeMetadataDepth(0x12300, 0x28000);
+      // This retirement control checks slices 0 and 1: register both real
+      // layers instead of relying on bits outside a one-layer allocation.
+      reused_depth.info.resources.layers = 2;
+      reused_depth.info.type = Prospero::ImageType::kColor2D;
+      reused_depth.info.data.size = 2 * sizeof(uint32_t);
+      reused_depth.info.mip_layout[0].size = reused_depth.info.data.size;
+      reused_depth.view_info.type = vk::ImageViewType::e2DArray;
+      reused_depth.view_info.layer_count = 2;
       reused_depth.info.pixel_format = vk::Format::eD32SfloatS8Uint;
       reused_depth.info.stencil = {base + 0x12200, 0x80};
       reused_depth.info.htile_clear_mask = 0;
@@ -42876,6 +42884,8 @@ void CheckPm4CeCompletion(RenderContext &renderer) {
 namespace Libs::Graphics {
 namespace {
 #include "ScalarBranchDescriptorWritesTests.inc"
+#include "HighSliceHtileTests.inc"
+#include "HighSliceHtileRegistrationNeighbors.inc"
 }
 }
 
@@ -42891,6 +42901,23 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && (std::strcmp(argv[1], "--htile-high-state-only") == 0 ||
+                   std::strcmp(argv[1], "--htile-high-gpu-only") == 0 ||
+                   std::strcmp(argv[1], "--htile-registration-neighbors") == 0)) {
+    VulkanHarness vulkan;
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    renderer.GetGpu().SendCommandSync([&] {
+      if (std::strcmp(argv[1], "--htile-high-state-only") == 0)
+        CheckHighSliceHtileState(vulkan);
+      else if (std::strcmp(argv[1], "--htile-registration-neighbors") == 0)
+        CheckHighSliceHtileRegistrationNeighbors(vulkan);
+      else
+        CheckHighSliceHtileGpu(vulkan);
+    });
+    renderer.ShutdownGpu();
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--scalar-branch-descriptor-writes-only") == 0) {
     VulkanHarness vulkan;
     RunScalarBranchDescriptorWrites(&vulkan);

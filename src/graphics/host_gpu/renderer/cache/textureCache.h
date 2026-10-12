@@ -215,7 +215,16 @@ private:
 		enum class Type : uint8_t { CMask, FMask, HTile };
 
 		Type     type;
-		uint32_t clear_mask = UINT32_MAX;
+		// UINT32_MAX is ImageInfo's all-clear seed; other values seed the known low-word bits.
+		uint32_t              clear_mask  = UINT32_MAX;
+		uint32_t              layer_count = 1;
+		std::vector<uint32_t> high_clear_masks;
+		// Geometry of the registered depth allocation, independent of a smaller bound view.
+		uint64_t              metadata_layer_size = 0;
+		uint64_t              depth_layer_size    = 0;
+		vk::Extent2D          depth_extent {};
+		uint32_t              depth_samples = 0;
+		Prospero::BufferFormat depth_format  = Prospero::BufferFormat::kInvalid;
 		// The image whose metadata this is (the last one registered with it), for diagnostics.
 		uint64_t owner_address = 0;
 	};
@@ -382,11 +391,13 @@ private:
 		uint64_t surface_generation = 0;
 		uint64_t clear_generation   = 0;
 		uint32_t clear_mask         = 0;
+		uint32_t layer_count        = 0;
+		std::vector<uint32_t> high_clear_masks;
 		bool     found              = false;
 		bool     valid              = false;
 	} m_meta_clear_memo;
-	// Bumped when m_surface_metas gains or loses an entry (see ColorClearUnchanged and
-	// IsDepthTargetCurrent).
+	// Bumped when m_surface_metas gains or loses an entry, or its registered geometry changes
+	// (see ColorClearUnchanged and IsDepthTargetCurrent).
 	std::atomic<uint64_t>                             m_surface_meta_generation {0};
 	RangeSet                                          m_dcc_metadata_seen;
 	struct DccCheckedSlice {
