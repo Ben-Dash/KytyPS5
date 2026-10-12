@@ -1,5 +1,16 @@
 # Integration test debt
 
+## Generic conversion reduced work; precision debt preserved, 2026-10-12
+
+Actual-helper9-path cost RED195324/E74AEA7B -> unchanged GREEN195549/0ADF5A1B.
+UInt/Float32 skip unrelatedFDiv/casts/half/sign work; normalized formats retain
+one required division. Existing codegen-size neighbor PASS. Native4800-lane
+baseline195325/candidate195550 are bit-identical with no missing/changed lanes;
+both measurementexit2 with144knownUNorm8-one errors. Independent goldens unchanged.
+ExactGPU speed/worldFPS, othergameplay titles and strictUNorm precision remain
+pending. Source-generated cache key must refresh naturally after emitter change;
+do not force old journal or blob signatures to avoid new compilation.
+
 ## Performance cycle: current proved/remaining scope, 2026-10-12
 
 PM4 protected-page false sharing has intended controlled RED192851/F1A166EF and

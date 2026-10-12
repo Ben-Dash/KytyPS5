@@ -1,5 +1,48 @@
 # Ghost of Yōtei: active integration and session resume
 
+## GPU generic conversion validated; next world comparison, 2026-10-12
+
+Shared generic formatted BUFFER helper now evaluates only the selected runtime
+format's conversion. Intended cost RED195324/E74AEA7B -> unchanged9-path
+GREEN195549/0ADF5A1B; codegen-size neighbor PASS. Native baseline195325/candidate
+195550 each100requests/4800lanes are byte-identical (0changed/missing/extra), same
+raw output SHAe167dc0e...; measurementexit2/144knownUNorm1ULP errors preserved.
+No full numeric-suite PASS, precision fix, cross-game gameplay or FPS claim.
+
+Next build/install this correction separately, refresh source key naturally and
+retry full rendering with neutral input/unchanged guards. Shader compile/cache
+warm-up time differs from steady frame cost; compare adjacent matched world
+intervals and inspect pixels/RT dimensions. PM4-only predecessor7823/A990 yielded
+2.43vs2.60baseline, no demonstrated gain. WSL remains stopped as explicitly asked.
+Exact-prefetch/memo coherence proposals remain unimplemented/opt-in; sampler WIP
+archive remains unapplied. No push or issue update during the current cycle.
+
+## PM4 runtime checked; no FPS gain yet, 2026-10-12 19:50 UTC
+
+Local source7823f07fd34f93117f23b248d36643b402c6b493 (not pushed) built194211
+and installed194318 PASS. Private runtime-pm4-7823f07f EXE SHA256
+A9907A86B7EA026256F740EC7B0CDB2B4178E591EF04A2872340690366E4A760.
+Naturally compatible c0 cache was accepted (1897 replay permutations); no key
+override. Game194349-c23fbc bounded360s/neutral/4workers/full rendering ended
+19:49:53UTC/exit0, no memory guard; maxWS18.04GiB/minfree26.82/mincommit22.93.
+90s screenshot withheld by foreground check; 180/300s show character/environment,
+grass, fire and water pixels. Single captures do not prove all effect correctness.
+No automatic input except neutral pad; post-timeout Options attempt sent nothing.
+
+Adjacent warm world intervals73presents/30s (~2.43FPS), versus c0 baseline78/30s
+(~2.60). PM4 header fault class disappears, but actual WAIT_REG_MEM waits increase;
+GPUbusy233–235ms versus226–228. No world performance improvement demonstrated;
+startup differs because the candidate uses a warmer compatible journal/cache.
+Source removes a real false dependency but this does not prove a speedup.
+
+Next sequential candidate: runtime generic formatted BUFFER conversion, where
+UInt/Float paths currently evaluate other-format divisions/conversions. Three
+agents supplied proposals; test-only cost fixture added, no GPU conversion
+production change yet. Native bindless target build active; freeze inputs until
+complete, then intended path-cost RED + native4800-lane numerical baseline before
+body correction. Preserve strict144-lane UNorm8-one baseline debt separately.
+WSL remains stopped under latest explicit user instruction. No push/issue post.
+
 ## PM4 false dependency proved/fixed; actual-world comparison pending, 2026-10-12
 
 See [performance cycle1](yotei-performance-cycle1-2026-10-12.md) for current commands,

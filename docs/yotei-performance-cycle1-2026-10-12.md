@@ -57,20 +57,42 @@ unfixed-source control193905/81597725 repeats the identical failure, so it is a
 separate existing debt; no full-suite PASS claim. Restored source timestamp was
 advanced before native rebuilding to avoid Copy-Item retaining an older timestamp.
 
-PM4 build/install and actual performance comparison are pending at this checkpoint.
-Passing regressions proves removed false dependencies, not an FPS improvement.
+PM4 source committed locally7823f07f. Native build194211/install194318 PASS;
+EXE A9907A86B7EA026256F740EC7B0CDB2B4178E591EF04A2872340690366E4A760.
+Game194349-c23fbc ran360s/exit0, no memory guard, maxWS18.04GiB/minfree26.82GiB;
+180/300s screenshots visibly contain character/environment/grass/fire/water.
+Adjacent warm intervals73presents/30s/~2.43FPS against baseline78/~2.60.
+PM4 read-fault class disappears but waits move to actual WAIT_REG_MEM consumers.
+GPUbusy233–235ms versus226–228; no FPS gain demonstrated. Startup is not a fair
+comparison because compatible cache/journal is warmer on the second run.
+Passing regressions proves removed false dependencies, not a runtime speedup.
 
 ## Remaining proposals
+
+Generic conversion is now a separately completed shared correction, pending its
+native core/game timing. Test-only build195134 and intended RED195324/E74AEA7B:
+real UInt32 helper path performs2FDiv, unsigned/signed casts, half unpack and
+sign extension. After lazy structured format branches, same9-case test
+GREEN195549/0ADF5A1B: UInt/Float32 paths0unrelated operations, normalized formats
+one required division. Runtime format, arithmetic operands, bounds/EXEC and ABI
+remain unchanged. Codegen-size neighbor195551 PASS.
+
+Fresh native numerical baseline195325 and candidate195550 each emit all4800
+lanes/100requests/25cases. Existing independent comparator reports0changed/missing/
+extra lanes; both raw output SHA256
+e167dc0e9bfebed2b9374a2eb1e0f14d1f714aaa7e2997f5a34dd25e6b165068.
+Both measurement processes exit2 with the same144UNorm8-one mismatches. This is
+exact preservation, not a strict numeric-suite PASS or a precision fix. No other
+gameplay title or current-world GPU speedup has yet been tested for this correction.
 
 - Exact compute prefetch: controlled RED192852/F1A166EF proves a valid distinct
   zero-stride permutation is suppressed after an earlier source was seen; ordinary
   nonzero strides correctly share identity. No production change yet. Keep this
   test opt-in/out of registered CTest until its correction passes. Required
   indirect/dirty metadata safeguards are separate from inline-only proposals.
-- GPU generic formatted conversion: top current journal compute sources have many
-  runtime-format buffers. Existing helper computes two normalization divisions and
-  other-format conversions even for UInt/Float paths. New path-cost/numerical
-  proposals remain ignored and unrun. Keep existing one-ULP UNorm debt distinct.
+- Further GPU shader candidates remain proposals: repeated raw BUFFER component
+  address arithmetic and unconditional formatted DWORD windows. They require
+  their own work-budget RED and unchanged independent numerical checks.
 - Driver cache compatibility, broad barrier changes and subword tiler packing are
   still research proposals. Dominant current tiler formats are4/8bytes, so the
   R8/R16 packing proposal does not directly address measured world cost.

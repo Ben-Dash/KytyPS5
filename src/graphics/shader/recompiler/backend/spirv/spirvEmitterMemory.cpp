@@ -1917,28 +1917,46 @@ uint32_t GenericFormattedConversionBody(EmitterState& state, const std::array<ui
 	const auto u32 = TypeU32(state);
 	const auto raw = params[0];
 	const auto bits = params[1];
-	// As NormalizeFormatComponent for 8/16/32-bit components; signed types sign-extend.
-	const auto signed_raw = state.builder.AllocateId();
-	state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), signed_raw,
-	                          Unary(state, spv::OpBitcast, TypeI32(state), raw), ConstantU32(state, 0),
-	                          bits);
-	const auto unsigned_float = Unary(state, spv::OpConvertUToF, TypeF32(state), raw);
-	const auto signed_float   = Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw);
-	const auto unorm = Binary(state, spv::OpFDiv, TypeF32(state), unsigned_float, params[8]);
-	const auto snorm = state.builder.AllocateId();
-	state.builder.AddFunction(spv::OpExtInst, TypeF32(state), snorm, GlslStd450(state), GLSLstd450FMax,
-	                          Binary(state, spv::OpFDiv, TypeF32(state), signed_float,
-	                                 params[9]),
-	                          ConstantF32Value(state, -1.0f));
-	auto converted = Select(state, u32, params[2],
-	                        EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw)), raw);
-	for (const auto [is_type, value]: {std::pair {params[3], Unary(state, spv::OpBitcast, u32, signed_raw)},
-	                                   std::pair {params[4], Unary(state, spv::OpBitcast, u32, unsigned_float)},
-	                                   std::pair {params[5], Unary(state, spv::OpBitcast, u32, signed_float)},
-	                                   std::pair {params[6], Unary(state, spv::OpBitcast, u32, unorm)},
-	                                   std::pair {params[7], Unary(state, spv::OpBitcast, u32, snorm)}}) {
-		converted = Select(state, u32, is_type, value, converted);
-	}
+	const auto signed_raw = [&] {
+		const auto value = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpBitFieldSExtract, TypeI32(state), value,
+		                          Unary(state, spv::OpBitcast, TypeI32(state), raw),
+		                          ConstantU32(state, 0), bits);
+		return value;
+	};
+	// Format flags come from this buffer's runtime descriptor. Evaluate only its
+	// selected conversion, retaining the existing normalization arithmetic and ABI.
+	// Address/bounds, dst_sel, D16 and guest EXEC remain at each load site.
+	auto converted = EmitValueOrDefaultIfCondition(state, params[2], u32, raw, [&] {
+		return EmitBitcastF32ToU32(state, EmitF16BitsToF32(state, raw));
+	});
+	converted = EmitValueOrDefaultIfCondition(state, params[3], u32, converted, [&] {
+		return Unary(state, spv::OpBitcast, u32, signed_raw());
+	});
+	converted = EmitValueOrDefaultIfCondition(state, params[4], u32, converted, [&] {
+		return Unary(state, spv::OpBitcast, u32,
+		             Unary(state, spv::OpConvertUToF, TypeF32(state), raw));
+	});
+	converted = EmitValueOrDefaultIfCondition(state, params[5], u32, converted, [&] {
+		return Unary(state, spv::OpBitcast, u32,
+		             Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()));
+	});
+	converted = EmitValueOrDefaultIfCondition(state, params[6], u32, converted, [&] {
+		const auto value = Binary(state, spv::OpFDiv, TypeF32(state),
+		                          Unary(state, spv::OpConvertUToF, TypeF32(state), raw),
+		                          params[8]);
+		return Unary(state, spv::OpBitcast, u32, value);
+	});
+	converted = EmitValueOrDefaultIfCondition(state, params[7], u32, converted, [&] {
+		const auto normalized = Binary(state, spv::OpFDiv, TypeF32(state),
+		                               Unary(state, spv::OpConvertSToF, TypeF32(state), signed_raw()),
+		                               params[9]);
+		const auto value = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpExtInst, TypeF32(state), value,
+		                          GlslStd450(state), GLSLstd450FMax, normalized,
+		                          ConstantF32Value(state, -1.0f));
+		return Unary(state, spv::OpBitcast, u32, value);
+	});
 	return converted;
 }
 

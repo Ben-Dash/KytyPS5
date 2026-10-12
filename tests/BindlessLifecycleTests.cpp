@@ -328,6 +328,7 @@ private:
 #include "NggVertexCountTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
+#include "GenericFormattedConversionPathCostTests.inc"
 #include "PackedBufferOffsetTests.inc"
 #include "EndOfPipeWriteGpuTests.inc"
 #include "EndOfPipeLiteralGpuTests.inc"
@@ -373,6 +374,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                            std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0 ||
                             std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0 ||
@@ -470,6 +472,7 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
     ConfigureVertexNonFiniteTraceGpuEnvironment();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
                     std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0))
     ConfigureGenericBufferTests();
@@ -563,6 +566,8 @@ int main(int argc, char **argv) {
     CheckVertexNonFiniteTraceGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0)
     CheckGenericBufferCodegenCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0)
+    CheckGenericFormattedConversionPathCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--ngg-vertex-count-gpu") == 0)
     CheckNggVertexCountGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--late-bda-image-fringe-gpu") == 0)
