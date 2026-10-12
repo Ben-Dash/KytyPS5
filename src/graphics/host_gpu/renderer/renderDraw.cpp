@@ -3248,6 +3248,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 			EmitDrawPrimitives(ucfg, vk_buffer, draw, emit);
 		}
 	}
+	m_context.GetCommandScheduler().NoteCommandRecorded();
 
 	if (!draw.IsIndexed()) {
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x600u);
@@ -3569,6 +3570,7 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 	EXIT_IF(buffer.IsInvalid());
 	EXIT_IF(args.offset_source == DrawOffsetSource::DrawState && args.first_instance != 0);
+	m_context.GetCommandScheduler().FlushIfRecordingAged();
 	{
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::PendingOps);
 		m_context.GetCommandScheduler().PopPendingOperations(false);
@@ -3760,6 +3762,7 @@ void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const D
 
 	EXIT_IF(buffer.IsInvalid());
 	EXIT_IF(args.offset_source == DrawOffsetSource::DrawState && args.first_instance != 0);
+	m_context.GetCommandScheduler().FlushIfRecordingAged();
 	{
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::PendingOps);
 		m_context.GetCommandScheduler().PopPendingOperations(false);

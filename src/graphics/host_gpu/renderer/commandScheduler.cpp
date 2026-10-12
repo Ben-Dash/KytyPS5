@@ -15,6 +15,8 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 
 #include <algorithm>
+#include <charconv>
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
@@ -24,6 +26,21 @@ namespace Libs::Graphics {
 static thread_local CommandScheduler* g_deferred_callback_scheduler = nullptr;
 
 namespace {
+
+uint64_t RecordingAgeBudgetUs() {
+	static const uint64_t budget = [] {
+		const char* text = KYTY_GETENV("KYTY_RECORDING_AGE_US");
+		if (text == nullptr) return uint64_t {0};
+		uint64_t value = 0;
+		const auto end = text + std::strlen(text);
+		const auto parsed = std::from_chars(text, end, value);
+		if (parsed.ec != std::errc {} || parsed.ptr != end) {
+			EXIT("invalid KYTY_RECORDING_AGE_US: expected unsigned microseconds\n");
+		}
+		return value;
+	}();
+	return budget;
+}
 
 void ReportVulkanFatal(const char* what, vk::Result result, uint64_t tick, uint32_t debug_op,
                        uint64_t debug_submit, uint32_t arg0, uint32_t arg1, uint32_t arg2,
@@ -196,6 +213,25 @@ void CommandScheduler::Flush() {
 void CommandScheduler::Flush(SubmitInfo& submit) {
 	Submit(submit);
 	BeginNext();
+}
+
+void CommandScheduler::FlushIfRecordingAged() {
+	// Keep disabled/empty boundaries cheap, without querying the host clock.
+	if (RecordingAgeBudgetUs() == 0 || InDeferredOperation() || !m_recording_has_work) return;
+	FlushIfRecordingAgedAt(std::chrono::steady_clock::now());
+}
+
+void CommandScheduler::FlushIfRecordingAgedAt(std::chrono::steady_clock::time_point now) {
+	const auto budget = RecordingAgeBudgetUs();
+	if (budget == 0 || InDeferredOperation() || !Active() || m_command.IsInvalid() ||
+	    !m_recording_has_work) {
+		return;
+	}
+	const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+	    now - m_recording_begin).count();
+	if (elapsed < 0 || static_cast<uint64_t>(elapsed) < budget) return;
+	// Existing ordered submit: retains register bindings, deferred callbacks and stream routing.
+	Flush();
 }
 
 void CommandScheduler::FlushAndWait() {
@@ -407,6 +443,8 @@ CommandBuffer& CommandScheduler::Current() {
 CommandBuffer& CommandScheduler::BeginCommand() {
 	EXIT_IF(!m_command.IsInvalid());
 	m_command.m_buffer = m_command_pool.Commit();
+	m_recording_has_work = false;
+	m_recording_begin = std::chrono::steady_clock::now();
 	if (m_async_submit) {
 		MarkCommandHookThread();
 	}

@@ -821,6 +821,20 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests> --red-zone-patcher-only)
 	add_test(NAME command_scheduler_timeline
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --scheduler-only)
+	add_test(NAME dispatch_recording_age_budget
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --dispatch-recording-age-budget-only)
+	add_test(NAME recording_age_policy
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --recording-age-policy-only)
+	add_test(NAME recording_age_policy_async
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --recording-age-policy-async-only)
+	add_test(NAME recording_age_indirect
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --recording-age-indirect-only)
+	set_tests_properties(dispatch_recording_age_budget recording_age_policy recording_age_policy_async recording_age_indirect
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_RECORDING_AGE_US=1000")
+	add_test(NAME recording_age_policy_disabled
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --recording-age-policy-disabled-only)
+	set_tests_properties(recording_age_policy_disabled
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_RECORDING_AGE_US=0")
 	add_test(NAME stream_buffer_ring
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --stream-buffer-only)
 	add_test(NAME command_stream_payloads

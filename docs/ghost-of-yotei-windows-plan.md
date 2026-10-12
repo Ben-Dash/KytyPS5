@@ -1,5 +1,28 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: recording-age policy validated, 2026-10-13
+
+Opt-in shared scheduler budget `KYTY_RECORDING_AGE_US=1000` submits an aged recording
+with actual draw/dispatch work through the existing ordered route. Default0 keeps
+the prior policy. No new transfer queue, dropped guest work or cache-key change.
+Native intended RED233238/408E8B32 -> unchanged GREEN233751/86C5F063;
+final234008/F083CE9D preserves all64 initial+2 words and surrounding sentinels.
+Final five focused CTests PASS2.00s onD228C047: budget, direct/async/disabled
+threshold and empty-recording cases, native producer/indirect ordering with no
+argument CPU publication/download-ring reservation. Active scheduler/WAIT/resume/
+command-stream and registered EOP publication/IRQ/generation controls pass.
+Two old indirect-count/unregistered-EOP failures also reproduce on archived
+prepatch binaries; see test debt. Do not claim all affected tests pass.
+
+Next native core build/private install, then one neutral30-second in-game title
+FPS sample. Latest measured normal control remains2.472FPS, reserved core2.600;
+no runtime improvement claimed yet. No menus/buttons/screenshots before gain.
+Three agents continue proposing separate candidates; root owns serial execution.
+Ordinary native buffer fill is the next smaller alternative. Transfer readback
+requires actual-writer and reverse-copy dependency proof before any game enable.
+Existing unhooked ComputePrefetchPermutationTests fixture preserved. No push or
+issue update; actual1080/60FPS/full effects remain pending.
+
 ## New measured direction and upstream options, 2026-10-13
 
 Read [new optimization options](yotei-optimization-options-2026-10-13.md) first.

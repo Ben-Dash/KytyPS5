@@ -32,6 +32,10 @@ public:
 	void           EndRendering();
 	void           Flush();
 	void           Flush(SubmitInfo& submit);
+	// Recording thread only: actual draw/dispatch commands, not handle/binding requests.
+	void NoteCommandRecorded() noexcept { m_recording_has_work = true; }
+	// Opt-in host recording budget, checked only before packet/draw/dispatch work.
+	void FlushIfRecordingAged();
 	void           FlushAndWait();
 	void           Finish();
 	CommandBuffer& BeginCommand();
@@ -70,6 +74,9 @@ public:
 	[[nodiscard]] GraphicContext&  Graphics() const noexcept { return m_graphics; }
 
 private:
+	friend struct RecordingAgeSchedulerTestAccess;
+	void FlushIfRecordingAgedAt(std::chrono::steady_clock::time_point now);
+
 	class CommandPool {
 	public:
 		CommandPool(GraphicContext& graphics, MasterSemaphore& master);
@@ -186,6 +193,8 @@ private:
 	// device in Ghost of Yotei at ~7000 submits per 10 s, which cycles the 64 chunks in ~100 ms).
 	std::array<uint64_t, ZoneChunks> m_zone_chunk_ticks {};
 	std::vector<ZoneMark> m_zone_marks;
+	bool m_recording_has_work = false;
+	std::chrono::steady_clock::time_point m_recording_begin {};
 	std::chrono::steady_clock::time_point m_last_submit {};
 	std::chrono::steady_clock::time_point m_last_pending_refresh {}; // See PopPendingOperations.
 };

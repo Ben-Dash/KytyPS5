@@ -111,6 +111,8 @@
 #undef max
 #endif
 
+#include "RecordingAgeSchedulerTestAccess.inc"
+
 namespace Libs {
 void InitAgcDriver_1(Loader::SymbolDatabase *symbols);
 }
@@ -199,6 +201,7 @@ struct BufferCacheTestAccess {
 };
 
 struct StreamBufferTestAccess {
+  static uint64_t ReservationOffset(const StreamBuffer& buffer) { return buffer.m_offset; }
   static bool NormalizeReservation(bool coherent, uint64_t atom, uint64_t &size,
                                    uint64_t &alignment) {
     return StreamBuffer::NormalizeReservation(coherent, atom, size, alignment);
@@ -5553,6 +5556,10 @@ public:
             "dirty-GC direct-memory allocation release failed");
     std::printf("[host]    %-32s ok\n", name);
   }
+
+  #include "DispatchRecordingAgeBudgetTests.inc"
+  #include "RecordingAgePolicyNeighbors.inc"
+  #include "ActiveAgeIndirectDispatchTests.inc"
 
   void CheckComputeMetaClearClassification() {
     constexpr const char *name = "ComputeMetaClearClassification";
@@ -42908,6 +42915,31 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && std::strcmp(argv[1], "--dispatch-recording-age-budget-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckDispatchRecordingAgeBudget();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--recording-age-policy-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckSchedulerRecordingAgePolicy();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--recording-age-indirect-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckActiveAgeIndirectDispatch();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--recording-age-policy-async-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckSchedulerRecordingAgePolicy(false, true);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--recording-age-policy-disabled-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckSchedulerRecordingAgePolicy(true);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--alpha-coverage-predicate-neighbors") == 0) {
     CheckAlphaCoveragePredicateNeighbors();
     return 0;

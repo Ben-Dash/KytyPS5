@@ -1,5 +1,26 @@
 # Integration test debt
 
+## Recording budget validated; gameplay measurement pending, 2026-10-13
+
+Next independent performance candidate: two real load/add/store dispatches with
+an8ms bounded host stimulus between them, warmed pipeline, exact modulo32-bit
+initial+2 output and untouched guards. Intended native RED233238/408E8B32 retained
+the aged tick; unchanged GREEN233751/86C5F063 and final234008/F083CE9D advance it.
+All numeric/sentinel controls passed before the cost assertion. Five CTests pass
+in2.00s: real dispatch cost, direct/async policy thresholds, disabled policy and
+native indirect producer2,1,1 -> eight exact output words without argument download.
+Active1000us scheduler/PM4 WAIT/resume/command-stream and EOP publication neighbors
+pass. Budget remains opt-in/default0; native game FPS improvement still pending.
+
+Existing default --native-indirect-only fails the GPU descriptor-count dependency
+on candidateD228C047 and archived prepatch408E8B32 identically (234010/234039).
+Existing --eop-write-ordering-gpu crashes at unmapped/unregistered label observation
+on candidateAA596EA7 both active/default and archived prepatch5D01A13D (234128,
+234141,234237). These are retained baseline debts, not passing affected controls.
+The separate registered EOP IRQ/publication/generation neighbors pass234129.
+Archived runner's initial missing-DLL failure234030 is not semantic evidence;
+234039 uses the normal native DLL directory. No GPU reset/hang occurred.
+
 ## Performance cycle 3 diagnostics, 2026-10-13
 
 Real transfer-queue AGE-off bootstrap RED223050/5D01A13D now reproduced with

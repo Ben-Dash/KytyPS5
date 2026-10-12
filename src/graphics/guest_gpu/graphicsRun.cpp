@@ -1069,9 +1069,13 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 	static const bool timed       = DrawPhaseTimer::Hash() != 0;
 	uint64_t          handler_end = 0;
 	std::vector<uint32_t> packet_snapshot;
+	uint32_t recording_packets = 0;
 	while (!execution.m_buffer_stack.empty()) {
 		if (g_gpu_state != nullptr) {
 			g_gpu_state->ProcessCommands();
+		}
+		if ((++recording_packets & 15u) == 0u) {
+			GetScheduler().FlushIfRecordingAged();
 		}
 		auto& cursor = execution.m_buffer_stack.back();
 		EXIT_IF(cursor.offset_dw > cursor.commands.size());
