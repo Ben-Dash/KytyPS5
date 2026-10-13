@@ -1,5 +1,28 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: system Performance preset exported correctly, 2026-10-13
+
+New general CLI `--game-preset-priority Default|Performance|Resolution` sets
+shared user preference0/1/2; default0 preserves previous behavior. Real UserService
+export -sD02mFDBh4 now writes configured priority only when negotiated capacity
+covers offset12+4. Known40byte/version header and caller48tail remain; no guessed
+new48schema, game title/address branch, menu or save edits. Actual source eboot
+consumer/name/target tables independently establish priority1 -> mode2Performance
+target60, priority2 ->Quality30 on current non-Trinity path. A saved game choice
+can override this default, so actual runtime mode/size/FPS remain to be checked.
+
+CPU intendedRED011830/284F617C -> SAME GREEN011910/45F0E092: null/error/user and
+40/48/16/8/0-capacity/field/canary controls first. Dynamic users0/1001 neighbor
+012045/1ACA857F PASS; focused CTest2/2 PASS0.06s. Source fix pending core/private
+install/nativeCLI validation and a neutral30s title run with Performance1080window/
+scale100/full rendering. No interpretation of target60 as achieved60.
+
+Opaque-cache correction4b6b0326 is completed with CPU+realGPU proof; next native
+game should retain intact old182MB driver data despite source edits. Journals
+still require exact current source. Shader modulo proxy showed no GPU gain;
+ArrayLength proposal remains unapplied. Latest complete worldFPS2.6704 (329).
+No push/issue publication, WSLstopped. Actual1080/full effects/stable60 pending.
+
 ## Current checkpoint: compatible driver cache survives compiler edits, 2026-10-13
 
 Shared opaque-cache policy completed locally after exact existing factory

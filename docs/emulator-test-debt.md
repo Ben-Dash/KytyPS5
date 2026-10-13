@@ -1,5 +1,21 @@
 # Integration test debt
 
+## Configured user game preset required reproduction, 2026-10-13
+
+Actual shared UserService NID export -sD02mFDBh4 invoked through SymbolDatabase,
+after setting new config value0/1/2 without changing HLE. Existing error/null/user,
+40/48/16/8/0 capacity negotiation, other-field zero and canaries first; old priority0
+should fail configured1/2 last. Preserve supported40 and unknown48 tail. Name
+mapping independently proved from actual consumer enum strings:Performance1
+preference selects mode2, Resolution2 mode0 Quality on non-Trinity. Game-specific
+capture is evidence only; source/API setting is general and default0. Production
+HLE intendedRED011830/284F617C after all configuration/error/capacity/canaries:
+configured1/2 stillreturned0. SAME GREEN011910/45F0E092 returns correct0/1/2 only
+where negotiated capacity>=16, other bytes unchanged. Dynamic users0/1001 neighbor
+012045/1ACA857F PASS; focused CPUCTest2/2 PASS0.06s. Known40/header40 and48tail
+preserved; request1..7 malformed header capacity remains pre-existing debt, not
+changed. NativeCLI/build/game pending; saved graphics option can override default.
+
 ## Opaque Vulkan cache source-only rejection required reproduction, 2026-10-13
 
 Extract current exact signature factory into shared CPU policy before behavior

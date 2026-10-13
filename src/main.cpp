@@ -64,6 +64,7 @@ static void PrintUsage() {
 	    "  --user-name <name>                   Local user name (1-16 bytes). Default: Kyty.\n");
 	::printf("  --user-id <num>                      Local user ID. Default: %d.\n",
 	         Config::DEFAULT_USER_ID);
+	::printf("  --game-preset-priority <value>        Default, Performance, Resolution. Default: Default.\n");
 	::printf("  --mic <name>                        Capture from this microphone; omit for silence.\n");
 	::printf("  --controller-color <#RRGGBB>        Override the controller lightbar color.\n");
 	::printf("  --controller-volume <0-100>         DualSense speaker volume. Default: 50.\n");
@@ -474,6 +475,17 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			if (!ParseUint32(value, options.config.screen_height) ||
 			    options.config.screen_height == 0) {
 				::printf("invalid screen height: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--game-preset-priority") {
+			if (value == "Default") {
+				options.config.game_preset_priority = 0;
+			} else if (value == "Performance") {
+				options.config.game_preset_priority = 1;
+			} else if (value == "Resolution") {
+				options.config.game_preset_priority = 2;
+			} else {
+				::printf("invalid game preset priority: %s\n", value.c_str());
 				return false;
 			}
 		} else if (arg == "--user-name") {

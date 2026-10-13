@@ -25,6 +25,7 @@ void Load(const ConfigOptions& cfg) {
 	EXIT_IF(g_config == nullptr);
 	EXIT_IF(cfg.user_name.empty() || cfg.user_name.size() > MAX_USER_NAME_LENGTH);
 	EXIT_IF(!IsConfiguredUserIdValid(cfg.user_id));
+	EXIT_IF(cfg.game_preset_priority > 2);
 	EXIT_IF(cfg.controller_speaker_volume > 100 || cfg.controller_vibration_intensity > 100);
 	EXIT_IF(cfg.audio_master_volume > MAX_AUDIO_VOLUME || cfg.audio_main_volume > MAX_AUDIO_VOLUME ||
 	        cfg.audio_music_volume > MAX_AUDIO_VOLUME ||
@@ -47,6 +48,10 @@ const std::string& GetUserName() {
 
 int32_t GetUserId() {
 	return g_config->user_id;
+}
+
+uint32_t GetGamePresetPriority() {
+	return g_config->game_preset_priority;
 }
 
 const std::string& GetAudioInputDevice() {

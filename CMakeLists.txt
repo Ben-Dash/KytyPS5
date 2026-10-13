@@ -810,6 +810,11 @@ if(BUILD_TESTING)
 	add_test(NAME driver_cache_native_roundtrip
 	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --driver-cache-native-roundtrip)
 	set_tests_properties(driver_cache_native_roundtrip PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME user_game_preset_priority
+	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --user-game-preset-priority-only)
+	add_test(NAME user_game_preset_users
+	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --user-game-preset-users-only)
+	set_tests_properties(user_game_preset_priority user_game_preset_users PROPERTIES TIMEOUT 10)
 	add_test(NAME armed_readback_window_cost
 	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --armed-readback-window-cost-gpu)
 	set_tests_properties(armed_readback_window_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

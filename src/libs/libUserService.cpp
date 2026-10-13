@@ -6,6 +6,7 @@
 #include "loader/symbolDatabase.h"
 
 #include <cstdio>
+#include <cstddef>
 #include <cstring>
 
 namespace Libs {
@@ -38,6 +39,7 @@ struct UserServiceGamePresets {
 };
 
 static_assert(sizeof(UserServiceGamePresets) == 40);
+static_assert(offsetof(UserServiceGamePresets, priority) == 12);
 
 static KYTY_SYSV_ABI int UserServiceInitialize(const void* /*params*/) {
 	PRINT_NAME();
@@ -137,6 +139,9 @@ static KYTY_SYSV_ABI int UserServiceGetGamePresets(int user_id, UserServiceGameP
 
 	std::memset(presets, 0, this_size);
 	presets->this_size = sizeof(UserServiceGamePresets);
+	if (this_size >= offsetof(UserServiceGamePresets, priority) + sizeof(presets->priority)) {
+		presets->priority = Config::GetGamePresetPriority();
+	}
 
 	return OK;
 }

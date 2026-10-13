@@ -388,7 +388,29 @@ private:
 #include "DispatchSnapshotJobSelectorTests.inc"
 #include "NativeThreadNamesTests.inc"
 
+#include "UserServiceGamePresetTests.inc"
+
 int main(int argc, char **argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--user-game-preset-priority-only") == 0 ||
+                   std::strcmp(argv[1], "--user-game-preset-users-only") == 0)) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    Common::InitializeThreads();
+    Common::Subsystems subsystems;
+    subsystems.Initialize<Config::Lifecycle>();
+    Config::ConfigOptions options;
+    options.printf_direction = Config::LogDirection::Silent;
+    Config::Load(options);
+    subsystems.Initialize<Log::Lifecycle>();
+    if (std::strcmp(argv[1], "--user-game-preset-users-only") == 0) {
+      for (const int32_t user : {0, 1001}) {
+        options.user_id = user;
+        Libs::Graphics::CheckUserServiceGamePresetPriority(options);
+      }
+    } else {
+      Libs::Graphics::CheckUserServiceGamePresetPriority(options);
+    }
+    return 0;
+  }
   const bool drain_stats_mode = argc == 3 && std::strcmp(argv[1], "--drain-stats") == 0;
   if (drain_stats_mode) { --argc; ++argv; }
   struct DrainStatsScope {

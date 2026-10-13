@@ -53,6 +53,8 @@ struct ConfigOptions {
 	uint32_t               screen_height               = 720;
 	std::string            user_name                   = "Kyty";
 	int32_t                user_id                     = DEFAULT_USER_ID;
+	// System-wide user preference:0 game default,1 performance,2 resolution.
+	uint32_t               game_preset_priority        = 0;
 	std::string            audio_input_device;
 	std::optional<ControllerColor> controller_color;
 	uint32_t               controller_speaker_volume      = 50;
@@ -122,6 +124,7 @@ uint32_t GetScreenWidth();
 uint32_t GetScreenHeight();
 const std::string& GetUserName();
 int32_t  GetUserId();
+uint32_t GetGamePresetPriority();
 const std::string& GetAudioInputDevice();
 const std::optional<ControllerColor>& GetControllerColor();
 uint32_t GetControllerSpeakerVolume();
