@@ -350,6 +350,8 @@ public:
     device.destroyDescriptorPool(pool,nullptr);
     device.destroyDescriptorSetLayout(descriptor_layout,nullptr);
   }
+  #include "GenericGpuMicrobenchMethod.inc"
+
   void Run(const GenericNumericCase& test,uint32_t low_exec,uint32_t high_exec) {
     constexpr const char* name="GenericBufferGpu";
     const auto descriptor=GenericInputDescriptor(test.format,test.stride,test.selectors,test.range);

@@ -1,5 +1,39 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: GPU timing screens zero-gain changes, 2026-10-13
+
+Channel-modulo sourceba3ed1b1 core002906/install003108 PASS; privateEXE
+97EEB17B27F31156184DBB22A89D7912E69E026DC5868C118BC7540979AA9BB3.
+Bounded native GPU A/B/A with32 live XYZW reads,512Binput, waves32/64 and channels
+1/3/4: original-modulo003515/915786, no-modulo003614/668312, archived original003705/
+915786. Same six batch counts37,39,41,27,28,28; all input/output/tail goldens PASS.
+Seven GPU timestamp samples/case; medians~29.7us/wave32 and58.49us/wave64;
+candidate changes-0.66%..+0.44% relative to bracketing baseline. No useful proxy
+GPU gain despite a passing source opcode cost. Worldba3 FPS pending; avoid another
+blind cold600s attempt. Production modulo was restored exactly after baseline.
+The one-slot/uniform/single-group proxy is not the twelve-slot fc6f workload.
+
+Opaque cache policy has CPU intendedRED005245/B1EABF29 -> sameGREEN005655/51C3C357
+with full old journal/host/diagnostic/size/checksum/native-header controls.
+Source-strict journal unchanged; host-compatible opaque driver blob survives
+compiler changes and reads intact legacy139byte wrappers without key pinning or
+cache-byte editing. Actual native loader compiled005811; real Vulkan loader/output
+regression pending. Keep this policy WIP until native proof. No game currently
+running at this checkpoint; check processes before resume.
+
+Independent ArrayLength cost intendedRED005054/C80DCEE4: all six live/validator/
+native-bounds controls pass;1/8/32loads query2/16/64(w32),4/32/128(w64). Production
+length hoist remains unapplied pending a GPU timing comparison and descriptor
+range controls. Main CPU attribution pending; all-thread counters are diagnostic.
+
+Read-only preset research: actualgame imports/calls GetGamePresets and reads its
+priority offset12; caller requests48bytes, current stub40bytes returnsdefault0.
+Numeric Performance mapping and actual mode override remain unproved. Output1080
+is already advertised under actual attribute3 0x480044; no confirmed display bug.
+Do not change GPU clock (actual~100MHz) or guess enum values. Fullrender/neutral,
+no menu/buttons/images, WSLstopped,30s titleFPS goal unchanged. Latest full world
+mean2.6704; useful speedup/actual1080/full effects/60FPS still pending. No push.
+
 ## Current checkpoint: channel division removed; no useful FPS gain yet, 2026-10-13
 
 Shared generic format channel selection replaces source0..3 modulo positive count
