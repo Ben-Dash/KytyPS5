@@ -903,6 +903,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --poll-exact-page-readback-cost-gpu)
 	add_test(NAME eager_adjacent_page_readback_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eager-readback-adjacent-pages-cost-gpu)
+	add_test(NAME empty_pm4_tail_submit_cost_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --empty-pm4-tail-submit-cost-gpu)
+	add_test(NAME empty_pm4_tail_required_work_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --empty-pm4-tail-required-work-neighbors-gpu)
+	add_test(NAME empty_pm4_tail_diagnostic_work_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --empty-pm4-tail-diagnostic-work-gpu)
+	set_tests_properties(empty_pm4_tail_submit_cost_gpu empty_pm4_tail_required_work_gpu
+		empty_pm4_tail_diagnostic_work_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME image_covered_read_scope
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-covered-read-planner-cost-only)
 	add_test(NAME image_new_read_stage

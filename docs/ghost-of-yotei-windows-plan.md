@@ -1,5 +1,34 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: redundant tail native GREEN; world comparison pending, 2026-10-13
+
+eeebdd96 plus shared optional CP flush correction: genuine native RED072755
+225D7037 submits2/tick2->4 -> unchanged GREEN074403 F8A1C852 submits1/tick2->3.
+Required transfer/fill/callback/eager/ordered literal negatives and actual
+automatic Begin timestamp reset/query/retirement all pass before/after. Eight
+affected scheduler/PM4/async WAIT/foreign/EOP CTests pass4.22s. Explicit flush,
+wait, finish, flip and SuspendPoint remain unconditional. Native core/install
+and clean chain1 neutral world30s against recorded3.882143 remain pending.
+Native deferred WAIT neighbor and actual GpuSuspendPoint074742/F2648188 PASS;
+three new registered CTests PASS1.22s. Core build and new private install next.
+
+Interrupted diagnostic `game-20261013-065805-diag-hot-fc6f8c56eb7e168f-dfda43`
+exited07:00:20UTC/0 before full30s: NO FPS comparison. Late actual GPU zones
+attribute buffer-copy37.647ms/frame, tiler21.56 (two hot sites13.387/6.641),
+FC6 compute9.208. Diagnostics can serialize/mark otherwise empty tails;
+their~381 native submits/frame do not prove removable clean-run submissions.
+Actual viewport/RT evidence: last30 top-five records lead with1920x1080;
+shadow/downsample targets differ, top-five telemetry is incomplete. Previous
+internal1080 uncertainty is narrowed, not an all-pass1080 claim.
+
+Other-game research: Jetsku U59 pinned f9e19582f0deac0d1226a7ce3faae30a9ab408ab
+supports direct2-byte image upload; our shared fused path currently rejects it.
+Actual Yotei late hot2B tiled1920x1080 upload is a concrete next regression and
+timing candidate. Its Astro results are not Yotei validation. SharpEmu PR926 is
+a comparison source, not a backend merge. Timestamp accuracy/complete BDA
+capture remain separate candidates, no FPS promise. WSL stopped; no menu/input,
+no new push/issue comments. Preserve all historical artifacts/prefetch WIP.
+
 ## Current checkpoint: repeated chain1 +27%, two world frames reviewed, 2026-10-13
 
 Same184fdb2b/EXE982918F5 repeated full neutral chain1 run

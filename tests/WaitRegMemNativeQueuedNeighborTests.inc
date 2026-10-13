@@ -2,6 +2,10 @@
 // Actual graphics/compute GuestGpu submission queues, not manual Process retries.
 namespace Libs::Graphics {
 struct WaitRegMemNativeQueueTestAccess {
+  static bool GraphicsBlocked(GuestGpu& gpu) {
+    Common::LockGuard lock(gpu.m_queue_mutex);
+    return !gpu.m_queues[0].empty() && gpu.m_queues[0].front().blocked;
+  }
   static uint32_t PendingCommands(const GuestGpu& gpu) {
     return gpu.m_pending_commands.load(std::memory_order_acquire);
   }

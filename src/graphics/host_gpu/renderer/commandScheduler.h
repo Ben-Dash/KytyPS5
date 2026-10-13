@@ -31,6 +31,8 @@ public:
 	void           BeginRendering(const RenderState& state);
 	void           EndRendering();
 	void           Flush();
+	// Optional CP boundaries only. Explicit Flush/Submit/Wait retain their dependencies.
+	[[nodiscard]] bool HasWorkForSubmission();
 	void           Flush(SubmitInfo& submit);
 	// Recording thread only: actual draw/dispatch commands, not handle/binding requests.
 	void NoteCommandRecorded() noexcept { m_recording_has_work = true; }

@@ -20,6 +20,9 @@ struct PerformanceMemoryTestAccess {
   static bool HasQueue(const BufferCache& cache) {return cache.m_readback_queue!=nullptr;}
   static void MarkHot(BufferCache& cache,uint64_t page) {cache.MarkReadbackHot(page);}
   static uint64_t ReadbackToken(const BufferCache& cache) {return cache.m_readback_token;}
+  static bool EagerReadyContains(const BufferCache& cache,uint64_t page) {
+    return std::find(cache.m_eager_ready.begin(),cache.m_eager_ready.end(),page)!=cache.m_eager_ready.end();
+  }
   static void ResetEagerHotPolicy(BufferCache& cache) {
     for(const auto& [page,tick]:cache.m_hot_pages) {
       (void)tick;cache.m_memory_tracker.SetReadbackHot(page,TRACKER_PAGE_SIZE,false);

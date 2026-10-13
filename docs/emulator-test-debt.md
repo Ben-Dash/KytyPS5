@@ -1,5 +1,32 @@
 # Integration test debt
 
+## Redundant empty PM4 tail submission required reproduction, 2026-10-13
+
+Native RED `072755-8939373-empty-pm4-tail-baseline-red` on eeebdd96/225D7037:
+all finite producer, protected old bytes, publication gate, actual native/CPU
+values, marker/canaries and cleanup pass before submits2/tick2->4 exceed1.
+Five required-work negatives baseline072757 pass; automatic native Begin-query
+negative baseline074305/2CA780E4 passes actual reset/top/bottom/retirement.
+Same unchanged GREEN074403/F8A1C852: submits1/tick2->3, every value/control
+unchanged. Required transfer/fill/callback/eager/literal GREEN074404 and native
+timestamp GREEN074405 all pass; eight affected CTests pass4.22s. Scheduler keeps
+all explicit waits/submits/finish/flip/suspend dependencies. CP optional boundary
+uses conservative handle exposure, pending dependency and current-tick callback
+work. GPU zones/checkpoints are marked; capability-specific execution remains
+uncovered. Native deferred WAIT passed in affected set; actual GpuSuspendPoint
+074742/F2648188 PASS, new3 registered CTests PASS1.22s. Real-world FPS next.
+Artifacts: `_Build/analysis/yotei-performance-cycle1-20261012/checks/20261013-*`.
+
+Real GuestGpu NOP -> GPU-backed WAIT submits the required readback in PollReadMemory,
+then progressed parser slice may BufferFlush a newly empty command buffer. Native
+regression must check actual queue submissions and tick progression only AFTER
+finite producer, protected old bytes, real pending publication, marker/canary and
+cleanup controls. Expected required submit1 rather than redundant2. Production
+must remain unchanged until genuine RED and copy/fill/priority+normal callbacks/
+eager/literal/timestamp negatives establish a conservative work oracle. Existing
+draw/dispatch-only m_recording_has_work is insufficient. Public explicit Flush,
+Wait, Finish and SuspendPoint dependencies must stay unconditional.
+
 ## Consecutive selected eager pages native cost regression, 2026-10-13
 
 Public BufferFlush native061744/70239F69 genuine RED after all three cases'

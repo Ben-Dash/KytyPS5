@@ -421,7 +421,8 @@ void CommandProcessor::BufferInit() {
 
 void CommandProcessor::BufferFlush() {
 	m_renderer.GetBufferCache().RecordEagerReadbacks();
-	GetScheduler().Flush();
+	auto& scheduler = GetScheduler();
+	if (scheduler.HasWorkForSubmission()) scheduler.Flush();
 }
 
 void CommandProcessor::BufferFlushIfGpuIdle() {

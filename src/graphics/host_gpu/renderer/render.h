@@ -213,6 +213,12 @@ private:
 
 	void Begin();
 	void End() const;
+	// Conservative optional-flush oracle: handle exposure may have recorded native work.
+	[[nodiscard]] bool HasSubmissionWork() const noexcept {
+		return m_native_handle_requested || m_rendering || m_compute_access_pending ||
+		       static_cast<bool>(m_pending_shader_writes);
+	}
+	void NoteSubmissionWork() const noexcept { m_native_handle_requested = true; }
 
 	RenderContext&      m_context;
 	GraphicContext&     m_graphics;
@@ -225,6 +231,7 @@ private:
 	uint32_t            m_debug_arg3      = 0;
 	uint64_t            m_debug_arg4      = 0;
 	mutable RenderState m_render_state;
+	mutable bool        m_native_handle_requested = false;
 	mutable bool        m_rendering   = false;
 	mutable bool        m_compute_access_pending = false;
 	mutable vk::PipelineStageFlags m_pending_shader_writes;

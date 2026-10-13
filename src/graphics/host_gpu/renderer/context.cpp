@@ -27,6 +27,7 @@ bool CommandBuffer::IsInvalid() const {
 
 vk::CommandBuffer CommandBuffer::Handle() const {
 	EXIT_IF(IsInvalid());
+	NoteSubmissionWork();
 	if (m_compute_access_pending) [[unlikely]] {
 		m_compute_access_pending = false;
 		ShaderAccessBarrier(m_buffer, vk::PipelineStageFlagBits::eComputeShader);
@@ -36,11 +37,13 @@ vk::CommandBuffer CommandBuffer::Handle() const {
 
 vk::CommandBuffer CommandBuffer::ChainHandle() const {
 	EXIT_IF(IsInvalid() || m_rendering);
+	NoteSubmissionWork();
 	return m_buffer;
 }
 
 vk::CommandBuffer CommandBuffer::HandleForFullBarrier() const {
 	EXIT_IF(IsInvalid());
+	NoteSubmissionWork();
 	m_compute_access_pending = false;
 	return m_buffer;
 }
@@ -48,7 +51,9 @@ vk::CommandBuffer CommandBuffer::HandleForFullBarrier() const {
 void CommandBuffer::Begin() {
 	EXIT_IF(m_rendering || m_pending_shader_writes || IsInvalid());
 	m_compute_access_pending = false;
-	auto buffer = Handle();
+	m_native_handle_requested = false;
+	// Begin itself has no GPU effect. Public handle access conservatively marks work.
+	auto buffer = m_buffer;
 
 	vk::CommandBufferBeginInfo begin_info {};
 	begin_info.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;

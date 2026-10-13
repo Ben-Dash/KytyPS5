@@ -205,6 +205,17 @@ void CommandScheduler::EndRendering() {
 	}
 }
 
+bool CommandScheduler::HasWorkForSubmission() {
+	CheckActive();
+	EXIT_IF(m_command.IsInvalid());
+	if (m_command.HasSubmissionWork()) return true;
+	// A callback-only tick must still be submitted so its real completion can publish it.
+	const auto tick = CurrentTick();
+	std::lock_guard lock(m_operation_mutex);
+	return (!m_pending_operations.empty() && m_pending_operations.back().tick == tick) ||
+	       (!m_priority_operations.empty() && m_priority_operations.back().tick == tick);
+}
+
 void CommandScheduler::Flush() {
 	SubmitInfo submit;
 	Flush(submit);
@@ -474,6 +485,7 @@ void CommandScheduler::WriteStartTimestamp() {
 		                     "create GPU timestamp pool");
 	}
 	m_timestamp_slot = m_timestamp_next++ % TimestampSlots;
+	m_command.NoteSubmissionWork();
 	m_command.m_buffer.resetQueryPool(m_timestamp_pool, m_timestamp_slot * 2, 2);
 	m_command.m_buffer.writeTimestamp(vk::PipelineStageFlagBits::eTopOfPipe, m_timestamp_pool,
 	                                  m_timestamp_slot * 2);
@@ -482,6 +494,7 @@ void CommandScheduler::WriteStartTimestamp() {
 void CommandScheduler::WriteEndTimestamp() {
 	const auto slot  = m_timestamp_slot;
 	m_timestamp_slot = UINT32_MAX;
+	m_command.NoteSubmissionWork();
 	m_command.m_buffer.writeTimestamp(vk::PipelineStageFlagBits::eBottomOfPipe, m_timestamp_pool,
 	                                  slot * 2 + 1);
 	// Runs on this thread once the buffer's tick completes, in tick order.
@@ -510,6 +523,7 @@ void CommandScheduler::CheckpointThunk(void* context, vk::CommandBuffer buffer,
 	GpuZones::g_checkpoint_ticks[index % GpuZones::CheckpointRing] =
 	    static_cast<CommandScheduler*>(context)->CurrentTick();
 	GpuZones::t_detail = {};
+	static_cast<CommandScheduler*>(context)->m_command.NoteSubmissionWork();
 	buffer.setCheckpointNV(reinterpret_cast<const void*>(static_cast<uintptr_t>(index)));
 }
 
@@ -534,6 +548,7 @@ void CommandScheduler::BeginZones() {
 	if (const auto last = m_zone_chunk_ticks[m_zone_chunk]; last != 0 && !IsFree(last)) {
 		m_master.Wait(last);
 	}
+	m_command.NoteSubmissionWork();
 	m_command.m_buffer.resetQueryPool(m_zone_pool, m_zone_chunk * ZoneChunkQueries,
 	                                  ZoneChunkQueries);
 	m_zone_marks.clear();
@@ -550,6 +565,7 @@ void CommandScheduler::MarkZone(DrainStats::Zone zone, uint64_t key, uint64_t pi
 		return;
 	}
 	// Bottom of pipe: the timestamp lands once the work recorded before it has finished.
+	m_command.NoteSubmissionWork();
 	m_command.m_buffer.writeTimestamp(
 	    vk::PipelineStageFlagBits::eBottomOfPipe, m_zone_pool,
 	    m_zone_chunk * ZoneChunkQueries + static_cast<uint32_t>(m_zone_marks.size()));
@@ -562,6 +578,7 @@ void CommandScheduler::EndZones() {
 	}
 	const auto chunk = m_zone_chunk;
 	m_zone_chunk     = UINT32_MAX;
+	m_command.NoteSubmissionWork();
 	m_command.m_buffer.writeTimestamp(
 	    vk::PipelineStageFlagBits::eBottomOfPipe, m_zone_pool,
 	    chunk * ZoneChunkQueries + static_cast<uint32_t>(m_zone_marks.size()));
