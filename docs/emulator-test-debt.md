@@ -1,19 +1,5 @@
 # Integration test debt
 
-## Pure timed polling scheduling hint, 2026-10-13
-
-Fresh after400 owned Main PSS73/73valid10seconds shows58 positions in pure
-RDTSC deadline polling and10 in nativeGPUwait. Original polling is correct;
-this is an experimental scheduling policy, not a claim of broken guest ISA.
-Before the shared decoded replacement of redundant MOV EAX,EAX following
-RDTSC with same-length PAUSE, prove native original/patched registers, flags,
-real clock/deadline, surrounding bytes/canaries and cleanup. Then assert
-requested opt-in hint; policyOFF and unrelated/interior-entry/indirect/memory/
-deadline-mutation/unreachable cases must retain original code. Reject uncertain
-CFG entry and failed patching without trapping or altering native deadlines.
-DefaultOFF until actual after400 FPS exceeds the current best4.16. A passing
-hint/control test is not FPS evidence. No game/address/hash conditions.
-
 ## SRT materialization work: operation witness required, 2026-10-13
 
 Completed46fe8e8b profile191442...730fa4 identifies shared graphics/compute

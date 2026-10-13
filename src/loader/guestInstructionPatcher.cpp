@@ -5,7 +5,6 @@
 
 #include "common/assert.h"
 #include "common/logging/log.h"
-#include "common/switches.h"
 #include "common/virtualMemory.h"
 
 #include <Zydis/Zydis.h>
@@ -95,11 +94,6 @@ static ZydisDecoder& GetDecoder() {
 		return value;
 	}();
 	return decoder;
-}
-
-bool TimedSpinPauseEnabled() {
-	const char* value=KYTY_GETENV("KYTY_TIMED_SPIN_PAUSE");
-	return value!=nullptr && std::strcmp(value,"1")==0;
 }
 
 namespace {
@@ -588,81 +582,6 @@ DecodedFunction DecodeFunction(uintptr_t function_start, uintptr_t function_end,
 	}
 	function.has_indirect_branch = indirect_branches.size() != resolved_indirect_branches.size();
 	return function;
-}
-
-// A closed register-only deadline loop. Its selfmove is redundant because
-// RDTSC already clears the upper32bits of RAX/RDX in64bitmode. PAUSE has no
-// architectural register/flags effects. Code selection uses decoded semantics.
-struct TimedSpinPauseCandidate {
-	std::array<uintptr_t,6> addresses {};
-	uintptr_t end {};
-};
-
-bool RegisterOperand(const DecodedCodeInstruction& decoded,u8 operand,ZydisRegister reg) {
-	return operand<decoded.instruction.operand_count_visible &&
-	       decoded.operands[operand].type==ZYDIS_OPERAND_TYPE_REGISTER &&
-	       decoded.operands[operand].reg.value==reg;
-}
-
-void CollectTimedSpinPauseCandidates(const DecodedFunction& function,
-                                    std::vector<TimedSpinPauseCandidate>& candidates) {
-	// An unresolved indirectjump can enter the selfmove without its RDTSC.
-	if(function.has_indirect_branch)return;
-	for(const auto& [address,first]:function.instructions) {
-		if(first.instruction.mnemonic!=ZYDIS_MNEMONIC_RDTSC)continue;
-		std::array<const DecodedCodeInstruction*,6> body {};
-		body[0]=&first;uintptr_t next=address+first.instruction.length;bool complete=true;
-		for(size_t i=1;i<body.size();++i) {
-			const auto found=function.instructions.find(next);
-			if(found==function.instructions.end()){complete=false;break;}
-			body[i]=&found->second;next+=body[i]->instruction.length;
-		}
-		if(!complete || std::ranges::any_of(body,[](const auto* i){return i->accesses_memory || i->uses_stack_pointer;}))continue;
-		const auto& move=*body[1];const auto& shift=*body[2];const auto& combine=*body[3];
-		const auto& compare=*body[4];const auto& branch=*body[5];
-		if(move.instruction.mnemonic!=ZYDIS_MNEMONIC_MOV || move.instruction.length!=2u ||
-		   !RegisterOperand(move,0,ZYDIS_REGISTER_EAX)||!RegisterOperand(move,1,ZYDIS_REGISTER_EAX))continue;
-		if(shift.instruction.mnemonic!=ZYDIS_MNEMONIC_SHL || !RegisterOperand(shift,0,ZYDIS_REGISTER_RDX) ||
-		   shift.instruction.operand_count_visible!=2u || shift.operands[1].type!=ZYDIS_OPERAND_TYPE_IMMEDIATE ||
-		   shift.operands[1].imm.value.u!=32u)continue;
-		if(combine.instruction.mnemonic!=ZYDIS_MNEMONIC_OR || combine.instruction.operand_count_visible!=2u)continue;
-		ZydisRegister clock=ZYDIS_REGISTER_NONE;
-		if(RegisterOperand(combine,0,ZYDIS_REGISTER_RAX)&&RegisterOperand(combine,1,ZYDIS_REGISTER_RDX))clock=ZYDIS_REGISTER_RAX;
-		else if(RegisterOperand(combine,0,ZYDIS_REGISTER_RDX)&&RegisterOperand(combine,1,ZYDIS_REGISTER_RAX))clock=ZYDIS_REGISTER_RDX;
-		else continue;
-		if(compare.instruction.mnemonic!=ZYDIS_MNEMONIC_CMP || compare.instruction.operand_count_visible!=2u ||
-		   !RegisterOperand(compare,0,clock) || compare.operands[1].type!=ZYDIS_OPERAND_TYPE_REGISTER)continue;
-		const auto deadline=compare.operands[1].reg.value;
-		if(ZydisRegisterGetClass(deadline)!=ZYDIS_REGCLASS_GPR64 || deadline==ZYDIS_REGISTER_RAX ||
-		   deadline==ZYDIS_REGISTER_RDX || deadline==ZYDIS_REGISTER_RSP)continue;
-		if((branch.instruction.mnemonic!=ZYDIS_MNEMONIC_JL && branch.instruction.mnemonic!=ZYDIS_MNEMONIC_JB &&
-		    branch.instruction.mnemonic!=ZYDIS_MNEMONIC_JLE && branch.instruction.mnemonic!=ZYDIS_MNEMONIC_JBE) ||
-		   GetRelativeTarget(branch)!=address)continue;
-		TimedSpinPauseCandidate candidate;candidate.end=next;
-		for(size_t i=0;i<body.size();++i)candidate.addresses[i]=body[i]->address;
-		candidates.push_back(candidate);
-	}
-}
-
-void ApplyTimedSpinPauseCandidates(PatchModule& module,
-                                  const std::vector<TimedSpinPauseCandidate>& candidates,
-                                  const std::set<uintptr_t>& known_targets,
-                                  GuestInstructionPatchResult& result) {
-	for(const auto& candidate:candidates) {
-		++result.timed_spin_pause.found;
-		const auto head=candidate.addresses[0];
-		const auto interior=known_targets.upper_bound(head);
-		if(interior!=known_targets.end()&&*interior<candidate.end)continue;
-		// Prior redzone/AMD rewrites remain authoritative; never patch their moved bytes.
-		if(std::ranges::any_of(candidate.addresses,[&](auto address){
-			return module.patched.contains(reinterpret_cast<u8*>(address));
-		}))continue;
-		const auto site=candidate.addresses[1];
-		constexpr std::array<u8,2> pause {0xf3u,0x90u};
-		std::memcpy(reinterpret_cast<void*>(site),pause.data(),pause.size());
-		module.patched.insert(reinterpret_cast<u8*>(site));
-		++result.timed_spin_pause.native;
-	}
 }
 
 std::optional<RedZoneMask> TranslateRedZoneMask(const RedZoneMask& mask, s64 stack_pointer_delta) {
@@ -1580,8 +1499,7 @@ GuestInstructionPatchResult PatchGuestInstructions(u64 segment_addr, u64 segment
                                                    bool protect_memory, bool emulate_amd,
                                                    GuestInstructionHostFeatures host_features) {
 	GuestInstructionPatchResult result {};
-	const bool pause_timed_spins=TimedSpinPauseEnabled();
-	if (!protect_memory && !emulate_amd && !pause_timed_spins) {
+	if (!protect_memory && !emulate_amd) {
 		return result;
 	}
 	auto*              module = GetContainingModule(reinterpret_cast<void*>(segment_addr));
@@ -1607,9 +1525,6 @@ GuestInstructionPatchResult PatchGuestInstructions(u64 segment_addr, u64 segment
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	analyze_red_zone |= emulate_amd;
 #endif
-	std::vector<TimedSpinPauseCandidate> timed_spin_candidates;
-	std::set<uintptr_t> known_targets;
-	if(pause_timed_spins)known_targets.insert(starts.begin(),starts.end());
 	for (size_t function_index = 0; function_index < starts.size(); ++function_index) {
 		const uintptr_t function_start = starts[function_index];
 		const uintptr_t function_end =
@@ -1620,16 +1535,6 @@ GuestInstructionPatchResult PatchGuestInstructions(u64 segment_addr, u64 segment
 
 		++result.function_count;
 		auto function = DecodeFunction(function_start, function_end, segment_addr, segment_end);
-		if(pause_timed_spins) {
-			CollectTimedSpinPauseCandidates(function,timed_spin_candidates);
-			known_targets.insert(function.branch_targets.begin(),function.branch_targets.end());
-			// Include known direct entries from ALL decoded functions, not just the
-			// candidate function, before applying any optional selfmove rewrite.
-			for(const auto& [address,decoded]:function.instructions) {
-				const auto target=GetRelativeTarget(decoded);
-				if(target!=0)known_targets.insert(target);
-			}
-		}
 		if (analyze_red_zone) {
 			AnalyzeRedZoneLiveness(function);
 		}
@@ -1652,7 +1557,6 @@ GuestInstructionPatchResult PatchGuestInstructions(u64 segment_addr, u64 segment
 			TrapUnrelocatedInstructions(*module, function, rewrite_sites, result);
 		}
 	}
-	if(pause_timed_spins)ApplyTimedSpinPauseCandidates(*module,timed_spin_candidates,known_targets,result);
 	const auto trampoline_addr =
 	    reinterpret_cast<u64>(module->trampoline_gen.getCode()) + trampoline_begin;
 	const auto trampoline_size = module->trampoline_gen.getSize() - trampoline_begin;

@@ -1723,8 +1723,7 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 #else
 	const bool protect_memory_faults = false;
 #endif
-	const bool pause_timed_spins=TimedSpinPauseEnabled();
-	const bool patch_guest_instructions = protect_memory_faults || emulate_amd || pause_timed_spins;
+	const bool patch_guest_instructions = protect_memory_faults || emulate_amd;
 
 	constexpr uint64_t INSTRUCTION_TRAMPOLINE_SIZE = 8u * 1024u * 1024u;
 	if (patch_guest_instructions) {
@@ -1854,12 +1853,6 @@ void RuntimeLinker::LoadProgramToMemory(Program* program) {
 			totals.insertq += result.insertq;
 			totals.rdpid += result.rdpid;
 			totals.clwb += result.clwb;
-			totals.timed_spin_pause += result.timed_spin_pause;
-			if(pause_timed_spins) {
-				LOGF("Decoded timed-spin PAUSE: %s, found=%" PRIu64 ", native=%" PRIu64 ", skipped=%" PRIu64 "\n",
-				     module_name.c_str(),result.timed_spin_pause.found,result.timed_spin_pause.native,
-				     result.timed_spin_pause.Skipped());
-			}
 			if (protect_memory_faults) {
 				LOGF("Windows guest red-zone patching: %s, functions=%" PRIu64 ", red_zone=%" PRIu64
 				     ", memory=%" PRIu64 ", patched=%" PRIu64 ", short=%" PRIu64 ", stack=%" PRIu64
