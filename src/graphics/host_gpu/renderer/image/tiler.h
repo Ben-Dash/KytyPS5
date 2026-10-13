@@ -89,6 +89,10 @@ public:
 	               uint64_t tiled_offset, uint64_t tiled_capacity, uint64_t linear_capacity,
 	               std::span<const GpuTileInfo> infos,
 	               ColorTransform               transform = ColorTransform::None);
+	// Complete raw color upload; false keeps the ordinary detile/transfer route.
+	[[nodiscard]] bool TryUploadImage(Image& image, Result source, uint64_t linear_capacity,
+	    std::span<const GpuTileInfo> infos, std::span<const vk::BufferImageCopy> regions,
+	    ColorTransform transform = ColorTransform::None);
 	[[nodiscard]] Result GetScratchBuffer(uint64_t size);
 	void                 ConvertD16(Result source, Result target, D16Direction direction, bool d32,
 	                                const D16Layout& layout);
@@ -154,6 +158,7 @@ private:
 	            vk::Buffer target, uint64_t target_offset, uint64_t target_capacity,
 	            std::span<Dispatch> dispatches, bool clear_target);
 	[[nodiscard]] vk::Pipeline GetPipeline(uint32_t slot);
+	[[nodiscard]] vk::Pipeline GetRawUploadPipeline(uint32_t bytes_per_element);
 
 	GraphicContext&                         m_graphics;
 	CommandScheduler&                       m_scheduler;
@@ -166,6 +171,9 @@ private:
 	vk::Pipeline                            m_d24_to_d16      = nullptr;
 	vk::Pipeline                            m_d32_to_d16      = nullptr;
 	vk::Pipeline                            m_color_transform = nullptr;
+	vk::DescriptorSetLayout                 m_raw_upload_descriptor_layout = nullptr;
+	vk::PipelineLayout                      m_raw_upload_pipeline_layout = nullptr;
+	std::array<vk::Pipeline, 2>              m_raw_upload_pipelines {};
 	// Shared with the deferred operations that return buffers, which may outlive this manager.
 	std::shared_ptr<ScratchPool>            m_scratch_pool;
 };

@@ -10,6 +10,8 @@
 #include "gpu_tiler_shaders/gpu_tiler_prt_3d_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_prt_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_render_target_spv.h"
+#include "gpu_tiler_shaders/gpu_tiler_render_target_upload32_spv.h"
+#include "gpu_tiler_shaders/gpu_tiler_render_target_upload64_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_standard256_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_standard4_3d_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_standard4_spv.h"
@@ -22,6 +24,7 @@
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/image.h"
+#include "graphics/host_gpu/renderer/image/imageView.h"
 
 #include <algorithm>
 #include <array>
@@ -157,6 +160,13 @@ TileManager::~TileManager() {
 	if (m_color_transform != nullptr) {
 		m_graphics.device.destroyPipeline(m_color_transform, nullptr);
 	}
+	for (auto pipeline: m_raw_upload_pipelines) {
+		if (pipeline != nullptr) m_graphics.device.destroyPipeline(pipeline, nullptr);
+	}
+	if (m_raw_upload_pipeline_layout != nullptr)
+		m_graphics.device.destroyPipelineLayout(m_raw_upload_pipeline_layout, nullptr);
+	if (m_raw_upload_descriptor_layout != nullptr)
+		m_graphics.device.destroyDescriptorSetLayout(m_raw_upload_descriptor_layout, nullptr);
 	if (m_pipeline_layout != nullptr) {
 		m_graphics.device.destroyPipelineLayout(m_pipeline_layout, nullptr);
 	}
@@ -436,6 +446,180 @@ vk::Pipeline TileManager::GetPipeline(uint32_t slot) {
 	m_graphics.device.destroyShaderModule(module, nullptr);
 	RequireVulkanSuccess(result, "create TileManager pipeline");
 	return m_pipelines[slot];
+}
+
+vk::Pipeline TileManager::GetRawUploadPipeline(uint32_t bytes_per_element) {
+	EXIT_IF(bytes_per_element != 4u && bytes_per_element != 8u);
+	const auto index = bytes_per_element == 4u ? 0u : 1u;
+	if (m_raw_upload_pipelines[index] != nullptr) return m_raw_upload_pipelines[index];
+	if (m_raw_upload_pipeline_layout == nullptr) {
+		const std::array<vk::DescriptorSetLayoutBinding, 3> bindings {{
+		    {0, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr},
+		    {1, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute, nullptr},
+		    {2, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute, nullptr}}};
+		vk::DescriptorSetLayoutCreateInfo descriptors {};
+		descriptors.flags = vk::DescriptorSetLayoutCreateFlagBits::ePushDescriptorKHR;
+		descriptors.bindingCount = static_cast<uint32_t>(bindings.size());
+		descriptors.pBindings = bindings.data();
+		RequireVulkanSuccess(m_graphics.device.createDescriptorSetLayout(
+		    &descriptors, nullptr, &m_raw_upload_descriptor_layout), "create raw tiled upload descriptors");
+		vk::PipelineLayoutCreateInfo layout {};
+		layout.setLayoutCount = 1;
+		layout.pSetLayouts = &m_raw_upload_descriptor_layout;
+		RequireVulkanSuccess(m_graphics.device.createPipelineLayout(
+		    &layout, nullptr, &m_raw_upload_pipeline_layout), "create raw tiled upload pipeline layout");
+	}
+	const auto code = index == 0u ? std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD32_SPV)
+	                              : std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD64_SPV);
+	const auto module = CompileSPV(code, m_graphics.device);
+	vk::PipelineShaderStageCreateInfo stage {};
+	stage.stage = vk::ShaderStageFlagBits::eCompute;
+	stage.module = module;
+	stage.pName = "main";
+	vk::ComputePipelineCreateInfo create {};
+	create.stage = stage;
+	create.layout = m_raw_upload_pipeline_layout;
+	const auto result = m_graphics.device.createComputePipelines(
+	    nullptr, 1, &create, nullptr, &m_raw_upload_pipelines[index]);
+	m_graphics.device.destroyShaderModule(module, nullptr);
+	RequireVulkanSuccess(result, "create raw tiled upload pipeline");
+	return m_raw_upload_pipelines[index];
+}
+
+bool TileManager::TryUploadImage(Image& image, Result source, uint64_t linear_capacity,
+                                 std::span<const GpuTileInfo> infos,
+                                 std::span<const vk::BufferImageCopy> regions,
+                                 ColorTransform transform) {
+	// First supported route owns every native texel of one complete color subresource.
+	// Unsupported metadata/capabilities retain the ordinary detile/transfer route.
+	const auto& native = image.backing;
+	const auto& info = image.info;
+	if (transform != ColorTransform::None || info.GetColorTransform() != ColorTransform::None ||
+	    info.IsBlock() || info.IsDepth() || info.HasStencil() || info.HasMetadata() ||
+	    info.type != Prospero::ImageType::kColor2D || info.tile_mode != Prospero::TileMode::kRenderTarget ||
+	    info.samples != 1u || info.resources.levels != 1u || info.resources.layers != 1u ||
+	    info.extent.width == 0u || info.extent.height == 0u || info.extent.depth != 1u ||
+	    native.image == nullptr || native.image_type != vk::ImageType::e2D || native.samples != 1u ||
+	    native.mip_levels != 1u || native.layers != 1u || native.extent != info.extent ||
+	    !(native.flags & vk::ImageCreateFlagBits::eMutableFormat) ||
+	    !(native.usage & vk::ImageUsageFlagBits::eStorage) || m_graphics.max_push_descriptors < 3u ||
+	    infos.size() != 1u || regions.size() != 1u || source.buffer == nullptr) return false;
+	const auto& tile = infos.front();
+	const auto& copy = regions.front();
+	if ((tile.bytes_per_element != 4u && tile.bytes_per_element != 8u) ||
+	    tile.bytes_per_element != info.bytes_per_block || tile.family != TileBlockFamily::RenderTarget64KB ||
+	    tile.tail || tile.depth != 1u || tile.surface_z != 0u || tile.width != info.extent.width ||
+	    tile.height != info.extent.height || tile.linear_offset != 0u ||
+	    copy.bufferOffset != 0u || copy.imageOffset != vk::Offset3D {0, 0, 0} ||
+	    copy.imageExtent != info.extent || copy.imageSubresource.aspectMask != vk::ImageAspectFlagBits::eColor ||
+	    copy.imageSubresource.mipLevel != 0u || copy.imageSubresource.baseArrayLayer != 0u ||
+	    copy.imageSubresource.layerCount != 1u ||
+	    (copy.bufferRowLength != 0u ? copy.bufferRowLength : copy.imageExtent.width) != tile.pitch ||
+	    (copy.bufferImageHeight != 0u ? copy.bufferImageHeight : copy.imageExtent.height) != tile.height ||
+	    source.size == 0u || source.offset % 4u != 0u || source.size % 4u != 0u ||
+	    source.offset > UINT64_MAX - source.size ||
+	    (source.capacity != 0u &&
+	     (source.offset > source.capacity || source.size > source.capacity - source.offset)) ||
+	    tile.tiled_size == 0u || tile.tiled_offset > source.size || tile.tiled_size > source.size - tile.tiled_offset ||
+	    tile.linear_size == 0u || tile.linear_size > linear_capacity) return false;
+	const auto& limits = m_graphics.GetPhysicalDeviceProperties().limits;
+	const auto alignment = std::max<uint64_t>(limits.minStorageBufferOffsetAlignment, 4u);
+	const auto descriptor_offset = Common::AlignDown(source.offset, alignment);
+	const auto base = source.offset - descriptor_offset;
+	const auto capacity = source.capacity != 0u ? source.capacity : source.offset + source.size;
+	if (base > UINT32_MAX || source.size > UINT32_MAX - base ||
+	    base + source.size > UINT64_MAX - 3u) return false;
+	const auto descriptor_range = Common::AlignUp(base + source.size, uint64_t {4});
+	if (descriptor_range > limits.maxStorageBufferRange || descriptor_range > UINT32_MAX ||
+	    descriptor_offset > capacity || descriptor_range > capacity - descriptor_offset) return false;
+	const auto raw_format = tile.bytes_per_element == 4u ? vk::Format::eR32Uint
+	                                                    : vk::Format::eR16G16B16A16Uint;
+	if (!ImageViewOps::FormatsCompatible(native.format, raw_format) ||
+	    !(m_graphics.GetFormatProperties(raw_format).optimalTilingFeatures &
+	      vk::FormatFeatureFlagBits::eStorageImage)) return false;
+	vk::ImageFormatProperties properties {};
+	if (m_graphics.GetImageFormatProperties(raw_format, vk::ImageType::e2D,
+	    vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eStorage, native.flags, &properties) !=
+	        vk::Result::eSuccess || !(properties.sampleCounts & vk::SampleCountFlagBits::e1) ||
+	    info.extent.width > properties.maxExtent.width || info.extent.height > properties.maxExtent.height ||
+	    properties.maxMipLevels < 1u || properties.maxArrayLayers < 1u) return false;
+
+	// Existing preparation validates tile/source/destination ranges and dispatch limits.
+	// Reserve its stream bytes before recording the source dependency: Map can submit a tick.
+	const auto source_binding = BindStorage(source, source.size);
+	std::vector<Dispatch> dispatches;
+	Prepare(false, source.size, linear_capacity, infos, source_binding.base, 0, dispatches);
+	EXIT_IF(dispatches.size() != 1u);
+	ImageViewInfo view {};
+	view.format = raw_format;
+	view.type = vk::ImageViewType::e2D;
+	view.aspect = vk::ImageAspectFlagBits::eColor;
+	view.level_count = view.layer_count = 1u;
+	view.usage = vk::ImageUsageFlagBits::eStorage;
+	const auto raw_view = image.FindView(view);
+	const auto pipeline = GetRawUploadPipeline(tile.bytes_per_element);
+	m_scheduler.EndRendering();
+	const auto command = m_scheduler.Current().Handle();
+	GpuZones::Mark(command, DrainStats::Zone::Tiler);
+	std::array<vk::BufferMemoryBarrier2, 2> buffers {};
+	buffers[0].srcStageMask = vk::PipelineStageFlagBits2::eAllCommands | vk::PipelineStageFlagBits2::eHost;
+	buffers[0].srcAccessMask = vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eHostWrite;
+	buffers[0].dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+	buffers[0].dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+	buffers[0].srcQueueFamilyIndex = buffers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	buffers[0].buffer = source.buffer;
+	buffers[0].offset = source.offset;
+	buffers[0].size = source.size;
+	buffers[1].srcStageMask = vk::PipelineStageFlagBits2::eHost;
+	buffers[1].srcAccessMask = vk::AccessFlagBits2::eHostWrite;
+	buffers[1].dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+	buffers[1].dstAccessMask = vk::AccessFlagBits2::eUniformRead;
+	buffers[1].srcQueueFamilyIndex = buffers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	buffers[1].buffer = m_stream_buffer.Handle();
+	buffers[1].offset = dispatches.front().params_offset;
+	buffers[1].size = sizeof(Push);
+	const auto image_barriers = image.GetBarriers(vk::ImageLayout::eGeneral,
+	    vk::AccessFlagBits2::eShaderWrite, vk::PipelineStageFlagBits2::eComputeShader, {});
+	vk::DependencyInfo dependency {};
+	dependency.bufferMemoryBarrierCount = static_cast<uint32_t>(buffers.size());
+	dependency.pBufferMemoryBarriers = buffers.data();
+	dependency.imageMemoryBarrierCount = static_cast<uint32_t>(image_barriers.size());
+	dependency.pImageMemoryBarriers = image_barriers.data();
+	command.pipelineBarrier2(dependency);
+	const vk::DescriptorImageInfo destination {nullptr, raw_view, vk::ImageLayout::eGeneral};
+	const vk::DescriptorBufferInfo parameters {m_stream_buffer.Handle(), dispatches.front().params_offset, sizeof(Push)};
+	std::array<vk::WriteDescriptorSet, 3> writes {};
+	for (uint32_t index = 0; index < writes.size(); ++index) {
+		writes[index].dstBinding = index;
+		writes[index].descriptorCount = 1u;
+	}
+	writes[0].descriptorType = vk::DescriptorType::eStorageBuffer;
+	writes[0].pBufferInfo = &source_binding.info;
+	writes[1].descriptorType = vk::DescriptorType::eStorageImage;
+	writes[1].pImageInfo = &destination;
+	writes[2].descriptorType = vk::DescriptorType::eUniformBuffer;
+	writes[2].pBufferInfo = &parameters;
+	command.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, m_raw_upload_pipeline_layout,
+	    0, static_cast<uint32_t>(writes.size()), writes.data());
+	command.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+	command.dispatch((tile.width + 7u) / 8u, (tile.height + 7u) / 8u, 1u);
+	m_scheduler.NoteCommandRecorded();
+	// Match Image::Upload's tracked final consumer state; no ownership/publication shortcuts.
+	image.Transit(vk::ImageLayout::eGeneral,
+	    vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {}, command);
+	// Complete this source read before any later queue writer reuses its bytes.
+	// Host writes still use BufferCache's existing protection/tick publication contract.
+	auto source_after = buffers[0];
+	source_after.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+	source_after.srcAccessMask = vk::AccessFlagBits2::eShaderRead;
+	source_after.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+	source_after.dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+	dependency.bufferMemoryBarrierCount = 1u;
+	dependency.pBufferMemoryBarriers = &source_after;
+	dependency.imageMemoryBarrierCount = 0u;
+	dependency.pImageMemoryBarriers = nullptr;
+	command.pipelineBarrier2(dependency);
+	return true;
 }
 
 void TileManager::Record(vk::Buffer source, uint64_t source_offset,

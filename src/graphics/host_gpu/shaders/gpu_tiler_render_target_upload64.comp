@@ -1,0 +1,7 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define RAW_UPLOAD_BYTES 8
+#define RAW_UPLOAD_FORMAT rgba16ui
+const uint ELEMENT_BYTES = 8u;
+#include "gpu_tiler_render_target.inc"
+#include "gpu_tiler_raw_upload_common.inc"

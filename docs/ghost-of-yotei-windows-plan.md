@@ -1,5 +1,54 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: fused upload GREEN and19–24% native gain, 2026-10-13
+
+Shared production fusion WIP at4fbf4ea9+saved patch. Native build020946 PASS;
+SAME cost fixture021044/F5602E25 GREEN after015650/2AB4DBB4 intendedRED: BOTH
+4/8-byte full native bits/guards/raw views/cleanup remain exact; copy1 ->0.
+GPU A/B/A015658/021054/archived021055:4B21952/16576/21760ns,8B32800/26560/
+32928ns median. Bracketing operation time reduction24.1581%/19.1821%; all54
+real fresh uploads pass. This is128x128 operation proof, not game FPS or4K proof.
+New shader sources archived beside native-a-b-a-comparison.json in cycle9.
+
+Fresh shader-compute build021201 and shared native tiler021320 PASS358cases/
+264format-mode pairs. BC4/5/7 cache aliases and mip-copy neighbors021408/409 PASS.
+Odd127x65/pitch128/interior sourceoffset4 controls021857 PASS. Final022337 build
+and CTest3/3 PASS1.36s cover actual later native source overwrite: image retains
+original bits, source changes, guards exact. New-route unsupported capability/
+partial/stream/deferred controls remain pending; original unsupported paths have
+shared tiler/cache coverage. Native core/install/uninstrumented30s world retry
+pending. No native process currently active.
+Details: [fused upload](yotei-fused-tiled-upload-2026-10-13.md).
+
+Main-only closed diagnostic extractor validates exactscope/internal3/OSTID25668:
+five NOMINAL counter periods145..170s record1,228,568calls; six graphics builders
+62.04% of frequency. No selected clock/sleep traces or counted kernel rows there.
+Coverage is incomplete and frequency is not CPU time; missed CPU sampler is not
+invented. Agents prepare bounded sampled HLE duration and Main fault-site scope.
+Three-agent alternatives/root serialized work/fullrender/neutral/no menus or
+buttons/WSLstopped remain. World~3FPS; actual1080/full effects/stable60 unresolved.
+
+## Current checkpoint: Main-only diagnostic completed, 2026-10-13
+
+Local native instrumentation4fbf4ea9 core015819/install015903 PASS. Private
+EXE76A4C80891AA20118E3271643B5AE3F8BE55F6121B16905F93B836C75F941EDD,
+cloned actualPerformance profile/warm cache; no guest behavior optimization.
+Neutral full-render run `game-20261013-015914-perf-cycle10-main-hle-attribution-world-30s-ca4726`
+PID40916 closed02:02:12UTC/exit0/no guards after complete650-gated30s diagnostic.
+Counters explicitly tag scope=main; exact identity internal3/WindowsTID25668.
+Top Main calls are AGC packet builders; time APIs do not dominate frequency.
+Frequency/callsites do not prove CPU duration. Read-only OS CPU sampler missed
+its window, so NO new CPU occupancy numbers may be claimed. Corrected ignored
+extractor/timed attribution proposal pending. Instrumented FPS is not a gain.
+
+Completed native upload A015658:4-byte median21952ns/min21280/max22880;8-byte
+32800ns/min32416/max33280; both exact full native bits/guards/liveupload PASS.
+Production fusion remains unapplied pending narrow shared patch/native unchanged
+costGREEN and GPU A/B/A/unsupported-neighbor controls. Actual world remains
+~3FPS; native query option's2.1% is not useful. Tests/instrumentation commits
+eade141b/4fbf4ea9 local only; no push/issue posts/images. No active native process
+at this checkpoint; check again on resume. WSL stopped, source work preserved.
+
 ## Current checkpoint: query option no useful gain; upload RED; Main diagnostic, 2026-10-13
 
 Actual Performance world baseline2.953571 versus existing real occlusion option

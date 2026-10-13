@@ -290,6 +290,8 @@ set(gpu_tiler_shader_names
 	prt
 	prt_3d
 	render_target
+	render_target_upload32
+	render_target_upload64
 	depth
 	promote_d16
 	demote_d16
@@ -869,6 +871,12 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --occlusion-native-cost-gpu)
 	set_tests_properties(native_occlusion_predication_gpu PROPERTIES
 		TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_OCCLUSION_QUERIES=1")
+	add_test(NAME fused_tiled_upload_cost
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-cost-gpu)
+	add_test(NAME fused_tiled_upload_odd_offset_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-odd-offset-gpu)
+	set_tests_properties(fused_tiled_upload_cost fused_tiled_upload_odd_offset_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)
 	add_test(NAME ngg_vertex_count_gpu

@@ -361,6 +361,7 @@ private:
 #include "EmbeddedFetchGpuTests.inc"
 #include "BcAliasOwnershipTests.inc"
 #include "FusedTiledUploadCostTests.inc"
+#include "FusedTiledUploadOddOffsetNeighbors.inc"
 #include "FusedTiledUploadGpuMicrobench.inc"
 #include "BcPartialBufferWriteTests.inc"
 #include "BcAliasPartialTailPaddingTests.inc"
@@ -402,6 +403,7 @@ private:
 
 int main(int argc, char **argv) {
   if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                    std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0))
     Libs::Graphics::ConfigureFusedTiledUploadTests();
   if (argc == 2 && (std::strcmp(argv[1], "--user-game-preset-priority-only") == 0 ||
@@ -449,6 +451,7 @@ int main(int argc, char **argv) {
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
                             std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0 ||
@@ -599,6 +602,7 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
        std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
        std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
@@ -619,11 +623,14 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
   if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0)) {
     auto& renderer = vulkan.RuntimeRenderer();
     renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&] {
-      if (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0)
+      if (std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0)
+        CheckFusedTiledUploadOddOffsetNeighbors(vulkan);
+      else if (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0)
         CheckFusedTiledUploadCost(vulkan);
       else
         CheckFusedTiledUploadGpuMicrobench(vulkan);

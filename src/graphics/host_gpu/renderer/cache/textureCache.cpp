@@ -1485,6 +1485,11 @@ void TextureCache::UploadImage(Image& image, Buffer& source, uint64_t source_off
 			     info.resources.layers, info.samples);
 		}
 		TileManager::Result linear {source.Handle(), source_offset, info.data.size, source.Size()};
+		if (!transfer.tiles.empty() &&
+		    m_tiler.TryUploadImage(destination, linear, transfer.LinearSize(), transfer.tiles,
+		                           transfer.regions, transfer.color_transform)) {
+			return;
+		}
 		if (!transfer.tiles.empty()) {
 			linear = m_tiler.Detile(source.Handle(), source_offset, info.data.size,
 			                        transfer.LinearSize(), transfer.tiles, transfer.color_transform);
