@@ -93,6 +93,8 @@ namespace Libs {
 // without it and count nothing.
 using CountCallFunc = void (*)(const char* library, const char* function, void* return_slot);
 inline CountCallFunc g_count_call = nullptr;
+// Physical guest Main role for opt-in diagnostics only; no scheduler behavior.
+inline thread_local bool g_main_call_diagnostic_role = false;
 void                 TraceCalls(uint32_t count) noexcept;
 void                 TraceAllCalls(std::chrono::milliseconds duration) noexcept;
 

@@ -45,6 +45,7 @@ struct CallCounter {
 };
 constexpr size_t                          CallCounterCount = 4096;
 std::array<CallCounter, CallCounterCount> g_call_counters;
+const bool g_main_call_diagnostic_only = KYTY_GETENV("KYTY_DEBUG_CALL_COUNTS_MAIN") != nullptr;
 
 // KYTY_DEBUG_TRACE_FUNCTIONS=<name>,<name>,...: prints the guest callers of the first
 // KYTY_DEBUG_TRACE_LIMIT (default 100) calls of each named function in every 5 s window (names as
@@ -89,6 +90,9 @@ void PrintCallCounts() {
 		std::sort(calls.begin(), calls.end(),
 		          [](const auto& a, const auto& b) { return a.first > b.first; });
 		std::string line = fmt::format("call-counts: t={}s total={}", window * 5, total);
+		if (g_main_call_diagnostic_only) {
+			line += " scope=main";
+		}
 		for (size_t i = 0; i < std::min<size_t>(calls.size(), 200); i++) {
 			const char* library  = calls[i].second->library.load();
 			const char* function = calls[i].second->function.load();
@@ -162,6 +166,9 @@ static void CountCall(const char* library, const char* function, void* return_sl
 		} else if (std::strncmp(library, "Graphics5", 9) != 0) {
 			PrintTracedCall(library, function, return_slot);
 		}
+	}
+	if (g_main_call_diagnostic_only && !g_main_call_diagnostic_role) {
+		return;
 	}
 	const auto first = (reinterpret_cast<uintptr_t>(function) >> 4u) % CallCounterCount;
 	for (size_t probe = 0; probe < CallCounterCount; probe++) {

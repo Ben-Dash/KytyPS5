@@ -1026,6 +1026,12 @@ void PthreadInitSelfForMainThread() {
 #endif
 	g_pthread_self->host_thread_id = os_thread_id;
 	g_pthread_main                 = g_pthread_self;
+	Libs::g_main_call_diagnostic_role = true;
+	if (Libs::g_count_call != nullptr) {
+		std::printf("call-main-role: internal=%d os_thread_id=%" PRIu64 "\n",
+		            g_pthread_self->unique_id, os_thread_id);
+		std::fflush(stdout);
+	}
 
 	LOGF("\tPthread main self: id = %d, os_thread_id = %" PRIu64 ", stack_addr = 0x%016" PRIx64
 	     ", stack_size = %" PRIu64 "\n",
