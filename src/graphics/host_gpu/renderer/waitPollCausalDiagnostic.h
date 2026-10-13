@@ -11,7 +11,10 @@
 
 namespace Libs::Graphics::WaitPollDiagnostic {
 inline constexpr uint32_t QueueCount = 57, SlotCount = QueueCount * 2;
-inline constexpr uint64_t RowLimit = 16384;
+// The bounded world capture requested65565 sparse WAIT rows alongside77874
+// other rows. This sublimit fits inside the262144 shared trace; still report
+// suppression and shared-ring loss rather than silently treating a prefix as full.
+inline constexpr uint64_t RowLimit = 131072;
 enum class PollPath : uint32_t {
   NotPolled, FallbackReady, TrackerClean, DownloadNowClean, UnpublishedSubmitted, UnpublishedFlushed,
   Count
