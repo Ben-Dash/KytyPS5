@@ -1,5 +1,70 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: repeated chain1 +27%, two world frames reviewed, 2026-10-13
+
+Same184fdb2b/EXE982918F5 repeated full neutral chain1 run
+`game-20261013-063738-perf-cycle23-chain1-confirm-and-capture-82ec95` completed
+06:40:12UTC/exit0/no guards. Full30s651..761/28title values mean3.882143,
+min3.7/max4.1 versus matched chain0 mean3.0625 (+26.76% single control).
+Prior chain1 repeat3.8 (+24.08%) agrees directionally. FPS comes from window
+titles in world, not screenshots. Useful observed gain; stable60 still absent.
+
+After complete sample, two1936x1119 window captures (1920x1080 client) at766/771
+were reviewed: character/instrument/nearby buildings show no obvious stretching
+or disappearance; visible grass, fire and sparks. The second title2.0 reflects
+post-sample capture/focus perturbation and is excluded from the benchmark.
+Evidence: `confirmed-gain-world-1.png`, `confirmed-gain-world-2.png` in that run.
+Two nearby frames are NOT full motion stability/wind/water/volumetric/reflection/
+shadow correctness or actual internal1080 proof. No new issue milestone post.
+
+Use explicit KYTY_COMPUTE_CHAIN1 for subsequent performance candidates; retain
+chain0 as the recorded control. No new global environment/core default change.
+HALF_UNIFORM stays off (cold driver compile prevented world sample); raw-wave32
+EXEC_HI oracle remains pending, no production SAVEEXEC patch.
+Next strongest research: bounded native redundant tail-submit reproduction with
+copy/fill/callback/timestamp/eager negatives before any conditional flush; actual
+GPU hot-work capture/complete inputs; generic video-output contract (no static
+always4K bug established, Astro resolution patch does not apply to Yotei).
+No native process active now (verify); source clean except docs/preexisting
+prefetch WIP. WSL stopped/no menus/input/new push/posts; all artifacts preserved.
+
+## Current checkpoint: chain1 actual world +24%, repeat/image pending, 2026-10-13
+
+SAME184fdb2b/EXE982918F5 full neutral chain0 mean3.0625 vs chain1 candidate
+`game-20261013-063118-perf-cycle22-chain1-world-title-30s-a384e1` complete30s
+650..762/29title values mean3.8, min3.5/max3.9,exit0/no guards. Single-pair
+gain24.08%, a useful observed candidate, NOT stable60 or full rendered proof.
+No images from the timed run. Existing native ordinary-buffer chain boundaries
+pass under0/1; BDA/image alias coverage remains partial.
+
+SAME runtime/source/shader policy repeat+post-sample capture
+`game-20261013-063738-perf-cycle23-chain1-confirm-and-capture-82ec95` active
+PID50700/root78455,started06:37:38UTC. Helper captures two frames ONLY after
+complete30s and >=10% mean gain against3.0625, then normal owned cleanup; capture
+does not enter measured interval. SOURCEFROZEN, verify actual run/process on resume.
+No default flag change yet. Native rendering/effects/internal1080/image stability
+still pending. Three next researches: generic output resolution contract;
+actual hot GPU work/capture with complete inputs; submission flush boundaries
+with required publication/order retained. No menu/buttons/push/posts, WSL stopped.
+
+## Current checkpoint: image/eager world3.06, existing chain trial active, 2026-10-13
+
+Local184fdb2b core062315/install062510 PASS, EXE
+982918F5613F7387033B0E29767A8904812139CDC19D829D1F3E169F6BC66A1A.
+New registered7CTests PASS2.72s. Full neutral chain0/HALFoff world
+`game-20261013-062604-perf-cycle21-image-scopes-eager-world-title-30s-455f07`
+complete30s650..739/24title values mean3.0625, min2.9/max3.2,exit0/no guards.
+Previous clean37b3.038462 differs by0.79% single-pair: NO useful FPS gain or image
+proof. Shared native correctness/cost fixes retained; actual60 unresolved.
+
+SAME EXE, new private clone, only existing KYTY_COMPUTE_CHAIN1 candidate
+`game-20261013-063118-perf-cycle22-chain1-world-title-30s-a384e1` started06:31:18UTC
+PID29508/root66029. Full neutral/original shader policy/no diagnostics or input,
+650gated30s after bounded warmup. SOURCEFROZEN; verify process/run before resume.
+Ordinary-buffer native boundaries proven0/1, but BDA/image alias and rendered
+game effect still pending. No default policy change, no images until useful
+title FPS gain. WSL stopped; no new push/issue comments. Preserve prefetch WIP.
+
 ## Current checkpoint: image scopes and eager page batches native GREEN, 2026-10-13
 
 Image planner genuine RED055808/055809(042570B7) ->same GREEN060021/060022
