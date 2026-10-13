@@ -65,6 +65,46 @@
 namespace Libs::Graphics {
 
 namespace {
+namespace MatDiag = ShaderRecompiler::IR::MaterializationDiagnostics;
+struct MaterializationProfileBridge final {
+  FunctionProfile::Scope& parent;
+  MatDiag::Observer observer;
+  const MatDiag::Observer* previous=nullptr;
+  std::optional<FunctionProfile::Scope> leaf;
+  bool installed=false;
+  static std::optional<MatDiag::Phase> SelectedPhase() {
+    static const auto choice=[]()->std::optional<MatDiag::Phase> {
+      const char* text=KYTY_GETENV("KYTY_DEBUG_MATERIALIZATION_PHASE");
+      if(text==nullptr)return std::nullopt;
+      constexpr const char* names[]{"setup","active","flat","memo","decode","specialization","counters"};
+      for(uint32_t i=0;i<std::size(names);++i)
+        if(std::strcmp(text,names[i])==0)return static_cast<MatDiag::Phase>(i);
+      return std::nullopt;
+    }();
+    return choice;
+  }
+  explicit MaterializationProfileBridge(FunctionProfile::Scope& p) : parent(p) {
+    if(!p.Sampled())return;const auto phase=SelectedPhase();if(!phase)return;
+    observer={this,Phase,Count};previous=MatDiag::observer;MatDiag::observer=&observer;installed=true;
+    parent.Count(MatDiag::Counter::SampledCalls);
+    if(*phase!=MatDiag::Phase::Count)parent.Count(MatDiag::Counter::SelectedLeafId,static_cast<uint32_t>(*phase)+1u);
+  }
+  ~MaterializationProfileBridge() { leaf.reset();if(installed)MatDiag::observer=previous; }
+  static void Count(void* userdata,MatDiag::Counter counter,uint64_t value) noexcept {
+    static_cast<MaterializationProfileBridge*>(userdata)->parent.Count(counter,value);
+  }
+  static void Phase(void* userdata,MatDiag::Phase phase,bool begin) noexcept {
+    auto& self=*static_cast<MaterializationProfileBridge*>(userdata);
+    if(SelectedPhase()!=phase)return;
+    if(begin)self.leaf.emplace(FunctionProfile::Site::MaterializationSelectedLeaf);
+    else self.leaf.reset();
+  }
+};
+} // namespace
+
+
+
+namespace {
 
 // Set once by the PipelineCache constructor, before any shader is translated: the device has
 // descriptor indexing and --bindless asked for it.
@@ -955,6 +995,7 @@ struct PipelineCache::ProgramCache {
 				DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::ResourceRefresh);
 				const bool materialized = [&] {
 					FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResources);
+				MaterializationProfileBridge bridge(profile);
 					return ShaderRecompiler::IR::MaterializeResources(
 					    source.resource_plan, runtime, source.resources, source.specialization, &source.memo);
 				}();
@@ -1099,6 +1140,7 @@ struct PipelineCache::ProgramCache {
 			}
 			const bool materialized = [&] {
 				FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResources);
+				MaterializationProfileBridge bridge(profile);
 				return ShaderRecompiler::IR::MaterializeResources(
 				    entry->second.resource_plan, runtime, entry->second.resources,
 				    entry->second.specialization, &entry->second.memo);
@@ -1238,6 +1280,7 @@ struct PipelineCache::ProgramCache {
 		};
 		const bool materialized = [&] {
 			FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResourcesLogged);
+			MaterializationProfileBridge bridge(profile);
 			return ShaderRecompiler::IR::MaterializeResourcesLogged(
 			    source->resource_plan, runtime, out.snapshot, out.specialization, out.reads);
 		}();

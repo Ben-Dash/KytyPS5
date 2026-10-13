@@ -1,5 +1,6 @@
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
+#include "graphics/shader/recompiler/ir/passes/ResourceMaterializationDiagnostics.h"
 
 #include <algorithm>
 #include <array>
@@ -1163,6 +1164,9 @@ void TestDmaSyntheticZeroReadsKeepValuesWithoutBacking() {
   }
 }
 
+// Diagnostic controls use the same independent memo/reference fixtures above.
+#include "MaterializationDiagnosticObserverTests.inc"
+
 } // namespace
 
 namespace Common {
@@ -1196,6 +1200,11 @@ void DbgExit(int code) {
 } // namespace Common
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--diagnostic-observer-only") == 0) {
+    TestMaterializationDiagnosticObserverPreservesActualRefresh();
+    std::puts("ResourceMaterializationTests: diagnostic observer controls passed");
+    return 0;
+  }
   const bool residency_only =
       argc == 2 && std::strcmp(argv[1], "--srt-residency-only") == 0;
   Check(argc == 1 || residency_only,

@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
+#include "graphics/shader/recompiler/ir/passes/ResourceMaterializationDiagnostics.h"
 
 #include "common/assert.h"
 #include "common/switches.h"
@@ -1382,6 +1383,8 @@ private:
 	};
 
 	bool Exact(uint64_t address, std::span<uint32_t> values) const {
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictReadCalls);
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictReadWords,values.size());
 		return m_source.read_specialization_memory(SpecializationUserdata(m_source), address, values);
 	}
 
@@ -1395,6 +1398,7 @@ private:
 		Block* block = nullptr;
 		for (uint32_t index = 0; index < m_count; index++) {
 			if (m_blocks[index].address == block_address) {
+				MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictBlockHits);
 				block = &m_blocks[index];
 				break;
 			}
@@ -1406,9 +1410,12 @@ private:
 				m_count++;
 			}
 			block->address = block_address;
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictBlockMisses);
 			block->clean   = Exact(block_address, block->words);
+			if(!block->clean)MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictBlockFailures);
 		}
 		if (!block->clean) {
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictExactFallbacks);
 			return Exact(address, values);
 		}
 		// Usually one dword: avoid a memmove call.
@@ -1458,6 +1465,8 @@ private:
 	};
 
 	bool Exact(uint64_t address, std::span<uint32_t> values) const {
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryReadCalls);
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryReadWords,values.size());
 		return m_source.read_memory(m_source.userdata, address, values);
 	}
 
@@ -1471,6 +1480,7 @@ private:
 		Block* block = nullptr;
 		for (uint32_t index = 0; index < m_count; index++) {
 			if (m_blocks[index].address == block_address) {
+				MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryBlockHits);
 				block = &m_blocks[index];
 				break;
 			}
@@ -1482,9 +1492,14 @@ private:
 				m_count++;
 			}
 			block->address = block_address;
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryBlockMisses);
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryWholeCalls);
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryReadWords,BlockWords);
 			block->whole   = m_source.read_memory_block(m_source.userdata, block_address, block->words);
+			if(!block->whole)MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryBlockFailures);
 		}
 		if (!block->whole) {
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryExactFallbacks);
 			return Exact(address, values);
 		}
 		const auto* words = block->words.data() + offset / sizeof(uint32_t);
@@ -1568,8 +1583,15 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
                  ResourceSpecialization& specialization, MaterializationMemo* memo) {
 	auto& reads = program.ThreadScratch().specialization_reads;
 	// The ordinary walker sends conditions that are not direct to its strict walker.
-	const auto active = walker.FindActiveSources();
-	if (!walker.RefreshFlatBuffer(snapshot.flattened_srt)) {
+	const auto active = [&] {
+		MaterializationDiagnostics::PhaseScope phase(MaterializationDiagnostics::Phase::Active);
+		return walker.FindActiveSources();
+	}();
+	const bool flat_refreshed = [&] {
+		MaterializationDiagnostics::PhaseScope phase(MaterializationDiagnostics::Phase::Flat);
+		return walker.RefreshFlatBuffer(snapshot.flattened_srt);
+	}();
+	if (!flat_refreshed) {
 		return ReportMaterializeFailure(program, "flat refresh", 0);
 	}
 	snapshot.uniform_fill = {};
@@ -1588,19 +1610,29 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 		snapshot.uniform_fill.uniform = uniform;
 	}
 	if constexpr (std::is_same_v<Roots, CompiledRoots>) {
+		MaterializationDiagnostics::PhaseScope phase(MaterializationDiagnostics::Phase::Memo);
+		MaterializationDiagnostics::Count(memo==nullptr?MaterializationDiagnostics::Counter::MemoAbsent:
+		    roots.compiled.memoizable?MaterializationDiagnostics::Counter::MemoEligible:
+		    MaterializationDiagnostics::Counter::MemoIneligible);
 		if (memo != nullptr) {
 			memo->reused = false;
 			if (roots.compiled.memoizable &&
 			    UpdateMemoKey(roots.compiled, runtime, active, snapshot.flattened_srt, *memo)) {
 				snapshot.user_data.assign(runtime.user_data.begin(), runtime.user_data.end());
 				memo->reused = true;
+				MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::MemoReused);
 				return true;
 			}
 			// The key now holds this refresh's inputs; it becomes valid only if the refresh
 			// succeeds.
 			memo->valid = false;
+			MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::MemoMiss);
 		}
 	}
+	MaterializationDiagnostics::PhaseScope decode_phase(MaterializationDiagnostics::Phase::Decode);
+	MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::BuffersDeclared,program.info.buffers.size());
+	MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::ImagesDeclared,program.info.images.size());
+	MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::SamplersDeclared,program.info.samplers.size());
 	snapshot.bindless_heaps.clear();
 	snapshot.bindless_sampler_heaps.clear();
 	const auto evaluate = [&](uint32_t source, DescriptorValue& value) {
@@ -1737,7 +1769,12 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 	if (capture_reads && !WrittenBuffersDisjoint(program, snapshot, reads))
 		return ReportMaterializeFailure(program, "written buffers overlap reads", 0);
 	snapshot.user_data.assign(runtime.user_data.begin(), runtime.user_data.end());
-	if (!BuildResourceSpecialization(program, snapshot, specialization)) {
+	decode_phase.End();
+	const bool specialized = [&] {
+		MaterializationDiagnostics::PhaseScope phase(MaterializationDiagnostics::Phase::Specialization);
+		return BuildResourceSpecialization(program,snapshot,specialization);
+	}();
+	if (!specialized) {
 		return false;
 	}
 	if constexpr (std::is_same_v<Roots, CompiledRoots>) {
@@ -1751,10 +1788,16 @@ bool Materialize(const ResourcePlan& program, const Roots& roots, const SrtRunti
 bool MaterializeCompiled(const ResourcePlan& program, const SrtRuntime& runtime,
                          ResourceSnapshot& snapshot, ResourceSpecialization& specialization,
                          MaterializationMemo* memo) {
+	MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::CompiledCalls);
+	MaterializationDiagnostics::PhaseScope setup_phase(MaterializationDiagnostics::Phase::Setup);
 	bool capture_reads = false;
 	bool result        = false;
 	if (MaterializationAllowed(program, runtime, capture_reads)) {
 		const auto&  compiled = CompileResourcePlan(program);
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::FlatSlots,program.srt_reads.size());
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::FlatRuns,compiled.flat_runs.size());
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::PlanNodes,compiled.nodes.size());
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::DescriptorSources,program.descriptor_sources.size());
 		// Read capture must see exact ranges.
 		CleanBlockCache blocks(runtime);
 		const bool      use_blocks = runtime.specialization_block_reads && !capture_reads &&
@@ -1763,14 +1806,21 @@ bool MaterializeCompiled(const ResourcePlan& program, const SrtRuntime& runtime,
 		OrdinaryBlockCache ordinary(clean_source);
 		const bool         ordinary_blocks = !capture_reads && runtime.read_memory != nullptr &&
 		                             runtime.read_memory_block != nullptr;
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::CaptureReads,capture_reads?1u:0u);
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::StrictBlocksEnabled,use_blocks?1u:0u);
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::OrdinaryBlocksEnabled,ordinary_blocks?1u:0u);
 		const auto   source = ordinary_blocks ? ordinary.Runtime() : clean_source;
 		ReadCapture  capture {source, program.ThreadScratch().specialization_reads};
 		const auto   observed = ObservedRuntime(source, capture_reads, capture);
 		SrtEvaluator clean(program, compiled, CleanRuntime(observed));
 		SrtEvaluator walker(program, compiled, observed, true, &clean);
+		setup_phase.End();
 		result = Materialize(program, CompiledRoots {compiled}, runtime, observed, capture_reads,
 		                     clean, walker, snapshot, specialization, memo);
 	}
+	setup_phase.End();
+	MaterializationDiagnostics::Count(result?MaterializationDiagnostics::Counter::CompiledSuccess:
+	    MaterializationDiagnostics::Counter::CompiledFailure);
 	if (!result && memo != nullptr) {
 		memo->valid  = false;
 		memo->reused = false;
@@ -1993,6 +2043,7 @@ bool ReadsUnchanged(const ReadLog& log, const SrtRuntime& runtime) {
 bool MaterializeResourcesReference(const ResourcePlan& program, const SrtRuntime& runtime,
                                    ResourceSnapshot&       snapshot,
                                    ResourceSpecialization& specialization) {
+	MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::ReferenceCalls);
 	bool capture_reads = false;
 	SrtResidencyReads residency(runtime, snapshot, program.info.uses_dma);
 	if (!MaterializationAllowed(program, runtime, capture_reads)) {
@@ -2018,6 +2069,7 @@ bool MaterializeResources(const ResourcePlan& program, const SrtRuntime& runtime
 	if (!result && !g_verify_materialization) {
 		// The compiled evaluator lacks some IR operations the walker knows (new resource tracking
 		// may bring more); the walker gives the draw its resources instead of skipping it.
+		MaterializationDiagnostics::Count(MaterializationDiagnostics::Counter::ReferenceFallback);
 		result = MaterializeResourcesReference(program, runtime, snapshot, specialization);
 	}
 	if (g_verify_materialization) {

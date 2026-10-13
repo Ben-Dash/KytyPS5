@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include "common/switches.h"
+#include "graphics/shader/recompiler/ir/passes/ResourceMaterializationDiagnostics.h"
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -20,6 +21,7 @@
 #endif
 
 namespace Libs::Graphics::FunctionProfile {
+namespace MatDiag = Libs::Graphics::ShaderRecompiler::IR::MaterializationDiagnostics;
 enum class Role : uint32_t { Other, Main, Gpu, Submit, DrawSpec, Upload };
 enum class Site : uint32_t {
   ProcessPm4,GetGraphicsPrograms,GetGraphicsPipeline,MaterializeResources,MaterializeResourcesLogged,
@@ -29,7 +31,7 @@ enum class Site : uint32_t {
   InvalidateMemory,DownloadBufferMemory,ReadbackGpuService,BufferPublish,PrepareBda,NativeFenceWait,
   PriorityWait,ServiceWait,QueueSubmit,RecorderPayload,RecorderIdleSpin,RecorderSignalWait,
   JoinAsyncUploads,DownloadImageMemory,ProcessDownloadImages,
-  DrawAuto,DrawIndex,DispatchDirect,DispatchIndirect,FaultHandler,ProgramPrecompileWait,PrepareGraphicsStages,AdoptGraphicsStages,GraphicsInputsCheck,GraphicsProgramMutexWait,GraphicsProgramsLocked,ProgramCacheGet,AdoptSpeculation,ProgramPermutationMatch,Count
+  DrawAuto,DrawIndex,DispatchDirect,DispatchIndirect,FaultHandler,ProgramPrecompileWait,PrepareGraphicsStages,AdoptGraphicsStages,GraphicsInputsCheck,GraphicsProgramMutexWait,GraphicsProgramsLocked,ProgramCacheGet,AdoptSpeculation,ProgramPermutationMatch,MaterializationSelectedLeaf,Count
 };
 inline constexpr uint32_t SiteCount=static_cast<uint32_t>(Site::Count),MaxThreads=64,MaxDepth=32;
 inline constexpr std::array<const char*,SiteCount> Names{
@@ -39,8 +41,9 @@ inline constexpr std::array<const char*,SiteCount> Names{
   "RecordReadback","Submit","Drain","InvalidateMemory","DownloadBufferMemory","ReadbackGpuService","BufferPublish",
   "PrepareBda","NativeFenceWait","PriorityWait","ServiceWait","QueueSubmit","RecorderPayload","RecorderIdleSpin",
   "RecorderSignalWait","JoinAsyncUploads","DownloadImageMemory","ProcessDownloadImages",
-  "DrawAuto","DrawIndex","DispatchDirect","DispatchIndirect","FaultHandler","ProgramPrecompileWait","PrepareGraphicsStages","AdoptGraphicsStages","GraphicsInputsCheck","GraphicsProgramMutexWait","GraphicsProgramsLocked","ProgramCacheGet","AdoptSpeculation","ProgramPermutationMatch"};
+  "DrawAuto","DrawIndex","DispatchDirect","DispatchIndirect","FaultHandler","ProgramPrecompileWait","PrepareGraphicsStages","AdoptGraphicsStages","GraphicsInputsCheck","GraphicsProgramMutexWait","GraphicsProgramsLocked","ProgramCacheGet","AdoptSpeculation","ProgramPermutationMatch","MaterializationSelectedLeaf"};
 struct Row {
+  std::array<std::atomic<uint64_t>,MatDiag::CounterCount> materialization_counts {};
   std::atomic<uint64_t> calls{0},sampled{0},wall_done{0},cpu_done{0},cpu_exclusive_done{0};
   std::atomic<uint64_t> wall_inclusive_ns{0},wall_exclusive_ns{0},cpu_inclusive_cycles{0},cpu_exclusive_cycles{0};
   std::atomic<uint64_t> max_wall_ns{0},query_wall_ns{0},query_errors{0},last_error{0};
@@ -163,6 +166,10 @@ class Scope final {
     }
     m_row->outstanding.fetch_sub(1,std::memory_order_release);
   }
+  [[nodiscard]] bool Sampled() const noexcept { return m_row!=nullptr&&m_sample; }
+  void Count(MatDiag::Counter counter,uint64_t value=1) noexcept {
+    if(Sampled())m_row->materialization_counts[static_cast<uint32_t>(counter)].fetch_add(value,std::memory_order_relaxed);
+  }
   Scope(const Scope&)=delete;Scope& operator=(const Scope&)=delete;
  private:
   Row* m_row=nullptr;Scope* m_parent;uint64_t m_epoch,m_wall_begin,m_cpu_begin,m_child_wall,m_child_cpu;
@@ -181,6 +188,13 @@ inline void Report() noexcept {
         r.wall_inclusive_ns.load(),r.wall_exclusive_ns.load(),r.cpu_inclusive_cycles.load(),r.cpu_exclusive_cycles.load(),r.max_wall_ns.load(),
         r.query_wall_ns.load(),r.query_count.load(),r.empty_probe_samples.load(),r.empty_probe_cycles.load(),r.empty_probe_errors.load(),
         r.query_errors.load(),r.last_error.load(),r.exclusive_invalid.load(),r.truncated.load(),r.outstanding.load(),r.depth_overflow.load());
+      if(r.materialization_counts[static_cast<uint32_t>(MatDiag::Counter::SampledCalls)].load()!=0) {
+        std::printf("function-profile-materialization tid=%u role=%u parent=%s population=selected_parent_calls",
+          tid,records[i].role.load(),Names[s]);
+        for(uint32_t c=0;c<MatDiag::CounterCount;++c)
+          std::printf(" %s=%llu",MatDiag::CounterNames[c],r.materialization_counts[c].load());
+        std::printf("\n");
+      }
     }
   }
   std::fflush(stdout);
