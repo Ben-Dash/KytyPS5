@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <chrono>
 #include <cinttypes>
 #include <cstdio>
@@ -579,6 +580,9 @@ void CommandStream::Impl::Drain() {
 	}
 	drains.fetch_add(1, std::memory_order_relaxed);
 	WakeIfSleeping();
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+	CommandStreamRegression::Observe(CommandStreamRegression::Phase::DrainWaiting);
+#endif
 	// The consumer takes a while to wake: waking it again on every spin would cost a kernel
 	// call each. Re-wake only now and then, for a consumer that went back to sleep.
 	for (uint32_t spins = 1; read.load(std::memory_order_acquire) < target; spins++) {
@@ -1751,6 +1755,18 @@ void CommandStream::Drain() {
 void CommandStream::Consume(std::stop_token stop) {
 	auto&    impl     = *m_impl;
 	uint64_t position = impl.read.load(std::memory_order_relaxed);
+	static const uint32_t idle_spin_limit = [] {
+		constexpr uint32_t Default = 2000;
+		const char* text = KYTY_GETENV("KYTY_RECORD_SPIN_ITERATIONS");
+		if (text == nullptr) return Default;
+		uint32_t value = 0;
+		const char* end = text + std::strlen(text);
+		const auto parsed = std::from_chars(text, end, value);
+		if (parsed.ec != std::errc {} || parsed.ptr != end || value > Default) {
+			EXIT("KYTY_RECORD_SPIN_ITERATIONS must be an integer from 0 to 2000\n");
+		}
+		return value;
+	}();
 	t_consuming       = &impl;
 	for (;;) {
 		const auto available = impl.write.load(std::memory_order_acquire);
@@ -1760,15 +1776,30 @@ void CommandStream::Consume(std::stop_token stop) {
 			}
 			// Spin a little: the GPU thread appends a few calls per draw.
 			bool more = false;
-			for (int i = 0; i < 2000 && !more; i++) {
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+			uint32_t completed_spins=0;
+#endif
+			for (uint32_t i = 0; i < idle_spin_limit && !more; i++) {
 				_mm_pause();
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+				++completed_spins;
+#endif
 				more = impl.write.load(std::memory_order_acquire) != position;
 			}
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+			CommandStreamRegression::Observe(CommandStreamRegression::Phase::EmptySpinComplete,completed_spins);
+#endif
 			if (more) {
 				continue;
 			}
 			const auto signal = impl.signal.load(std::memory_order_acquire);
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+			CommandStreamRegression::Observe(CommandStreamRegression::Phase::BeforeSleepMark);
+#endif
 			impl.sleeping.store(true, std::memory_order_seq_cst);
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+			CommandStreamRegression::Observe(CommandStreamRegression::Phase::AfterSleepMark);
+#endif
 			if (impl.write.load(std::memory_order_seq_cst) == position && !stop.stop_requested()) {
 				impl.sleeps.fetch_add(1, std::memory_order_relaxed);
 				// A stop request only wakes a waiter that re-checks: poll it with a timeout.
@@ -1776,6 +1807,9 @@ void CommandStream::Consume(std::stop_token stop) {
 					impl.signal.fetch_add(1, std::memory_order_release);
 					impl.signal.notify_one();
 				});
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+				CommandStreamRegression::Observe(CommandStreamRegression::Phase::BeforeSignalWait);
+#endif
 				impl.signal.wait(signal, std::memory_order_acquire);
 			}
 			impl.sleeping.store(false, std::memory_order_relaxed);

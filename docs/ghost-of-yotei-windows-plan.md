@@ -1,5 +1,70 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: settings trials closed; optional recorder policy native proof
+
+All game runs are closed. Same `ac0ac772`/EXE6205371B clean 30-second title trials:
+write-window-on 3.839286 FPS; removing unbuffered stdout 3.75; buffered stdout
+and label interval 4000us 3.865517 (29 values, frames 652–769, range 3.6–4.2).
+The last run `123427-311c4b` closed 12:36:54 UTC/0/no guards. None demonstrates
+a substantial stable FPS gain. Keep ordinary label interval 2000us; no images,
+new push or issue publication. Heavy debug work was already off.
+
+Actual 64 KiB-boundary test `124439/45B5B22D` now passes every native/backing
+word and guard, two real write faults/ticks/copies, 16 bytes/256 reserved.
+Earlier `123835` missed only the test exception witness; a test-only noinline
+store and compiler signal fences preserve its TLS registration. The production
+write fix and data/footprint oracles were unchanged.
+
+Next experiment is `KYTY_RECORD_SPIN_ITERATIONS=100`, optional 0..2000 with
+unchanged default 2000, changing only the recorder's empty-ring spin bound.
+Native CPU RED `124109/686EF8EF` passes all four payload/order/sleep-race/wake/
+Drain/counter/cleanup controls before the 2000>100 cost failure; unchanged
+GREEN `124438/45B5B22D` passes with 100. Existing real 3000-payload/wrap/order
+case passes under unset/default, 0, 100 and 2000; invalid inputs reject clearly.
+Eight affected CTests pass in 2.53s. Actual deferred recorder WAIT_REG_MEM,
+native SuspendPoint and native command lanes pass under record-thread1/spin100
+(`125053–125054`, exact executables 45B5B22D and 8F6AB348).
+
+Native core/install and clean world comparison for the recorder policy are
+pending. A smaller spin can sleep before a tiny next batch; wake/submit/Drain
+behavior remains mandatory, so CPU savings alone do not justify the default.
+No shipping test observers or counters. Full effects/60 FPS remain unmet.
+
+## Current checkpoint: debug overhead trial gives no gain; settings comparison active
+
+Local fix `ac0ac772`, native core `121810` and install `121920` pass. Installed
+EXE `6205371BB86A63FE018AEFB250300EE687C7BD986367C313DDE7951F7D44471A` in
+`_Build/analysis/yotei-performance-cycle34-20261013/runtime-ac0ac772-write-fault-window`.
+Clean write-window-on run `game-20261013-121951-perf-cycle35-write-window-on-world-title-30s-29addc`
+completed 28 titles, frames 653–766, mean 3.839286 FPS, range 3.6–4.2; closed
+12:22:19 UTC, exit 0, no guards. Versus the off baseline 3.611111 this is a single
+pair +6.32%, not a confirmed useful gain; no screenshots were taken.
+
+Actual clean-run audit confirms heavy diagnostics, Vulkan/shader/GPU-assisted
+validation, dumps and async pipeline skipping are off. Eager descriptor setup,
+linear-image readback, raw-image buffer coherence and hardware bounds are
+correctness paths and remain enabled. PAD_RECORD writes one 29-byte neutral
+event. Residual `vmmem` presence alone does not establish running WSL: bounded
+`wsl --list --running --quiet` returned empty/exit 0 and its working set was 0 GiB.
+Continue shutdown if WSL really restarts, as authorized by the user.
+
+Same EXE/settings, only `KYTY_DEBUG_UNBUFFERED` removed (presence, so 0 is not
+off): `game-20261013-123038-perf-cycle36-unbuffered-unset-write-window-on-world-title-30s-13c8a9`
+completed full 30 seconds, 28 titles, frames 650–759, mean 3.75 FPS, range 3.3–4.2;
+closed 12:33:25 UTC/0, no guards. No demonstrated logging FPS gain. Helper
+`_Build/analysis/yotei-performance-cycle36-20261013/run-buffered-title-fps.ps1`
+changes only that override and preserves neutral controls and measurement gates.
+
+Run `game-20261013-123427-perf-cycle37-label-flush-4000-buffered-world-title-30s-311c4b`
+PID53092 is ACTIVE, source/tests/CMake frozen: same EXE/buffered/window1/chain1,
+only opportunistic label flush interval 2000→4000 microseconds. Mandatory
+dependency/readback/submission waits remain. Drain this owned run before edits,
+builds or native tests. Settings evidence is in
+`_Build/analysis/yotei-performance-cycle35-20261013/settings-debug-impact.md`.
+Clean 64 KiB-boundary fixture is ready outside source and remains unexecuted;
+optional recorder idle-spin fixture is also prepared but not integrated or RED.
+No new visual validation, push or issue publication. Full effects/60 FPS remain unmet.
+
 ## Current checkpoint: write-fault locality native proof complete; world comparison next
 
 Shared opt-in `KYTY_CPU_WRITE_FAULT_WINDOW=1` carries actual `WriteFault` origin

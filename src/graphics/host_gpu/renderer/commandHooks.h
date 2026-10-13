@@ -44,6 +44,19 @@ void CommitRecordedCall(void (*run)(VkCommandBuffer buffer, const uint8_t* paylo
 
 // An ordered stream of recorded Vulkan calls and other work, from the thread that routed it last
 // to one consumer. At most four exist at a time.
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+namespace CommandStreamRegression {
+enum class Phase : uint32_t { EmptySpinComplete, BeforeSleepMark, AfterSleepMark, BeforeSignalWait, DrainWaiting };
+// Standalone real-stream controls only. Each consumer owns its TLS observer;
+// shipping code has no observer/counter or extra hot-loop instructions.
+inline thread_local void (*observer)(Phase,uint32_t,void*)=nullptr;
+inline thread_local void* context=nullptr;
+inline void Observe(Phase phase,uint32_t spins=0) {
+	if(observer!=nullptr)observer(phase,spins,context);
+}
+}
+#endif
+
 class CommandStream {
 public:
 	CommandStream();

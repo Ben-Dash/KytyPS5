@@ -933,6 +933,12 @@ if(BUILD_TESTING)
 	add_test(NAME cpu_write_fault_window_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --cpu-write-fault-window-neighbors-gpu)
 	set_tests_properties(cpu_write_fault_window_neighbors_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME cpu_write_fault_window_boundary_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --cpu-write-fault-window-boundary-gpu)
+	set_tests_properties(cpu_write_fault_window_boundary_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME command_stream_idle_spin_cost
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --command-stream-idle-spin-cost)
+	set_tests_properties(command_stream_idle_spin_cost PROPERTIES TIMEOUT 15 RUN_SERIAL TRUE)
 	add_test(NAME gpu_read_memory_foreign_fault_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-foreign-fault-locality-gpu)
 	add_test(NAME gpu_read_memory_cross_owner_gpu

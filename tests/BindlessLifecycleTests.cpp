@@ -394,6 +394,7 @@ private:
 #include "GpuReadMemoryExactPageCostTests.inc"
 #include "CpuWriteFaultWindowCostTests.inc"
 #include "CpuWriteFaultWindowNeighbors.inc"
+#include "CpuWriteFaultWindowBoundary.inc"
 #include "GpuReadMemoryImageAliasGuards.inc"
 #include "CpuWriteFaultImageWindowGuards.inc"
 #include "GpuReadMemoryForeignFaultLocality.inc"
@@ -427,6 +428,7 @@ private:
 #include "NativeThreadNamesTests.inc"
 
 #include "UserServiceGamePresetTests.inc"
+#include "CommandStreamIdleSpinCostTests.inc"
 
 int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0)
@@ -434,6 +436,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0)
     Libs::Graphics::ConfigureCpuWriteFaultWindowCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0)
+    Libs::Graphics::ConfigureCpuWriteFaultWindowCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0)
     Libs::Graphics::ConfigureCpuWriteFaultWindowCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0))
     Libs::Graphics::ConfigurePrepareBdaUploadBatchCostTests();
@@ -510,6 +514,12 @@ int main(int argc, char **argv) {
       std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0;
   if (readback_queue_mode) ConfigureReadbackQueueBootstrapTests();
   std::setvbuf(stdout, nullptr, _IONBF, 0);
+  if (argc == 2 && (std::strcmp(argv[1], "--command-stream-idle-spin-cost") == 0 ||
+                    std::strcmp(argv[1], "--command-stream-idle-spin-neighbors") == 0)) {
+    Common::InitializeThreads();
+    CheckCommandStreamIdleSpinCost(std::strcmp(argv[1], "--command-stream-idle-spin-cost") == 0);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--native-thread-names-only") == 0) {
     CheckNativeThreadNamesWithoutProfiler();
     return 0;
@@ -518,6 +528,7 @@ int main(int argc, char **argv) {
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0 ||
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
@@ -711,6 +722,7 @@ int main(int argc, char **argv) {
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0 ||
        (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
        std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
@@ -872,6 +884,10 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0) {
     CheckCpuWriteFaultWindowNeighbors(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0) {
+    CheckCpuWriteFaultWindowBoundary(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0) {

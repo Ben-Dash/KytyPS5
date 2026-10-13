@@ -1,5 +1,37 @@
 # Integration test debt
 
+## Recorder idle-spin policy required bounded reproduction, 2026-10-13
+
+Native CPU RED `124109/686EF8EF`: all four real scheduling/payload/wake/Drain/
+counter/cleanup controls passed, then the explicit 100-spin oracle failed with
+2000. Unchanged GREEN `124438/45B5B22D` passes with 100. Shared optional
+`KYTY_RECORD_SPIN_ITERATIONS` accepts 0..2000; default remains 2000. Only the
+empty-ring bound changes; shipping has no test hooks/counters. Existing actual
+3000-payload/wrap/order test passes in separate fresh `8F6AB348` processes with
+unset/default, 0, 100 and 2000; 2001, nonnumeric, negative, trailing junk and
+overflow reject explicitly. Eight affected CTests pass in 2.53 seconds.
+
+Actual deferred WAIT_REG_MEM `125053/45B5B22D` confirms the routed recorder and
+native result/markers/publication; fresh native SuspendPoint and command lanes
+`125053–125054/8F6AB348` pass under record-thread 1/spin 100. Native core/install,
+clean title FPS and actual recorder CPU benefit remain pending. Reduced CPU-test
+cycles are not elapsed time or FPS evidence; default must remain 2000.
+
+Matched cycle33 EXE/PDB and bounded native disassembly place 15 of 69 recorder
+samples in its actual 2000-PAUSE empty-ring loop. Sample frequencies are wall
+positions, not CPU attribution or removable frame time. Before changing its
+policy, exercise the real public CommandStream with small known payloads,
+alignment/FIFO callbacks, producers at three sleep-transition boundaries,
+actual wake, a separately withheld Drain, bounded stop/join and route cleanup.
+All functional controls precede the explicit 100-spin budget oracle. Test-only
+observers must not enter shipping code or hot-loop timing measurements. Any
+deadlock/setup failure is not the intended cost RED. Keep default 2000 and make
+any smaller policy optional until clean native world FPS proves benefit.
+
+Fixture, test-only hooks and optional policy have the native proof above.
+No multi-thread scaling or FPS claim follows
+from the recorder's approximately 30% of one core in a diagnostic run.
+
 ## Foreign CPU write-fault readback locality, 2026-10-13
 
 Native RED `120847/B14270F4`: all three setup, actual protected foreign store,
@@ -19,7 +51,13 @@ geometry remains unchanged; no side-queue optimization or proof is claimed.
 Cross-page/RMW/armed-generation native controls `121409/74065F48` pass; all
 native/backing words, real fences, guards and cleanup precede footprint checks.
 Twenty affected native GPU CTests pass in 9.66 seconds. Separate 64 KiB-window
-boundary control and native game comparison are pending.
+boundary `124439/45B5B22D` passes all 192 KiB native/backing words, guards and
+cleanup plus two actual write faults/native copies/ticks, 16 bytes/256 reserved.
+Initial `123835` preserved every value and footprint but missed the exception
+witness. Test-only noinline store plus compiler signal fences preserve its TLS
+registration; unchanged native/data/cost oracles then pass. This was not a
+production RED or weakened oracle. Clean world comparison is recorded in the
+launch plan; useful net throughput and other-game performance remain unproved.
 
 Actual cycle33 diagnostic attributes 66.89% of packed readback bytes to foreign
 CPU write faults. This is traffic attribution, not removable critical-path time.
