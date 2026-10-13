@@ -7,6 +7,8 @@
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
+#include <cstring>
 #include <fmt/format.h>
 #include <map>
 #include <mutex>
@@ -15,6 +17,12 @@
 #include <thread>
 #include <unordered_map>
 #include <vector>
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace Libs::Graphics::DrainStats {
 
@@ -48,7 +56,17 @@ std::atomic<uint64_t> g_presents {0};
 // Time between new game frames: one bucket per millisecond, the last collects the rest.
 std::array<std::atomic<uint64_t>, FrameBuckets> g_frame_ms {};
 
+struct FaultCpuTotals {
+	uint64_t requested=0, samples=0, cycles=0, query_failed=0, underflow=0, nested=0, straddled=0;
+	uint32_t last_error=0;
+	void Add(const FaultCpuTotals& other) {
+		requested+=other.requested;samples+=other.samples;cycles+=other.cycles;
+		query_failed+=other.query_failed;underflow+=other.underflow;nested+=other.nested;straddled+=other.straddled;
+		if(other.last_error!=0)last_error=other.last_error;
+	}
+};
 struct FaultSite {
+	FaultCpuTotals cpu;
 	std::string thread;
 	uint64_t    count        = 0;
 	uint64_t    ns           = 0;
@@ -433,15 +451,65 @@ void Report(const Snapshot& before, const Snapshot& after, double seconds, bool 
 		}
 	}
 	std::unordered_map<uint64_t, FaultSite> sites;
+	uint64_t main_cycles=0,main_cycle_delta=0;
+	uint32_t main_cycle_error=0,main_tid=0;
+	bool main_cycle_valid=false;
+	static uint64_t previous_main_cycles=0;
+	static uint32_t previous_main_tid=0;
+	static bool previous_main_valid=false;
+	static const bool cpu_diagnostic=[] {
+		const char* v=std::getenv("KYTY_DEBUG_FAULT_CPU");return v!=nullptr&&std::strcmp(v,"1")==0;
+	}();
 	{
 		std::lock_guard lock(g_site_mutex);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+		if(cpu_diagnostic) {
+			main_tid=g_fault_cpu_main_tid.load(std::memory_order_relaxed);
+			HANDLE main_thread=main_tid!=0?OpenThread(THREAD_QUERY_LIMITED_INFORMATION,FALSE,main_tid):nullptr;
+			ULONG64 current=0;bool query_ok=false;
+			if(main_thread!=nullptr) {
+				query_ok=QueryThreadCycleTime(main_thread,&current)!=0;
+				if(!query_ok)main_cycle_error=GetLastError();
+				CloseHandle(main_thread);
+			} else if(main_tid!=0)main_cycle_error=GetLastError();
+			main_cycles=current;
+			main_cycle_valid=interval&&query_ok&&previous_main_valid&&
+			    main_tid==previous_main_tid&&current>previous_main_cycles;
+			if(main_cycle_valid)main_cycle_delta=current-previous_main_cycles;
+			previous_main_valid=query_ok;previous_main_tid=main_tid;previous_main_cycles=current;
+			g_fault_cpu_epoch.fetch_add(1,std::memory_order_relaxed);
+		}
+#endif
 		sites.swap(g_sites);
 	}
+	FaultCpuTotals fault_cpu;
+	uint64_t fault_read_n=0,fault_write_n=0,fault_read_ns=0,fault_write_ns=0;
 	std::vector<const FaultSite*> site_rows;
 	std::vector<uint64_t>         site_keys;
 	for (const auto& [key, site]: sites) {
 		site_rows.push_back(&site);
 		site_keys.push_back(key);
+		fault_cpu.Add(site.cpu);
+		(site.write?fault_write_n:fault_read_n)+=site.count;
+		(site.write?fault_write_ns:fault_read_ns)+=site.ns;
+	}
+	if(cpu_diagnostic) {
+		text+=fmt::format("  main-fault-cpu scope=main boundary=site_body all_sites={} main_tid={} requested={} samples={} raw_cycles={} "
+		    "nested_covered_by_parent={} query_failed={} underflow={} straddled={} last_error={} "
+		    "main_cycle_total={} main_cycle_delta={} denominator_valid={} denominator_error={} "
+		    "observed_main_percent={:.6f} subtraction=none scale=1 map_window=since_last_fault_swap "
+		    "numerator_recording_overhead=excluded denominator_includes_instrumentation=1 veh_and_ismapped=excluded\n",
+		    sites.size(),main_tid,fault_cpu.requested,fault_cpu.samples,fault_cpu.cycles,
+		    fault_cpu.nested,fault_cpu.query_failed,fault_cpu.underflow,fault_cpu.straddled,fault_cpu.last_error,
+		    main_cycles,main_cycle_delta,main_cycle_valid?1u:0u,main_cycle_error,
+		    main_cycle_valid&&main_cycle_delta!=0?100.0*static_cast<double>(fault_cpu.cycles)/static_cast<double>(main_cycle_delta):0.0);
+		const bool frame_denominator=interval&&frames!=0;
+		text+=fmt::format("  fault-total read_n={} read_wall_ns={} write_n={} write_wall_ns={} "
+		    "total_n={} total_wall_ns={} report_frames={} per_frame_valid={} wall_ms_per_frame={:.6f} "
+		    "map_window=since_last_fault_swap time_domain=wall scopes=inclusive\n",
+		    fault_read_n,fault_read_ns,fault_write_n,fault_write_ns,fault_read_n+fault_write_n,
+		    fault_read_ns+fault_write_ns,interval?frames:0,frame_denominator?1u:0u,
+		    frame_denominator?per(static_cast<double>(fault_read_ns+fault_write_ns)/1e6):0.0);
 	}
 	std::vector<size_t> site_order(site_rows.size());
 	for (size_t i = 0; i < site_order.size(); i++) site_order[i] = i;
@@ -523,7 +591,8 @@ void Record(Kind kind, Reason reason, uint32_t pm4_op, uint64_t value) noexcept 
 	frame.value.fetch_add(value, std::memory_order_relaxed);
 }
 
-void RecordFaultSite(uint64_t pc, uint64_t address, bool write, uint64_t ns) noexcept {
+void RecordFaultSite(uint64_t pc, uint64_t address, bool write, uint64_t ns,
+                     const FaultCpuSample* cpu) noexcept {
 	if (!Enabled()) {
 		return;
 	}
@@ -541,6 +610,14 @@ void RecordFaultSite(uint64_t pc, uint64_t address, bool write, uint64_t ns) noe
 	}
 	std::lock_guard lock(g_site_mutex);
 	auto&           site = g_sites[key];
+	if(cpu!=nullptr&&cpu->requested) {
+		++site.cpu.requested;
+		if(cpu->nested)++site.cpu.nested;
+		else if(cpu->query_failed) {++site.cpu.query_failed;site.cpu.last_error=cpu->error;}
+		else if(cpu->underflow)++site.cpu.underflow;
+		else if(cpu->epoch!=g_fault_cpu_epoch.load(std::memory_order_relaxed))++site.cpu.straddled;
+		else if(cpu->valid) {++site.cpu.samples;site.cpu.cycles+=cpu->cycles;}
+	}
 	if (writer.end != 0) {
 		site.written++;
 		site.frame_age += g_frames.load(std::memory_order_relaxed) - writer.frame;

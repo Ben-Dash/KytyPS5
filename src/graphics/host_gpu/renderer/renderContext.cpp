@@ -18,6 +18,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace Libs::Graphics {
 
@@ -87,6 +93,17 @@ static bool FaultSiteMainOnly() noexcept {
 	return enabled;
 }
 
+static bool FaultCpuDiagnosticEnabled() noexcept {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	static const bool enabled = [] {
+		const auto* value = KYTY_GETENV("KYTY_DEBUG_FAULT_CPU");
+		return value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	return enabled;
+#else
+	return false;
+#endif
+}
 bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
 	// The host reports the faulting byte, not the instruction's access width. Both caches
 	// resolve its page; guessing a width can cross the end of a valid guest mapping.
@@ -98,22 +115,51 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 	const bool record_fault_site = DrainStats::Enabled() &&
 	    (!FaultSiteMainOnly() || Libs::g_main_call_diagnostic_role);
 	struct SiteTimer {
-		bool                                  enabled;
-		bool                                  write;
-		uint64_t                              address;
+		bool enabled, write;
+		uint64_t address, cpu_begin=0;
 		std::chrono::steady_clock::time_point start;
+		DrainStats::FaultCpuSample cpu;
+		SiteTimer(bool on, bool writing, uint64_t fault_address)
+		    : enabled(on), write(writing), address(fault_address),
+		      start(on ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point {}) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+			cpu.requested=on&&FaultCpuDiagnosticEnabled()&&Libs::g_main_call_diagnostic_role;
+			if(cpu.requested) {
+				cpu.nested=DrainStats::t_fault_cpu_depth++!=0;
+				DrainStats::g_fault_cpu_main_tid.store(GetCurrentThreadId(),std::memory_order_relaxed);
+				cpu.epoch=DrainStats::g_fault_cpu_epoch.load(std::memory_order_relaxed);
+				if(!cpu.nested) {
+					ULONG64 begin=0;
+					cpu.valid=QueryThreadCycleTime(GetCurrentThread(),&begin)!=0;
+					cpu.query_failed=!cpu.valid;
+					if(!cpu.valid)cpu.error=GetLastError();
+					cpu_begin=begin;
+				}
+			}
+#endif
+		}
 		~SiteTimer() {
-			if (enabled) {
-				const auto elapsed = std::chrono::steady_clock::now() - start;
-				DrainStats::RecordFaultSite(
-				    DrainStats::t_fault_pc, address, write,
-				    static_cast<uint64_t>(
-				        std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count()));
+			if(enabled) {
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+				if(cpu.requested) {
+					if(cpu.valid) {
+						ULONG64 end=0;
+						if(QueryThreadCycleTime(GetCurrentThread(),&end)==0) {
+							cpu.valid=false;cpu.query_failed=true;cpu.error=GetLastError();
+						} else if(end<cpu_begin) {
+							cpu.valid=false;cpu.underflow=true;
+						} else cpu.cycles=end-cpu_begin;
+					}
+					--DrainStats::t_fault_cpu_depth;
+				}
+#endif
+				const auto elapsed=std::chrono::steady_clock::now()-start;
+				DrainStats::RecordFaultSite(DrainStats::t_fault_pc,address,write,
+				    static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count()),
+				    cpu.requested?&cpu:nullptr);
 			}
 		}
-	} site_timer {record_fault_site, access == PageFaultAccess::Write, fault_vaddr,
-	              record_fault_site ? std::chrono::steady_clock::now()
-	                                    : std::chrono::steady_clock::time_point {}};
+	} site_timer {record_fault_site, access == PageFaultAccess::Write, fault_vaddr};
 	if (access == PageFaultAccess::Write) {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadWriteFault
 		                                          : DrainStats::Reason::GuestWriteFault);

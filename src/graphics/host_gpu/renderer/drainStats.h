@@ -115,8 +115,18 @@ void Stop();
 
 void Record(Kind kind, Reason reason, uint32_t pm4_op, uint64_t value) noexcept;
 void CountFrame(bool new_frame) noexcept;
+// Diagnostic-only sample. CPU cycles remain raw; no elapsed-time conversion.
+struct FaultCpuSample {
+	bool requested=false, valid=false, nested=false, query_failed=false, underflow=false;
+	uint64_t cycles=0, epoch=0;
+	uint32_t error=0;
+};
+inline std::atomic<uint64_t> g_fault_cpu_epoch {0};
+inline std::atomic<uint32_t> g_fault_cpu_main_tid {0};
+inline thread_local uint32_t t_fault_cpu_depth = 0;
 // A GPU-memory fault stalled the faulting thread for `ns`; keyed by the faulting instruction.
-void RecordFaultSite(uint64_t pc, uint64_t address, bool write, uint64_t ns) noexcept;
+void RecordFaultSite(uint64_t pc, uint64_t address, bool write, uint64_t ns,
+                     const FaultCpuSample* cpu = nullptr) noexcept;
 // A recorded GPU command writes [vaddr, vaddr+size). Read fault sites report the newest such
 // writer of their address and how many frames ago it was recorded.
 void RecordGpuWrite(uint64_t vaddr, uint64_t size) noexcept;
