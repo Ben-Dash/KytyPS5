@@ -1,5 +1,30 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: channel division removed; no useful FPS gain yet, 2026-10-13
+
+Shared generic format channel selection replaces source0..3 modulo positive count
+with bounded masks and the exact count3 repeat. Metadata validity, conversions,
+stride/index/offset/bounds, EXEC and format keys unchanged. Native intendedRED
+001021/ECA63286 -> SAME GREEN002637/598C217D after52 literal native cases covering
+three-channel/both waves/EXEC/end/OOB/prefix. Four general entry divisions become0.
+Independent100requests/4800lanes match3b exactly (0 changes;144 known UNorm errors
+both). Category/codegen neighbors PASS; focused CTests2/2 PASS0.93s. Completed
+source fix pending native core/private install and world FPS validation.
+
+Latest completed native world run uses329492cf ready-readback+3b converter:
+core002053/install002145 PASS, privateEXE
+1308AC8757CBC80712D22179C372D06F4E7524087A13002EE15513F3C38B2D47.
+Game002157-bdc248 loaded182MB cache/1921records without invalidation. Full30s
+neutral title sample fromframe650 mean2.6704/min2.5/max2.8, exit0/no guards.
+No useful improvement vs previous completebc age0 control2.6148. Do not assign
+this small difference independently to readback or converter without a matched
+3b-only full sample. No images/menu/buttons, all render work remains enabled.
+
+Next loop also tests shorter native GPU measurement before another whole-game
+cold compilation and audits replay identity. Main-only HLE diagnostic proposal
+uninstalled; existing all-thread counts can guide an optional separate run.
+Actual1080/60FPS/full effect correctness remain pending; no push/issuecomment.
+
 ## Current checkpoint: ready buffer reads avoid unrelated downloads, 2026-10-13
 
 ReadMemory shared GPU-thread route queries a valid fully mapped range inside one

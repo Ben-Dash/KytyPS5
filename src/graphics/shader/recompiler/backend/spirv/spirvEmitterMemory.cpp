@@ -3225,6 +3225,12 @@ void EmitGenericBufferFormats(EmitterState& state) {
 		const auto info      = LookupDynamicBufferFormat(state, field(word, 0, 7));
 		const auto count     = EmitUMax32(state, field(info.layout, 0, 3), ConstantU32(state, 1));
 		const auto byte_size = EmitUMax32(state, field(info.layout, 3, 5), ConstantU32(state, 1));
+		// source is in [0,3]. For every positive count, source % count
+		// is a small mask except count3, whose last source repeats channel0.
+		const auto channel_mask = EmitUMin32(
+		    state, Binary(state, spv::OpISub, u32, count, ConstantU32(state, 1)), ConstantU32(state, 3));
+		const auto three_channels =
+		    Binary(state, spv::OpIEqual, boolean, count, ConstantU32(state, 3));
 		const auto is_type   = [&](Format::ComponentType type) {
 			return Binary(state, spv::OpIEqual, boolean, info.type,
 			              ConstantU32(state, static_cast<uint32_t>(type)));
@@ -3251,9 +3257,12 @@ void EmitGenericBufferFormats(EmitterState& state) {
 			format.constant_one[output] = AndCondition(
 			    state, info.valid, Binary(state, spv::OpIEqual, boolean, selector, ConstantU32(state, 1)));
 			// As Format::ResolveFormattedSource: channels repeat past the format's component count.
-			const auto component = Binary(
-			    state, spv::OpUMod, u32, Binary(state, spv::OpBitwiseAnd, u32, selector, ConstantU32(state, 3)),
-			    count);
+			const auto source = Binary(state, spv::OpBitwiseAnd, u32, selector, ConstantU32(state, 3));
+			const auto component = Select(
+			    state, u32, three_channels,
+			    Select(state, u32, Binary(state, spv::OpIEqual, boolean, source, ConstantU32(state, 3)),
+			           ConstantU32(state, 0), source),
+			    Binary(state, spv::OpBitwiseAnd, u32, source, channel_mask));
 			const auto bits = EmitUMax32(
 			    state,
 			    EmitBitFieldUExtract(state, info.widths,

@@ -6,7 +6,11 @@ Generic channel selection:52 literal native cases before actual invocation-entry
 variable-division cost. Counts1/2/3/4, reversed/constants, exact end/OOB/prefix,
 guest wave32/64 and asymmetric EXEC. Intended native RED001021/ECA63286 passes
 all52 controls first, then four divisions per resource fail expected0 for both
-waves. Old4800 matrix unchanged. Production pending; memory fix goes first.
+waves. SAME GREEN002637/598C217D has0 divisions. Native100requests/4800lanes
+002637-9134037 byte-identical to3b235505 (0 changed/missing/extra;144 known UNorm
+golden errors both). Category/codegen neighbors PASS002639/002704; CTests2/2
+PASS0.93s. Host selected source0..3/count>=1 exact mask/count3 proof applies also
+to future positive counts. Core/build and useful world FPS still pending.
 
 Public GPU ReadMemory ready-A/open unrelatedB on distinct4KiB pages of same16KiB
 owner: real EOP store, old completed native tick, bounded priority publication gate,
