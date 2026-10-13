@@ -929,7 +929,12 @@ if(BUILD_TESTING)
 	add_test(NAME gpu_read_memory_cross_owner_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-cross-owner-gpu)
 	set_tests_properties(gpu_read_memory_exact_pages_gpu gpu_read_memory_foreign_fault_gpu
-		gpu_read_memory_cross_owner_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+		gpu_read_memory_cross_owner_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE
+		ENVIRONMENT "KYTY_GPU_READ_EXACT_PAGES=1")
+	add_test(NAME gpu_read_memory_image_alias_guards_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-image-alias-guards-gpu)
+	set_tests_properties(gpu_read_memory_image_alias_guards_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE
+		ENVIRONMENT "KYTY_GPU_READ_EXACT_PAGES=1")
 	add_test(NAME prepare_bda_upload_batch_cost_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-batch-cost-gpu)
 	add_test(NAME prepare_bda_upload_batch_legacy_gpu

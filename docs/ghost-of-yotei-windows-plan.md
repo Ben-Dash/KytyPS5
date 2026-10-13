@@ -1,5 +1,47 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: exact-read world no gain; default restored; CP profile next
+
+4326 world111028-7e7f26 full30s650..754/27titles mean3.488889,min3.3/max3.7,
+exit0/no guards11:13:00UTC; against priorimagebudget3.671429 -4.97% singlepair,
+no usefulgain/images. ExactGPU pages are now experimental optin
+KYTY_GPU_READ_EXACT_PAGES1; default0 keeps old locality. SAME native7F7A49AF
+threeoptin checks PASS1.39s; default0control112037 all6semantic/native/fence/
+guard/cleanup controls PASS with originalwide65540/44/48 then intentionally
+fails optin costoracle. MainvalidRED fixture/oracle unchanged.
+
+Actual explicit dirtyimage/pending-only aliases113045/BC337D50 PASS: realnative
+clear/realpendingstaging+actualbufferwriter, all A/far/imageordering/native/
+guards/realcompletion/cleanup, oldwide65540/65544 retained. Initial112340 all
+semanticcontrols passed but test omitted60B leading64-alignment gap after real
+4B image staging; corrected from StreamBuffer::Map allocation contract (not
+production change/not a RED). Windows far_words rename fixed beforevalidcase.
+Safeexperimentalpath retained for later matched sameEXE0/1 diagnostics.
+
+PSS owned CP/recorder helper SelfTest113047:39/39 validnative-loop samples,
+actual cycles/user/kernel deltas and allcleanup PASS, native5.0068s; newgame
+profile pending. Only Thread_Gpu/GpuQueueSubmit onexactownedPID, dedicated5-10s
+diagnostic, nevercleanFPS. Forkaudit foundexistingSRT/TLS/memo/spec certificates
+alreadyhere; candidatepurebindingprep requires actual CP/PSS/phasecostwitness.
+
+## Current checkpoint:4326d348 explicit GPU reads world retry active, 2026-10-13
+
+Completed shared explicit/touchedpage correction localcommit
+4326d348e4974e60c20e6f45565e8367aafe1554; nativecore110626/install111026 PASS.
+Privatecycle32/runtime-4326d348-exact-gpu-read EXE
+75482D665EE47DF9DC7FBFFEBC5F75F5EC3DF76871105A69109334B04542B630.
+`game-20261013-111028-perf-cycle32-exact-gpu-read-world-title-30s-7e7f26`
+PID55612/root24865 ACTIVE/sourceFROZEN, same neutralfullrender chain1/HALFoff/
+scale100/scratch1024/BDA0,650gated30s300warmbound; actualFPS result pending.
+Onlycomplete sample+10%against3.882143 permits post-sample captures. WSLnot
+running beforelaunch; latestuser confirmedNOTneeded/keep stopping, no askagain.
+Sourcecleanexceptdocs/preservedprefetchWIP. No menu/buttons/newpush/issues.
+Additional explicitdirty/pendingimage alias test pending; existingguard keeps
+oldpath and18affectedtests passed. Frameahead CLI is dormant; don'toffer it as
+speedup. Larger Suspend credits/CP-prefix forkport require separate proof, not
+a dependency timeout bypass. Next diagnostics may measure actual pool and named
+readback reasons/credit wait costs separately with flagsOFF in cleanFPS runs.
+
 ## Current checkpoint: explicit GPU read pages native GREEN; core/world next
 
 6be6 plus shared explicit-read origin WIP: genuineRED105225/585CD167 all6case

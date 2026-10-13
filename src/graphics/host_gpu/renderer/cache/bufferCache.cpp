@@ -706,6 +706,16 @@ bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
 	return false;
 }
 
+static bool ExplicitGpuReadPagesEnabled() {
+	// Exact pages reduce transfer bytes, but locality may still benefit the next
+	// consumer. Keep the experiment opt-in until matched world throughput improves.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_GPU_READ_EXACT_PAGES");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+
 void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
 	if (!GuestGpu::IsGpuThread() && CommandScheduler::InDeferredOperation()) {
 		EXIT("unsupported buffer readback from an asynchronous GPU completion, "
@@ -732,7 +742,7 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write, Memor
 	if (tracked) {
 		state = m_memory_tracker.QueryReadback(vaddr, size);
 		if (state.unarmed) {
-			bool exact_pages = !is_write && origin == MemoryReadOrigin::Explicit;
+			bool exact_pages = ExplicitGpuReadPagesEnabled() && !is_write && origin == MemoryReadOrigin::Explicit;
 			if (exact_pages) {
 				// Releasing a tracker page requires all its actual dirty bytes. Keep the
 				// conservative image/publication path for any alias on these same pages.

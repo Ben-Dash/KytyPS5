@@ -392,6 +392,7 @@ private:
 #include "ArmedReadbackWindowCostTests.inc"
 #include "EagerReadbackAdjacentPagesCostTests.inc"
 #include "GpuReadMemoryExactPageCostTests.inc"
+#include "GpuReadMemoryImageAliasGuards.inc"
 #include "GpuReadMemoryForeignFaultLocality.inc"
 #include "GpuReadMemoryCrossOwner.inc"
 #include "PollExactPageReadbackCostTests.inc"
@@ -431,7 +432,7 @@ int main(int argc, char **argv) {
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                     std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0))
     Libs::Graphics::ConfigureEmptyPm4TailSubmitCostTests();
-  if (argc == 2 && (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0))
+  if (argc == 2 && (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)))
     Libs::Graphics::ConfigureEagerReadbackAdjacentPagesCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
@@ -509,7 +510,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
-                            (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0) ||
+                            (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
                             std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                             std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
@@ -696,7 +697,7 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
-       (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0) ||
+       (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
        std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
        std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
@@ -840,6 +841,10 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0) {
     CheckPollExactPageReadbackCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0) {
+    CheckGpuReadMemoryImageAliasGuards(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0) {

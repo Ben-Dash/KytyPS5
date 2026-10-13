@@ -2,6 +2,14 @@
 
 ## Explicit GPU ReadMemory touched-page amplification required reproduction
 
+Dedicated actual imagealias113045/BC337D50 native dirty/pending-only guard PASS,
+wide65540/65544 with allimage/far ordering/prefence/fence/guards/cleanup. Initial
+test112340 missed60B leadingalignment after4B realimage staging; expectedring
+reservation corrected fromMap alignment contract, not a productionbug/RED.
+Experimental0control112037/7F7A49AF preservesoldfull locality/all6controls;
+optin1threechecksPASS1.39s. World4326mean3.488889 no usefulgain, mode nowdefault
+OFFpendingmeasured workload need. Actualother-game CPU/GPU perf stillunproved.
+
 Actual105225/585CD167 RED afterALL6casevalues/nativefences/armed-old/guards/
 cleanup PASS: basic4B reads65540, otherexplicit cases widen similarly. Baseline
 actualforeignfault105226 PASSwide. UnchangedGREEN105628/1B2D690F explicit

@@ -5,6 +5,10 @@
 #include "graphics/host_gpu/renderer/debug.h"
 namespace Libs::Graphics {
 struct PerformanceMemoryTestAccess {
+  static bool DownloadImageActual(TextureCache& cache,ImageId id) {
+    std::scoped_lock lock(cache.m_lock);
+    return cache.DownloadImageMemory(id);
+  }
   static void RecreateUploadRing(BufferCache& cache,uint64_t bytes) {
     // Caller has completed actual native work and drained all callbacks.
     cache.m_staging_buffer.~StreamBuffer();
