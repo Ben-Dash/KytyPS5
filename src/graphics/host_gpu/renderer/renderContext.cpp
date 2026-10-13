@@ -164,7 +164,7 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadWriteFault
 		                                          : DrainStats::Reason::GuestWriteFault);
 		RecordUpload(UploadSource::Fault, fault_vaddr, 0x1000);
-		m_buffer_cache.InvalidateMemory(fault_vaddr, fault_size);
+		m_buffer_cache.InvalidateMemory(fault_vaddr, fault_size, MemoryReadOrigin::WriteFault);
 		m_buffer_cache.ExpandWriteFault(fault_vaddr);
 		m_texture_cache.InvalidateMemory(fault_vaddr, fault_size);
 		if (gpu_thread) {

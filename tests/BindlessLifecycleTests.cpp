@@ -392,7 +392,10 @@ private:
 #include "ArmedReadbackWindowCostTests.inc"
 #include "EagerReadbackAdjacentPagesCostTests.inc"
 #include "GpuReadMemoryExactPageCostTests.inc"
+#include "CpuWriteFaultWindowCostTests.inc"
+#include "CpuWriteFaultWindowNeighbors.inc"
 #include "GpuReadMemoryImageAliasGuards.inc"
+#include "CpuWriteFaultImageWindowGuards.inc"
 #include "GpuReadMemoryForeignFaultLocality.inc"
 #include "GpuReadMemoryCrossOwner.inc"
 #include "PollExactPageReadbackCostTests.inc"
@@ -426,6 +429,12 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0)
+    Libs::Graphics::ConfigureCpuWriteFaultImageWindowGuards();
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0)
+    Libs::Graphics::ConfigureCpuWriteFaultWindowCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0)
+    Libs::Graphics::ConfigureCpuWriteFaultWindowCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0))
     Libs::Graphics::ConfigurePrepareBdaUploadBatchCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
@@ -507,6 +516,9 @@ int main(int argc, char **argv) {
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+                            std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0 ||
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
@@ -697,6 +709,9 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0 ||
        (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
        std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
@@ -845,6 +860,18 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0) {
     CheckGpuReadMemoryImageAliasGuards(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0) {
+    CheckCpuWriteFaultWindowCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0) {
+    CheckCpuWriteFaultImageWindowGuards(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0) {
+    CheckCpuWriteFaultWindowNeighbors(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0) {

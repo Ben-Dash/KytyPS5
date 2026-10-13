@@ -1,5 +1,104 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: write-fault locality native proof complete; world comparison next
+
+Shared opt-in `KYTY_CPU_WRITE_FAULT_WINDOW=1` carries actual `WriteFault` origin
+through invalidation/retry and async GPU callback. A previously live complete
+buffer owner may use the validated fault-ahead window (default 64 KiB, capped
+at the original 512 KiB). Full selected pages must be mapped and have no dirty
+or pending image aliases. Normal discovery, explicit/kernel writes, reads,
+generation tokens, fences and priority publication are retained. Separate
+QueueReadback geometry is unchanged. The performance experiment defaults off.
+
+Genuine RED `120847/B14270F4` passed all native/value/fault/fence/guard/cleanup
+controls before failing only the transfer cost. Unchanged GREEN
+`121131/F846079A` copies 12 instead of 65548 bytes for the two real foreign
+write-fault cases; explicit invalidation remains 65548. Real other-page dirty
+and pending images `121256/DC810DAF` preserve wide downloads and image order.
+Actual atomic RMW, cross-page store, and old-armed/new-GPU-writer cases
+`121409/74065F48` pass every native/backing word and guard. Twenty affected
+native GPU CTests pass in 9.66 seconds; log
+`_Build/analysis/yotei-performance-cycle34-20261013/affected-ctest.txt`.
+
+Initial `120725` was a missing fixture CLI registration, not an intended RED.
+Independent production and fixture reviews found no blocking defect. A separate
+64 KiB boundary control is being prepared; core build/install and clean world
+30-second title-FPS comparison are pending. Current same-build off baseline is
+3.611111 FPS, frames 653–757. No new FPS gain, image proof, push or issue update.
+
+## Current checkpoint: clean baseline before CPU write-fault locality experiment
+
+Native Windows, branch `yotei-integration-native`, source `3a8a74e6` (local only).
+Run `_Build/runs/game-20261013-120151-perf-cycle34-write-window-off-baseline-world-title-30s-c62c92`
+used EXE `06E533BF62A0DF06DDF93B9A6BF591631F9410D1121809E19AE1F730BE2B4E39`.
+Full clean 30-second world-title sample: 27 values, frames 653–757, mean 3.611111
+FPS, minimum 3.2, maximum 3.9. Closed at 12:04:23 UTC, exit 0, no memory guards.
+Chain 1, BDA batching off, exact GPU reads off, full render, neutral controls;
+no diagnostic timers, menus or screenshots. WSL was stopped again after automatic
+restart; the user explicitly authorizes continued shutdown. No useful gain yet.
+
+Next candidate is actual protected foreign CPU write-fault readback locality,
+motivated by 66.89% of packed bytes in the separate cycle33 diagnostic. Three
+agents independently prepare the native reproduction, review owner/image/page
+preservation, and audit recorder scheduling. Production behavior is still unchanged.
+Regression requirements are recorded in `docs/emulator-test-debt.md`.
+
+Matching EXE/PDB bounded disassembly confirms the recorder's empty-ring 2000-PAUSE
+loop. Its true CPU share and FPS benefit remain unproved; reducing that loop is a
+separate fallback candidate, not evidence for more workers. Offline evidence:
+`_Build/analysis/yotei-performance-cycle33-20261013/pss-cp-recorder/owned-52968-1141/offline/conclusions.md`.
+Keep experiments opt-in until useful clean throughput is demonstrated. Actual
+60 FPS and complete effects remain unmet. No new push or issue publication.
+
+## Current checkpoint: actual CP/readback diagnostic; foreign CPU writes priority
+
+3a8a74e6/EXE06E533BF diagnostic114100-ca85fc exited11:43:36UTC/0,no guards;
+both game/PSShelper fullyclosed. Nevera cleanFPS orimageproof. ActualownedPSS
+10.014s,69rounds/69validsamples perrole, allsnapshot/handlecleanup0,errornull:
+Thread_Gpu32068 CPU5375ms/~53.67%onecore; GpuQueueSubmit18452 CPU2984.375ms/
+~29.78%. Rawcycles retained; wallRIP frequencies are NOT CPU percentages.
+MatchedPDB GUID/age +exactEXE validatedbyagents. NTDLL waitreturn24/69CP and
+46/69recorder; win32u GPU-sync return6/69CP. Recorderowncode15/69 in
+CommandStream::Consume, boundedassembly checkpending. CPnative25/69 spread
+acrossSRT/buffer/prep/recordingwithnomajor>2-sampleaddress; no caseformoreworkers
+fromthat alone. Existingphasewall/TSC includeswaits, no CPUcostsumclaim.
+
+New reporter30blocks allrow-count/packedbyte sums validated. Last6completed5s
+intervals108frames/13870readbacks:21.10097packedMiB/frame. ForeignCPU WRITE
+faults14.11387 (66.89%),GPU READ faults3.39818(16.10%),foreignREAD2.91672
+(13.82%),unattributedcandidate0.54288(2.57%),eager0.12932(0.61%volume but45.83
+requests/frame). This explains smallcoverage ofexplicit-page experiment; packed
+bytes are not nativecopied/requested/removable time. Next establishforeignwrite
+FullDrain timing and actualwrite-fault-ahead/RMW preservation policy BEFORE
+changingits window; priorexactGPU experiment explicitlykeptthispathunchanged.
+
+Actuallate retiredpool24/29,038,592B (~27.7MiB) farbelow1GiBcap: hugeidlepool
+is NOTthisscene's demonstratedcause. OverallVMA/driverresidency interpretation
+stillpendingagentanalysis. Forkbindingprep broaderthanneeded; existingTLS/SRT/
+memos/certificatesalreadyhere. Read-only3agents now auditwritefaultRMW, matching
+wait/pause code and measured CPUphase costs. No nextproductionfixapplied.
+BothBDA/exactreads OFFdefault; no screenshots/newpush/issues,WSLkeepstopped.
+
+## Current checkpoint:3a8a74e6 CP/recorder diagnostic ACTIVE, 2026-10-13
+
+Nativecore113937/install114058 PASS; privatecycle33/runtime-3a8a74e6-diag
+EXE06E533BF62A0DF06DDF93B9A6BF591631F9410D1121809E19AE1F730BE2B4E39.
+`game-20261013-114100-diag-cycle33-cp-recorder-bytes-pool-ca85fc` PID52968/
+root45965 ACTIVE/sourceFROZEN. Both experiments0/fullrender/neutral/chain1/
+HALFoff/scratch1024. Dedicateddiag addsdrain5, existingdrawphasesall/specstats1,
+newreadbackbytes1/memorybudget1; automaticDrain timestamps alterwork. This is
+NOTcleanFPS or screenshot proof. NoGPUzones/full-buffer dumping enabled.
+
+Owned-onlyPSS wrapperroot71546 ACTIVE waitsframe600(max240s) then10s/lowrate
+sequential Thread_Gpu/GpuQueueSubmit snapshots; outerownedhelper270s bound,
+bothstreams drained/outputignoredcycle33/pss-cp-recorder/owned-52968-1141.
+No rawstack/guestmemory/otherprocess contexts, exactPID/hash/start/TIDlifetimes.
+SelfTest39/39 actualspin/cycles/cleanupPASS. Helperstdoutpresentation fixed
+only([pscustomobject]dictionary); capture/validation codeunchanged.
+Verify/drain BOTH game andhelper beforeediting/building/GPUtests. Diagnostic
+sampling mayfinish first, gamekeeperstillbounded650/30s/300warm. Outcomepending.
+UserWSLNOTneeded/keep stopping,no menu/input/push/issues,oldartifactsprotected.
+
 ## Current checkpoint: defaults restored; dedicated CP/recorder diagnosis next
 
 0fe5f40f preserves original default readlocality; exactpages1 andBDA batch1 remain

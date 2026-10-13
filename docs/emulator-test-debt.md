@@ -1,5 +1,44 @@
 # Integration test debt
 
+## Foreign CPU write-fault readback locality, 2026-10-13
+
+Native RED `120847/B14270F4`: all three setup, actual protected foreign store,
+GPU-before-CPU-retry, fresh producer fence, sibling preservation, full native BDA
+consumer, backing, guards and cleanup controls passed before the cost failure.
+Actual write faults copied 65548 bytes and reserved 65728; explicit invalidation
+did the same. Unchanged GREEN `121131/F846079A`: write faults copy 12/reserve 192,
+far pages stay GPU-dirty/protected/old, all controls pass; explicit invalidation
+still copies 65548/reserves 65728. Initial `120725` rejected missing harness CLI
+registration before running the fixture, so it is not a valid RED.
+
+Real dirty/pending image on another page inside the selected window passed
+`121256/DC810DAF`: whole-window guards retain wide 65540/65544-byte downloads,
+actual native/CPU overwrite/image-order/fence/guards/cleanup all pass. Shared
+experiment `KYTY_CPU_WRITE_FAULT_WINDOW=1` is default-off. Separate QueueReadback
+geometry remains unchanged; no side-queue optimization or proof is claimed.
+Cross-page/RMW/armed-generation native controls `121409/74065F48` pass; all
+native/backing words, real fences, guards and cleanup precede footprint checks.
+Twenty affected native GPU CTests pass in 9.66 seconds. Separate 64 KiB-window
+boundary control and native game comparison are pending.
+
+Actual cycle33 diagnostic attributes 66.89% of packed readback bytes to foreign
+CPU write faults. This is traffic attribution, not removable critical-path time.
+Before changing the current 512 KiB publication window, reproduce a real protected
+foreign CPU store into a GPU-dirty page. Verify actual native producer bytes,
+protected old backing, preservation of every unwritten dirty sibling on each
+released page, final CPU upload/native values, fences, guards and cleanup before
+the transfer-footprint oracle. Cover a cross-page store, a fresh GPU writer,
+older armed publication superseded by a writer, ordinary explicit is_write and
+foreign read locality. Dirty/pending image aliases, unknown and cross-owner
+requests must preserve the conservative path. A validated fault-ahead window is
+only a locality policy; GPU-dirty pages outside it must remain protected.
+
+Production changes have native RED/GREEN as above. Use a semantic write-fault
+origin, preserve InvalidateMemory re-query and real fence/priority publication,
+and keep any new performance experiment opt-in until a clean 30-second world
+title-FPS comparison demonstrates useful gain. No synthetic result proves
+gameplay speed or effects correctness.
+
 ## Explicit GPU ReadMemory touched-page amplification required reproduction
 
 Dedicated actual imagealias113045/BC337D50 native dirty/pending-only guard PASS,

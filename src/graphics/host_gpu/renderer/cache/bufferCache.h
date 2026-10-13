@@ -36,8 +36,8 @@ class TextureCache;
 using BufferId = Common::SlotId;
 inline constexpr BufferId NULL_BUFFER_ID {0};
 
-// Explicit GPU consumers need their touched pages; host fault handlers retain read locality.
-enum class MemoryReadOrigin : uint8_t { Explicit, Fault };
+// Carry the actual access origin independently of optional diagnostics.
+enum class MemoryReadOrigin : uint8_t { Explicit, Fault, WriteFault };
 
 class BufferCache {
 public:
@@ -68,7 +68,8 @@ public:
 	~BufferCache();
 	KYTY_CLASS_NO_COPY(BufferCache);
 
-	void                   InvalidateMemory(uint64_t vaddr, uint64_t size);
+	void                   InvalidateMemory(uint64_t vaddr, uint64_t size,
+	                                        MemoryReadOrigin origin = MemoryReadOrigin::Explicit);
 	// After a guest write fault at vaddr (see MemoryTracker::ExpandWriteFault).
 	// KYTY_FAULT_AHEAD_PAGES=<pages> sets the window (a power of two, default 16; 1: off).
 	void                   ExpandWriteFault(uint64_t vaddr);
@@ -213,9 +214,9 @@ private:
 	[[nodiscard]] bool DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size,
 	                                        std::span<const uint8_t> ordered_bytes = {});
 	// Thread_Gpu: arms the readback window around [vaddr, vaddr+size).
-	void RecordReadback(uint64_t vaddr, uint64_t size, bool is_write);
+	void RecordReadback(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin);
 	// Other threads: publish GPU-dirty pages without draining Thread_Gpu.
-	void ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write);
+	void ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin);
 	void MarkReadbackHot(uint64_t vaddr);
 	// GPU writes that may still be in flight (KYTY_DEBUG_READBACK_AGE): NoteGpuWrite logs a
 	// written range; Thread_Gpu, between commands, InflightWriteTick returns the latest tick of a

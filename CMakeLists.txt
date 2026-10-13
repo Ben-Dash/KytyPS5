@@ -924,6 +924,15 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eager-readback-adjacent-pages-cost-gpu)
 	add_test(NAME gpu_read_memory_exact_pages_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-exact-page-cost-gpu)
+	add_test(NAME cpu_write_fault_window_cost_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --cpu-write-fault-window-cost-gpu)
+	set_tests_properties(cpu_write_fault_window_cost_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME cpu_write_fault_image_window_guards_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --cpu-write-fault-image-window-guards-gpu)
+	set_tests_properties(cpu_write_fault_image_window_guards_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME cpu_write_fault_window_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --cpu-write-fault-window-neighbors-gpu)
+	set_tests_properties(cpu_write_fault_window_neighbors_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME gpu_read_memory_foreign_fault_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-foreign-fault-locality-gpu)
 	add_test(NAME gpu_read_memory_cross_owner_gpu

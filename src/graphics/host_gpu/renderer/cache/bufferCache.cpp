@@ -613,7 +613,7 @@ BufferCache::~BufferCache() {
 	m_buffers.clear();
 }
 
-void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
+void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size, MemoryReadOrigin origin) {
 	if (!GuestRange {vaddr, size}.Valid()) {
 		EXIT("BufferCache: invalid memory-invalidation range\n");
 	}
@@ -640,23 +640,38 @@ void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
 		if (!gpu_dirty) {
 			return;
 		}
-		ReadMemory(vaddr, size, true);
+		ReadMemory(vaddr, size, true, origin);
 	}
 }
 
-void BufferCache::ExpandWriteFault(uint64_t vaddr) {
+static uint64_t FaultAheadWindow() {
 	static const uint64_t window = [] {
 		const char* text  = KYTY_GETENV("KYTY_FAULT_AHEAD_PAGES");
 		const auto  pages = text != nullptr ? std::strtoull(text, nullptr, 10) : 16ull;
 		return std::has_single_bit(pages) && pages <= TRACKER_REGION_PAGES ? pages * TRACKER_PAGE_SIZE
 		                                                                   : TRACKER_PAGE_SIZE;
 	}();
+	return window;
+}
+
+static bool CpuWriteFaultWindowEnabled() {
+	// Locality is a performance policy. Preserve the old default until world
+	// throughput, as well as native data preservation, demonstrates a benefit.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_CPU_WRITE_FAULT_WINDOW");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+
+void BufferCache::ExpandWriteFault(uint64_t vaddr) {
+	const auto window = FaultAheadWindow();
 	if (window > TRACKER_PAGE_SIZE) {
 		m_memory_tracker.ExpandWriteFault(vaddr, window);
 	}
 }
 
-void BufferCache::RecordReadback(uint64_t vaddr, uint64_t size, bool is_write) {
+void BufferCache::RecordReadback(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
 	if (is_write && !IsRegionRegistered(vaddr, size)) {
 		if (m_memory_tracker.IsRegionGpuModified(vaddr, size)) {
 			EXIT("BufferCache: GPU-dirty memory has no buffer owner, addr=0x%016" PRIx64
@@ -665,14 +680,36 @@ void BufferCache::RecordReadback(uint64_t vaddr, uint64_t size, bool is_write) {
 		}
 		return;
 	}
+	// Unknown or partial owners keep normal discovery and its conservative window.
+	// Inspect the live owner before FindBuffer can create or merge one.
+	bool write_fault_window = CpuWriteFaultWindowEnabled() && is_write &&
+	                          origin == MemoryReadOrigin::WriteFault;
+	if (write_fault_window) {
+		const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
+		write_fault_window = owner != nullptr && *owner && !IsBufferInvalid(*owner) &&
+		                     m_slot_buffers[*owner].IsInBounds(vaddr, size);
+	}
 	auto& buffer = m_slot_buffers[FindBuffer(vaddr, size)];
 
 	// Widen nearby CPU reads so they share one publication.
 	constexpr uint64_t WindowSize   = 512 * 1024;
 	const auto         buffer_begin = buffer.CpuAddress();
 	const auto         buffer_end   = buffer_begin + buffer.Size();
-	const auto window_begin = std::max(Common::AlignDown(vaddr, WindowSize), buffer_begin);
-	const auto window_end = std::min(std::max(window_begin + WindowSize, vaddr + size), buffer_end);
+	auto window_begin = std::max(Common::AlignDown(vaddr, WindowSize), buffer_begin);
+	auto window_end = std::min(std::max(window_begin + WindowSize, vaddr + size), buffer_end);
+	if (write_fault_window) {
+		const auto local_window = std::min(FaultAheadWindow(), WindowSize);
+		const auto begin = std::max(Common::AlignDown(vaddr, local_window), buffer_begin);
+		const auto end = std::min(std::max(begin + local_window, vaddr + size), buffer_end);
+		const auto page_begin = Common::AlignDown(begin, TRACKER_PAGE_SIZE);
+		const auto page_end = Common::AlignUp(end, TRACKER_PAGE_SIZE);
+		if (m_scheduler.Context().IsMapped(page_begin, page_end - page_begin) &&
+		    !m_texture_cache.HasPendingDownload(page_begin, page_end - page_begin) &&
+		    !m_texture_cache.IsRegionGpuModified(page_begin, page_end - page_begin)) {
+			window_begin = begin;
+			window_end = end;
+		}
+	}
 	if (!DownloadBufferMemory(buffer, window_begin, window_end - window_begin)) {
 		DrainStats::Record(DrainStats::Kind::ReadbackClean, 0);
 	}
@@ -723,7 +760,7 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write, Memor
 		     vaddr, size);
 	}
 	if (!GuestGpu::IsGpuThread()) {
-		ReadMemoryAsync(vaddr, size, is_write);
+		ReadMemoryAsync(vaddr, size, is_write, origin);
 		return;
 	}
 	// Thread_Gpu consumes the bytes itself, so it waits here. Pages armed by an earlier
@@ -766,12 +803,12 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write, Memor
 					DrainStats::Record(DrainStats::Kind::ReadbackClean, 0);
 				}
 			} else {
-				RecordReadback(vaddr, size, is_write);
+				RecordReadback(vaddr, size, is_write, origin);
 			}
 			state = m_memory_tracker.QueryReadback(vaddr, size);
 		}
 	} else {
-		RecordReadback(vaddr, size, is_write);
+		RecordReadback(vaddr, size, is_write, origin);
 		state = m_memory_tracker.QueryReadback(vaddr, size);
 	}
 	if (state.gpu_dirty) {
@@ -987,7 +1024,7 @@ void BufferCache::PublishQueuedReadback(QueuedReadback& request) {
 	if (request.notification != nullptr) request.notification->Notify();
 }
 
-void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) {
+void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
 	// Thread_Gpu only records and submits the download; this thread waits for its own
 	// publication while Thread_Gpu keeps working. The caller retries the access afterwards:
 	// a page the GPU re-dirtied meanwhile simply faults again.
@@ -1007,7 +1044,7 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) 
 	std::shared_ptr<QueuedReadback> queued;
 	if (state.unarmed || tick >= m_scheduler.CurrentTick()) {
 		const auto reason = DrainStats::CurrentReason();
-		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, reason, &tick,
+		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, origin, reason, &tick,
 		                                                &age, &queued] {
 			DrainStats::ReasonScope reason_scope(reason);
 			// The foreign snapshot preceded queueing; publication or another reader
@@ -1046,7 +1083,7 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) 
 			if (!is_write) {
 				MarkReadbackHot(vaddr);
 			}
-			RecordReadback(vaddr, size, is_write);
+			RecordReadback(vaddr, size, is_write, origin);
 			const auto current = m_memory_tracker.QueryReadback(vaddr, size);
 			if (!current.gpu_dirty) {
 				tick = 0;
