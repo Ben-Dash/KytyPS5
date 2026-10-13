@@ -1,5 +1,65 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: completed SRT drill narrows next target; clean FPS still3.7
+
+NativeWindows localHEAD46fe8e8b. Both cost corrections have genuine native
+RED/GREEN and requiredneighborproof; actual clean30s FPS gains are negligible:
+readbackready3.714286→3.746429 (+0.87%, SAMEEXE), GPUdirtymask3.714286→3.725
+(+0.29%, isolatedproduction acrossEXEs). No meaningfulgain/images; readyflag
+remainsdefault0. Full60FPS/FX unachieved. HistoricalPrefetchWIP/userdata kept.
+
+SRT diagnostic run game-20261013-191442-diag-cycle41-srt-function-profile-730fa4
+completed19:17:31.958UTC/0/no guards/stderr empty/noimages. Source46fe8e8b,
+EXEA015DE1F34575D52DB6CE2990771691728D3BB004C09BC46B22B2D685A7B5113;
+650→686,10.1873071s,27threads/176rows, allquery/exclusive/truncated/outstanding/
+depth/overflow errors0. Three independent agents audited actualcompletedrows.
+ParsedJSON/MD: cycle41/srt-drill/completed-cycle41; independentgpu-state JSON.
+No task-ownednativegame/build/test remains active; verify onnextresume.
+
+MeasuredCP11404 MaterializeResources245480calls/3926samples: incl4.570us/
+excl3.907us, raw14232cycles vsrootempty~1630–1753. This sharedgraphics+compute
+body is the clearest nextCPUcandidate, notprovedframe-critical orremovable.
+Mutexwait0.031us/permutationmatch0.151us nearprobe floor: do NOTremove lock/
+addworkers/hotset basedonthis. ParentGetGraphics14.464us versusold4.42 has
+addednestedprobes; notproductionregression evidence. RoleMain1 ishostentry;
+loggedworkerTID56256 recordsrole0, noactualDrawSpecrole4 assignment.
+
+Next: sparse operation counts and rotateONE sampledleaf within actual
+MaterializeCompiled/refresh-flat-SRT/memo-key/descriptor-eval/referencefallback.
+Existing compiledplans/memo/64Bblock caches alreadypresent. Neither duplicate
+reads norfallbackfrequency proven. Obtain actualwitness then recordsynthetic
+RED coveringdescriptor/selector/ownership/imagealias changes beforefix. Foreign
+readback stillmostlyrequirednative/publication wait; noexactguestMainCall/frame
+request correlation exists, so do notsum acrossTIDs orclaimcritical-chaincost.
+WSLoff, no push/issues. Research reconciled in docs/yotei-performance-research-2026-10-13.md.
+
+## Current checkpoint: two proved cost fixes have no meaningful world FPS gain; SRT drill active
+
+LocalHEAD46fe8e8b. RepeatedGPUdirty53bfa9a1 nativecore190816 andprivateinstall
+190912 passed. Actual clean full30s worldtitle run190931...1aca64 closed
+19:12:03UTC/0/no guards: mean3.725,28titles,frames650–758, range3.5–4.0;
+previous isolated-change baseline3.714286 (+0.29%) givesNOmeaningfulgain/noimages.
+Different EXEs, samefull1080p/render/neutral/settings; do not call sameEXE A/B.
+Optional ready-after-wait staysdefaultOFF (+0.87% prior sameEXE pair).
+
+New diagnostic46fe8e8b splits real GetGraphicsPrograms into stageprepare/adopt,
+inputchecks, mutexwait/lockedbody, exactProgramCacheGet/permutation/adoption,
+SRTmaterialization/readvalidation. Existing sampler/collector remainsdefaultOFF;
+no new GPUtimestamps/submits/fences/forcedFinish or shippingtestcounter. Native
+CPU smoke191317/CD971B87 passes, core191318 andprivateinstall191429 pass.
+EXEA015DE1F34575D52DB6CE2990771691728D3BB004C09BC46B22B2D685A7B5113.
+ACTIVE bounded diagnosticgame46464 / execsession35688:
+game-20261013-191442-diag-cycle41-srt-function-profile-730fa4. All other heavy
+instrumentationOFF, neutralfullrender; profiler650→10seconds, closeafter15s
+sample. SOURCEFREEZE until completion; verify no remaining ownedprocesses.
+This is diagnostic-only; do not use its FPS as clean comparison.
+
+Root/3agents will inspect actual CP vsworker rows, calibratedquery overhead and
+errors/outstanding/depth, identify stage/cache/SRT body or requiredwait before
+anotherproductionfix. Avoid duplicate already-existing preparedinputs/last-
+permutation/compiledplan/memo/64Bblock-cache optimizations. Preserveallcache/
+save/artifacts/historyPrefetchWIP. WSLoff; no push/issues; fullFX60FPSunmet.
+
 ## Current checkpoint: redundant GPU-dirty protection mask proved; world check pending
 
 Native Windows dd8ff4de + WIP. Genuine nativeRED190549/B8B01E70: all setup/

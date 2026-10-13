@@ -1,5 +1,21 @@
 # Integration test debt
 
+## SRT materialization work: operation witness required, 2026-10-13
+
+Completed46fe8e8b profile191442...730fa4 identifies shared graphics/compute
+MaterializeResources245480calls/3926samples above probe floor, but no exact
+redundant operation or critical frame path is proved. Before a production
+cache/refresh/fallback change, count actual compiledsuccess/referencefallback,
+flat-run/slot observations, memo eligibility/reuse and descriptor evaluation
+within the current abstractions. Use sparse counters/one rotating sampled leaf,
+not nested timers on every scalar read. Existing compiledplans/memo/64Bblock
+caches must not be duplicated. Any new skip requires a genuine synthetic RED
+with changed descriptor words/selector, same-page dirty siblings, pending/dirty
+image aliases, user SGPR/shader base and failed-read fallback; preserve ordinary
+versus strict readers and explicit unsupported errors. Actual witness/RED are
+pending; 3.9us samplemean is not a promised FPS saving. Mutex/permutation timing
+is near the probe floor and supplies no lock-removal/hotset justification.
+
 ## Repeated GPU-dirty state bookkeeping, 2026-10-13
 
 Before skipping protection-mask construction, prove an actual native buffer
@@ -15,7 +31,8 @@ Independent AllInRange bit-by-bit boundaries and existing memory-tracker OS/
 token/death tests are required. Native RED190549 masks1 and unchangedGREEN190651 masks0 prove redundant
 maskwork.5actual GPU neighbors190652 pass; independent BitArray +complete
 MemoryTracker OS/token/conflict190759 pass.12affectedCTests pass4.62s.
-Actual game/FPS benefit remains pending.
+Actual clean30s world190931 mean3.725 vsprevious3.714286 (+0.29%) gives
+no meaningfulFPSgain; same settings across two EXEs, notsameEXE A/B.
 
 ## Ready range after native wait versus unrelated publication, 2026-10-13
 
