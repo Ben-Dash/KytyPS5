@@ -807,6 +807,9 @@ if(BUILD_TESTING)
 	add_test(NAME generic_channel_repetition_cost
 	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --generic-channel-repetition-cost)
 	set_tests_properties(generic_channel_repetition_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME driver_cache_native_roundtrip
+	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --driver-cache-native-roundtrip)
+	set_tests_properties(driver_cache_native_roundtrip PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME armed_readback_window_cost
 	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --armed-readback-window-cost-gpu)
 	set_tests_properties(armed_readback_window_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

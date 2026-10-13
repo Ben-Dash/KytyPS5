@@ -265,6 +265,7 @@ public:
 
 private:
 	friend struct AttachmentFeedbackTestAccess;
+    friend struct DriverCacheNativeTestAccess;
 	struct ProgramCache;
 
 	struct GraphicsPipelineKey {

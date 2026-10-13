@@ -226,7 +226,8 @@ class GenericGpuPipeline {
   uint32_t measured_mismatches=0u;
 public:
   GenericGpuPipeline(VulkanHarness& native,GenericCompilation& compiled_shader,
-                     FetchGpuBuffer& input_buffer,FetchGpuBuffer& output_buffer):
+                     FetchGpuBuffer& input_buffer,FetchGpuBuffer& output_buffer,
+                     vk::PipelineCache driver_cache=nullptr,vk::PipelineCreationFeedback* feedback=nullptr):
       vulkan(native),shader(compiled_shader),shader_input(input_buffer),output(output_buffer) {
     constexpr const char* name="GenericBufferGpu";
     auto& graphics=vulkan.RuntimeContext();
@@ -339,7 +340,12 @@ public:
   vk::ComputePipelineCreateInfo pipeline_info{};
   pipeline_info.stage = stage;
   pipeline_info.layout = pipeline_layout;
-  RequireVulkanSuccess(device.createComputePipelines(nullptr,1u,&pipeline_info,nullptr,&pipeline),
+  vk::PipelineCreationFeedbackCreateInfo feedback_info{};
+  if(feedback!=nullptr) {
+    feedback_info.pPipelineCreationFeedback=feedback;
+    pipeline_info.pNext=&feedback_info;
+  }
+  RequireVulkanSuccess(device.createComputePipelines(driver_cache,1u,&pipeline_info,nullptr,&pipeline),
       "real bounded generic-buffer compute pipeline");
   }
   ~GenericGpuPipeline() {

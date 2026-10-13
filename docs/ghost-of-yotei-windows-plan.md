@@ -1,5 +1,33 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: compatible driver cache survives compiler edits, 2026-10-13
+
+Shared opaque-cache policy completed locally after exact existing factory
+extraction: CPU intendedRED005245/B1EABF29 -> SAME GREEN005655/51C3C357, all existing
+strict journal/version/repair tests pass. Opaque KytyPC4 wrapper omits compiler
+source; intact oldKytyPC3 host/config/diagnostic tail and actual139bytepayload
+offset are accepted with length/checksum/native32bytevendor/device/UUID validation.
+Journal remains exact current compiler/source/schema/application key. No cache
+header edits, key forcing, changed shader semantics or missing-integrity bypass.
+
+Actual shared LoadDriverCacheShard native010845/21E43738 restored15132 real
+vkGetPipelineCacheData bytes from a private legacy wrapper, native outputs and
+canaries/full/asymmetricEXEC PASS, valid actual driver feedbackcacheHit1. Wrong
+host/checksum/rehashednativeUUID yield emptycache. CPUjournal/nativeCTest2/2
+PASS0.53s. Native bindless build010720 and final010943 PASS. Core/private install
+and original182MB cache in-game validation pending; this improves iteration
+policy rather than claiming higher FPS. Last completeworldFPS remains2.6704.
+
+New legitimate user setting candidate: actual eboot GetGamePresets caller reads
+priorityoffset12 after requesting48bytes; name table proves internal2=Performance,
+internal0=Quality. Current KernelIsTrinityMode(false) branch maps priority1->2,
+priority2->0; default0 currentlyalwaysreturned. Shared config/API CPU regression
+pending; no title/address branch and no guessed enum. Keep supported40byte ABI
+negotiation/caller48tail intact. Outputstatus already1080; clock100MHz correct.
+Source-only/static consumption does not prove performance or rendered dimensions.
+No menus/buttons/images/push/issuepost; user30s titleFPS/fullrender/WSLstopped
+constraints and stableactual1080/60/full effect goals remain.
+
 ## Current checkpoint: GPU timing screens zero-gain changes, 2026-10-13
 
 Channel-modulo sourceba3ed1b1 core002906/install003108 PASS; privateEXE

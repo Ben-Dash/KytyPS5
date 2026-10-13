@@ -46,7 +46,7 @@ private runtime `performance-cycle6-20261013/runtime-329492cf`, executable
 1308AC8757CBC80712D22179C372D06F4E7524087A13002EE15513F3C38B2D47.
 Game002157-bdc248 loaded182239919bytes/1921records without invalidation. Complete
 neutral full-render30second title sample00:25:07UTC/frame650: mean2.6704,min2.5,
-max2.8,27logged values; exit0, no guards, maxWS16.55GiB/minphysical29.87GiB.
+max2.8,27logged values; exit0, no guards, maxWS16.55GiB/minphysical28.60GiB.
 Small difference versus2.6148bc control is not a useful sustained gain and cannot
 be isolated to memory versus converter without completed3b-only benchmark.
 No screenshots/image inspection/menu/buttons/reset. Next channel optimization

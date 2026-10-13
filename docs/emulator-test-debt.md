@@ -1,5 +1,31 @@
 # Integration test debt
 
+## Opaque Vulkan cache source-only rejection required reproduction, 2026-10-13
+
+Extract current exact signature factory into shared CPU policy before behavior
+change. CPU test preserves literal legacy bytes and source-strict journal,
+vendor/device/driver/UUID/config/diagnostic rejection, envelope sizes/checksum and
+Vulkan VERSION_ONE little-endian32byte controls, then expects opaque host cache
+compatibility after synthetic compiler source changes. Existing source gate
+intendedRED005245/B1EABF29 fails last. Same CPU GREEN005655/51C3C357 passes full
+old journal tests after correction; actual loader compiled005811. Legacy offsets
+are parsed without editing cache bytes or pinning source keys. Real Vk native
+roundtrip010845/21E43738 PASS:15132byteactualdriver payload, legacy139bytewrapper,
+actual application cache feedback valid/hit1, full/asymmetric/nativecanaries.
+Actual loader returns empty forwronghost/checksum/rehashednativeUUID. Focused
+CTest CPUjournal/native2/2 PASS0.53s. Full existing182MB gamecache reuse and any
+warm-up/runtimeFPS gain remain pending; no FPS claim from these controls.
+
+## Runtime native buffer length reuse required reproduction, 2026-10-13
+
+Real GenericCompilation1/8/32 reads for waves32/64, all loads/stores live and
+SPIR-V validation; count runtime SSBO length queries by actual variable/constant
+descriptor slot/member, each length still feeds native bounds. Six modules must
+pass setup before repeated query/view fails one-query budget. Production pending
+fix: intendedRED005054/C80DCEE4 allsix setups/bounds pass then repeated query
+budget fails. Any candidate must keep exact4800 lanes, native range rebinding,
+all guards and compare fixed-batch GPU A/B/A before a full cold game retry.
+
 ## Next cycle required reproductions, 2026-10-13
 
 Generic channel selection:52 literal native cases before actual invocation-entry

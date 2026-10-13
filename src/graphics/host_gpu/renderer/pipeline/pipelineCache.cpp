@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+#include "graphics/host_gpu/renderer/pipeline/driverCachePolicy.h"
 #include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 
 #include "common/assert.h"
@@ -126,22 +127,22 @@ vk::PolygonMode ResolvePolygonMode(const HW::ModeControl& mode, bool cull_front,
 }
 
 std::string DriverCacheSignature(const vk::PhysicalDeviceProperties& properties) {
-	constexpr char hex[] = "0123456789abcdef";
-	std::string    uuid(VK_UUID_SIZE * 2, '0');
-	for (size_t i = 0; i < VK_UUID_SIZE; i++) {
-		uuid[i * 2]     = hex[properties.pipelineCacheUUID[i] >> 4u];
-		uuid[i * 2 + 1] = hex[properties.pipelineCacheUUID[i] & 0xfu];
-	}
-	return fmt::format("KytyPC3:{}:{:08x}:{:08x}:{:08x}:{}:opt={}\n", KYTY_SHADER_CACHE_KEY,
-	                   properties.vendorID, properties.deviceID, properties.driverVersion, uuid,
-	                   static_cast<uint32_t>(Config::GetShaderOptimizationType()));
+	DriverCachePolicy::HostIdentity host {.vendor = properties.vendorID, .device = properties.deviceID,
+	                                      .driver = properties.driverVersion,
+	                                      .optimization = static_cast<uint32_t>(Config::GetShaderOptimizationType())};
+	std::copy_n(properties.pipelineCacheUUID.data(), host.uuid.size(), host.uuid.begin());
+	return DriverCachePolicy::JournalSignature(host, KYTY_SHADER_CACHE_KEY);
 }
 
 // The driver cache file's signature. KYTY_VTX_EXPLODE_CHECK changes every vertex and mesh shader:
 // its pipelines go to an own file with an own key, so the regular driver cache stays untouched.
 // The value trace adds internal push words; its journal and key are also isolated.
 std::string DriverBinarySignature(const vk::PhysicalDeviceProperties& properties) {
-	auto signature = DriverCacheSignature(properties);
+	DriverCachePolicy::HostIdentity host {.vendor = properties.vendorID, .device = properties.deviceID,
+	                                      .driver = properties.driverVersion,
+	                                      .optimization = static_cast<uint32_t>(Config::GetShaderOptimizationType())};
+	std::copy_n(properties.pipelineCacheUUID.data(), host.uuid.size(), host.uuid.begin());
+	auto signature = DriverCachePolicy::BlobSignature(host, KYTY_SHADER_CACHE_KEY);
 	if (ShaderRecompiler::IR::VertexExplodeCheck().enabled) {
 		signature += "vtxexplode=1\n";
 	}
@@ -1635,34 +1636,47 @@ vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::pat
 	std::vector<uint8_t> initial_data;
 	if (cache_exists) {
 		Common::File file(cache_path, Common::File::Mode::Read);
-		const auto   file_size = file.IsInvalid() ? 0 : file.Size();
-		const auto   signature = DriverBinarySignature(m_graphics.GetPhysicalDeviceProperties());
-		if (file_size >= signature.size() + sizeof(uint64_t) &&
-		    file_size <= std::numeric_limits<uint32_t>::max()) {
-			std::string cached_signature(signature.size(), '\0');
-			uint64_t    payload_hash = 0;
-			initial_data.resize(file_size - signature.size() - sizeof(payload_hash));
-			uint32_t signature_read = 0;
-			uint32_t hash_read      = 0;
-			uint32_t payload_read   = 0;
-			file.Read(cached_signature.data(), static_cast<uint32_t>(cached_signature.size()),
-			          &signature_read);
-			file.Read(&payload_hash, sizeof(payload_hash), &hash_read);
-			file.Read(initial_data.data(), static_cast<uint32_t>(initial_data.size()),
-			          &payload_read);
-			file.Close();
-			if (signature_read != cached_signature.size() || hash_read != sizeof(payload_hash) ||
-			    payload_read != initial_data.size() || cached_signature != signature ||
-			    XXH3_64bits(initial_data.data(), initial_data.size()) != payload_hash) {
-				initial_data.clear();
-				PipelineCacheLog(
-				    "Vulkan pipeline cache: invalidating {} (driver, emulator, or data mismatch)",
-				    path);
+		const auto file_size = file.IsInvalid() ? 0 : file.Size();
+		const auto& properties = m_graphics.GetPhysicalDeviceProperties();
+		DriverCachePolicy::HostIdentity host {.vendor = properties.vendorID, .device = properties.deviceID,
+		                                      .driver = properties.driverVersion,
+		                                      .optimization = static_cast<uint32_t>(Config::GetShaderOptimizationType())};
+		std::copy_n(properties.pipelineCacheUUID.data(), host.uuid.size(), host.uuid.begin());
+		std::string diagnostic;
+		if (ShaderRecompiler::IR::VertexExplodeCheck().enabled) diagnostic += "vtxexplode=1\n";
+		diagnostic += ShaderRecompiler::IR::VertexTraceCacheSignature();
+		if (file_size > sizeof(uint64_t) && file_size <= std::numeric_limits<uint32_t>::max()) {
+			// Read only the bounded wrapper prefix first. A legacy source-key wrapper
+			// is longer than the new host-only header; its original payload offset
+			// must be retained rather than overwritten or guessed from the new key.
+			const auto probe_size = std::min<size_t>(
+			    DriverCachePolicy::MaxBlobHeaderBytes(host, KYTY_SHADER_CACHE_KEY, diagnostic),
+			    static_cast<size_t>(file_size - sizeof(uint64_t)));
+			std::string probe(probe_size, '\0');
+			uint32_t probe_read = 0;
+			file.Read(probe.data(), static_cast<uint32_t>(probe.size()), &probe_read);
+			const auto header_size = probe_read == probe.size()
+			    ? DriverCachePolicy::FindBlobHeaderBytes(std::span<const char>(probe.data(), probe.size()),
+			          host, KYTY_SHADER_CACHE_KEY, diagnostic) : 0u;
+			if (DriverCachePolicy::EnvelopeSizeValid(file_size, header_size) && file.Seek(header_size)) {
+				uint64_t payload_hash = 0;
+				uint32_t hash_read = 0, payload_read = 0;
+				initial_data.resize(static_cast<size_t>(file_size - header_size - sizeof(payload_hash)));
+				file.Read(&payload_hash, sizeof(payload_hash), &hash_read);
+				file.Read(initial_data.data(), static_cast<uint32_t>(initial_data.size()), &payload_read);
+				if (hash_read != sizeof(payload_hash) || payload_read != initial_data.size() ||
+				    !DriverCachePolicy::PayloadChecksumMatches(initial_data, payload_hash) ||
+				    !DriverCachePolicy::PayloadHostHeaderMatches(initial_data, host)) {
+					initial_data.clear();
+					PipelineCacheLog("Vulkan pipeline cache: invalidating {} (payload/header/host mismatch)", path);
+				}
+			} else {
+				PipelineCacheLog("Vulkan pipeline cache: invalidating {} (wrapper/host mismatch)", path);
 			}
 		} else {
-			file.Close();
 			PipelineCacheLog("Vulkan pipeline cache: invalidating {} (invalid file size)", path);
 		}
+		file.Close();
 	}
 
 	vk::PipelineCacheCreateInfo create {};

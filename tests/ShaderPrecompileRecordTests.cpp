@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
+#include "graphics/host_gpu/renderer/pipeline/driverCachePolicy.h"
 
 #include <array>
 #include <bit>
@@ -507,9 +508,12 @@ void TestGenericBufferKeysRoundTrip() {
         "generic buffer keys round-trip unchanged");
 }
 
+#include "DriverCachePolicyTests.inc"
+
 } // namespace
 
 int main() {
+  TestDriverOpaqueCachePolicy();
   TestAllStagesRoundTrip();
   TestRuntimeInputsDoNotChangeRecords();
   TestInvalidRecords();
