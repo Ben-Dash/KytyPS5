@@ -107,6 +107,11 @@ struct ReadbackState {
 // PrepareBda's synchronizing passes so far (see RegionManager::HotWrites).
 inline std::atomic<uint32_t> g_bda_pass_serial {0};
 
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+// Harness-only work observer; absent from emulator builds.
+inline thread_local uint64_t* g_region_protection_mask_evaluations = nullptr;
+#endif
+
 class RegionManager final {
 public:
 	RegionManager(PageManager& page_manager, uint64_t cpu_addr,
@@ -164,6 +169,15 @@ public:
 		if constexpr (source == DirtySource::Gpu && enable) {
 			if (m_cpu_dirty.AnyInRange(start, end)) {
 				EXIT("GPU dirty state conflicts with CPU dirty state\n");
+			}
+		}
+		if constexpr (source == DirtySource::Gpu && enable) {
+			// The validated, locked range already has exactly the required read protection.
+			// Pending publication or stale-readable pages still require the transition below.
+			if (m_gpu_dirty.AllInRange(start, end) &&
+			    (m_arms == nullptr || !m_arms->armed.AnyInRange(start, end)) &&
+			    !m_stale_readable.AnyInRange(start, end)) {
+				return;
 			}
 		}
 		auto& bits = GetBits<source>();
@@ -478,6 +492,11 @@ private:
 
 	template <bool track, bool is_read>
 	void UpdateProtection() {
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+		if (g_region_protection_mask_evaluations != nullptr) {
+			++*g_region_protection_mask_evaluations;
+		}
+#endif
 		const auto protection = is_read ? ~m_gpu_dirty | m_stale_readable : m_cpu_dirty;
 		auto&      previous   = is_read ? m_readable : m_writable;
 		auto       mask       = protection ^ previous;

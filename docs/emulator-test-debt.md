@@ -1,5 +1,22 @@
 # Integration test debt
 
+## Repeated GPU-dirty state bookkeeping, 2026-10-13
+
+Before skipping protection-mask construction, prove an actual native buffer
+owner is CPU-clean, GPU-dirty, unarmed and not stale-readable across the full
+requested range. Repeated writable acquisition must preserve every native/
+backing word, page protection, token, canary and cleanup before the zero-mask
+cost oracle. Baseline mask count1 versus expected0 is the intended RED;
+bootstrap/build/guard failures are not. A harness-only observer must be absent
+from game builds. Partial bit-word boundaries, initially clean pages, actual
+armed publication, stale-read revocation and arms outside the written range
+must retain their transitions. Keep CPU-conflict validation before any exit.
+Independent AllInRange bit-by-bit boundaries and existing memory-tracker OS/
+token/death tests are required. Native RED190549 masks1 and unchangedGREEN190651 masks0 prove redundant
+maskwork.5actual GPU neighbors190652 pass; independent BitArray +complete
+MemoryTracker OS/token/conflict190759 pass.12affectedCTests pass4.62s.
+Actual game/FPS benefit remains pending.
+
 ## Ready range after native wait versus unrelated publication, 2026-10-13
 
 Function profiling shows foreign readback latency is mostly waiting. Before

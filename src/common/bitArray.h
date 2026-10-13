@@ -188,6 +188,33 @@ public:
 		return combined != 0;
 	}
 
+	// True only when every bit of a nonempty, valid range is set. Reads only covered words.
+	[[nodiscard]] constexpr bool AllInRange(size_t start, size_t end) const {
+		if (start >= end || end > N) {
+			return false;
+		}
+		const auto first_word = start / BITS_PER_WORD;
+		const auto last_word = (end - 1) / BITS_PER_WORD;
+		const auto end_bit = (end - 1) % BITS_PER_WORD;
+		const auto start_mask = ~uint64_t {0} << (start % BITS_PER_WORD);
+		const auto end_mask = end_bit == BITS_PER_WORD - 1 ? ~uint64_t {0} :
+			(uint64_t {1} << (end_bit + 1)) - 1;
+		if (first_word == last_word) {
+			const auto mask = start_mask & end_mask;
+			return (m_data[first_word] & mask) == mask;
+		}
+		if ((m_data[first_word] & start_mask) != start_mask ||
+		    (m_data[last_word] & end_mask) != end_mask) {
+			return false;
+		}
+		for (auto word = first_word + 1; word < last_word; ++word) {
+			if (m_data[word] != ~uint64_t {0}) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	// Splits the bits into 64 equal slices; bit s of the result is set when any bit of slice s
 	// is set.
 	[[nodiscard]] constexpr uint64_t SliceSummary() const {

@@ -373,6 +373,47 @@ template <size_t N> void TestSliceSummary() {
   }
 }
 
+// Include within tests/BitArrayTests.cpp's existing namespace, invoke from main.
+template <size_t N> void TestAllInRange() {
+  Common::BitArray<N> bits;
+  Check(!bits.AllInRange(0, N), "empty bits unexpectedly report full range");
+  bits.Fill();
+  Check(bits.AllInRange(0, N) && bits.AllInRange(0, 1) && bits.AllInRange(N - 1, N),
+        "filled bit array lost first/last/full ranges");
+  Check(!bits.AllInRange(0, 0) && !bits.AllInRange(N, N) &&
+        !bits.AllInRange(3, 2) && !bits.AllInRange(0, N + 1),
+        "AllInRange accepted empty/invalid ranges");
+  uint64_t rng = 0x6fe012349abced01ull;
+  for (size_t pattern = 0; pattern < 160; ++pattern) {
+    bits.Clear();
+    std::array<bool, N> reference{};
+    for (size_t index = 0; index < N; ++index) {
+      rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17;
+      const bool set = pattern % 3 == 0 ? true : pattern % 3 == 1 ? (rng & 1) != 0 : false;
+      reference[index] = set;
+      if (set) bits.Set(index);
+    }
+    // Full masks missing exactly one independently chosen bit exercise every boundary.
+    if (pattern % 3 == 0) {
+      const size_t missing = (pattern * 67) % N;
+      bits.Unset(missing); reference[missing] = false;
+    }
+    for (size_t begin = 0; begin < N + 2; ++begin) {
+      for (const size_t width : {size_t(0), size_t(1), size_t(2), size_t(63), size_t(64),
+                                size_t(65), size_t(129), N}) {
+        const size_t end = begin + width;
+        bool expected = begin < end && end <= N;
+        if (expected) {
+          for (size_t index = begin; index < end; ++index) expected &= reference[index];
+        }
+        Check(bits.AllInRange(begin, end) == expected,
+              "AllInRange differs from independent bit-by-bit full-range reference");
+      }
+    }
+  }
+}
+// Required invocation sizes:64,128,1024. No full-array copy is used by the independent oracle.
+
 } // namespace
 
 int main() {
@@ -381,6 +422,9 @@ int main() {
   TestRangeDiscoveryAndIteration();
   TestRandomizedDifferential();
   TestTrackerSizedRandomizedDifferential();
+  TestAllInRange<64>();
+  TestAllInRange<128>();
+  TestAllInRange<1024>();
   TestSliceSummary<64>();
   TestSliceSummary<1024>();
   TestSliceSummary<4096>();

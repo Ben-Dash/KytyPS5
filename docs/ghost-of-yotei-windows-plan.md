@@ -1,5 +1,51 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: redundant GPU-dirty protection mask proved; world check pending
+
+Native Windows dd8ff4de + WIP. Genuine nativeRED190549/B8B01E70: all setup/
+all-pageGPUdirtyCPUcleanUnarmed/PAGE_NOACCESS/native4MiB generations/fullbacking/
+guards/cleanup controls pass, then redundant protectionMaskEvaluations1 fails.
+Unchanged GREEN190651/625EE5D8 gives0;5native neighbors190652 pass expected
+mask counts0/1/1/1/0: partial63/64boundary, initiallyclean, realEOParmed,
+actualstaleread+reprotection, armoutsidewrittenrange. Shared locked state guard
+is after range and CPU-conflict validation; AllInRange touches only requested
+words. The observer compiles only into the existing lifecycle-test target.
+
+Native independent BitArray64/128/1024 bit-by-bit190759/DD6EF117 and entire
+MemoryTracker190759/837D57D4 pass, including OS protection/tokens/hotstale/
+conflict death paths. Fixed a preexisting dangling BenchmarkCleanUploads call
+which prevented rebuilding that CPU test target; no benchmark implementation
+existed in source. Twelve exact affected CTests pass4.62s. Native core build
+190817 currently active; game/privateinstall/actual FPS improvement pending.
+Baseline world policy0 mean3.714286 on previousEXE0FC1FA9A, samefullrender/
+neutral1080p/settings; optional ready-after-wait staysOFF after its negligible
++0.87% pair. Preserve warmcache/save/privatepreviousruntime for new comparison.
+
+No push/issue update, WSLstopped, historicalPrefetchWIP untouched. Full60FPS/
+FX remain unmet. Finish nativecore, privateinstall, clean30s worldtitleFPS;
+images only if meaningfulgain, then checkpoint/handoff/local separatecommit.
+
+## Current checkpoint: first measured wait optimization gives no meaningful FPS gain
+
+Local327065f6 + result recorddd8ff4de. Actual completed clean native world
+comparison, SAME EXE0FC1FA9A, full1080p/fullrender/neutralcontrols: policyOFF
+3.714286 vs ON3.746429 (+0.87%),28titles/full30s each, frames650–759/652–761.
+Both exit0, no memory guards/screenshots; opt-in remains default0. Exact runs:
+185854...dc2fe8 and190137...d7121f, comparison cycle41/clean-ready-wait-comparison.json.
+This does not prove the redundant wait was a frame-critical bottleneck.
+
+Next shared candidate: repeated writable buffer acquisition recalculates a
+whole4MiB-region protection mask even when exact range is alreadyGPUdirty,
+CPUclean, unarmed and unstale. Three-agent proposals prepared; root integrated
+only the harness diagnostic counter/native fixtures and recorded required
+regression in debt. Native RED target build190448 is active; production state
+transition correction is NOT applied. Verify completion before edits/execution.
+Only after genuine all-controls-pass/mask1 cost RED: apply exact locked/range-
+validated idempotence, independent bit-by-bit AllInRange and CPUconflict/OS/token
+neighbors; unchanged nativeGREEN then core/privateinstall/worldFPS. Existing
+work/proprietarydata/pipelines/historicalPrefetchWIP preserved, WSL stopped,
+no push/issue update. Full effects/60FPS remain unmet.
+
 ## Current checkpoint: ready-after-native-wait optimization proved; world comparison pending
 
 Cycle41, native Windows, c8dde68a plus recorded WIP. Genuine RED `184937`,

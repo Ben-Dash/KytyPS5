@@ -435,6 +435,13 @@ private:
 #include "UserServiceGamePresetTests.inc"
 #include "FunctionProfileSmokeTests.inc"
 #include "CommandStreamIdleSpinCostTests.inc"
+#include "RepeatedGpuDirtyStateCostTests.inc"
+#include "RepeatedGpuDirtyStateNeighbors.inc"
+
+static bool IsRepeatedGpuDirtyStateMode(const char* mode) {
+  return std::strcmp(mode, "--repeated-gpu-dirty-state-cost-gpu") == 0 ||
+      std::strcmp(mode, "--repeated-gpu-dirty-state-neighbors-gpu") == 0;
+}
 
 static bool IsForeignReadbackReadyMode(const char* mode) {
   return std::strcmp(mode, "--foreign-readback-ready-after-wait-cost-gpu") == 0 ||
@@ -446,6 +453,8 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && IsRepeatedGpuDirtyStateMode(argv[1]))
+    Libs::Graphics::ConfigureRepeatedGpuDirtyStateCostTests();
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1]))
     Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0)
@@ -548,6 +557,7 @@ int main(int argc, char **argv) {
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
+       IsRepeatedGpuDirtyStateMode(argv[1]) ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
@@ -743,6 +753,7 @@ int main(int argc, char **argv) {
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
+       IsRepeatedGpuDirtyStateMode(argv[1]) ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
@@ -959,6 +970,13 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0) {
     CheckForeignReadbackQueuedStateCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && IsRepeatedGpuDirtyStateMode(argv[1])) {
+    if (std::strcmp(argv[1], "--repeated-gpu-dirty-state-cost-gpu") == 0)
+      CheckRepeatedGpuDirtyStateCost(vulkan);
+    else
+      CheckRepeatedGpuDirtyStateNeighbors(vulkan);
     return 0;
   }
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1])) {

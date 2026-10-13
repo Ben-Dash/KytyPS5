@@ -1394,6 +1394,9 @@ void TestBdaHintSummary() {
         address, page_size, true, [](uint64_t, uint64_t) noexcept {},
         []() noexcept {});
     tracker.MarkRegionAsCpuModified(address, page_size);
+  } else if (std::strcmp(name, "cpu-dirty-explicit-gpu") == 0) {
+    tracker.MarkRegionAsCpuModified(address, page_size);
+    tracker.MarkRegionAsGpuModified(address, page_size);
   } else if (std::strcmp(name, "reentrant-upload") == 0) {
     tracker.ForEachUploadRange(
         address, page_size, true, [](uint64_t, uint64_t) noexcept {},
@@ -1466,7 +1469,7 @@ void CheckDeathCase(const char *name) {
 }
 
 void TestFatalPaths() {
-  for (const char *name : {"gpu-dirty-explicit-cpu", "reentrant-upload",
+  for (const char *name : {"gpu-dirty-explicit-cpu", "cpu-dirty-explicit-gpu", "reentrant-upload",
                            "recursive-tracking-lock", "non-owner-tracking-unlock"}) {
     CheckDeathCase(name);
   }
@@ -1548,10 +1551,6 @@ bool ProtectGuestHostMemory(uint64_t vaddr, uint64_t size,
 int main(int argc, char **argv) {
   if (argc == 3 && std::strcmp(argv[1], "--death") == 0) {
     RunDeathCase(argv[2]);
-  }
-  if (argc == 2 && std::strcmp(argv[1], "--benchmark-clean-upload") == 0) {
-    BenchmarkCleanUploads();
-    return 0;
   }
   TestGuestRange();
   TestRangeSet();
