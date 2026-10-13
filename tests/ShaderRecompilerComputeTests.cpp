@@ -10496,7 +10496,7 @@ public:
 
 #include "AlphaCoverageEndpointTests.inc"
 
-  void CheckNativeIndirectDispatch() {
+  void CheckNativeIndirectDispatch(bool observe_gpu_count = false, bool observe_native_count = false) {
     constexpr const char *name = "NativeIndirectDispatch";
     constexpr uintptr_t base = 0x0000000204600000ull;
     constexpr uint64_t allocation_size = 0x100000;
@@ -10714,11 +10714,31 @@ public:
         const std::array<u32, 3> packet{static_cast<u32>(count_args),
                                       static_cast<u32>(count_args >> 32u), 0x41u};
         const auto dirty_tick = scheduler.CurrentTick();
+        if (!observe_gpu_count) {
         Require(name, "GPU count indirect dispatch",
                 CpOpDispatchIndirect(processor, 0xc0021600u, packet.data(), 0, 0) == 3 &&
                     scheduler.CurrentTick() > dirty_tick &&
                     !cache.HasGpuDirtyBytes(count_args, 4),
                 "the descriptor dependency did not synchronize its preceding GPU writer");
+        } else {
+          // Diagnostic mode observes the old host-drain predicate, then runs the
+          // original numeric/image goldens. It does not establish a regression GREEN.
+          const auto consumed = CpOpDispatchIndirect(
+              processor, 0xc0021600u, packet.data(), 0, 0);
+          const auto after_tick = scheduler.CurrentTick();
+          const bool remains_gpu_dirty = cache.HasGpuDirtyBytes(count_args, 4);
+          const bool old_host_drain_predicate = consumed == 3 &&
+              after_tick > dirty_tick && !remains_gpu_dirty;
+          std::printf("[indirect-count-observe] count=%u consumed=%u tick_before=%llu "
+                      "tick_after=%llu gpu_dirty_after=%u old_host_drain_predicate=%u\n",
+                      count, consumed,
+                      static_cast<unsigned long long>(dirty_tick),
+                      static_cast<unsigned long long>(after_tick),
+                      remains_gpu_dirty ? 1u : 0u, old_host_drain_predicate ? 1u : 0u);
+          std::fflush(stdout);
+          Require(name, "observed GPU count indirect packet", consumed == 3,
+                  "the diagnostic packet was not consumed; this is not a stale-cost result");
+        }
         const auto clean_tick = scheduler.CurrentTick();
         ShaderComputeInputInfo input{};
         const auto program = context.GetPipelineCache().GetComputeProgram(
@@ -10732,6 +10752,59 @@ public:
                 CpOpDispatchIndirect(processor, 0xc0021600u, packet.data(), 0, 0) == 3 &&
                     scheduler.CurrentTick() == clean_tick,
                 "a clean descriptor dependency caused another GPU drain");
+        if (observe_native_count) {
+          constexpr u32 probe_guard = 0xdeadbeefu;
+          constexpr u32 output_words = 16u;
+          std::vector<u32> initial_probe(output_words + 2u, probe_guard);
+          auto probe = CreateHostBuffer(name, initial_probe.size() * sizeof(u32),
+              vk::BufferUsageFlagBits::eTransferDst, initial_probe);
+          const auto [native_owner, page_offset] = cache.PeekPage(count_output);
+          Require(name, "observed actual native count output owner", bool(native_owner),
+                  "no actual native owner; not a native arithmetic reproduction");
+          const auto within_page = count_output & (BufferCache::CACHING_PAGESIZE - 1u);
+          Require(name, "observed native probe range inside owner page",
+                  within_page + output_words * sizeof(u32) <= BufferCache::CACHING_PAGESIZE,
+                  "probe escaped the fully owned caching page");
+          const auto source_offset = page_offset + within_page;
+          const bool cpu_dirty_before_probe = cache.HasGpuDirtyBytes(count_output, output_words * sizeof(u32));
+          scheduler.EndRendering();
+          auto command = scheduler.Current().Handle();
+          vk::BufferMemoryBarrier ready{};
+          ready.srcAccessMask = vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eMemoryWrite;
+          ready.dstAccessMask = vk::AccessFlagBits::eTransferRead;
+          ready.srcQueueFamilyIndex = ready.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          ready.buffer = native_owner;
+          ready.offset = source_offset;
+          ready.size = output_words * sizeof(u32);
+          command.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+              vk::PipelineStageFlagBits::eTransfer, {}, 0u, nullptr, 1u, &ready, 0u, nullptr);
+          const vk::BufferCopy copy{source_offset, sizeof(u32), output_words * sizeof(u32)};
+          command.copyBuffer(native_owner, probe.buffer, 1u, &copy);
+          vk::BufferMemoryBarrier host{};
+          host.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+          host.dstAccessMask = vk::AccessFlagBits::eHostRead;
+          host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          host.buffer = probe.buffer;
+          host.offset = 0u;
+          host.size = probe.size;
+          command.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+              vk::PipelineStageFlagBits::eHost, {}, 0u, nullptr, 1u, &host, 0u, nullptr);
+          scheduler.Finish();
+          const auto native = ReadBuffer(name, probe, output_words + 2u);
+          bool exact = true;
+          for (u32 i = 0; i < output_words; ++i)
+            exact = exact && native[i + 1u] == (i < count ? count + i + 1u : sentinel);
+          const bool guards = native.front() == probe_guard && native.back() == probe_guard;
+          std::printf("[indirect-native-owner-observe] count=%u exact=%u probe_guards=%u "
+                      "cpu_dirty_before_probe=%u added_finish=1 words=",
+                      count, exact ? 1u : 0u, guards ? 1u : 0u, cpu_dirty_before_probe ? 1u : 0u);
+          for (u32 i = 0; i < output_words; ++i) std::printf("%s%08x", i == 0u ? "" : ",", native[i + 1u]);
+          std::printf("\n");
+          std::fflush(stdout);
+          DestroyBuffer(&probe);
+          // Observation only. Existing final CPU publication/numeric/image predicates
+          // still decide the original test. A full new semantic RED needs teardown first.
+        }
         cache.ReadMemory(count_output, 16u * sizeof(u32));
         std::array<u32, 16> actual{};
         Require(name, "counted output readback",
@@ -43882,6 +43955,16 @@ int main(int argc, char **argv) {
                    std::strcmp(argv[1], "--gpu-counted-multi-draw-srd") == 0)) {
     VulkanHarness vulkan;
     vulkan.CheckGpuCountedMultiDraw(std::strcmp(argv[1], "--gpu-counted-multi-draw-srd") != 0);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--native-indirect-observe-native-count") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckNativeIndirectDispatch(true, true);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--native-indirect-observe-count") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckNativeIndirectDispatch(true);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--native-indirect-only") == 0) {
