@@ -886,6 +886,9 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --retired-image-byte-budget-neighbors-gpu)
 	set_tests_properties(retired_image_byte_budget_gpu retired_image_byte_budget_neighbors_gpu
 		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME retired_image_mixed_size_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --retired-image-mixed-size-gpu)
+	set_tests_properties(retired_image_mixed_size_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME fused_tiled_upload_2byte_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-2byte-cost-gpu)
 	set_tests_properties(fused_tiled_upload_2byte_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

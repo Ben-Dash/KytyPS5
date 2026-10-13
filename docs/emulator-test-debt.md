@@ -2,6 +2,12 @@
 
 ## Retired native-image recycling byte budget required reproduction, 2026-10-13
 
+Mixed native103850/FE975240 PASS actualsizes4096/16384/65536, genuine native
+contents/canaries/ticks for all four images; insertion evicts BOTH smaller
+retired entries, retained65536/count1, heldlive large image reread unchanged,
+idle/envcleanup PASS. Registeredtwo memory CTests PASS1.06s; nativecore103425
+onb5dd974c PASS. Runtime pool occupancy/physicalblocks/game FPS still untested.
+
 Same unchanged GREEN102624/25DDEDFE retained32768/count2 vs old81920/count5;
 allnative imagebits/canaries/ticks/live sixth/cleanup PASS. Neighbors102625
 sameEXE oversize/reuse/format/zeroCap/count24/invalidParse/envcleanup PASS;

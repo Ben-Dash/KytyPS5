@@ -1,5 +1,20 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint:b5dd974c byte-limit core; mixed native proof complete
+
+Separate memoryfix b5dd974ca19df56269a7a89def75e47501cc6c7c, nativecore103425
+PASS. Real mixed allocation neighbor103850/FE975240 PASS: native sizes4096/
+16384/65536, large insertion evicts BOTH older small entries, retained65536/
+count1; allimagebits/guards/completion/live heldowner/cleanup PASS. Registered
+two memory CTests PASS1.06s. Test-onlymixed follow-up/CMake registration pending
+commit; no new memory policy edit. Actual memory-pool world benefit untested.
+
+WSL restarted again (PID55344/18.01GiB); optional user question asks whether
+another current task needs it. Continue native small tests/research; no more
+WSL shutdown while clarifying conflicting actualusage. Game retry needs enough
+RAM/cleanhost conditions; no claims of60/paging/VRAM savings from these tests.
+Source clean except follow-up test/docs and preserved prefetchWIP (verify).
+
 ## Current checkpoint: retired-image byte-limit native GREEN; game pending
 
 ad5f5bbf plus byte-limit WIP: unchanged realRED102201/DA41B93E retained81920B/

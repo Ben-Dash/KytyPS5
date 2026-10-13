@@ -363,6 +363,7 @@ private:
 #include "FusedTiledUploadCostTests.inc"
 #include "RetiredImageByteBudgetTests.inc"
 #include "RetiredImageByteBudgetNeighbors.inc"
+#include "RetiredImageMixedSizeTests.inc"
 #include "FusedTiledUpload2ByteCapabilityTests.inc"
 #include "FusedTiledUpload1080Bench.inc"
 #include "FusedTiledUploadOddOffsetNeighbors.inc"
@@ -445,7 +446,7 @@ int main(int argc, char **argv) {
                     std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0))
     Libs::Graphics::Require("WaitRegMemNativeNonblockingCost", "direct-record profile setup",
         _putenv_s("KYTY_RECORD_THREAD", "0") == 0, "could not pin direct recording before getters");
-  if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0)) {
+  if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0))) {
     Libs::Graphics::Require("RetiredImageByteBudget","standalone process configuration",
         _putenv_s("KYTY_RECORD_THREAD","0")==0&&_putenv_s("KYTY_IMAGE_RECYCLE","1")==0,
         "direct recording/recycle configuration failed before native setup");
@@ -520,7 +521,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
-                            (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0) ||
+                            (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0)) ||
                             std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0 ||
@@ -708,7 +709,7 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
-       (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0) ||
+       (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0)) ||
 
        std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
@@ -736,10 +737,12 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
-  if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0)) {
+  if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0))) {
     auto& renderer=vulkan.RuntimeRenderer();renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&]{
-      if (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0)
+      if (std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0)
+        CheckRetiredImageMixedSize(vulkan);
+      else if (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0)
         CheckRetiredImageByteBudgetNeighbors(vulkan);
       else
         CheckRetiredImageByteBudget(vulkan);
