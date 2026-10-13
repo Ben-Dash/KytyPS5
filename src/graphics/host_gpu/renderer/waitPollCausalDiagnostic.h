@@ -51,7 +51,7 @@ inline bool Active() noexcept {
   return Enabled() && LabelCausalTrace::active.load(std::memory_order_acquire);
 }
 // Call under this diagnostic's mutex. The label ring never calls back into it.
-inline void Record(LabelCausalTrace::Stage stage, uint64_t owner=0, uint64_t tick=0,
+inline void ForwardRow(LabelCausalTrace::Stage stage, uint64_t owner=0, uint64_t tick=0,
     uint64_t token=0, uint64_t address=0, uint64_t size=0, uint64_t value=0,
     uint64_t pc=0, uint64_t submit=0) noexcept {
   ++requested_rows;
@@ -108,9 +108,9 @@ public:
       episode.input=input; episode.id=++next_episode; episode.first_ns=begin;
       const auto meta=uint64_t{input.queue}|(uint64_t{input.stream}<<8)|
         (uint64_t{input.func}<<16)|(uint64_t{input.operation}<<24);
-      Record(LabelCausalTrace::Stage::WaitSite,input.owner,input.submit,episode.id,
+      ForwardRow(LabelCausalTrace::Stage::WaitSite,input.owner,input.submit,episode.id,
         input.address,input.width,input.ref,input.packet,meta);
-      Record(LabelCausalTrace::Stage::WaitMask,input.owner,begin,episode.id,
+      ForwardRow(LabelCausalTrace::Stage::WaitMask,input.owner,begin,episode.id,
         input.address,input.poll,input.mask,input.packet,input.submit);
     }
     ++episode.calls; episode.unpublished+=unpublished;
@@ -119,17 +119,17 @@ public:
     const bool transition=episode.last_path!=path ||
       (!unpublished&&(!episode.had_value||episode.last_value!=actual||satisfied));
     if(transition) {
-      Record(LabelCausalTrace::Stage::WaitPollOutcome,input.owner,armed_tick,episode.id,
+      ForwardRow(LabelCausalTrace::Stage::WaitPollOutcome,input.owner,armed_tick,episode.id,
         input.address,poll_elapsed,static_cast<uint64_t>(path),input.packet,input.submit);
-      if(!unpublished) Record(LabelCausalTrace::Stage::WaitReadResult,input.owner,read_elapsed,
+      if(!unpublished) ForwardRow(LabelCausalTrace::Stage::WaitReadResult,input.owner,read_elapsed,
         episode.id,input.address,input.width,actual,input.packet,satisfied?1:0);
     }
     episode.last_path=path;
     if(!unpublished) { episode.had_value=true; episode.last_value=actual; }
     if(!unpublished&&satisfied) {
-      Record(LabelCausalTrace::Stage::WaitEpisodeDone,input.owner,input.submit,episode.id,
+      ForwardRow(LabelCausalTrace::Stage::WaitEpisodeDone,input.owner,input.submit,episode.id,
         input.address,episode.calls,episode.unpublished,episode.comparator_false,end-episode.first_ns);
-      Record(LabelCausalTrace::Stage::WaitEpisodeTiming,input.owner,episode.poll_ns,episode.id,
+      ForwardRow(LabelCausalTrace::Stage::WaitEpisodeTiming,input.owner,episode.poll_ns,episode.id,
         input.address,episode.read_ns,0,input.packet,input.submit);
       episode={};
     }
@@ -143,7 +143,7 @@ inline uint64_t CvBegin(uint64_t owner,uint64_t generation,uint64_t blocked_mask
   const auto begin=LabelCausalTrace::Now();
   std::lock_guard lock(mutex);
   if(!Active()||dumped) return 0;
-  Record(LabelCausalTrace::Stage::WaitCvBegin,owner,generation,begin,0,0,blocked_mask);
+  ForwardRow(LabelCausalTrace::Stage::WaitCvBegin,owner,generation,begin,0,0,blocked_mask);
   return begin;
 }
 inline void CvEnd(uint64_t owner,uint64_t begin,bool notified,uint64_t generation) noexcept {
@@ -156,14 +156,14 @@ inline void CvEnd(uint64_t owner,uint64_t begin,bool notified,uint64_t generatio
   const auto bucket=elapsed<100000?0:elapsed<500000?1:elapsed<1000000?2:
     elapsed<2000000?3:elapsed<5000000?4:5;
   ++cv_histogram[bucket];
-  Record(LabelCausalTrace::Stage::WaitCvEnd,owner,generation,begin,0,elapsed,notified?1:0);
+  ForwardRow(LabelCausalTrace::Stage::WaitCvEnd,owner,generation,begin,0,elapsed,notified?1:0);
 }
 inline void SourceNotify(uint64_t owner,uint64_t generation) noexcept {
   if(!Active()) return;
   std::lock_guard lock(mutex);
   if(!Active()||dumped) return;
   ++source_notifies;
-  Record(LabelCausalTrace::Stage::WaitSourceNotify,owner,generation,0,0,0,source_notifies);
+  ForwardRow(LabelCausalTrace::Stage::WaitSourceNotify,owner,generation,0,0,0,source_notifies);
 }
 inline void DumpIfClosed() {
   if(!Enabled() || LabelCausalTrace::start_ns.load()==0 || LabelCausalTrace::active.load()) return;
