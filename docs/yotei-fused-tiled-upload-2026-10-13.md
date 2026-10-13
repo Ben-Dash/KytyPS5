@@ -40,6 +40,16 @@ All54 real native uploads retain exact bits and guards. This proves an operation
 gain at128x128, not4K throughput, game FPS, rendered dimensions or full effects.
 Actual game retry remains pending; world baseline is~3FPS.
 
+Completed ce9 world retry mean3.045833 versus2.953571 in one pair: about3%, no
+useful game gain. Separate SAME-EXE/device-local-source/target1920x1080 comparison
+031229/CB311C9D passes36 full image trials and complete native+guest source/guard
+checks after a real bounded guest-mapping setup correction. Median4B154400ns
+legacy ->27616ns fused (82.11%);8B304864 ->57984ns (80.98%). Two warms/seven
+interleaved pairs per format; target is cleared before each measured upload and
+every output word checked after it. Device-source preparation remains outside
+both GPU intervals. The measured operation improvement does not imply game FPS
+or the game's actual internal resolution.
+
 Fresh shader-compute build021201 and native shared tiler021320 pass358cases/
 264format-mode pairs after swizzle extraction. Fresh linked BC4/5/7 cache aliases
 and copy-mip neighboring cases021408/409 pass with zero mismatches. New-route odd
