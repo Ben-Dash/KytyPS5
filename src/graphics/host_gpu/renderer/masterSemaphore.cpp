@@ -300,6 +300,12 @@ void MasterSemaphore::Wait(uint64_t tick) {
 	wait_info.pValues        = &tick;
 
 	const auto result = m_graphics.device.waitSemaphores(&wait_info, UINT64_MAX);
+	if (result != vk::Result::eSuccess) {
+		std::fprintf(stderr, "Vulkan timeline wait failed: result=%d waited_tick=%llu known_gpu_tick=%llu\n",
+		             static_cast<int>(result), static_cast<unsigned long long>(tick),
+		             static_cast<unsigned long long>(m_gpu_tick.load(std::memory_order_acquire)));
+		std::fflush(stderr);
+	}
 	ReportDeviceFault(m_graphics, result, m_gpu_tick.load(std::memory_order_acquire));
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 	Refresh();
