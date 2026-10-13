@@ -32,6 +32,7 @@ struct Row {
 struct Config {
   bool on = false;
   uint64_t pointer = 0, span = 0x4000, start_frame = 400;
+  uint64_t capture_not_before_ns = 0;
   std::array<uint64_t, 8> read_pcs {};
   size_t pc_count = 0;
 };
@@ -41,6 +42,18 @@ inline const Config& GetConfig() {
     const char* on = KYTY_GETENV("KYTY_LABEL_CAUSAL_TRACE");
     c.on = on != nullptr && on[0] == '1' && on[1] == '\0';
     if (!c.on) return c;
+    if (const char* p = KYTY_GETENV("KYTY_LABEL_CAUSAL_MIN_ELAPSED_S"); p != nullptr) {
+      char* end = nullptr;
+      const auto seconds = std::strtoull(p, &end, 10);
+      if (end == p || *end != '\0' || seconds > 300) {
+        c.on = false;
+        std::fprintf(stderr, "label-causal invalid elapsed gate; diagnostic disabled\n");
+        return c;
+      }
+      const auto now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch()).count());
+      c.capture_not_before_ns = now + seconds * 1'000'000'000ull;
+    }
     if (const char* p = KYTY_GETENV("KYTY_LABEL_CAUSAL_POINTER"); p != nullptr) {
       char* end = nullptr;
       c.pointer = std::strtoull(p, &end, 16);
@@ -64,7 +77,7 @@ inline const Config& GetConfig() {
   return config;
 }
 inline bool Enabled() noexcept { return GetConfig().on; }
-inline constexpr size_t Capacity = 32768;
+inline constexpr size_t Capacity = 262144;
 inline std::array<Row, Capacity> rows {};
 inline std::mutex mutex;
 inline std::atomic<uint64_t> start_ns {0}, target {0};
@@ -150,7 +163,7 @@ inline void TickFrame(uint64_t frame) {
   if (!Enabled()) return;
   const auto now = Now();
   if (start_ns.load() == 0) {
-    if (frame < GetConfig().start_frame) return;
+    if (frame < GetConfig().start_frame || now < GetConfig().capture_not_before_ns) return;
     start_ns.store(now, std::memory_order_release);
     active.store(true, std::memory_order_release);
     std::printf("label-causal begin frame=%" PRIu64 " seconds=10 capacity=%zu "
