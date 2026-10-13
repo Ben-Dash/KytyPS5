@@ -6,7 +6,6 @@
 #include "common/common.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
-#include "graphics/host_gpu/renderer/csPartialFlush.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
@@ -205,16 +204,6 @@ public:
 	void ContinueComputeChain() const noexcept { m_compute_access_pending = true; }
 	// For a caller that records a full memory dependency at once, which covers the pending one.
 	[[nodiscard]] vk::CommandBuffer HandleForFullBarrier() const;
-	// Native substitutes of guest work may write in stages other than compute.
-	// Keep their history in this stable wrapper across pooled native-buffer rollover.
-	void NoteCsPartialFlushProducer(vk::PipelineStageFlags2 source) const noexcept {
-		m_cs_partial_producers.Note(source);
-	}
-	void RecordCsPartialFlush() const;
-	// Called after the legacy OFF CS full barrier records its covering dependency.
-	void CoverCsPartialFlushProducers() const noexcept {
-		m_cs_partial_producers.CoveredByRecordedCsPartialFlush();
-	}
 	[[nodiscard]] GraphicContext&   GetGraphics() const noexcept { return m_graphics; }
 	[[nodiscard]] RenderContext&    GetContext() const noexcept { return m_context; }
 	[[nodiscard]] HW::Context&      GetRegisters() const noexcept { return *m_registers; }
@@ -256,7 +245,6 @@ private:
 	mutable bool        m_native_handle_requested = false;
 	mutable bool        m_rendering   = false;
 	mutable bool        m_compute_access_pending = false;
-	mutable CsPartialFlushProducerStages m_cs_partial_producers;
 	mutable vk::PipelineStageFlags m_pending_shader_writes;
 	mutable GraphicsState          m_graphics_state;
 	HW::Context*        m_registers   = nullptr;

@@ -2384,12 +2384,6 @@ void CommandProcessor::EmitGlobalBarrier() {
 	CurrentBuffer().HandleForFullBarrier().pipelineBarrier2(dependency);
 }
 
-void CommandProcessor::EmitCsPartialFlush() {
-	Common::LockGuard lock(m_renderer.GetMutex());
-	GetScheduler().EndRendering();
-	CurrentBuffer().RecordCsPartialFlush();
-}
-
 void CommandProcessor::BreakComputeChain() {
 	if (!GetScheduler().Active()) {
 		return;
@@ -2427,16 +2421,8 @@ void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
 
 	const auto valid_cache_event_index = event_index == 0x00000000 || event_index == 0x00000007;
 	switch (event_type) {
-		// CsPartialFlush. Only this event has the opt-in native producer-stage policy.
+		// CsPartialFlush, GsPartialFlush, PsPartialFlush.
 		case 0x00000007:
-			if (CsPartialFlushStagesEnabled()) {
-				EmitCsPartialFlush();
-			} else {
-				EmitGlobalBarrier();
-				CurrentBuffer().CoverCsPartialFlushProducers();
-			}
-			break;
-		// VsPartialFlush, PsPartialFlush retain the existing conservative full policy.
 		case 0x0000000f:
 		case 0x00000010: EmitGlobalBarrier(); break;
 		// CbDbDataWritebackInvalidate, CbDataWritebackInvalidate.

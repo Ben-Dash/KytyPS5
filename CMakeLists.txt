@@ -1019,21 +1019,6 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --compute-chain-visibility-only)
 	set_tests_properties(compute_chain_visibility_off PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=0")
 	set_tests_properties(compute_chain_visibility_on PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=1")
-	add_test(NAME cs_partial_producer_stage_cost
-		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --cs-partial-producer-stage-cost)
-	add_test(NAME cs_partial_producer_stage_plan
-		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --cs-partial-producer-stage-plan)
-	add_test(NAME cs_partial_alias_rollover_off
-		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --cs-partial-alias-rollover)
-	add_test(NAME cs_partial_alias_rollover_on
-		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --cs-partial-alias-rollover)
-	set_tests_properties(cs_partial_producer_stage_cost cs_partial_alias_rollover_on
-		PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=1;KYTY_CS_PARTIAL_STAGE_SCOPED=1")
-	set_tests_properties(cs_partial_alias_rollover_off
-		PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=1;KYTY_CS_PARTIAL_STAGE_SCOPED=0")
-	set_tests_properties(cs_partial_producer_stage_cost cs_partial_producer_stage_plan
-		cs_partial_alias_rollover_off cs_partial_alias_rollover_on
-		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	set_tests_properties(image_covered_read_scope image_new_read_stage image_partial_read_scopes
 		image_uploaded_read_stage_subset compute_chain_visibility_off compute_chain_visibility_on
 		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

@@ -112,22 +112,6 @@ vk::CommandBuffer CommandBuffer::HandleForFullBarrier() const {
 	return m_buffer;
 }
 
-void CommandBuffer::RecordCsPartialFlush() const {
-	EXIT_IF(IsInvalid() || m_rendering);
-	// Actual upload copies retain their existing post-copy visibility dependency.
-	FlushUploadDependency();
-	NoteSubmissionWork();
-	const auto barrier = m_cs_partial_producers.Plan();
-	vk::DependencyInfo dependency{};
-	dependency.memoryBarrierCount = 1;
-	dependency.pMemoryBarriers = &barrier;
-	// The planned source always includes COMPUTE, so this dependency also covers
-	// the deferred compute-chain access without Handle() adding another barrier.
-	m_buffer.pipelineBarrier2(dependency);
-	m_compute_access_pending = false;
-	m_cs_partial_producers.CoveredByRecordedCsPartialFlush();
-}
-
 void CommandBuffer::Begin() {
 	EXIT_IF(m_rendering || m_pending_shader_writes || m_upload_dependency_pending ||
 	        !m_upload_destinations.empty() || IsInvalid());
