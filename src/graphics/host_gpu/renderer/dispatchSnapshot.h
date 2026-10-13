@@ -17,6 +17,8 @@
 //   KYTY_DISPATCH_SNAPSHOT=frame:<n>           every dispatch of the first frame >= n that has any
 //   KYTY_DISPATCH_SNAPSHOT=1                   what dispatch_snapshot.txt names, else frame:600
 //   KYTY_DISPATCH_SNAPSHOT_MAX=<n>             snapshots per shader (8) or per frame (4000)
+//   KYTY_DISPATCH_SNAPSHOT_START_FRAME=<n>     additional minimum frame for either selector;
+//     strict decimal uint64, default0; early dispatches do not consume quotas.
 //   KYTY_DISPATCH_SNAPSHOT_DIR=<dir>           where they go (_snapshots)
 //   KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER=<slot>:<bytes>  require this written buffer's declared
 //     SRD size (decimal, nonzero bytes); rejected dispatches do not consume capture limits.

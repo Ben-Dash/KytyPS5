@@ -52,6 +52,7 @@ struct Settings {
 	bool                  enabled = false;
 	std::vector<uint64_t> hashes;
 	int64_t               frame = -1;
+	uint64_t              start_frame = 0; // additional diagnostic admission, before quota
 	uint32_t              max   = 0;
 	uint32_t              ring  = 0; // KYTY_DISPATCH_SNAPSHOT_RING: keep only the last n snapshots
 	std::filesystem::path directory;
@@ -99,6 +100,15 @@ const Settings& GetSettings() {
 		const char* dir = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_DIR");
 		s.directory     = dir != nullptr && *dir != '\0' ? dir : "_snapshots";
 		s.enabled       = s.frame >= 0 || !s.hashes.empty();
+		if (const char* start = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_START_FRAME"); start != nullptr) {
+			const std::string_view text(start);
+			uint64_t value = 0;
+			const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+			if (text.empty() || parsed.ec != std::errc {} || parsed.ptr != text.data() + text.size()) {
+				EXIT("dispatch-snapshot: malformed KYTY_DISPATCH_SNAPSHOT_START_FRAME; expected decimal uint64\n");
+			}
+			s.start_frame = value;
+		}
 		if (const char* filter = KYTY_GETENV("KYTY_DISPATCH_SNAPSHOT_WRITTEN_BUFFER");
 		    filter != nullptr) {
 			WrittenBufferSelector selector;
@@ -1010,7 +1020,7 @@ InventoryLedger& GetInventoryLedger() {
 void RecordJobInventory(const ShaderStageRuntime& runtime, const ShaderComputeInputInfo* input,
                          std::array<uint32_t, 3> groups, uint64_t frame) {
 	const auto& s = GetSettings();
-	if (!s.enabled || s.job_inventory_max == 0u) return;
+	if (!s.enabled || s.job_inventory_max == 0u || frame < s.start_frame) return;
 	const auto* program = runtime.program;
 	const auto* resources = runtime.resources;
 	const uint64_t hash = program != nullptr ? program->shader_hash : 0u;
@@ -1131,6 +1141,7 @@ bool WantedRuntime(const ShaderStageRuntime& runtime, uint64_t frame) {
 	if (!s.enabled) [[likely]] {
 		return false;
 	}
+	if (frame < s.start_frame) return false;
 	if (s.written_buffer && !MatchesWrittenBufferSelector(*s.written_buffer, runtime)) {
 		return false;
 	}
@@ -1175,6 +1186,7 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
                       uint64_t frame, vk::Buffer args, uint64_t args_offset) {
 	static uint32_t next_id = 0;
 	const auto&     s       = GetSettings();
+	if (frame < s.start_frame) return {};
 	if (s.written_buffer && !MatchesWrittenBufferSelector(*s.written_buffer, input.stage)) {
 		return {};
 	}
@@ -1198,6 +1210,7 @@ Pending CaptureInputs(RenderContext& context, const ShaderComputeInputInfo& inpu
 	Json meta;
 	meta["version"]  = 1;
 	meta["shader"]   = fmt::format("{:016x}", program.shader_hash);
+	if (s.start_frame != 0u) meta["admission_start_frame"] = s.start_frame;
 	if (s.written_buffer) {
 		meta["admission_written_buffer"] = {{"index", s.written_buffer->slot},
 		                                     {"declared_bytes", s.written_buffer->declared_bytes}};
