@@ -1,5 +1,22 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: retired-image byte-limit native GREEN; game pending
+
+ad5f5bbf plus byte-limit WIP: unchanged realRED102201/DA41B93E retained81920B/
+count5 vs cap32768 ->GREEN102624/25DDEDFE retained32768/count2. All real image
+bits/guards/native ticks/live sixth/cleanup unchanged PASS. Neighbors102625
+sameEXE oversized/reuse/formatMismatch/cap0/count24/invalid+overflow/envcleanup
+PASS. Five affected2B/BC/mip CTests PASS2.36s. Mixed-size/multiple-victim native
+control pending, then commit/core/private install and neutralworld30s.
+Byte limit clamps existing count24 by min(explicit/default1GiB,planningbudget/8),
+evicts only already-retired allocations, preserves live owners/fences/reuse.
+Retainedallocationbytes do not equal physicalVRAM blocks/FPS; actualruntime
+pool occupancy and usefulgame speed remain unproved.
+Default BDA batching staysOFF; supportedoptin1 sixnativechecksPASS2.52s;
+off-control retainsoldpairs/allsemanticcontrols before intentionallyfailed
+optin costoracle. Core/default-off world nottested yet. WSLautorestarted4.3GiB
+aftershutdown; don'tclaimall recenthostloadisolated. Preserve historical WIP.
+
 ## Current checkpoint:BDA experiment opt-in; retired-image byte-limit genuine RED
 
 b351 worldrepeat101111-191cfb complete30s650..745/27titles mean3.222222,

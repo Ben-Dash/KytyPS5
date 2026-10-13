@@ -880,6 +880,12 @@ if(BUILD_TESTING)
 		TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_OCCLUSION_QUERIES=1")
 	add_test(NAME fused_tiled_upload_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-cost-gpu)
+	add_test(NAME retired_image_byte_budget_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --retired-image-byte-budget-gpu)
+	add_test(NAME retired_image_byte_budget_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --retired-image-byte-budget-neighbors-gpu)
+	set_tests_properties(retired_image_byte_budget_gpu retired_image_byte_budget_neighbors_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME fused_tiled_upload_2byte_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-2byte-cost-gpu)
 	set_tests_properties(fused_tiled_upload_2byte_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)

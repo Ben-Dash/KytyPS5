@@ -166,6 +166,10 @@ private:
 	    m_image_format_properties;
 };
 
+// Standalone native regression observer; the caller owns/has retired all images.
+[[nodiscard]] uint64_t NativeImageRecyclerRetainedBytesForTests(VmaAllocator allocator, size_t* count);
+void NativeImageRecyclerClearForTests(VmaAllocator allocator);
+
 struct VulkanImageState {
 	vk::PipelineStageFlags2 pl_stage    = vk::PipelineStageFlagBits2::eAllCommands;
 	vk::AccessFlags2        access_mask = vk::AccessFlagBits2::eNone;

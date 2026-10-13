@@ -312,11 +312,39 @@ struct RecycledImage {
 	vk::ImageUsageFlags  usage {};
 	vk::ImageCreateFlags flags {};
 	uint64_t             serial = 0;
+	uint64_t             bytes  = 0;
 };
 constexpr size_t           RecycledImagesMax = 24;
 std::mutex                 g_recycled_mutex;
 std::vector<RecycledImage> g_recycled;
 uint64_t                   g_recycled_serial = 0;
+
+// Retired images have already left live ownership. Keep the existing count limit,
+// and bound actual native allocation bytes as well as the number of handles.
+uint64_t RecycledImageByteLimit(const GraphicContext& graphics) {
+	constexpr uint64_t default_bytes = 1024ull * 1024 * 1024;
+	uint64_t configured = default_bytes;
+	if (const char* text = KYTY_GETENV("KYTY_IMAGE_RECYCLE_MAX_BYTES"); text != nullptr) {
+		// This is a decimal process-only cache budget, not a device capacity override.
+		// Invalid/overflowed input keeps the default; zero disables idle retention.
+		uint64_t parsed = 0;
+		bool valid = *text != '\0';
+		for (const char* current = text; valid && *current != '\0'; ++current) {
+			const auto digit = static_cast<unsigned char>(*current);
+			if (digit < '0' || digit > '9' ||
+			    parsed > (UINT64_MAX - (digit - '0')) / 10u) {
+				valid = false;
+			} else {
+				parsed = parsed * 10u + digit - '0';
+			}
+		}
+		if (valid) {
+			configured = parsed;
+		}
+	}
+	const auto budget = graphics.GetTotalMemoryBudget();
+	return budget != 0 ? std::min(configured, budget / 8u) : configured;
+}
 
 bool ImageRecycleEnabled() {
 	static const bool enabled = [] {
@@ -333,6 +361,25 @@ bool ImageRecyclable(const vk::ImageCreateInfo& info) {
 	       info.initialLayout == vk::ImageLayout::eUndefined;
 }
 } // namespace
+
+// Test-only access to actual retained allocations. Does not advance GPU readiness,
+// alter policy, free an object or expose a synthetic native allocation.
+uint64_t NativeImageRecyclerRetainedBytesForTests(VmaAllocator allocator, size_t* count) {
+  std::scoped_lock lock(g_recycled_mutex);
+  uint64_t bytes=0;
+  for(const auto& image:g_recycled) {
+    VmaAllocationInfo info{};vmaGetAllocationInfo(allocator,image.allocation,&info);
+    bytes+=info.size;
+  }
+  if(count!=nullptr)*count=g_recycled.size();
+  return bytes;
+}
+
+void NativeImageRecyclerClearForTests(VmaAllocator allocator) {
+  std::vector<RecycledImage> retired;
+  {std::scoped_lock lock(g_recycled_mutex);retired.swap(g_recycled);}
+  for(const auto& image:retired)vmaDestroyImage(allocator,image.image,image.allocation);
+}
 
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
 	KYTY_PROFILER_FUNCTION();
@@ -422,20 +469,39 @@ void GraphicContext::DeleteImage(VulkanImage& image) {
 
 	vk::Image     destroy_image      = image.image;
 	VmaAllocation destroy_allocation = image.allocation;
+	std::vector<RecycledImage> evicted;
 	HandleRegistry::Unregister(reinterpret_cast<uint64_t>(static_cast<VkImage>(image.image)));
 	if (image.recyclable) {
+		VmaAllocationInfo allocation_info {};
+		vmaGetAllocationInfo(allocator, image.allocation, &allocation_info);
+		const uint64_t bytes = allocation_info.size;
+		const uint64_t limit = RecycledImageByteLimit(*this);
 		std::scoped_lock lock {g_recycled_mutex};
-		g_recycled.push_back({image.image, image.allocation, image.format, image.image_type,
-		                      image.extent, image.layers, image.mip_levels, image.samples,
-		                      image.usage, image.flags, ++g_recycled_serial});
-		destroy_image      = nullptr;
-		destroy_allocation = nullptr;
-		if (g_recycled.size() > RecycledImagesMax) {
+		if (bytes != 0 && bytes <= limit) {
+			g_recycled.push_back({image.image, image.allocation, image.format, image.image_type,
+			                      image.extent, image.layers, image.mip_levels, image.samples,
+			                      image.usage, image.flags, ++g_recycled_serial, bytes});
+			destroy_image      = nullptr;
+			destroy_allocation = nullptr;
+		}
+		// At most24 retained entries, so a small sum avoids another mutable global
+		// counter and leaves creation/reuse/test cleanup accounting unchanged.
+		uint64_t retained = 0;
+		for (const auto& retired : g_recycled) {
+			retained += retired.bytes;
+		}
+		while (!g_recycled.empty() &&
+		       (g_recycled.size() > RecycledImagesMax || retained > limit)) {
 			const auto oldest = std::ranges::min_element(g_recycled, {}, &RecycledImage::serial);
-			destroy_image      = oldest->image;
-			destroy_allocation = oldest->allocation;
+			retained -= oldest->bytes;
+			evicted.push_back(*oldest);
 			g_recycled.erase(oldest);
 		}
+	}
+	// All victims were already retired by their original owner. Native destruction
+	// stays outside the pool lock; no recording tick or live owner is advanced.
+	for (const auto& retired : evicted) {
+		vmaDestroyImage(allocator, retired.image, retired.allocation);
 	}
 	if (destroy_image) {
 		vmaDestroyImage(allocator, destroy_image, destroy_allocation);

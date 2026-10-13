@@ -2,6 +2,12 @@
 
 ## Retired native-image recycling byte budget required reproduction, 2026-10-13
 
+Same unchanged GREEN102624/25DDEDFE retained32768/count2 vs old81920/count5;
+allnative imagebits/canaries/ticks/live sixth/cleanup PASS. Neighbors102625
+sameEXE oversize/reuse/format/zeroCap/count24/invalidParse/envcleanup PASS;
+five affected2B/BC/mip CTests PASS2.36s. Mixed-size/multiple-victim control
+and actual core/game needed. No physicalVRAM/FPS gain implied by allocationcap.
+
 Genuine native RED102201/DA41B93E onb351 plus diagnosticobserver/fixture:
 allreal imagebits/canaries/ticks/live sixth/cleanup PASS; nativeallocationA16384,
 requestedcap2A32768, actualretired5A81920/count5; finalcostfails. Earlier bad
