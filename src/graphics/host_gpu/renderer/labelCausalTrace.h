@@ -23,7 +23,7 @@ namespace Libs::Graphics::LabelCausalTrace {
 enum class Stage : uint32_t {
   GuestEnqueue, CpStart, LabelRecord, OrderedBegin, ReadbackArm,
   NativeSubmit, NativeObserved, PublishBegin, BackingWritten, Finalized,
-  FaultBegin, FaultEnd, PointerResolved, PointerUnavailable
+  FaultBegin, FaultEnd, PointerResolved, PointerUnavailable, SliceEnter, SliceExit
 };
 struct Row {
   uint64_t ordinal, ns, owner, tick, token, address, size, value, pc, submit;

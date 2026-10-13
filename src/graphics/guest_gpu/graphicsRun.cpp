@@ -886,6 +886,10 @@ bool GuestGpu::Process(Submission& submission) {
 		cp.SetFlip({});
 	}
 
+	LabelCausalTrace::Record(LabelCausalTrace::Stage::SliceEnter,
+	    reinterpret_cast<uint64_t>(&cp), 0, submission.sequence,
+	    reinterpret_cast<uint64_t>(submission.commands.data()), submission.commands.size_bytes(),
+	    submission.queue_id, cp.GetSubmitId(), static_cast<uint64_t>(submission.type));
 	cp.BufferInit();
 	bool complete = true;
 
@@ -965,6 +969,12 @@ bool GuestGpu::Process(Submission& submission) {
 			break;
 	}
 
+	LabelCausalTrace::Record(LabelCausalTrace::Stage::SliceExit,
+	    reinterpret_cast<uint64_t>(&cp), 0, submission.sequence,
+	    reinterpret_cast<uint64_t>(submission.commands.data()), submission.commands.size_bytes(),
+	    (complete ? 1u : 0u) | (submission.command_execution.MadeProgress() ? 2u : 0u) |
+	        (submission.constant_execution.MadeProgress() ? 4u : 0u),
+	    cp.GetSubmitId(), static_cast<uint64_t>(submission.type));
 	return complete;
 }
 
