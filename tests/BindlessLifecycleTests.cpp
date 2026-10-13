@@ -359,6 +359,7 @@ private:
 #include "NggVertexCountTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
+#include "GenericChannelRepetitionTests.inc"
 #include "GenericFormattedConversionPathCostTests.inc"
 #include "PackedBufferOffsetTests.inc"
 #include "EndOfPipeWriteGpuTests.inc"
@@ -416,6 +417,8 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0 ||
                             std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0 ||
                             std::strcmp(argv[1], "--generic-formatted-dispatch-decision-cost") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
@@ -519,6 +522,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
     ConfigureVertexNonFiniteTraceGpuEnvironment();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0 ||
+                    std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0 ||
                     std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-formatted-dispatch-decision-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-buffer-numeric-readback") == 0 ||
@@ -614,6 +619,10 @@ int main(int argc, char **argv) {
     CheckVertexValueTraceGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
     CheckVertexNonFiniteTraceGpu(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0)
+    CheckGenericChannelRepetitionCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0)
+    CheckGenericChannelRepetitionNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0)
     CheckGenericBufferCodegenCost(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-formatted-conversion-path-cost") == 0)
