@@ -920,6 +920,7 @@ struct PipelineCache::ProgramCache {
 	ShaderProgram Get(const ShaderParams& params, InputInfo& input_info, uint32_t& push_data_cursor,
 	                  ProgramWait wait = ProgramWait::Wait, bool* pending = nullptr,
 	                  const void* known_source = nullptr) {
+		FunctionProfile::Scope function_profile(FunctionProfile::Site::ProgramCacheGet);
 		ShaderType stage;
 		if constexpr (std::is_same_v<InputInfo, ShaderVertexInputInfo>) {
 			stage = input_info.logical_stage;
@@ -952,9 +953,12 @@ struct PipelineCache::ProgramCache {
 		const auto existing = [&](SourceEntry& source) -> std::optional<ShaderProgram> {
 			if (!AdoptSpeculation(source, stage, user_data, params.Base(), runtime, wait)) {
 				DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::ResourceRefresh);
-				if (!ShaderRecompiler::IR::MaterializeResources(
-				        source.resource_plan, runtime, source.resources, source.specialization,
-				        &source.memo)) {
+				const bool materialized = [&] {
+					FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResources);
+					return ShaderRecompiler::IR::MaterializeResources(
+					    source.resource_plan, runtime, source.resources, source.specialization, &source.memo);
+				}();
+				if (!materialized) {
 					// Skip this draw or dispatch, not the session; the next use materializes again.
 					ReportMaterializeFailure(params.hash);
 					return ShaderProgram {};
@@ -967,6 +971,7 @@ struct PipelineCache::ProgramCache {
 			if (stats_enabled) {
 				CountRefresh(source);
 			}
+			FunctionProfile::Scope match_profile(FunctionProfile::Site::ProgramPermutationMatch);
 			DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::ProgramMatch);
 			const auto matches = [&](const Permutation& candidate) {
 				const auto& layout = candidate.program.bindings;
@@ -1092,9 +1097,13 @@ struct PipelineCache::ProgramCache {
 				entry = programs.try_emplace(lookup_key,
 				    ShaderRecompiler::IR::ExtractResourcePlan(translated->program)).first;
 			}
-			if (!ShaderRecompiler::IR::MaterializeResources(
-			        entry->second.resource_plan, runtime, entry->second.resources,
-			        entry->second.specialization, &entry->second.memo)) {
+			const bool materialized = [&] {
+				FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResources);
+				return ShaderRecompiler::IR::MaterializeResources(
+				    entry->second.resource_plan, runtime, entry->second.resources,
+				    entry->second.specialization, &entry->second.memo);
+			}();
+			if (!materialized) {
 				// Skip this draw or dispatch, not the session; the next use materializes again.
 				ReportMaterializeFailure(params.hash);
 				return {};
@@ -1227,9 +1236,12 @@ struct PipelineCache::ProgramCache {
 		    .specialization_block_reads = true,
 		    .read_memory_block          = ReadShaderGuestMemoryAhead,
 		};
-		if (!ShaderRecompiler::IR::MaterializeResourcesLogged(source->resource_plan, runtime,
-		                                                      out.snapshot, out.specialization,
-		                                                      out.reads)) {
+		const bool materialized = [&] {
+			FunctionProfile::Scope profile(FunctionProfile::Site::MaterializeResourcesLogged);
+			return ShaderRecompiler::IR::MaterializeResourcesLogged(
+			    source->resource_plan, runtime, out.snapshot, out.specialization, out.reads);
+		}();
+		if (!materialized) {
 			speculation_failures[3].fetch_add(1, std::memory_order_relaxed);
 			return false;
 		}
@@ -1246,6 +1258,7 @@ struct PipelineCache::ProgramCache {
 	bool AdoptSpeculation(SourceEntry& source, ShaderType stage, std::span<const uint32_t> user_data,
 	                      uint64_t shader_base, const ShaderRecompiler::IR::SrtRuntime& runtime,
 	                      ProgramWait wait) {
+		FunctionProfile::Scope function_profile(FunctionProfile::Site::AdoptSpeculation);
 		if (wait == ProgramWait::Prefetch || stage == ShaderType::Compute) {
 			return false;
 		}
@@ -1256,6 +1269,7 @@ struct PipelineCache::ProgramCache {
 		static const bool ab      = AbSelected("specprep");
 		bool              adopted = false;
 		const auto        reads_unchanged = [&] {
+			FunctionProfile::Scope profile(FunctionProfile::Site::ReadsUnchanged);
 			DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::SpeculationReads);
 			if (draw->reads_current) {
 				// The reads stand (see DrawSpeculator::ReadsCurrent). KYTY_VERIFY_SPEC_READS=1
@@ -1734,6 +1748,7 @@ void PipelineCache::InitializeShaderPrecompile() {
 }
 
 void PipelineCache::WaitForPrecompile() {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::ProgramPrecompileWait);
 	if (m_precompile_done.load(std::memory_order_acquire)) return;
 	std::lock_guard lock(m_precompile_join_mutex);
 	if (m_precompile_thread.joinable()) m_precompile_thread.join();
@@ -2165,6 +2180,7 @@ static std::array<ShaderParams, 3> PrepareGraphicsStages(
     std::span<const Prospero::ColorComponentMapping, 8> target_export_mapping, bool pixel_active,
     std::array<ShaderVertexInputInfo, 3>& vertex_info, ShaderPixelInputInfo& pixel_info,
     ShaderParams& pixel_params) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::PrepareGraphicsStages);
 	const bool tess_active = user_config.GetPrimType() == Prospero::PrimitiveType::kPatch;
 	std::array<ShaderParams, 3> vertex_params;
 	if (tess_active) {
@@ -2298,6 +2314,7 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 	// shader map and the vertex tables are unchanged (see PreparedGraphicsStages).
 	// KYTY_DEBUG_AB=stageinputs prepares them here in every other window.
 	const auto take_prepared = [&]() -> SpeculatedDraw* {
+		FunctionProfile::Scope function_profile(FunctionProfile::Site::AdoptGraphicsStages);
 		auto* draw = t_speculated_draw;
 		if (tess_active || wait == ProgramWait::Prefetch || draw == nullptr ||
 		    !draw->prepared.valid) {
@@ -2310,6 +2327,7 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 			return nullptr;
 		}
 		const bool unchanged = [&] {
+			FunctionProfile::Scope function_profile(FunctionProfile::Site::GraphicsInputsCheck);
 			DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::InputsCheck);
 			return SameGraphicsStageRegisters(prepared.registers, vertex_regs, pixel_regs, sh,
 			                                  context, user_config, target_export_mapping,
@@ -2366,7 +2384,11 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 	const void* known_pixel =
 	    prepared != nullptr ? prepared->stages[SpeculatedDraw::Pixel].source : nullptr;
 	const bool mesh_active = vertex_info[0].logical_stage == ShaderType::Mesh;
-	Common::LockGuard lock(m_mutex);
+	const auto lock = [&] {
+		FunctionProfile::Scope function_profile(FunctionProfile::Site::GraphicsProgramMutexWait);
+		return Common::LockGuard(m_mutex);
+	}();
+	FunctionProfile::Scope locked_profile(FunctionProfile::Site::GraphicsProgramsLocked);
 	uint32_t          push_data_cursor =
 	    mesh_active ? ShaderRecompiler::IR::PushData::MeshDrawDwordCount : 0;
 	GraphicsPrograms  result;

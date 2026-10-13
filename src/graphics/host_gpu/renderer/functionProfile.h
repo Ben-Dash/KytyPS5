@@ -29,7 +29,7 @@ enum class Site : uint32_t {
   InvalidateMemory,DownloadBufferMemory,ReadbackGpuService,BufferPublish,PrepareBda,NativeFenceWait,
   PriorityWait,ServiceWait,QueueSubmit,RecorderPayload,RecorderIdleSpin,RecorderSignalWait,
   JoinAsyncUploads,DownloadImageMemory,ProcessDownloadImages,
-  DrawAuto,DrawIndex,DispatchDirect,DispatchIndirect,FaultHandler,Count
+  DrawAuto,DrawIndex,DispatchDirect,DispatchIndirect,FaultHandler,ProgramPrecompileWait,PrepareGraphicsStages,AdoptGraphicsStages,GraphicsInputsCheck,GraphicsProgramMutexWait,GraphicsProgramsLocked,ProgramCacheGet,AdoptSpeculation,ProgramPermutationMatch,Count
 };
 inline constexpr uint32_t SiteCount=static_cast<uint32_t>(Site::Count),MaxThreads=64,MaxDepth=32;
 inline constexpr std::array<const char*,SiteCount> Names{
@@ -39,7 +39,7 @@ inline constexpr std::array<const char*,SiteCount> Names{
   "RecordReadback","Submit","Drain","InvalidateMemory","DownloadBufferMemory","ReadbackGpuService","BufferPublish",
   "PrepareBda","NativeFenceWait","PriorityWait","ServiceWait","QueueSubmit","RecorderPayload","RecorderIdleSpin",
   "RecorderSignalWait","JoinAsyncUploads","DownloadImageMemory","ProcessDownloadImages",
-  "DrawAuto","DrawIndex","DispatchDirect","DispatchIndirect","FaultHandler"};
+  "DrawAuto","DrawIndex","DispatchDirect","DispatchIndirect","FaultHandler","ProgramPrecompileWait","PrepareGraphicsStages","AdoptGraphicsStages","GraphicsInputsCheck","GraphicsProgramMutexWait","GraphicsProgramsLocked","ProgramCacheGet","AdoptSpeculation","ProgramPermutationMatch"};
 struct Row {
   std::atomic<uint64_t> calls{0},sampled{0},wall_done{0},cpu_done{0},cpu_exclusive_done{0};
   std::atomic<uint64_t> wall_inclusive_ns{0},wall_exclusive_ns{0},cpu_inclusive_cycles{0},cpu_exclusive_cycles{0};
