@@ -21,7 +21,11 @@ Actual dirty/pending images outside requested bytes on the samepage185801–
 Pending image also staysdirty; pending-only directpostwait isolation is still
 testdebt. Eight affected native CTests pass in3.89s; existing read/write image
 controls185440–185441 pass. Core185448 and privateinstall185820 pass.
-Clean matched world policy0/1 comparison remains pending. This is not yet an FPS improvement.
+Clean matched world policy0/1 comparison completed on327065f6/EXE0FC1FA9A:
+OFF mean3.714286 vs ON3.746429 (+0.87%),28titles each/full30s, frames650–759
+and652–761, both exit0/no memory guards. Runs185854...dc2fe8/190137...d7121f.
+No meaningful gain or screenshots; default stays0. Next measured lead:
+repeated GPU-dirty/protection mask bookkeeping, native regression first. This is not yet an FPS improvement.
 
 Discard cycle41 control `game-20261013-184050-...-b5edb2` from world FPS:
 frame650 arrived while still loading; the two post-title captures show loading
