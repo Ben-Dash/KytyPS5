@@ -64,7 +64,7 @@ inline const Config& GetConfig() {
   return config;
 }
 inline bool Enabled() noexcept { return GetConfig().on; }
-inline constexpr size_t Capacity = 8192;
+inline constexpr size_t Capacity = 32768;
 inline std::array<Row, Capacity> rows {};
 inline std::mutex mutex;
 inline std::atomic<uint64_t> start_ns {0}, target {0};
@@ -79,6 +79,29 @@ inline uint64_t Now() noexcept {
 inline bool Overlaps(uint64_t a, uint64_t as, uint64_t b, uint64_t bs) noexcept {
   return a != 0 && b != 0 && as != 0 && bs != 0 && as <= UINT64_MAX - a &&
          bs <= UINT64_MAX - b && a < b + bs && b < a + as;
+}
+inline bool ReadPointer(uint64_t address, uint64_t& resolved) noexcept {
+  if (Libs::LibKernel::Memory::TryReadBacking(address, &resolved, sizeof(resolved)))
+    return true;
+#if defined(_WIN32)
+  // Loader image data is outside the kernel backing allocator. Observe only
+  // already-readable committed bytes: never service a guest fault or unblock it.
+  MEMORY_BASIC_INFORMATION info {};
+  const auto* pointer = reinterpret_cast<const void*>(address);
+  if (VirtualQuery(pointer, &info, sizeof(info)) != sizeof(info) ||
+      info.State != MEM_COMMIT || (info.Protect & (PAGE_GUARD | PAGE_NOACCESS)) != 0)
+    return false;
+  const auto protection = info.Protect & 0xff;
+  if (protection != PAGE_READONLY && protection != PAGE_READWRITE &&
+      protection != PAGE_WRITECOPY && protection != PAGE_EXECUTE_READ &&
+      protection != PAGE_EXECUTE_READWRITE && protection != PAGE_EXECUTE_WRITECOPY)
+    return false;
+  SIZE_T copied = 0;
+  return ReadProcessMemory(GetCurrentProcess(), pointer, &resolved, sizeof(resolved),
+                           &copied) != 0 && copied == sizeof(resolved);
+#else
+  return false;
+#endif
 }
 inline bool Matches(Stage stage, uint64_t address, uint64_t size, uint64_t pc) noexcept {
   const auto& c = GetConfig();
@@ -138,8 +161,7 @@ inline void TickFrame(uint64_t frame) {
     if (c.pointer != 0) {
       uint64_t resolved = 0;
       // Read checked backing outside the trace mutex; no protected-VA access.
-      const bool valid = Libs::LibKernel::Memory::TryReadBacking(
-          c.pointer, &resolved, sizeof(resolved)) && resolved != 0 &&
+      const bool valid = ReadPointer(c.pointer, resolved) && resolved != 0 &&
           c.span <= UINT64_MAX - resolved;
       target.store(valid ? resolved : 0, std::memory_order_release);
       if (!valid) { std::lock_guard lock(mutex); ++pointer_errors; }
