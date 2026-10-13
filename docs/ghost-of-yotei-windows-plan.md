@@ -1,5 +1,40 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: Main waits on GPU; native shader baseline defect found, 2026-10-13
+
+Diagnostic-only local3abecd72 core050211/install050306 PASS, private EXE
+CCA19F98FD628014311E78068F7D26BADF0EE77D3819939D59A3A3BB338D92A4.
+Full neutral diag18 run `game-20261013-050928-diag-cycle18-owned-pdh-pss-main-30s-dedb3d`
+exit0/no guards,30s title3.034615 (instrumented, NOT clean speedup proof).
+Owned helpers completed: `_Build/analysis/yotei-performance-cycle18-20261013/owned-24252-20261013-050943-0568634`.
+PSS Main31652:224/224 valid,30.010s,all marker/snapshot cleanup0,max capture2.589ms.
+Own synthetic RX-spin proof4BF helper:16/16 known-loop RIPs/real exit counter/cleanup.
+PSS captures scheduling-sensitive contexts; separate diagnostic, no VA clone/dump.
+GPU PDH589rows/31sets/30valid intervals/no errors:3Dmean59.8827/max63.2432%,
+Copy2mean0.5967%; sample span33.845s,frames569..669. Engine utilization is NOT SM
+occupancy; don't sum overlapping engines. Exact owned PID/path/start/hash verified.
+
+Offline SELF hash5178 and bounded disassembly prove four hot guest regions are
+RDTSC deadline spins polling GPU labels/queue sequence.119/224 samples hit two
+exact spin RIPs;40/224 native samples are win32u!NtGdiDdDDIWaitForSynchronizationObjectFromCpu.
+Thus historical83–92% Main CPU mostly represents GPU/job waiting, NOT proven CPU
+work bottleneck. Do not shorten time artificially, fabricate readiness or skip
+synchronization. Uncensored Main fault BODY diagnostic17, five fully contained
+intervals/76frames:36067faults/36066valid/1straddle/no query errors;
+fault cycles/Main cycles1.820997%, wall66.949ms/frame. Prefix VEH/IsMapped and
+post-timer logging/history are excluded. Details in ignored cycle17/main-fault-cpu
+and cycle18/hot-main-offline. GPU shader/transfer/synchronization alternatives next.
+
+Fresh native shader target051628 PASS, EXE53230EFE8751A919FA9B05CC8C23E2F46E73C17E198B8824BD686F44A0447C24.
+Existing HALF_UNIFORM1 strided/scalar-branch GPU controls051904/051905 PASS.
+Full wave64 suite051903 fails actual ScalarOrn2SaveexecB32Wave32 readback;
+same HALF_UNIFORM0 baseline051933 fails SAME case. This is an existing baseline
+defect, NOT a proved half-uniform regression or optimization. No game with this
+option started. Isolate unchanged fixture/verify AMD ISA first; shared fix needs
+same native GREEN before further performance claims. No active native process
+now (verify); historical prefetch WIP preserved. No menus/input/images/push/posts,
+WSL stopped, actual1080/full effects/stable60 remain unresolved.
+
 ## Current checkpoint: exact-page Poll world3.04, attribution next, 2026-10-13
 
 37b94dbe core044859/install044949 PASS; private EXE

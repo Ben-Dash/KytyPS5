@@ -1,5 +1,17 @@
 # Integration test debt
 
+## Scalar ORN2 SAVEEXEC B32 wave32 baseline native failure, 2026-10-13
+
+Fresh current native shader test EXE53230EFE, --wave64-only, fails existing
+ScalarOrn2SaveexecB32Wave32 readback with HALF_UNIFORM1 (051903) AND ordinary
+HALF_UNIFORM0 (051933). Adjacent scalar/strided controls pass. Do not classify
+this as an option regression or change goldens to permit it. Add isolated selector
+for the SAME existing fixture, verify its independent expected old EXEC/destination,
+new low32 EXEC/SCC and unaffected high mask against primary RDNA ISA, then fix
+shared decoder/IR/emitter only after valid isolated native RED. Shader opcode,
+state lifetime and fixture setup all remain hypotheses. Neighbor masks, partial
+waves, both source forms and wave64 controls required; game relevance unknown.
+
 ## PM4 polling touched-page download footprint required reproduction, 2026-10-13
 
 Unarmed GPU PollReadMemory currently widens a scalar request through ordinary
