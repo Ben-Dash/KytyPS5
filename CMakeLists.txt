@@ -922,6 +922,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --poll-exact-page-readback-cost-gpu)
 	add_test(NAME eager_adjacent_page_readback_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eager-readback-adjacent-pages-cost-gpu)
+	add_test(NAME gpu_read_memory_exact_pages_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-exact-page-cost-gpu)
+	add_test(NAME gpu_read_memory_foreign_fault_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-foreign-fault-locality-gpu)
+	add_test(NAME gpu_read_memory_cross_owner_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-cross-owner-gpu)
+	set_tests_properties(gpu_read_memory_exact_pages_gpu gpu_read_memory_foreign_fault_gpu
+		gpu_read_memory_cross_owner_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME prepare_bda_upload_batch_cost_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-batch-cost-gpu)
 	add_test(NAME prepare_bda_upload_batch_legacy_gpu

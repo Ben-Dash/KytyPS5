@@ -1,5 +1,44 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: explicit GPU read pages native GREEN; core/world next
+
+6be6 plus shared explicit-read origin WIP: genuineRED105225/585CD167 all6case
+controls PASS before small requestcopies65540 instead4. SAME unchanged
+GREEN105628/1B2D690F explicit4/8/12/8 bytes, farGPUdirty/unarmed/CPUold kept;
+actualGPU-thread fault and is_write both retain65540/65600reserve. Foreign
+rawCPUfault105226baseline ->105629GREEN stayswide. Allrealproducer/current
+generation/sibling/armed-old beforeSubmit/nativefence/priority/guards/cleanup
+unchanged PASS. Eighteen affectedWAIT/EOP/foreign/2B/BC/mip CTests PASS7.52s.
+Crossowner110341/40843F55 PASS realtwo-owner8B discovery/newnative merge and
+wholefar/canaries/backing;new3registeredCTests PASS1.30s. Dirty/pendingimage
+aliases retain old path via existingpage-wide queries; directalias-specific
+neighbor still a pending additionalcase. No explicit-image capability claim.
+
+Initial104857 compilefailed dueWindows far macro and nonexistenttestgate.Release;
+both corrected before VALID105225, not calledRED. Production narrows only
+trackedcompleteowner/read-only/Explicit GPU requests, keeps centralHostFault
+originFault plusforeign/is_write/invalid/discovery and realpublication waits.
+Separate fixcommit/core/privateinstall/world30s next; no gameFPS claimyet.
+Lastclean imagebudget/defaultBDA0 world104422-3ca394 completed30s653..761/
+28titles mean3.671429,min3.1/max3.9,exit0/no guards10:46:49UTC,no usefulgain/images.
+WSL needed? latestuserNOTneeded,continue stopping; no reapproval needed.
+
+## Current checkpoint:6be6dde0 image budget world retry active, 2026-10-13
+
+Nativecore104257/install104420 PASS, privatecycle31/runtime-6be6dde0-image-budget
+EXE7C174573186B6E07B310E2A6CE0D83B4D1D6F7E9476DBBD5E138D97165B2F640.
+`game-20261013-104422-perf-cycle31-image-byte-budget-world-title-30s-3ca394`
+PID53256/root51412 ACTIVE/sourceFROZEN; neutralfullrender chain1/HALFoff/scale100/
+scratch1024/BDA batching explicitly0;650gated30s300boundwarm, result pending.
+Capture only complete+10%mean gain vs3.882143, excludedfromsample.
+Latestuser clarified WSL isNOT needed: continue stopping it. Boundedshutdown0
+afterprevious18GiB restart, physicalfree33.67GiB/virtual54.27GiB; verify whether
+it autorestarts before interpreting host isolation. No other app stopped.
+Next GPU explicitReadMemory six-case +foreignfault fixtures savedignored
+cycle30/gpu-read-memory, NOTcompiled/RED/policyapplied. CentralFaultorigin must
+staywide; typed Explicit/Fault plus dirty/pendingimage aliases before narrowing.
+No menu/input/newpush/issueposts; preserve historical prefetchWIP and allartifacts.
+
 ## Current checkpoint:b5dd974c byte-limit core; mixed native proof complete
 
 Separate memoryfix b5dd974ca19df56269a7a89def75e47501cc6c7c, nativecore103425

@@ -1,5 +1,34 @@
 # Integration test debt
 
+## Explicit GPU ReadMemory touched-page amplification required reproduction
+
+Actual105225/585CD167 RED afterALL6casevalues/nativefences/armed-old/guards/
+cleanup PASS: basic4B reads65540, otherexplicit cases widen similarly. Baseline
+actualforeignfault105226 PASSwide. UnchangedGREEN105628/1B2D690F explicit
+4/8/12/8B, whole touchedpage dirtysiblings/currentproducer and far-unarmedold
+PASS; actualGPUfault/is_write65540 unchanged; foreign105629widePASS.
+Eighteen affectedCTests PASS7.52s. Crossowner110341/40843F55 realnewmergedowner/
+lowhigh/far/native/backing/guards/cleanupPASS;3registeredchecksPASS1.30s.
+Native104857 initialtest compilefail(far macro/missingRelease) fixed beforevalid
+RED; not reproduction. Dedicateddirty/pendingimage alias origin case and actual
+core/game throughput remain pending; existingguard fallsback conservatively.
+
+Current fresh read-only ReadMemory on GPU thread widens to512KiB, although its
+explicit API has a known requested span. Before behavior changes, native6case
+fixture must prove real requested A and far64KiB B in one owner, protectedold
+CPU bytes/unarmed priorstate, real producer/canaries/prefence armed-old/full
+native+CPU values/lifetime cleanup BEFORE footprint. Only four explicit reads
+may narrow: basic/same-page sibling/crosspage/new current writer. Actual raw
+protected GPU-thread read FAULT and is_write must retain wide65540bytes; real
+foreign CPU fault also remains wide. Old armed-generation/EOP controls still
+required. New semantic Explicit/Fault origin, not diagnostic-dependent TLS,
+must distinguish central HandleFault from ordinary GPU API requests. Dirty or
+pending image aliases on touched pages retain old path unless proved safe.
+No production change before genuine RED; same unchanged GREEN, typed/foreign/
+EOP/image/BC neighbors and native world30s needed. Runtime reason byte counts
+are censored by old drainlog48-row limit, so its21MiB/frame is not eligible
+traffic or removable time. No fake readiness/resources/page-access shortcuts.
+
 ## Retired native-image recycling byte budget required reproduction, 2026-10-13
 
 Mixed native103850/FE975240 PASS actualsizes4096/16384/65536, genuine native

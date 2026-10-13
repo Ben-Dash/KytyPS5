@@ -174,7 +174,7 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 	} else {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadReadFault
 		                                          : DrainStats::Reason::GuestReadFault);
-		m_buffer_cache.ReadMemory(fault_vaddr, fault_size);
+		m_buffer_cache.ReadMemory(fault_vaddr, fault_size, false, MemoryReadOrigin::Fault);
 	}
 	return true;
 }

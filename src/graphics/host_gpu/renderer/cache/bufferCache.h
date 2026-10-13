@@ -36,6 +36,9 @@ class TextureCache;
 using BufferId = Common::SlotId;
 inline constexpr BufferId NULL_BUFFER_ID {0};
 
+// Explicit GPU consumers need their touched pages; host fault handlers retain read locality.
+enum class MemoryReadOrigin : uint8_t { Explicit, Fault };
+
 class BufferCache {
 public:
 	static constexpr uint32_t CACHING_PAGEBITS  = 14;
@@ -69,7 +72,8 @@ public:
 	// After a guest write fault at vaddr (see MemoryTracker::ExpandWriteFault).
 	// KYTY_FAULT_AHEAD_PAGES=<pages> sets the window (a power of two, default 16; 1: off).
 	void                   ExpandWriteFault(uint64_t vaddr);
-	void                   ReadMemory(uint64_t vaddr, uint64_t size, bool is_write = false);
+	void                   ReadMemory(uint64_t vaddr, uint64_t size, bool is_write = false,
+	                                  MemoryReadOrigin origin = MemoryReadOrigin::Explicit);
 	// GPU command parser: starts/submits a real download and reports false until its
 	// page publication has finished. Never treats stale-readable backing as ready.
 	[[nodiscard]] bool     PollReadMemory(uint64_t vaddr, uint64_t size);

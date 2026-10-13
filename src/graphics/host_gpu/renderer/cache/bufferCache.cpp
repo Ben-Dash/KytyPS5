@@ -706,7 +706,7 @@ bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
 	return false;
 }
 
-void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
+void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
 	if (!GuestGpu::IsGpuThread() && CommandScheduler::InDeferredOperation()) {
 		EXIT("unsupported buffer readback from an asynchronous GPU completion, "
 		     "addr=0x%016" PRIx64 " size=0x%016" PRIx64 "\n",
@@ -732,7 +732,32 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	if (tracked) {
 		state = m_memory_tracker.QueryReadback(vaddr, size);
 		if (state.unarmed) {
-			RecordReadback(vaddr, size, is_write);
+			bool exact_pages = !is_write && origin == MemoryReadOrigin::Explicit;
+			if (exact_pages) {
+				// Releasing a tracker page requires all its actual dirty bytes. Keep the
+				// conservative image/publication path for any alias on these same pages.
+				const auto page_begin = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
+				const auto page_end = Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE);
+				exact_pages = !m_texture_cache.HasPendingDownload(page_begin, page_end - page_begin) &&
+				              !m_texture_cache.IsRegionGpuModified(page_begin, page_end - page_begin);
+			}
+			Buffer* exact_owner = nullptr;
+			if (exact_pages) {
+				const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
+				if (owner != nullptr && *owner && !IsBufferInvalid(*owner)) {
+					auto& buffer = m_slot_buffers[*owner];
+					const auto begin = buffer.CpuAddress();
+					if (vaddr >= begin && vaddr - begin <= buffer.Size() &&
+					    size <= buffer.Size() - (vaddr - begin)) exact_owner = &buffer;
+				}
+			}
+			if (exact_owner != nullptr) {
+				if (!DownloadBufferMemory(*exact_owner, vaddr, size)) {
+					DrainStats::Record(DrainStats::Kind::ReadbackClean, 0);
+				}
+			} else {
+				RecordReadback(vaddr, size, is_write);
+			}
 			state = m_memory_tracker.QueryReadback(vaddr, size);
 		}
 	} else {
