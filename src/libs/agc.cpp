@@ -26,6 +26,7 @@
 #include "kernel/pthread.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
+#include "libs/sampledHleBodyCost.h"
 
 #include <algorithm>
 #include <array>
@@ -1019,6 +1020,7 @@ int KYTY_SYSV_ABI AgcSetUcRegIndirectPatchSetNumRegisters(uint32_t* cmd, uint32_
 
 int KYTY_SYSV_ABI AgcSetCxRegIndirectPatchAddRegisters(uint32_t* cmd, uint32_t num_regs) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::CxPatch);
 
 	AgcTrace("\t cmd      = 0x%016" PRIx64 "\n"
 	     "\t num_regs = %" PRIu32 "\n",
@@ -1031,6 +1033,7 @@ int KYTY_SYSV_ABI AgcSetCxRegIndirectPatchAddRegisters(uint32_t* cmd, uint32_t n
 
 int KYTY_SYSV_ABI AgcSetShRegIndirectPatchAddRegisters(uint32_t* cmd, uint32_t num_regs) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::ShPatch);
 
 	AgcTrace("\t cmd      = 0x%016" PRIx64 "\n"
 	     "\t num_regs = %" PRIu32 "\n",
@@ -1478,6 +1481,7 @@ int KYTY_SYSV_ABI AgcCreateInterpolantMapping2(ShaderRegister* regs, const Shade
 
 int KYTY_SYSV_ABI AgcGetDataPacketPayloadAddress(uint32_t** addr, uint32_t* cmd, int type) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::Payload);
 
 	static std::atomic<uint32_t> log_count {0};
 	if (log_count.fetch_add(1) < 64) {
@@ -1787,6 +1791,7 @@ uint32_t* KYTY_SYSV_ABI AgcCbDispatch(CommandBuffer* buf, uint32_t thread_group_
                                       uint32_t thread_group_y, uint32_t thread_group_z,
                                       uint32_t modifier) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::Dispatch);
 
 	static std::atomic<uint32_t> log_count {0};
 	if (log_count.fetch_add(1) < 64) {
@@ -1903,6 +1908,7 @@ uint32_t* KYTY_SYSV_ABI AgcCbBranch(CommandBuffer* buf, uint8_t mode, uint8_t co
 uint32_t* KYTY_SYSV_ABI AgcCbSetShRegisterRangeDirect(CommandBuffer* buf, uint32_t offset,
                                                       const uint32_t* values, uint32_t num_values) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::ShRange);
 
 	static std::atomic<uint32_t> log_count {0};
 	if (log_count.fetch_add(1) < 64) {
@@ -1947,6 +1953,7 @@ uint32_t* KYTY_SYSV_ABI AgcCbSetShRegistersDirect(CommandBuffer*                
                                                   const volatile ShaderRegister* regs,
                                                   uint32_t                       num_regs) {
 	PRINT_NAME();
+	BodyCostDiagnostic::Scope body_cost(BodyCostDiagnostic::Function::ShRegs);
 
 	AgcTrace("\t regs     = 0x%016" PRIx64 "\n"
 	     "\t num_regs = %" PRIu32 "\n",

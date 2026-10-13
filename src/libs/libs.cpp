@@ -1,4 +1,5 @@
 #include "libs/libs.h"
+#include "libs/sampledHleBodyCost.h"
 
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -101,6 +102,7 @@ void PrintCallCounts() {
 		}
 		std::printf("%s\n", line.c_str());
 		std::fflush(stdout);
+		BodyCostDiagnostic::Report(window * 5);
 	}
 }
 

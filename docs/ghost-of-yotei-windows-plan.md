@@ -1,5 +1,31 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: fused world3.05FPS; Main92% core, 2026-10-13
+
+Correction committed locally ce9ead1a; core022559/install022747 PASS. New private
+actualPerformance runtime EXE51D56207EC96E07A7F7A23B22A1594FDBBC3DBD2EECA96FA63DCDFFF0A8DC1F2.
+Neutral/no counters/full-render world run `game-20261013-022757-perf-cycle11-fused-upload-world-title-30s-2b1025`
+completed650-gated30s at02:30:23UTC:24values, mean3.045833,min3.0/max3.1,
+frames650..741; exit0/no guards, maxWS16.42GiB. About+3.1% versus baseline2.953571
+in one pair is not useful game improvement. Images remain uninspected. The
+19–24% native128x128 operation improvement remains separately proved.
+
+Owned read-only OS CPU sample SUCCESS at frames553..646, actual30.021694s,
+no counter/Suspend/input and zero query errors. Unique Thread_Main/OSTID16160
+used27703CPUms =92.277% of one core; process89375CPUms~2.98cores. Thread_Gpu
+host CPU38.309%, DrawSpeculator27.430%, GpuQueueSubmit21.025%; these are CPU
+threads, NOT GPU-engine utilization. CPU window precedes650-title window; do not
+claim exactly matched timings or attribute Main cycles from call frequency.
+Artifact cycle3 `cpu-threads-validated-37960-20261013T0229519928929Z.json`.
+
+Next separate bounded diagnostic: sampled inclusive AGC-body CPU cycles/wall with
+empty-probe overhead control, plus explicit Main-only fault-site wall scope.
+No fake clocks, skipped GPU work, shader-hash hacks or speculative spin fix.
+Three agents/root serialized native work; no active game/build now, verify again.
+Source tracked clean before this docs update; preserve historical prefetch WIP.
+No push/issue posts/menus/buttons; WSL remains stopped. Actual1080/full effects/
+stable60 unresolved; current world~3FPS.
+
 ## Current checkpoint: fused upload GREEN and19–24% native gain, 2026-10-13
 
 Shared production fusion WIP at4fbf4ea9+saved patch. Native build020946 PASS;

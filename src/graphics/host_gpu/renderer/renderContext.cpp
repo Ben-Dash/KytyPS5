@@ -10,6 +10,7 @@
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/presentation/videoOut.h"
 #include "libs/errno.h"
+#include "libs/libs.h"
 
 #include <algorithm>
 #include <atomic>
@@ -73,6 +74,19 @@ VideoOut::VideoOutDriver& RenderContext::GetVideoOut() const {
 	return *m_video_out;
 }
 
+static bool FaultSiteMainOnly() noexcept {
+	static const bool enabled = [] {
+		const char* value = KYTY_GETENV("KYTY_DEBUG_FAULT_STATS_MAIN");
+		const bool main_only = value != nullptr && std::strcmp(value, "1") == 0;
+		if (main_only) {
+			std::printf("fault-stats: scope=main; explicit guest Main role; wall time includes waits\n");
+			std::fflush(stdout);
+		}
+		return main_only;
+	}();
+	return enabled;
+}
+
 bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
 	// The host reports the faulting byte, not the instruction's access width. Both caches
 	// resolve its page; guessing a width can cross the end of a valid guest mapping.
@@ -81,6 +95,8 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 		return false;
 	}
 	const bool gpu_thread = GuestGpu::IsGpuThread();
+	const bool record_fault_site = DrainStats::Enabled() &&
+	    (!FaultSiteMainOnly() || Libs::g_main_call_diagnostic_role);
 	struct SiteTimer {
 		bool                                  enabled;
 		bool                                  write;
@@ -95,8 +111,8 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 				        std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count()));
 			}
 		}
-	} site_timer {DrainStats::Enabled(), access == PageFaultAccess::Write, fault_vaddr,
-	              DrainStats::Enabled() ? std::chrono::steady_clock::now()
+	} site_timer {record_fault_site, access == PageFaultAccess::Write, fault_vaddr,
+	              record_fault_site ? std::chrono::steady_clock::now()
 	                                    : std::chrono::steady_clock::time_point {}};
 	if (access == PageFaultAccess::Write) {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadWriteFault

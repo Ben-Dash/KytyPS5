@@ -33,3 +33,25 @@ Ignored proposal/parser/sampler references:
 `extract-hle-call-counts.ps1`, and cycle3
 `sample-thread-cpu-readonly-validated.ps1`. Preserve raw stdout and exact source
 revision/EXE; boot and in-world reports must be separated by timestamps/frame gate.
+
+## Sampled body and Main fault attribution
+
+Default-off `KYTY_DEBUG_HLE_BODY_COST` adds explicit scopes to six AGC bodies,
+without changing PRINT_NAME semantics, signatures or packet outputs. Physical
+Main-only sampling uses one call in64, real Windows thread cycle counters and
+separate steady wall duration. Matched empty query brackets remain separate;
+no forced subtraction or conversion of cycles to elapsed time. Complete sampled
+records are snapshotted coherently; window boundaries/call counts remain
+approximate. API failures preserve error codes; straddled/underflow samples are
+distinct. Inclusive child/fault work must not be summed when scopes overlap.
+
+`KYTY_DEBUG_FAULT_STATS_MAIN=1` filters existing fault-site recording by the same
+explicit Main role. With `--drain-stats 5`, its wall durations include waits and
+omit work before the existing timer, including early exception/mapping checks.
+These rows do not establish CPU time by themselves. Both options are diagnostics,
+not optimization fixes; instrumented FPS will not be credited as a gain.
+
+Native linked build023647 passes with header SHA
+`51BB220E2EE789908E09624BE0197F4B2BC51128490EF9836B97477646FA0312`.
+Core/private install and actual combined diagnostic remain pending. Counter/body
+switches use presence; unset to disable. Fault switch requires literal1.
