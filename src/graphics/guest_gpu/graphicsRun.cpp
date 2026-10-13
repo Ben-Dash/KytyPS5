@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 
 #include "graphics/guest_gpu/graphicsRun.h"
 
@@ -658,6 +659,10 @@ void GuestGpu::Enqueue(Submission submission) {
 	Common::LockGuard lock(m_queue_mutex);
 	EXIT_IF(!m_accepting);
 	submission.sequence = m_next_sequence++;
+	LabelCausalTrace::Record(LabelCausalTrace::Stage::GuestEnqueue, 0, 0,
+	    submission.sequence, reinterpret_cast<uint64_t>(submission.commands.data()),
+	    submission.commands.size_bytes(), submission.queue_id, 0,
+	    static_cast<uint64_t>(submission.type));
 	m_outstanding.insert(submission.sequence);
 	m_queues[submission.queue_id].push_back(std::move(submission));
 	m_submission_count++;
@@ -874,6 +879,9 @@ bool GuestGpu::Process(Submission& submission) {
 	if (first_slice) {
 		submission.started = true;
 		cp.SetSubmitId(++m_submit_id);
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::CpStart, 0, 0,
+		    submission.sequence, reinterpret_cast<uint64_t>(submission.commands.data()),
+		    submission.commands.size_bytes(), submission.queue_id, 0, m_submit_id);
 		cp.ResetDeCe();
 		cp.SetFlip({});
 	}

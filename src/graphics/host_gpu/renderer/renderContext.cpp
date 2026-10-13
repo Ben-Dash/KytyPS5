@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -177,7 +178,11 @@ bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) no
 	} else {
 		DrainStats::ReasonScope reason(gpu_thread ? DrainStats::Reason::GpuThreadReadFault
 		                                          : DrainStats::Reason::GuestReadFault);
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::FaultBegin, 0, 0, 0,
+		    fault_vaddr, fault_size, 0, DrainStats::t_fault_pc);
 		m_buffer_cache.ReadMemory(fault_vaddr, fault_size, false, MemoryReadOrigin::Fault);
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::FaultEnd, 0, 0, 0,
+		    fault_vaddr, fault_size, 0, DrainStats::t_fault_pc);
 	}
 	return true;
 }
@@ -439,6 +444,7 @@ void RenderContext::ReportMipStats(void* dst, uint32_t size, bool reset) {
 
 void RenderContext::TickFrame() {
 	FunctionProfile::TickFrame(m_graphics.presented_frames.load(std::memory_order_relaxed));
+	LabelCausalTrace::TickFrame(m_graphics.presented_frames.load(std::memory_order_relaxed));
 	FramePassesFlip();
 	m_texture_cache.TickFrame();
 	m_buffer_cache.TickFrame();

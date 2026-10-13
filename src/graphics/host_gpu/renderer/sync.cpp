@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 #include "graphics/host_gpu/renderer/sync.h"
 
 #include "common/assert.h"
@@ -80,6 +82,12 @@ static void RecordEndOfPipeWrite(uint64_t submit_id, CommandBuffer& buffer, uint
 	(void)buffer.Handle();
 
 	const auto width      = static_cast<uint32_t>(size);
+	if (LabelCausalTrace::Enabled()) {
+		auto& causal_scheduler = buffer.GetContext().GetCommandScheduler();
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::LabelRecord,
+		    reinterpret_cast<uint64_t>(&causal_scheduler), causal_scheduler.CurrentTick(),
+		    0, destination, width, value, 0, submit_id);
+	}
 	const auto value_low  = static_cast<uint32_t>(value);
 	const auto value_high = static_cast<uint32_t>(value >> 32u);
 	const auto operation  = static_cast<uint32_t>(DebugOperation(action));

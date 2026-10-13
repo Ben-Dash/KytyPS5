@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 
@@ -378,6 +379,8 @@ void CommandScheduler::PriorityOperationsThread(std::stop_token stop) {
 			m_priority_active_tick = operation.tick;
 		}
 		m_master.Wait(operation.tick);
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::NativeObserved,
+		    reinterpret_cast<uint64_t>(this), operation.tick);
 		if (!stop.stop_requested()) {
 			RunOperation(std::move(operation.callback));
 		}
@@ -756,6 +759,8 @@ void CommandScheduler::QueueSubmit(SubmitJob& job) {
 		                  job.debug_arg4);
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	LabelCausalTrace::Record(LabelCausalTrace::Stage::NativeSubmit,
+	    reinterpret_cast<uint64_t>(this), job.tick);
 }
 
 void CommandScheduler::EnableAsyncSubmit() {

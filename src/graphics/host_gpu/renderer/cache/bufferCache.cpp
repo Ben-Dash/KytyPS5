@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 
@@ -387,6 +388,10 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	// writes elsewhere on the same page still use their normal download copies.
 	EXIT_IF(!ordered_bytes.empty() && known_size != ordered_bytes.size());
 	std::vector<uint8_t> known_bytes(ordered_bytes.begin(), ordered_bytes.end());
+	const bool causal_ordered = LabelCausalTrace::Enabled() && !ordered_bytes.empty();
+	uint64_t causal_value = 0;
+	if (causal_ordered && ordered_bytes.size() <= sizeof(causal_value))
+		std::memcpy(&causal_value, ordered_bytes.data(), ordered_bytes.size());
 	// Arm after any ring wrap (which can submit and move the tick) and before queueing the
 	// publication, which may run inline during shutdown. Waiters only wait on submitted ticks,
 	// so they cannot observe an arm before its publication is queued.
@@ -469,6 +474,11 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		                       {}, 0, nullptr, 1, &after, 0, nullptr);
 	}
 	arm();
+	const auto causal_tick = m_scheduler.CurrentTick();
+	if (causal_ordered)
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::ReadbackArm,
+		    reinterpret_cast<uint64_t>(&m_scheduler), causal_tick, token,
+		    vaddr, ordered_bytes.size(), causal_value);
 	PruneInFlight();
 	m_gpu_dirty_generation++;
 	auto& inflight = m_inflight_downloads.emplace_back();
@@ -479,7 +489,11 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages), download,
 	                                    owner = std::move(temporary), mapped, offset, total_size,
 	                                    buffer_address, copies = std::move(copies), vaddr,
-	                                    known_bytes = std::move(known_bytes)] {
+	                                    known_bytes = std::move(known_bytes), causal_tick, causal_value, causal_ordered] {
+		if (causal_ordered)
+			LabelCausalTrace::Record(LabelCausalTrace::Stage::PublishBegin,
+			    reinterpret_cast<uint64_t>(&m_scheduler), causal_tick, token,
+			    vaddr, known_bytes.size(), causal_value);
 		FunctionProfile::Scope function_profile(FunctionProfile::Site::BufferPublish);
 		if (download != nullptr) download->Invalidate(offset, total_size);
 		for (const auto& copy: copies) {
@@ -488,6 +502,10 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		}
 		if (!known_bytes.empty()) {
 			Libs::LibKernel::Memory::WriteBacking(vaddr, known_bytes.data(), known_bytes.size());
+			if (causal_ordered)
+				LabelCausalTrace::Record(LabelCausalTrace::Stage::BackingWritten,
+				    reinterpret_cast<uint64_t>(&m_scheduler), causal_tick, token,
+				    vaddr, known_bytes.size(), causal_value);
 		}
 		(void)owner; // Retain dedicated staging through the final backing write.
 		// The backing holds the GPU bytes now; pages still armed by this download become
@@ -495,6 +513,10 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		for (const auto& [address, bytes]: pages) {
 			m_memory_tracker.FinalizeReadback(address, bytes, token);
 		}
+		if (causal_ordered)
+			LabelCausalTrace::Record(LabelCausalTrace::Stage::Finalized,
+			    reinterpret_cast<uint64_t>(&m_scheduler), causal_tick, token,
+			    vaddr, known_bytes.size(), causal_value);
 		if (notification != nullptr) notification->Notify();
 	});
 	return true;
@@ -2053,6 +2075,13 @@ void BufferCache::WriteOrderedMemory(uint64_t vaddr, std::span<const uint8_t> by
 	if (bytes.empty() || !GuestRange {vaddr, bytes.size()}.Valid() ||
 	    ((vaddr | bytes.size()) & 3u) != 0) {
 		EXIT("BufferCache: invalid ordered memory write\n");
+	}
+	if (LabelCausalTrace::Enabled()) {
+		uint64_t causal_value = 0;
+		if (bytes.size() <= sizeof(causal_value)) std::memcpy(&causal_value, bytes.data(), bytes.size());
+		LabelCausalTrace::Record(LabelCausalTrace::Stage::OrderedBegin,
+		    reinterpret_cast<uint64_t>(&m_scheduler), m_scheduler.CurrentTick(), 0,
+		    vaddr, bytes.size(), causal_value);
 	}
 	m_texture_cache.InvalidateMemoryFromGPU(vaddr, bytes.size(), TextureCache::GpuWriteSource::Copy);
 	auto [destination, offset] = ObtainBuffer(vaddr, bytes.size(), true, true);
