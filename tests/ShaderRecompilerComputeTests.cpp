@@ -19157,6 +19157,13 @@ private:
     m_executable_info_supported =
         has_extension(VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     if (m_executable_info_supported) {
+      vk::PhysicalDevicePipelineExecutablePropertiesFeaturesKHR available_executable{};
+      vk::PhysicalDeviceFeatures2 available_executable_features{};
+      available_executable_features.pNext = &available_executable;
+      m_physical_device.getFeatures2(&available_executable_features);
+      m_executable_info_supported = available_executable.pipelineExecutableInfo == true;
+    }
+    if (m_executable_info_supported) {
       executable_info.pipelineExecutableInfo = true;
       executable_info.pNext = const_cast<void *>(device_info.pNext);
       device_info.pNext = &executable_info;

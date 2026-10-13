@@ -537,6 +537,12 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
                          const char *hash_text, uint32_t rounds,
                          std::span<char *const> spv_paths) {
   constexpr const char *name = "PipelineCompileTime";
+  const auto *stats_env = std::getenv("KYTY_TEST_PIPELINE_STATS_ONLY");
+  const bool stats_only = stats_env != nullptr && std::strcmp(stats_env, "1") == 0;
+  if (stats_only && !vulkan.ExecutableInfoSupported()) {
+    std::printf("[host] %s: pipeline executable statistics unavailable; no compile/dispatch\n", name);
+    return;
+  }
   const auto hash = std::strtoull(hash_text, nullptr, 16);
   auto records = ReadShaderJournalCopy(journal_path);
   auto record = std::find_if(records.begin(), records.end(),
@@ -547,7 +553,7 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
           "only compute and pixel shaders are timed");
   std::vector<double> recompile_times;
   std::optional<ShaderRecompiler::CompileResult> compiled;
-  for (uint32_t pass = 0; pass < 5; pass++) {
+  for (uint32_t pass = 0; pass < (stats_only ? 1u : 5u); pass++) {
     const auto start = std::chrono::steady_clock::now();
     compiled = CompileJournalRecord(*record, name, false);
     recompile_times.push_back(std::chrono::duration<double, std::milli>(
@@ -578,6 +584,16 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
     inputs.emplace_back(label, std::move(words));
   }
 
+  if (stats_only) {
+    std::printf("[host] %s: exact record=%016llx wave=%u push=%u hw_bounds=%u native_fp16=%u table=%u no_dispatch=1\n",
+        name, static_cast<unsigned long long>(record->hash), record->wave_size, record->push_data_start_dword,
+        ShaderRecompiler::HardwareStorageBufferBounds(), ShaderRecompiler::NativeFloat16(), ShaderRecompiler::TableMode());
+    for (const auto &binding : compiled->program.bindings.descriptors)
+      std::printf("[host] %s: reflected set=%u binding=%u kind=%u count=%u\n", name,
+          ShaderRecompiler::IR::NativeDescriptorSet(record->stage),
+          ShaderRecompiler::IR::NativeBinding(record->stage, binding.kind),
+          static_cast<unsigned>(binding.kind), NativeDescriptorCount(binding));
+  }
   const auto device = vulkan.Device();
   const auto stage_flag =
       pixel ? vk::ShaderStageFlagBits::eFragment : vk::ShaderStageFlagBits::eCompute;
@@ -768,7 +784,7 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
   };
 
   std::vector<std::vector<double>> times(inputs.size());
-  for (uint32_t round = 0; round <= rounds; round++) {
+  for (uint32_t round = 0; !stats_only && round <= rounds; round++) {
     for (size_t i = 0; i < inputs.size(); i++) {
       // Alternate the order so drift and warm-up do not favour one input.
       const auto index = (round % 2 == 0) ? i : inputs.size() - 1 - i;
@@ -784,12 +800,16 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
   // representations (the ISA) there.
   const auto *isa_dir = std::getenv("KYTY_PIPELINE_ISA");
   const auto capture = [&](const std::string &label, std::vector<uint32_t> &words) {
+    if (stats_only)
+      std::printf("[host] %s: input=%s words=%zu original_xxh3=%016llx\n", name, label.c_str(),
+          words.size(), static_cast<unsigned long long>(XXH3_64bits(words.data(), words.size()*sizeof(uint32_t))));
     words[2] = ++generator;
     vk::PipelineCreateFlags flags = vk::PipelineCreateFlagBits::eCaptureStatisticsKHR;
     if (isa_dir != nullptr) {
       flags |= vk::PipelineCreateFlagBits::eCaptureInternalRepresentationsKHR;
     }
     const auto created = create_pipeline(label, words, flags);
+    if (stats_only) std::printf("[host] %s: captured_native_compile_ms=%.3f input=%s\n", name, created.ms, label.c_str());
     vk::PipelineInfoKHR info{};
     info.pipeline = created.pipeline;
     uint32_t executables = 0;
@@ -801,6 +821,7 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
               device.getPipelineExecutablePropertiesKHR(&info, &executables,
                                                         properties.data()),
               "vkGetPipelineExecutablePropertiesKHR");
+    if (stats_only) std::printf("[host] %s: executables=%u input=%s\n", name, executables, label.c_str());
     for (uint32_t index = 0; index < executables; index++) {
       vk::PipelineExecutableInfoKHR executable{};
       executable.pipeline = created.pipeline;
@@ -816,6 +837,8 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
                 "vkGetPipelineExecutableStatisticsKHR");
       std::string line;
       for (const auto &statistic : statistics) {
+        if (stats_only) std::printf("[host] %s: counter=%s format=%u description=%s\n", name,
+            statistic.name.data(), static_cast<unsigned>(statistic.format), statistic.description.data());
         line += fmt::format(" {}=", statistic.name.data());
         switch (statistic.format) {
           case vk::PipelineExecutableStatisticFormatKHR::eBool32:
@@ -872,6 +895,7 @@ void TimePipelineCompile(VulkanHarness &vulkan, const char *journal_path,
 
   for (size_t i = 0; i < inputs.size(); i++) {
     auto &words = inputs[i].second;
+    if (stats_only) { capture(inputs[i].first, words); continue; }
     const auto repeat_ms = compile_ms(inputs[i].first, words, false);
     std::printf("[host]    %s: %6zu words  median %8.2f ms  min %8.2f ms  "
                 "unchanged repeat %7.2f ms  %s\n",
