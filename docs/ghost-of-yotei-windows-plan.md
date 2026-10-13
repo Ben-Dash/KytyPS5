@@ -1,5 +1,87 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint:BDA batch complete native proof; core/world next, 2026-10-13
+
+Untouched compute neighbor100259/477FBA47 PASS: real previous chained shader
+writesC; publicPrepareBda uploadsA/B only; old CPU C/GPU ownership retained;
+following nativeSSBO reads newA/C without extra prebarrier, all3owners/guards/
+publication/cleanup PASS. Three new overlap/deferred/untouched registered CTests
+PASS1.29s. Combined with unchanged3profileRED->GREEN, 13affected, freshchain0/1
+and Suspend proof above, shared immediate-copy batch fix is ready for separate
+commit/nativecore/privateinstall/world30s. Actual FPS benefit remains pending.
+Default scratch1024 restored; no menu/input/newpush/posts. No nativeprocess now.
+
+## Current checkpoint:BDA batch native GREEN; scratch trial no useful gain
+
+14a8bac1 plus immediate-copy batch WIP: genuineRED094147/2C44EBA6 ->unchanged
+GREEN095142/44/1506A129 for Selective/Legacy/Checked. Normal/temp barriers4->2;
+actual ring-wrap stays4/tick+1; each copy2/32768B and native8192words/guards/
+repeat/new generation/cleanup PASS.13affectedCTests PASS6.03s; fresh chain0/1+
+new3BDA registered PASS2.24s; Suspend095357/3EC8F33A PASS. Overlap/disjoint same
+owner/publicSSBO consumer095621/F13E8C49 keepall requiredpairs+first/final/backing
+PASS; actual deferred-recorder095622 sameEXE nativewords/ring/temp lifetimes PASS
+(counts in that case are recording hooks, not driver-cost proof).
+Untouched preceding compute-chain neighbor and nativecore/world next; no game
+FPS or other-game compatibility claimed from native batch tests.
+
+Scratch128 full30s652..760/28titles mean3.628571,min2.8/max4.0,exit0/no guards
+completed09:46:38UTC. Against candidate3.469231 this is +4.59% singlepair, still
+below historical reverse3.640741/prior3.882143: NO useful verified gain/images.
+Keep original1024 benchmark setting. No active native process now (verify).
+Retired image-pool bytes/VMA budget is another concrete source lead (24 count
+limit lacksbytecap); actualpool occupancy/paging and correctness proof pending.
+
+## Current checkpoint: scratch128 trial active; BDA barrier cost genuine RED
+
+Historical reverse b8 run093530-74b8cf complete30s650..754/27titles mean3.640741,
+min3.4/max3.8,exit0/no guards09:38:05UTC. Candidate2B mean3.469231 is -4.71%
+vs reverse control; no useful world gain, drift/repeatability still limited.
+Neither whole-game2B gain nor a fully isolated regression is established.
+
+Current14a8bac1 exact6F607CDE EXE, new private cycle28/runtime-14a8bac1-scratch128,
+`game-20261013-094338-perf-cycle28-scratch128-world-title-30s-a271ff` PID38236,
+root80039 ACTIVE. Only existing KYTY_SCRATCH_IDLE_MB128 (default1024) changed;
+same neutral fullrender chain1/HALFoff/650gated30s/300bound warmup, pending.
+Native source FROZEN. No menu/buttons/push/posts; capture only fullsample+10%
+gain over3.882143. Whole-device pre-sample reverse observation15106/16311MiB,
+P0/50C/2880MHz/43% GPU is memory-pressure lead, not emulator-only/paging proof.
+
+New independent PrepareBda native RED094147/2C44EBA6 on14a8bac1 test-onlyWIP:
+normal4MB staging, actual24KB ring wrap/tick+1, actual8KB temporary sources ALL
+initial/native8192words/guards/dirty/clean/repeated/new CPU generation/cleanup
+PASS; copies2/regions2/32768bytes each. Actualpre2/post2; normal/temp expected1/1
+cost fails last, wrap must retain2/2. Shipping behavior unchanged. Immediate-copy
+batch proposal and independent review saved cycle26/buffer-copy-review; exact
+production patch/GREEN/neighbor profiles/runtime benefit still pending.
+
+## Current checkpoint:2B world3.47; verified historical reverse control active
+
+14a8bac1/EXE6F607CDE full neutral chain1 run093125-141ea6 completed09:34:06UTC,
+30s653..753/26titles mean3.469231,min3.2/max3.7,exit0/no guards. This is -8.01%
+vs immediate preceding b8 mean3.771429 and -10.636% vs older3.882143. Operation
+gain -72.8% did NOT translate to useful world FPS. No images captured.
+
+Reverse control `game-20261013-093530-perf-cycle27-reverse-b8-world-title-30s-74b8cf`
+PID16108/root41942 ACTIVE. Separate private clone of completed candidate runtime
+retains its saves/caches, only original previously verified b8 executable restored
+with exact EF33708B SHA. Diagnostic helper accepts historical binary ONLY when
+its saved complete/exit0/no-guards world run revision/hash match; current14a8bac1
+source is preserved/frozen. No checkout/source reversal/rebuild of old code.
+Same neutral full-render chain1/HALFoff/scale100/650gated30s; pending. Artifact
+and invocation profile `_Build/analysis/yotei-performance-cycle27-20261013`.
+Do not interpret a candidate-regression claim until reverse control completes.
+
+## Current checkpoint:14a8bac1 direct2B world retry active, 2026-10-13
+
+Native core092953/install093110 PASS; private cycle26/runtime-14a8bac1-2byte
+EXE6F607CDEB335CF7401D1B9686A17E31222BF3D0E6454FC44151AA9EEA6065420.
+Neutral chain1/fullrender/HALFoff/scale100 run
+`game-20261013-093125-perf-cycle26-direct-2byte-world-title-30s-141ea6` PID49988,
+root23184 active, source inputs FROZEN. Bounded warmup300 then650gated30s title
+sample; result pending. Capture helper permits two images only AFTER a full
+sample and >=10% mean gain against recorded3.882143; capture excluded from FPS.
+Verify current process/artifacts before continuation. No menu/buttons/push/posts.
+
 ## Current checkpoint: direct2B completed native proof; core/world next, 2026-10-13
 
 Shared2B direct upload unchanged RED091807 ->GREEN092043, copies1->0 with exact

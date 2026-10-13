@@ -187,6 +187,13 @@ public:
 	[[nodiscard]] GraphicsState& GetGraphicsState() const noexcept { return m_graphics_state; }
 	void InvalidateGraphicsState() const noexcept { m_graphics_state = {}; }
 
+	// BDA synchronization scopes share dependencies; their native copies stay immediate.
+	void BeginUploadBatch() const;
+	void EndUploadBatch() const;
+	[[nodiscard]] bool UploadBatchActive() const noexcept { return m_upload_batch_depth != 0; }
+	[[nodiscard]] bool RecordBdaUploadCopy(vk::Buffer source, vk::Buffer destination,
+	                                        std::span<const vk::BufferCopy> copies) const;
+	void FlushUploadDependency() const;
 	[[nodiscard]] vk::CommandBuffer Handle() const;
 	// KYTY_COMPUTE_CHAIN=1: a dispatch leaves the barrier that orders it before later work pending
 	// instead of recording it, so consecutive dispatches the guest did not separate by a cache
@@ -216,6 +223,7 @@ private:
 	// Conservative optional-flush oracle: handle exposure may have recorded native work.
 	[[nodiscard]] bool HasSubmissionWork() const noexcept {
 		return m_native_handle_requested || m_rendering || m_compute_access_pending ||
+		       m_upload_dependency_pending ||
 		       static_cast<bool>(m_pending_shader_writes);
 	}
 	void NoteSubmissionWork() const noexcept { m_native_handle_requested = true; }
@@ -231,6 +239,9 @@ private:
 	uint32_t            m_debug_arg3      = 0;
 	uint64_t            m_debug_arg4      = 0;
 	mutable RenderState m_render_state;
+	mutable uint32_t    m_upload_batch_depth = 0;
+	mutable bool        m_upload_dependency_pending = false;
+	mutable std::vector<vk::Buffer> m_upload_destinations;
 	mutable bool        m_native_handle_requested = false;
 	mutable bool        m_rendering   = false;
 	mutable bool        m_compute_access_pending = false;

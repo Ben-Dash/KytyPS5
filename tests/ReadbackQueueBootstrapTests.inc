@@ -1,9 +1,15 @@
 // Test-only proposal; include after EndOfPipeLiteralNeighborTests.inc.
 // Requires a real distinct transfer-family queue created before RenderContext.
+#include <new>
 #include "common/hostException.h"
 #include "graphics/host_gpu/renderer/debug.h"
 namespace Libs::Graphics {
 struct PerformanceMemoryTestAccess {
+  static void RecreateUploadRing(BufferCache& cache,uint64_t bytes) {
+    // Caller has completed actual native work and drained all callbacks.
+    cache.m_staging_buffer.~StreamBuffer();
+    new (&cache.m_staging_buffer) StreamBuffer(cache.m_graphics,cache.m_scheduler,MemoryUsage::Upload,bytes);
+  }
   static bool CpuDirty(BufferCache& cache,uint64_t address,uint64_t bytes) {
     return cache.m_memory_tracker.IsRegionCpuModified(address,bytes);
   }

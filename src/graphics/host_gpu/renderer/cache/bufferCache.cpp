@@ -1360,6 +1360,14 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 	}
 	if (source) {
 		auto& command = m_scheduler.Current();
+		if (!is_written && !is_texel_buffer && command.UploadBatchActive()) {
+			ClampBufferCopies(copies, source == m_staging_buffer.Handle() ? m_staging_buffer.Size() : 0,
+			                  buffer.Size(), "upload", buffer.CpuAddress());
+			if (command.RecordBdaUploadCopy(source, buffer.Handle(), copies)) {
+				if (stats_on) t_sync_stats.record_ns[kind] += SyncStats::Now() - walked;
+				return false;
+			}
+		}
 		command.EndRendering();
 		const auto native = command.Handle();
 		GpuZones::Mark(native, DrainStats::Zone::BufferCopy);
@@ -2233,9 +2241,22 @@ void BufferCache::EnsureBdaZeroPage() {
 	SetPageTableProbe(BDA_ZERO_PAGE_ENTRY, address);
 }
 
+namespace {
+class BdaUploadBatchScope {
+public:
+	explicit BdaUploadBatchScope(CommandBuffer& command): m_command(command) { m_command.BeginUploadBatch(); }
+	~BdaUploadBatchScope() { m_command.EndUploadBatch(); }
+	BdaUploadBatchScope(const BdaUploadBatchScope&) = delete;
+	BdaUploadBatchScope& operator=(const BdaUploadBatchScope&) = delete;
+private:
+	CommandBuffer& m_command;
+};
+} // namespace
+
 void BufferCache::SynchronizeBdaLegacy(const RangeSet& mapped) {
 	const UploadSourceScope upload_source(UploadSource::Bda);
 	EnsureBdaZeroPage();
+	const BdaUploadBatchScope upload_batch(m_scheduler.Current());
 	// Clear before the full walk so writes racing with the walk stay pending. Summaries go
 	// first: a hint published in between re-sets its summary bit for the next pass.
 	for (size_t summary = 0; summary < MemoryTracker::BDA_SUMMARY_WORDS; ++summary) {
@@ -2251,6 +2272,7 @@ void BufferCache::SynchronizeBdaLegacy(const RangeSet& mapped) {
 bool BufferCache::SynchronizeBdaSelective(const RangeSet& mapped) {
 	const UploadSourceScope upload_source(UploadSource::Bda);
 	EnsureBdaZeroPage();
+	const BdaUploadBatchScope upload_batch(m_scheduler.Current());
 	for (size_t summary = 0; summary < MemoryTracker::BDA_SUMMARY_WORDS; ++summary) {
 		uint64_t words = m_memory_tracker.ConsumeBdaSummaryWord(summary);
 		// On failure, words not yet visited keep their hint bits; restore their summary bits.

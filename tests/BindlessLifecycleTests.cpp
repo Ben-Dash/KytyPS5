@@ -391,6 +391,10 @@ private:
 #include "PollExactPageReadbackCostTests.inc"
 #include "EmptyPm4TailSubmitCostTests.inc"
 #include "EmptyPm4TailRequiredWorkNeighbors.inc"
+#include "PrepareBdaUploadBatchCostTests.inc"
+#include "BdaUploadUntouchedComputeNeighbor.inc"
+#include "BdaUploadOverlapAndConsumerNeighbors.inc"
+#include "PrepareBdaUploadBatchAsyncNeighbors.inc"
 #include "EmptyPm4TailDiagnosticWorkTests.inc"
 #include "ForeignReadbackQueuedStateCostTests.inc"
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
@@ -415,7 +419,10 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0))
+    Libs::Graphics::ConfigurePrepareBdaUploadBatchCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
+                    (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                     std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0))
     Libs::Graphics::ConfigureEmptyPm4TailSubmitCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0)
@@ -493,7 +500,11 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
+                    (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                             std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--bda-upload-overlap-consumer-gpu") == 0 ||
+                    std::strcmp(argv[1], "--prepare-bda-upload-untouched-compute-gpu") == 0 ||
+                    std::strcmp(argv[1], "--prepare-bda-upload-async-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--empty-pm4-tail-diagnostic-work-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
@@ -650,6 +661,12 @@ int main(int argc, char **argv) {
     ConfigureGenericBufferTests(true);
   if (argc == 2 && std::strcmp(argv[1], "--empty-pm4-tail-diagnostic-work-gpu") == 0)
     Libs::Graphics::ConfigureEmptyPm4TailDiagnosticWorkTests();
+  if (argc == 2 && std::strcmp(argv[1], "--bda-upload-overlap-consumer-gpu") == 0)
+    Libs::Graphics::ConfigurePrepareBdaUploadBatchCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-untouched-compute-gpu") == 0)
+    Libs::Graphics::ConfigurePrepareBdaUploadBatchCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-async-neighbors-gpu") == 0)
+    Libs::Graphics::ConfigurePrepareBdaUploadBatchAsyncNeighbors();
   Common::InitializeThreads();
   Common::Subsystems subsystems;
   subsystems.Initialize<Config::Lifecycle>();
@@ -657,6 +674,10 @@ int main(int argc, char **argv) {
   options.printf_direction = Config::LogDirection::Silent;
   options.gpu_frames_ahead = 0;
   options.label_flush_interval_us = 0;
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0)
+    options.bda_sync_mode = Config::BdaSyncMode::Legacy;
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0)
+    options.bda_sync_mode = Config::BdaSyncMode::SelectiveChecked;
   Config::Load(options);
   subsystems.Initialize<Log::Lifecycle>();
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
@@ -665,7 +686,11 @@ int main(int argc, char **argv) {
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
+                    (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
        std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--bda-upload-overlap-consumer-gpu") == 0 ||
+                    std::strcmp(argv[1], "--prepare-bda-upload-untouched-compute-gpu") == 0 ||
+                    std::strcmp(argv[1], "--prepare-bda-upload-async-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--empty-pm4-tail-diagnostic-work-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
@@ -797,6 +822,22 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--empty-pm4-tail-diagnostic-work-gpu") == 0) {
     CheckEmptyPm4TailDiagnosticWork(vulkan);
+    return 0;
+  }
+  if (argc == 2 && (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0)) {
+    CheckPrepareBdaUploadBatchCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-untouched-compute-gpu") == 0) {
+    CheckBdaUploadUntouchedComputeNeighbor(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--bda-upload-overlap-consumer-gpu") == 0) {
+    CheckBdaUploadOverlapAndConsumerNeighbors(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--prepare-bda-upload-async-neighbors-gpu") == 0) {
+    CheckPrepareBdaUploadBatchAsyncNeighbors(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0) {

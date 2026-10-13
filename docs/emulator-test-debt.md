@@ -1,5 +1,58 @@
 # Integration test debt
 
+## Retired native-image recycling byte budget required reproduction, 2026-10-13
+
+Current recycler retains up to24 native images without an allocation-byte cap.
+JetU59 byte-budget policy is a concrete comparison lead; actual owned pool use/
+paging remains unproved. Before production, use bounded tiny real images and
+measured actual VMA allocation sizes, complete native GPU uploads/readbacks and
+retirement. A caller-configured cap2A should reject retaining5A after real
+retirement; old count-only pool is expected cost RED. Read the still-live image
+again and preserve all guards/lifetimes before cost. Test-only pool statistics
+may observe actual allocations, never change GPU readiness/ownership. Then
+derive byte cap from real device budget and explicit host limit, preserve exact
+reuse/layout reset/handle generations, count24 bound and pending/live owners.
+Allocation bytes freed may remain in VMA blocks; don't claim physical residency
+or game FPS from bookkeeping. Native game/cross-device budget behavior pending.
+
+## Independent PrepareBda upload barrier batch required reproduction, 2026-10-13
+
+Same unchanged native GREEN095142/095144 under Selective/Legacy/SelectiveChecked
+1506A129: normal and temporary pre1post1/copy2/32768bytes; actual ring-wrap
+pre2post2/tick+1 unchanged. ALL native8192words/guards/repeat/new CPU generation/
+cleanup PASS. Thirteen affected CTests PASS6.03s; fresh shader-target chain0/1
+and registered3BDA checks PASS2.24s; actual SuspendPoint095357/3EC8F33A PASS.
+Native overlapping/disjoint-same-owner and actual inside-scope SSBO reader
+095621/F13E8C49 keep2pairs plus first/final/backing/guards PASS. Deferred-recorder
+095622 sameEXE normal/wrap/temp actual native bytes/guards/lifetimes PASS;
+observer there counts recording hooks, not native submit-thread cost.
+Tiny preceding compute-chain/untouched destination and core/game FPS pending.
+
+Untouched actual chained C writer100259/477FBA47 PASS: CPU C staysold/GPUowned,
+onlyA/B copied; following nativeSSBO seesAnew/Cmarker with no extra predependency,
+all3nativeowners/output guards/Cpublication/actualcleanup PASS. Three registered
+new overlap/deferred/untouched CTests PASS1.29s. Core/game benefit remains pending.
+
+Genuine native RED094147/2C44EBA6 on14a8bac1: normal/actual24KB ring-wrap/
+actual8KB temporary-source all native8192words/guards/CPU generations/clean
+repeat/cleanup PASS before finalcost. Each copy2/regions2/32768bytes, pre2post2;
+tick7->7/12->13/18->18. Expectednormal/temp1pair, actualwrap2pairs. Test-only
+idle staging-ring recreation changes its capacity, not ownership/readiness;
+finite real GPU fills/publicCPUpublication justify initialwritten cacheowners.
+Same test unchanged GREEN required; no production applied. Source artifacts
+`_Build/analysis/yotei-performance-cycle1-20261012/checks/20261013-094147-0312999-prepare-bda-upload-batch-baseline-red`.
+
+JetU59 UploadBatch is a comparison lead: independent CPU-dirty native owners
+currently each receive before/copy/after barriers. Reproduce public PrepareBda
+on two precreated dirty owners with actual native bytes/guards/cleanup, copy2
+and exact transferred bytes BEFORE native barrier4 exceeds expected2. Clean
+repeat must copy0; CPU rewrite/new epoch must publish real changed bytes.
+No production change until intended RED. Copy commands must remain immediate:
+current staging Map/Commit and temporary source retirement belong to its tick.
+Any deferred final visibility must close before native consumers/submits/tick
+changes; ring-wrap, temporary staging, overlap and consumer controls required.
+Diagnostic239.4 buffer-copy intervals/frame does not prove upload-only frequency.
+
 ## Two-byte full color tiled upload cost reproduction, 2026-10-13
 
 Actual RED091807/FCAD4B4D on b8d1ceb3: complete128x128 R8G8UNorm native bits,

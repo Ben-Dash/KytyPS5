@@ -913,6 +913,23 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --poll-exact-page-readback-cost-gpu)
 	add_test(NAME eager_adjacent_page_readback_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eager-readback-adjacent-pages-cost-gpu)
+	add_test(NAME prepare_bda_upload_batch_cost_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-batch-cost-gpu)
+	add_test(NAME prepare_bda_upload_batch_legacy_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-batch-cost-legacy-gpu)
+	add_test(NAME prepare_bda_upload_batch_checked_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-batch-cost-checked-gpu)
+	set_tests_properties(prepare_bda_upload_batch_cost_gpu prepare_bda_upload_batch_legacy_gpu
+		prepare_bda_upload_batch_checked_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME prepare_bda_upload_async_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-async-neighbors-gpu)
+	add_test(NAME bda_upload_overlap_consumer_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --bda-upload-overlap-consumer-gpu)
+	set_tests_properties(prepare_bda_upload_async_neighbors_gpu bda_upload_overlap_consumer_neighbors_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME bda_upload_untouched_compute_neighbor_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --prepare-bda-upload-untouched-compute-gpu)
+	set_tests_properties(bda_upload_untouched_compute_neighbor_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME empty_pm4_tail_submit_cost_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --empty-pm4-tail-submit-cost-gpu)
 	add_test(NAME empty_pm4_tail_required_work_gpu

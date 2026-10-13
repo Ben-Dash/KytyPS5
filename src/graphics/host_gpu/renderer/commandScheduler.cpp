@@ -644,6 +644,8 @@ void CommandScheduler::ReadTimestamps(uint32_t slot) {
 
 uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	JoinAsyncUploads();
+	// Native copies remain immediate, but visibility must precede end diagnostics and retirement.
+	m_command.FlushUploadDependency();
 	EXIT_IF(m_command.IsInvalid());
 	EXIT_IF(submit.num_wait_semaphores > SubmitInfo::MaxSemaphores ||
 	        submit.num_signal_semaphores >= SubmitInfo::MaxSemaphores);

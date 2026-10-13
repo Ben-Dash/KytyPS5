@@ -7,6 +7,7 @@
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
 #include "graphics/host_gpu/renderer/image/imageView.h"
+#include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -25,8 +26,66 @@ bool CommandBuffer::IsInvalid() const {
 	return m_buffer == nullptr;
 }
 
+void CommandBuffer::BeginUploadBatch() const {
+	EXIT_IF(IsInvalid() || m_upload_batch_depth == UINT32_MAX);
+	++m_upload_batch_depth;
+}
+
+void CommandBuffer::EndUploadBatch() const {
+	EXIT_IF(m_upload_batch_depth == 0);
+	if (--m_upload_batch_depth == 0) FlushUploadDependency();
+}
+
+void CommandBuffer::FlushUploadDependency() const {
+	if (!m_upload_dependency_pending) return;
+	EXIT_IF(IsInvalid() || m_rendering);
+	// Clear before any later handle request; the actual copies are already recorded.
+	m_upload_dependency_pending = false;
+	m_upload_destinations.clear();
+	NoteSubmissionWork();
+	vk::MemoryBarrier after {};
+	after.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+	after.dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite;
+	m_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+	                         vk::PipelineStageFlagBits::eAllCommands,
+	                         vk::DependencyFlagBits::eByRegion, 1, &after, 0, nullptr, 0, nullptr);
+}
+
+bool CommandBuffer::RecordBdaUploadCopy(vk::Buffer source, vk::Buffer destination,
+	                                      std::span<const vk::BufferCopy> copies) const {
+	if (!UploadBatchActive() || copies.empty()) return false;
+	EXIT_IF(IsInvalid() || source == nullptr || destination == nullptr);
+	EndRendering();
+	// Initially split even disjoint ranges of the same owner. Repeated destinations may
+	// carry a real transfer WAW dependency; distinct cache allocations do not alias.
+	if (std::find(m_upload_destinations.begin(), m_upload_destinations.end(), destination) !=
+	    m_upload_destinations.end()) {
+		FlushUploadDependency();
+	}
+	if (!m_upload_dependency_pending) {
+		// This stronger global pre-dependency also covers a pending compute chain.
+		const auto native = HandleForFullBarrier();
+		GpuZones::Mark(native, DrainStats::Zone::BufferCopy);
+		vk::MemoryBarrier before {};
+		before.srcAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite |
+		                       vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eTransferWrite;
+		before.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+		native.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+		                       vk::PipelineStageFlagBits::eTransfer,
+		                       vk::DependencyFlagBits::eByRegion, 1, &before, 0, nullptr, 0, nullptr);
+	}
+	// Keep the source reservation, native copy and temporary owner's completion in the
+	// same tick. Only the post-copy visibility dependency is deferred to the boundary.
+	NoteSubmissionWork();
+	m_buffer.copyBuffer(source, destination, static_cast<uint32_t>(copies.size()), copies.data());
+	m_upload_destinations.push_back(destination);
+	m_upload_dependency_pending = true;
+	return true;
+}
+
 vk::CommandBuffer CommandBuffer::Handle() const {
 	EXIT_IF(IsInvalid());
+	FlushUploadDependency();
 	NoteSubmissionWork();
 	if (m_compute_access_pending) [[unlikely]] {
 		m_compute_access_pending = false;
@@ -37,19 +96,22 @@ vk::CommandBuffer CommandBuffer::Handle() const {
 
 vk::CommandBuffer CommandBuffer::ChainHandle() const {
 	EXIT_IF(IsInvalid() || m_rendering);
+	FlushUploadDependency();
 	NoteSubmissionWork();
 	return m_buffer;
 }
 
 vk::CommandBuffer CommandBuffer::HandleForFullBarrier() const {
 	EXIT_IF(IsInvalid());
+	FlushUploadDependency();
 	NoteSubmissionWork();
 	m_compute_access_pending = false;
 	return m_buffer;
 }
 
 void CommandBuffer::Begin() {
-	EXIT_IF(m_rendering || m_pending_shader_writes || IsInvalid());
+	EXIT_IF(m_rendering || m_pending_shader_writes || m_upload_dependency_pending ||
+	        !m_upload_destinations.empty() || IsInvalid());
 	m_compute_access_pending = false;
 	m_native_handle_requested = false;
 	// Begin itself has no GPU effect. Public handle access conservatively marks work.
@@ -86,6 +148,7 @@ void CommandBuffer::SetDebugInfo(uint32_t op, uint64_t submit_id, uint32_t arg0,
 }
 
 void CommandBuffer::BeginRendering(const RenderState& state) const {
+	FlushUploadDependency();
 	if (m_rendering && m_render_state == state) {
 		return;
 	}
