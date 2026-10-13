@@ -1,5 +1,45 @@
 # Integration test debt
 
+## PM4 queue service and bounded yielding, 2026-10-14
+
+Actual causal diagnostic `aeb13a50` after frame 400 joins 73 real completion
+labels: arm→finalize mean 0.730 ms, while queue 1 compute waits 72.804 ms before
+first CP processing and queue 0 SuspendPoint waits 139.821 ms. This does not
+prove starvation: same-queue FIFO, blocked producers and resumed slices can
+explain part of the delay. First record uninterrupted Process slices and their
+Complete/Blocked/progress status; do not classify all latency as removable.
+
+Before any opt-in packet quantum, reproduce cost using the actual public GPU
+queue/parser APIs: enqueue a finite graphics progress stream and independent
+compute capture while the real consumer is held, then release. Verify all
+final payloads, checksums, queue FIFO, canaries and task cleanup before the
+bounded-between-packets progress oracle. Baseline must fail only that cost
+oracle; native bootstrap, shader/build failures or GPU hangs are not RED.
+Budget is an explicit scheduling policy, not an invented guest memory-order
+guarantee between independent queues. Distinguish Yielded from Blocked so a
+runnable slice never enters the blocked poll (100 microseconds requested;
+Windows Clang condition-variable backend rounds it to at least 1 ms). A graphics CE/DE round
+must share the budget and actually return to the outer queue scheduler.
+Preserve per-queue CP registers, buffer stack/tail chains, submit IDs, CE/DE
+counters, speculator resume, every packet and real WAIT_REG_MEM predicates.
+Cover nested/chain buffers, CE/DE synchronization, false blocked waits,
+readback notifications, same-queue FIFO and real native completion before a
+game retry. Do not force more recording-age GPU runs to reproduce device loss.
+RED/GREEN and runtime benefit remain pending.
+
+Policy test now has a genuine native RED `212750…real-RED`, EXE `115A34F5`:
+all 4096 values, FIFO, guards and cleanup pass, short queues observe 4096.
+Unchanged GREEN `212922`, EXE `E40BB0E4`: observes 32/64/32, all controls pass.
+CPU IB/CE-DE ON/OFF and stronger same-queue tail FIFO neighbors pass.
+Native queue-state fixture initially omitted a guest compute dependency:
+OFF numerics failed although ON happened to serialize. This is an invalid
+neighbor input, not another production defect. Added real ACQUIRE_MEM before
+the second read-modify-write dispatch, retained goldens. Corrected fixture
+`213632` OFF and `213633` ON, plus `213634/213635` nested IB/CE ON/OFF all
+pass on EXE `87FB57A4`, including A+2/B+7, CPU fringe, guards and cleanup.
+Actual world throughput and deferred-recorder neighbors remain pending;
+do not infer that fair CPU slices are the measured world bottleneck.
+
 ## SRT materialization work: operation witness required, 2026-10-13
 
 Completed46fe8e8b profile191442...730fa4 identifies shared graphics/compute

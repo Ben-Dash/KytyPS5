@@ -1,5 +1,128 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: warmed control disproves quantum gain; candidate reverted
+
+Native Windows `406395a4` on `yotei-integration-native`.
+Completed actual world/HUD comparisons on SAME EXE `4035C2BC…`:
+control0 `214216…11d1b4` mean2.516667; quantum64 rejected2.4; quantum512
+`214917…3a92f2` mean3.56; quantum2048 `215517…876677` rejected3.5.
+Necessary repeated warmed control0 `220203…715c61` mean3.54, frames536–560;
+same village/player/HUD visually matches quantum512 at537–561. Bothcontrol
+images and one512 image inspected; second512 capture withheld by focus guard.
+All these runs closed0/no memory guards, full render/neutral input/90s+400 gate.
+512 versus warmedcontrol is only+0.56%, not meaningful. Earlier+41.5% pair
+was not a confirmed policy gain and is superseded by this repeat. No2x result.
+
+User non-gain rollback carried out: FULL `028b5994` production/tests/CTest
+reverted by `406395a4`, with exact patch, fixtures and all runtime/test evidence
+preserved under cycle44-20261014/rejected-PM4-quantum and normal check folders.
+No native process active now; verify before edits. Installed quantum runtime
+stillcontains oldEXE and must not be relabelled as revertedsource. Diagnostics
+remain defaultOFF; nextnativebuild must use currentsource and isolated runtime.
+
+Next largest shader experiment is immutable dynamic-format metadata: actual
+FC6 has four Private128u32 arrays, 2048 declaredbytes/thread/no stores.
+DefaultINDEXED_SWITCH does not affect this emitter-generated path. This is
+not measured driver spill cost and FC6-alone9.2ms cannot establish2x. Shared
+constant-returning lookup proposal/independent128metadata CPU regression and
+finiteactualGPUprobe are being prepared in ignored cycle44/gpu-next-candidate.
+Production shader patch UNAPPLIED; genuinecostRED/GREEN/cacheidentity/native
+numeric/driverorworkload proof required. BDA/globalrecording-query ports lack
+a large current cost witness; avoidduplicate caches/unsupported range skipping.
+
+Common::CondVar::WaitFor100 requests100MICROSECONDS (Windows Clang roundsat
+least1ms), not100ms; one100msblocked-gap hypothesis was wrong. Old cumulative
+blocked-poll timing aggregatesmanywaits. Testdebtcorrected; no schedulerchange.
+Userdata/oldruntime/PrefetchWIP preserved, WSLunused/stopped, no push/issues.
+Actual currentworld≈3.54FPS, ≥2×/60FPS/fullFX goals remain unmet.
+
+## Current checkpoint: native quantum regression proved; world FPS still pending
+
+Native Windows local `028b5994`, branch `yotei-integration-native`.
+Default-OFF CPU packet-budget candidate has genuine RED/GREEN and independent
+native GPU/IB/CE/FIFO proof. Source policy has not been accepted as a world FPS
+fix. Complete CPU fairness RED `212750`/EXE `115A34F5` → unchanged GREEN
+`212922`/`E40BB0E4`; all values/guards/cleanup pass. Corrected native dependency
+fixture (real ACQUIRE_MEM, unchanged numerics) OFF/64 and IB+CE OFF/64 pass
+`213632`–`213635`/`87FB57A4`. CPU IB/CE/FIFO both modes pass. Fresh existing
+WAIT queued/ready/async, gpu_command_lane and WAIT32/64 ABI pass `213918`–`213923`.
+Native core `214009` and install `214147` PASS; private runtime
+cycle44-20261014/runtime-quantum-world is cloned from preserved cycle42 runtime.
+EXE `4035C2BC2DE6F02F487289145F649E1BC1C3F13A9F08AABF5ACD59496A6B282B`.
+
+Latest user confirms too-early run had not reached the game. A warmed startup
+can pass frame400 while loading. Do not count 15–40 loading/black FPS as gains.
+Current comparisons retain frame400 but wait90s before the short6s title gate;
+positive acceptance still requires a visibly rendered world. This later scene
+is not comparable to the prior 4.16 short early-world sample.
+Control `game-20261013-214216-perf-cycle44-world-control-quantum0-11d1b4` closed0,
+90.55s gate, frames1382–1395, mean2.516667; no guards, no screenshots/no visual
+claim from this control alone. SameEXE quantum64 `214515…c81ca2` startedsample
+at495/90.57s, then title2.4<=control rejected/closed0; restore/remove64 setting.
+Quantum512 `game-20261013-214917-perf-cycle44-world-quantum512-3a92f2` rootPID53436
+currently ACTIVE, source inputs FROZEN; outcome pending. Wait/drain it before
+any build/test/source edit. Try only authorized bounded variations; if entire
+candidate family lacks gain, preserve evidence then revert the policy commit.
+WSL remains unused/stopped; no push/issue; keep old runtimes/data/PrefetchWIP.
+Goal ≥2× original3.7FPS and60FPS/fullFX remains unmet. Three agents independently
+audit next generic BDA read ranges, recording synchronization and readonly shader
+format tables; no further production port is applied or promised to double FPS.
+
+## Current checkpoint: actual queue latency isolated; Demon’s Souls comparison
+
+Native Windows, branch `yotei-integration-native`, local `48e71fdc`.
+User confirmed the 30+ FPS Demon’s Souls result belongs to another person.
+Saved primary-source comparison and candidate ranking:
+[Yōtei versus Demon’s Souls](yotei-vs-demons-souls-performance-2026-10-14.md).
+No local Demon’s Souls dataset/game is available. Do not attribute the difference
+solely to hardware or assert Demon’s Souls uses a simpler rendering model.
+
+Best tentative normal setting remains GPU core 1: short full-render title sample
+`201848…91f0b6`, 402–421, 4.16 versus 3.7 FPS, actual world in two post-gain
+screenshots. Combined affinity/priority change, not sustained or doubled FPS.
+Label interval 0 rejected at 3.9; pure clock-spin PAUSE rejected at 3.8 and
+fully reverted `731acca9`. Age 1000 failed before frame 400 at frame 333;
+restore age 0 and do not repeat risky age runs without bounded regression.
+Exact wait-result logging `fe0ef118` is now included in the built diagnostic;
+it diagnoses a later failure, does not fix the earlier unknown Vulkan result.
+
+Actual causal trace `game-20261013-210900-diag-cycle44-main-table-readable-4a6531`:
+source `aeb13a50`, EXE `9431EA6FE88935D8ABCE0546BB3879620FA9E533C3D7667E70954DF3E3A74914`,
+native core/install PASS, exit 0, no guards, stderr empty. Frames 400–437;
+20869 retained rows, dropped 0, pointer errors 0. Loader global is private
+memory outside Kernel backing; bounded readable-only RPM diagnostic resolves
+the actual GPU sequence table to `0x2000000000` on every sampled frame.
+All 73 label arm/publication/finalize chains join by owner/tick/token.
+Arm→finalize mean 0.730 ms, p95 1.574, max 2.132: backing publication is not
+the measured 140 ms delay. Guest enqueue→first CP start: queue 1 Compute mean
+72.804 ms/p95 120.043; queue 0 SuspendPoint mean 139.821 ms/p95 161.973.
+Queue 52 CP start→label mean 75.151 ms includes resumed slices and other work,
+not pure CPU cost. Analyze uninterrupted processing versus dependency blocking
+before declaring unfair scheduling or changing the shared queue mechanism.
+No faults at selected PCs were recorded; unfaulted polls are invisible.
+Artifacts: cycle44/trace-analysis-4a6531/{causal-analysis,submission-to-label-analysis}.json.
+
+Existing `--async-submit false` quick comparison `211518…3af95d` showed a
+nominal 15.22 FPS after frame 679, but BOTH post-gain captures were fully black,
+only 159 replay compute pipelines were consumed, and close required forced
+cleanup/exit -1. User independently confirmed it did not reach the game.
+REJECTED, not an FPS improvement; restore async submit true. Frame 400 starts
+evaluation, but a positive reading must still be followed by visible world.
+
+Next temporary diagnostic `48e71fdc` adds SliceEnter/Exit around actual
+GuestGpu::Process; native build currently finishing, execution pending.
+Three agents audit finite packet-budget yield regression, CPU resume/binding
+semantics, and actual slice/label joins. Fair-yield code not applied; requires
+genuine RED, unchanged GREEN, FIFO/CE-DE/indirect/blocked/native neighbors.
+GC donor 19.7→45 FPS does not reproduce here: existing frame ages and 500 ms
+budget cache already present; late cycle33 registrations 35–39/s, collected
+35–40/s, buffer allocation 0.23–0.26 ms/s. No blind GC rewrite.
+
+Default diagnostic OFF; preserve all guest work, clocks, completion, bounds
+and original captures. Goal ≥2× original world FPS remains unmet.
+No push/issue publication; keep WSL stopped and preserve historical untracked
+ComputePrefetchPermutationTests.inc, user games/saves/caches and prior artifacts.
+
 ## Current checkpoint: after400 reject loop; DMA trial removed; Main polling confirmed
 
 User nowrequires immediate FPS evaluation afterframe400; equal/lower candidate
