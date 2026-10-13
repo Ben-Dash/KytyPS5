@@ -45,6 +45,16 @@ public:
 	[[nodiscard]] int GetFrameNum() const;
 
 	[[nodiscard]] static bool IsGpuThread() noexcept;
+	// A callback can retain this token after GuestGpu shutdown without retaining the GPU.
+	class ReadbackNotification {
+	public:
+		void Notify();
+	private:
+		friend class GuestGpu;
+		std::mutex m_mutex;
+		GuestGpu*  m_owner = nullptr;
+	};
+	[[nodiscard]] static std::shared_ptr<ReadbackNotification> CaptureReadbackNotification();
 
 private:
 	static constexpr uint32_t ComputePipeCount     = 7;
@@ -71,6 +81,7 @@ private:
 	};
 
 	void              Enqueue(Submission submission);
+	void              NotifyReadbackReady();
 	// Waits until every submission enqueued before `sequence` has completed.
 	void              WaitForSubmissionsBefore(uint64_t sequence);
 	void              ProcessCommands();
@@ -97,6 +108,9 @@ private:
 	bool                                           m_accepting         = true;
 	bool                                           m_stopping          = false;
 	bool                                           m_shutdown_complete = false;
+	uint64_t                                       m_readback_generation = 0; // queue mutex
+	std::shared_ptr<ReadbackNotification> m_readback_notification =
+	    std::make_shared<ReadbackNotification>();
 	// Completion callbacks can outlive GuestGpu during renderer shutdown.
 	std::shared_ptr<std::binary_semaphore> m_suspend_point_ready =
 	    std::make_shared<std::binary_semaphore>(1);

@@ -388,6 +388,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	// publication, which may run inline during shutdown. Waiters only wait on submitted ticks,
 	// so they cannot observe an arm before its publication is queued.
 	const auto token = ++m_readback_token;
+	const auto notification = GuestGpu::CaptureReadbackNotification();
 	const auto arm   = [this, &pages, token] {
 		for (const auto& [address, bytes]: pages) {
 			m_memory_tracker.ArmReadback(address, bytes, token, m_scheduler.CurrentTick());
@@ -397,10 +398,11 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		// Dirty pages without recorded bytes carry nothing to copy; their publication only
 		// ends their GPU ownership.
 		arm();
-		m_scheduler.DeferPriorityOperation([this, token, pages = std::move(pages)] {
+		m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages)] {
 			for (const auto& [address, bytes]: pages) {
 				m_memory_tracker.FinalizeReadback(address, bytes, token);
 			}
+			if (notification != nullptr) notification->Notify();
 		});
 		return true;
 	}
@@ -470,7 +472,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	// Known bytes also remain GPU-owned until this tick is actually published.
 	// Otherwise a clean-backing read could observe the old CPU label before the fence.
 	inflight.ranges = std::move(pending_ranges);
-	m_scheduler.DeferPriorityOperation([this, token, pages = std::move(pages), download,
+	m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages), download,
 	                                    owner = std::move(temporary), mapped, offset, total_size,
 	                                    buffer_address, copies = std::move(copies), vaddr,
 	                                    known_bytes = std::move(known_bytes)] {
@@ -488,6 +490,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		for (const auto& [address, bytes]: pages) {
 			m_memory_tracker.FinalizeReadback(address, bytes, token);
 		}
+		if (notification != nullptr) notification->Notify();
 	});
 	return true;
 }
@@ -824,6 +827,7 @@ struct BufferCache::QueuedReadback {
 	uint64_t                                   wait_tick      = 0;
 	uint64_t                                   queue_value    = 0;
 	bool                                       published      = false;
+	std::shared_ptr<GuestGpu::ReadbackNotification> notification;
 	std::mutex                                 mutex;
 };
 
@@ -875,6 +879,7 @@ std::shared_ptr<BufferCache::QueuedReadback> BufferCache::QueueReadback(uint64_t
 	}
 	auto request            = std::make_shared<QueuedReadback>();
 	request->buffer_address = buffer_begin;
+	request->notification = GuestGpu::CaptureReadbackNotification();
 	m_memory_tracker.ForEachUnarmedDownloadRange(
 	    window_begin, window_end - window_begin, [&](uint64_t address, uint64_t bytes) noexcept {
 		    m_memory_tracker.ValidateGpuDirtyPages(m_gpu_modified_ranges, address, bytes,
@@ -940,6 +945,7 @@ void BufferCache::PublishQueuedReadback(QueuedReadback& request) {
 	}
 	request.published = true;
 	request.download.reset();
+	if (request.notification != nullptr) request.notification->Notify();
 }
 
 void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) {

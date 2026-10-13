@@ -101,6 +101,8 @@ inline thread_local uint64_t    t_fault_pc = 0;
 #if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
 // Native regression observation only; no shipping renderer state or control.
 inline thread_local void (*g_wait_timer_test_observer)(Kind) = nullptr;
+inline thread_local void (*g_blocked_wait_enter_test_observer)() = nullptr;
+inline thread_local void (*g_blocked_wait_exit_test_observer)(bool) = nullptr;
 #endif
 
 [[nodiscard]] inline bool Enabled() noexcept {

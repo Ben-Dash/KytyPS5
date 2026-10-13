@@ -1,5 +1,53 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: foreign requery and publication wake native GREEN, 2026-10-13
+
+Foreign CPU callback correction local e55aded4: intended cost RED042544/6A15CF7E
+with all numeric/fence/canary/cleanup controls passing; same GREEN043231/E4AF6BA0
+removes redundant ring64->128 allocation and leaves unrelated B dirty/unarmed.
+Real new A writer still waits and publishes abcdef09. Fully armed neighbor pending.
+
+Real queue continuation RED043400/107885A5: actual publication/native5145a7c3,
+graphics11/compute22/independent33, both blocked, guards/cleanup/zero waits pass,
+but CV times out despite publication. Same GREEN043454/4AE64E5A after retained
+notification token/generation: signalled CV/readyTimeouts0. The bounded 1ms test
+stimulus and CV18.1us are NOT a natural game performance measurement. Debug queue
+backing snapshot avoids protected fault under queue mutex; lifetime detached after
+worker join. Six affected CTests pass2.46s; foreign and real async recording with
+wake043534/043535 also pass. Core/private install/30s world recovery pending.
+
+Prior actual world regression2.358333 vs3.033333 remains unaccepted. Recover or
+disable Poll candidate; no images until useful title FPS gain. WSL stopped,
+no menus/input/new pushes/issue comments. Preserve historical prefetch WIP.
+Actual1080/full effects/stable60 remain unresolved.
+
+## Current checkpoint: Poll correct but world regresses2.36FPS, 2026-10-13
+
+7d93 core040627/install040914 PASS; EXE95B5ECD05DB613ECD57FA4816A0287C73B870F80A8C00FAD67D7607B584B3A85.
+Full neutral/no-diagnostics world run `game-20261013-040924-perf-cycle14-poll-world-title-30s-488282`
+closed04:13:22UTC/exit0/no guards. Complete30s651..720/24titles:mean2.358333,
+min2.2/max2.4 versus TLSa980mean3.033333. This is a22.25% single-pair regression,
+NOT an accepted optimization. No images inspected. Restore/disable the candidate
+if the next measured correction does not recover prior throughput.
+
+Read-only OS sample30.030124s/frames552..624/zero query errors: Main47016
+83.769% one core, process~2.705cores; hostGPU31.275%, DrawSpec22.268%, submit18.991%.
+Separate CPU window precedes650FPS and does not establish a latency cause.
+Native async-recording041940/A69D259C PASS: actual record-thread1 routed callback
+consumed, original native scalar/11/22/canaries/publication/two-pending/0wait
+controls unchanged. Earlier tests pinned record-thread0; this closes that
+ordinary async route proof, not all ring-pressure cases.
+
+Three next alternatives: bounded publication-to-queue latency proof and safe
+wake if justified; foreign CPU ReadMemoryAsync callback authoritative requery
+before widening512KiB window; targeted image/ring fallback characterization.
+Wake proposal must fix debug_queues raw protected dereference under queue lock:
+it can wait priority while publication notifier needs that lock. Existing100
+wait is microseconds/Windows alternative1ms, not100ms. No wake behavior change
+or stale-ready shortcut applied yet. Async test-only WIP twofiles; no native
+process active now. Preserve historical prefetch WIP. No new push/issue posts,
+WSL stopped, no menus/buttons. Actual1080/full effects/stable60 unresolved.
+
 ## Current checkpoint: GPU WAIT poll native GREEN, world pending, 2026-10-13
 
 Three-file shared PollReadMemory/PM4 suspension correction WIP. Actual existing

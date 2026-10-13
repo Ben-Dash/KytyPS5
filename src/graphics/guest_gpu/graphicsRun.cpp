@@ -201,6 +201,7 @@ GuestGpu::GuestGpu(RenderContext& renderer): m_renderer(renderer) {
 	GraphicsInitJmpTables();
 	m_gfx_cp = std::make_unique<CommandProcessor>(renderer, 0);
 	m_gfx_cp->Reset();
+	m_readback_notification->m_owner = this;
 	m_thread = std::jthread(ThreadRun, this);
 }
 
@@ -222,7 +223,30 @@ void GuestGpu::Shutdown() {
 	if (m_thread.joinable()) {
 		m_thread.join();
 	}
+	// Detach only after the dispatcher joined; a callback already notifying is serialized.
+	{
+		std::lock_guard lock(m_readback_notification->m_mutex);
+		m_readback_notification->m_owner = nullptr;
+	}
 	m_shutdown_complete = true;
+}
+
+void GuestGpu::ReadbackNotification::Notify() {
+	std::lock_guard lock(m_mutex);
+	if (m_owner != nullptr) m_owner->NotifyReadbackReady();
+}
+
+std::shared_ptr<GuestGpu::ReadbackNotification> GuestGpu::CaptureReadbackNotification() {
+	return g_gpu_state != nullptr ? g_gpu_state->m_readback_notification : nullptr;
+}
+
+void GuestGpu::NotifyReadbackReady() {
+	Common::LockGuard lock(m_queue_mutex);
+	++m_readback_generation;
+	for (auto& queue: m_queues) {
+		if (!queue.empty()) queue.front().blocked = false;
+	}
+	m_work_available.SignalAll();
 }
 
 bool GuestGpu::IsStopping() {
@@ -678,6 +702,7 @@ void GuestGpu::ThreadRun(void* data) {
 		Common::UniqueFunction<void> command;
 		bool                         has_submission = false;
 		bool                         should_stop    = false;
+		uint64_t                     readback_generation = 0;
 		{
 			Common::LockGuard                    lock(gpu->m_queue_mutex);
 			std::optional<DrainStats::WaitTimer> idle;
@@ -710,7 +735,15 @@ void GuestGpu::ThreadRun(void* data) {
 				if (selected_queue < 0) {
 					gpu->m_processing = false;
 					DrainStats::WaitTimer poll(DrainStats::Kind::BlockedPoll);
-					gpu->m_work_available.WaitFor(&gpu->m_queue_mutex, 100);
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+					if (DrainStats::g_blocked_wait_enter_test_observer != nullptr)
+						DrainStats::g_blocked_wait_enter_test_observer();
+#endif
+					[[maybe_unused]] const bool notified = gpu->m_work_available.WaitFor(&gpu->m_queue_mutex, 100);
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+					if (DrainStats::g_blocked_wait_exit_test_observer != nullptr)
+						DrainStats::g_blocked_wait_exit_test_observer(notified);
+#endif
 					for (auto& queue: gpu->m_queues) {
 						if (!queue.empty()) {
 							queue.front().blocked = false;
@@ -725,6 +758,7 @@ void GuestGpu::ThreadRun(void* data) {
 				gpu->m_next_queue = (static_cast<uint32_t>(selected_queue) + 1) % QueueCount;
 				gpu->m_processing = true;
 				has_submission    = true;
+				readback_generation = gpu->m_readback_generation;
 			}
 		}
 		if (should_stop) {
@@ -782,9 +816,16 @@ void GuestGpu::ThreadRun(void* data) {
 				    (opcode == Pm4::IT_WAIT_REG_MEM || opcode == Pm4::IT_WAIT_REG_MEM_64)) {
 					const auto address =
 					    (p[2] & ~3u) | (static_cast<uint64_t>(p[3] & 0x3ffffu) << 32u);
-					line += fmt::format(" wait@0x{:x} func={} ref=0x{:x} mask=0x{:x} value=0x{:x}",
-					                    address, p[1] & 7u, p[4], p[5],
-					                    *reinterpret_cast<const volatile uint32_t*>(address));
+					line += fmt::format(" wait@0x{:x} func={} ref=0x{:x} mask=0x{:x}",
+					                    address, p[1] & 7u, p[4], p[5]);
+					// Never fault while holding m_queue_mutex: a publication callback may
+					// need it to wake these queues. This backing snapshot is not readiness.
+					uint32_t backing = 0;
+					if (LibKernel::Memory::TryReadBacking(address, &backing, sizeof(backing))) {
+						line += fmt::format(" backingValue=0x{:x}", backing);
+					} else {
+						line += " backingValue=unavailable";
+					}
 				} else if (stats.blocked != 0) {
 					line += fmt::format(" op=0x{:02x} [{:08x} {:08x} {:08x} {:08x} {:08x}]", opcode,
 					                    p[0], p[1], p[2], p[3], p[4]);
@@ -795,7 +836,9 @@ void GuestGpu::ThreadRun(void* data) {
 			std::fflush(stdout);
 		}
 		if (!complete) {
-			submission.blocked = true;
+			// Publication can race the packet's false poll before this requeue.
+			// Do not discard a notification that arrived while the slice was running.
+			submission.blocked = readback_generation == gpu->m_readback_generation;
 			gpu->m_queues[submission.queue_id].push_front(std::move(submission));
 			gpu->m_submission_count++;
 		} else {

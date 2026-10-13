@@ -1,5 +1,45 @@
 # Integration test debt
 
+## Publication-to-queue notification required reproduction, 2026-10-13
+
+After GPU-backed PM4 polling, actual world throughput fell from 3.033333 to
+2.358333 FPS. A bounded native fixture will release a finite GPU producer at
+the real all-blocked queue boundary and verify authoritative publication,
+native words, independent queue progress, canaries and cleanup before checking
+whether the real condition variable times out without publication notification.
+The explicit 1ms scheduling stimulus is not natural game latency. A spurious
+wake or baseline cost zero is not a reproduction. Apply a lifetime-safe shared
+notification only after genuine RED; measure one 30s world retry afterwards.
+
+Native 043400/107885A5 intended RED: all actual GPU words/11/22/33,
+independent queue progress, publication, guards, cleanup and zero dispatcher
+waits pass; real CV times out after publication (readyTimeouts=1). Same unchanged
+043454/4AE64E5A GREEN after shared notification: readyTimeouts=0, CV signalled.
+The generation closes publication-before-requeue loss; retained token is
+detached after worker join; debug backing reads cannot fault under queue lock.
+Six affected CTests and real asynchronous recording pass. Game recovery pending.
+
+## Foreign readback queued-state race required reproduction, 2026-10-13
+
+Actual foreign CPU ReadMemory sees A unarmed then queues its existing GPU
+callback. An earlier GPU callback publishes A through real readback before
+making sibling B GPU-dirty/open. The stale callback should read actual A while
+leaving unrelated B pending and reserving no further download ring bytes; all
+native/CPU values, queue ordering, canaries, cleanup and a new-A-writer negative
+control precede this cost. Existing API only, real PendingCommands test getter,
+no delay as a substitute for ordering. Native RED pending.
+
+Native 042544/6A15CF7E intended RED: native/CPU values, new-A writer fence,
+guards and cleanup pass; stale callback allocates ring64->128 and arms B.
+Same unchanged 043231/E4AF6BA0 GREEN: ring64->64 and B remains unarmed/pending;
+new real A writer still waits and publishes abcdef09. Shared correction is local
+e55aded4. Fully-armed callback neighbor and game hit/FPS remain pending.
+
+Candidate after genuine RED: authoritative requery inside the queued callback,
+clean ->tick0, fully armed ->owned tick/flush if current, unarmed ->existing
+record/discovery/publication. Preserve actual outer fence/priority waits,
+CPU overwrite/new generation and unknown range errors. Game hit/FPS unknown.
+
 ## TLS MOV replacement arithmetic FLAGS required reproduction, 2026-10-13
 
 Actual SafeCall and TlsRegStub in loader/jit.h adjust RSP with SUB before saved

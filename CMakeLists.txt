@@ -889,8 +889,16 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-queued-neighbor-gpu)
 	add_test(NAME wait_reg_mem_poll_neighbors_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-poll-neighbors-gpu)
+	add_test(NAME wait_reg_mem_nonblocking_async_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-nonblocking-cost-async-gpu)
+	add_test(NAME foreign_readback_queued_state_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-queued-state-cost-gpu)
+	add_test(NAME wait_reg_mem_ready_continuation_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-ready-continuation-cost-gpu)
 	set_tests_properties(wait_reg_mem_nonblocking_gpu wait_reg_mem_queued_gpu
-		wait_reg_mem_poll_neighbors_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+		wait_reg_mem_poll_neighbors_gpu wait_reg_mem_nonblocking_async_gpu
+		foreign_readback_queued_state_gpu wait_reg_mem_ready_continuation_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)
 	add_test(NAME ngg_vertex_count_gpu
