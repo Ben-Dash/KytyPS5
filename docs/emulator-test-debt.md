@@ -24,6 +24,12 @@ PASS3.63s include mixed arms, new writers, true queues, async and literal EOP.
 Retained actual notification token native044617 also PASS before/after actual
 GuestGpu destruction; no sanitizer claim. Core/private install/world pending.
 
+37b94dbe core044859/install044949 PASS; full neutral world30s mean3.038462,
+min2.8/max3.2,651..743/26titles/exit0/no guards. Previous3.028 effectively unchanged
+(+0.35% single-pair); useful game FPS gain NOT proved. Next bottleneck attribution
+uses owned-PID GPU Engine utilization and independently validated Main sampling,
+with diagnostic overhead explicitly separated from clean title measurement.
+
 ## Publication-to-queue notification required reproduction, 2026-10-13
 
 After GPU-backed PM4 polling, actual world throughput fell from 3.033333 to

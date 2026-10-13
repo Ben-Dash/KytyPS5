@@ -1,5 +1,27 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: exact-page Poll world3.04, attribution next, 2026-10-13
+
+37b94dbe core044859/install044949 PASS; private EXE
+E8AF53C8B6B0DCA27D28C8EB336613BAAA7C645FDB5D47C00F58D1710E9512D5.
+Full neutral run `game-20261013-044959-perf-cycle16-poll-pages-world-title-30s-35af5a`
+closed04:52:59UTC/exit0/no guards. Complete30s651..743/26title values:
+mean3.038462, min2.8/max3.2 vs dca3.028 (+0.35% single-pair): NO useful gain.
+Native redundant-copy proof remains valid, but the world bottleneck is not
+resolved by this correction. No images inspected. Actual1080/full effects/60 pending.
+
+Change next iteration to bounded bottleneck attribution: owned-PID Windows GPU
+Engine counters (read-only, English paths available); actual Main instruction
+pointer sampling through PSS if independently validated and accessible without
+admin, in a separate explicitly perturbed diagnostic run; uncensored Main fault
+CPU totals. Windows ETW alternative prepared but current token lacks profiling
+privilege/admin, so no trace/elevation/UAC started. Do not apply speculative empty
+mutex notification or per-zone GPU rewrites without evidence. Existing per-zone
+BottomOfPipe timestamps may perturb GPU overlap; old200ms interval is a lead,
+not an uninstrumented shader bottleneck proof. Three agents preparing helpers.
+No active native process now (verify); source clean except preserved historical
+prefetch WIP. No menus/input/new pushes/posts; WSL stopped; routine handoffs authorized.
+
 ## Current checkpoint: exact-page Poll native GREEN, world pending, 2026-10-13
 
 Independent scalar/cross-page genuine RED044730/E66C9D6D after test setup fixes:
