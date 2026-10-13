@@ -875,6 +875,15 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --hardware-buffer-bounds)
 	add_test(NAME gpu_command_lane
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
+	add_test(NAME pm4_runnable_queue_fairness
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --pm4-runnable-queue-fairness)
+	set_tests_properties(pm4_runnable_queue_fairness PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE)
+	foreach(pm4_case IN ITEMS indirect indirect-off cede cede-off fifo fifo-off
+			native native-off native-ib-ce native-ib-ce-off)
+		add_test(NAME pm4_quantum_${pm4_case}
+			COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --pm4-quantum-${pm4_case})
+		set_tests_properties(pm4_quantum_${pm4_case} PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE)
+	endforeach()
 	add_test(NAME end_of_pipe_literal_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
 	add_test(NAME native_occlusion_predication_gpu

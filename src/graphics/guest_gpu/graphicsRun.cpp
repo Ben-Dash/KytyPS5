@@ -702,6 +702,7 @@ void GuestGpu::ThreadRun(void* data) {
 	struct QueueStats {
 		uint64_t                completed = 0;
 		uint64_t                blocked   = 0;
+		uint64_t                yielded   = 0;
 		std::array<uint32_t, 8> packet {};
 	};
 	std::array<QueueStats, QueueCount> queue_stats {};
@@ -796,6 +797,8 @@ void GuestGpu::ThreadRun(void* data) {
 			auto& stats = queue_stats[submission.queue_id];
 			if (complete) {
 				stats.completed++;
+			} else if (submission.yielded) {
+				stats.yielded++;
 			} else {
 				stats.blocked++;
 				auto commands = submission.command_execution.RemainingCommands();
@@ -815,11 +818,11 @@ void GuestGpu::ThreadRun(void* data) {
 			for (uint32_t id = 0; id < QueueCount; id++) {
 				auto&      stats   = queue_stats[id];
 				const auto pending = gpu->m_queues[id].size();
-				if (stats.completed == 0 && stats.blocked == 0 && pending == 0) {
+				if (stats.completed == 0 && stats.blocked == 0 && stats.yielded == 0 && pending == 0) {
 					continue;
 				}
-				line += fmt::format(" q{}: done={} blocked={} pending={}", id, stats.completed,
-				                    stats.blocked, pending);
+				line += fmt::format(" q{}: done={} blocked={} yielded={} pending={}", id, stats.completed,
+				                    stats.blocked, stats.yielded, pending);
 				const auto& p      = stats.packet;
 				const auto  opcode = (p[0] >> 8u) & 0xffu;
 				if (stats.blocked != 0 &&
@@ -848,7 +851,8 @@ void GuestGpu::ThreadRun(void* data) {
 		if (!complete) {
 			// Publication can race the packet's false poll before this requeue.
 			// Do not discard a notification that arrived while the slice was running.
-			submission.blocked = readback_generation == gpu->m_readback_generation;
+			submission.blocked = !submission.yielded &&
+			                     readback_generation == gpu->m_readback_generation;
 			gpu->m_queues[submission.queue_id].push_front(std::move(submission));
 			gpu->m_submission_count++;
 		} else {
@@ -872,6 +876,25 @@ void GuestGpu::ThreadRun(void* data) {
 	}
 }
 
+// CPU packet fairness only, default OFF. A quantum never changes packet semantics
+// or native recording-age policy; it only offers other runnable queues a slice.
+static uint32_t Pm4CpuQuantumPackets() {
+	static const uint32_t quantum = [] {
+		const char* text = KYTY_GETENV("KYTY_PM4_CPU_QUANTUM_PACKETS");
+		if (text == nullptr) return uint32_t {0};
+		uint32_t value = 0;
+		if (*text == '\0') EXIT("invalid KYTY_PM4_CPU_QUANTUM_PACKETS\n");
+		for (const char* p = text; *p != '\0'; ++p) {
+			if (*p < '0' || *p > '9' || value > 65536u / 10u)
+				EXIT("invalid KYTY_PM4_CPU_QUANTUM_PACKETS\n");
+			value = value * 10u + static_cast<uint32_t>(*p - '0');
+			if (value > 65536u) EXIT("invalid KYTY_PM4_CPU_QUANTUM_PACKETS\n");
+		}
+		return value;
+	}();
+	return quantum;
+}
+
 bool GuestGpu::Process(Submission& submission) {
 	const bool first_slice = !submission.started;
 	auto&      cp          = GetProcessor(submission.queue_id);
@@ -892,6 +915,26 @@ bool GuestGpu::Process(Submission& submission) {
 	    submission.queue_id, cp.GetSubmitId(), static_cast<uint64_t>(submission.type));
 	cp.BufferInit();
 	bool complete = true;
+	submission.yielded = false;
+	struct QuantumContext { GuestGpu* gpu; uint32_t queue; } quantum_context {this, submission.queue_id};
+	Pm4PacketBudget quantum;
+	Pm4PacketBudget* budget = nullptr;
+	const auto configured_quantum = Pm4CpuQuantumPackets();
+	if (configured_quantum != 0 &&
+	    (submission.type == SubmissionType::Graphics || submission.type == SubmissionType::Compute)) {
+		quantum.remaining = quantum.quantum = configured_quantum;
+		quantum.context = &quantum_context;
+		quantum.another_queue_runnable = [](void* opaque) {
+			const auto& context = *static_cast<QuantumContext*>(opaque);
+			Common::LockGuard lock(context.gpu->m_queue_mutex);
+			for (uint32_t id = 0; id < QueueCount; ++id) {
+				if (id != context.queue && !context.gpu->m_queues[id].empty() &&
+				    !context.gpu->m_queues[id].front().blocked) return true;
+			}
+			return false;
+		};
+		budget = &quantum;
+	}
 
 	switch (submission.type) {
 		case SubmissionType::Graphics: {
@@ -901,22 +944,33 @@ bool GuestGpu::Process(Submission& submission) {
 				bool round_progress = false;
 				if (!submission.constant_complete) {
 					cp.SetConstantStream(true);
-					submission.constant_complete =
-					    cp.Process(submission.constant_execution, submission.constant_commands) ==
-					    Pm4ProcessResult::Complete;
+					const auto result = cp.Process(submission.constant_execution,
+					                               submission.constant_commands, budget);
+					submission.constant_complete = result == Pm4ProcessResult::Complete;
+					submission.yielded |= result == Pm4ProcessResult::Yielded;
 					cp.SetConstantStream(false);
 					round_progress |= submission.constant_execution.MadeProgress();
 				}
 				cp.SetCeComplete(submission.constant_complete);
+				// Even a CE stream finishing exactly at the quantum boundary yields the
+				// combined graphics slice before starting DE. Complete stays distinct.
+				if (budget != nullptr && budget->yield_requested) {
+					progressed |= round_progress;
+					complete = submission.command_complete && submission.constant_complete;
+					submission.yielded = !complete;
+					break;
+				}
 				if (!submission.command_complete) {
-					submission.command_complete =
-					    cp.Process(submission.command_execution, submission.commands) ==
-					    Pm4ProcessResult::Complete;
+					const auto result = cp.Process(submission.command_execution,
+					                               submission.commands, budget);
+					submission.command_complete = result == Pm4ProcessResult::Complete;
+					submission.yielded |= result == Pm4ProcessResult::Yielded;
 					round_progress |= submission.command_execution.MadeProgress();
 				}
 				progressed |= round_progress;
 				complete = submission.command_complete && submission.constant_complete;
-				if (complete || !round_progress) {
+				if (budget != nullptr && budget->yield_requested) submission.yielded = !complete;
+				if (complete || !round_progress || submission.yielded) {
 					break;
 				}
 			}
@@ -944,8 +998,9 @@ bool GuestGpu::Process(Submission& submission) {
 			if (first_slice) {
 				GraphicsDbgDumpDcb("cc", num_dw, buffer);
 			}
-			complete = cp.Process(submission.command_execution, submission.commands) ==
-			           Pm4ProcessResult::Complete;
+			const auto result = cp.Process(submission.command_execution, submission.commands, budget);
+			complete = result == Pm4ProcessResult::Complete;
+			submission.yielded = result == Pm4ProcessResult::Yielded;
 			if (submission.command_execution.MadeProgress()) {
 				if (complete) {
 					m_renderer.RunGarbageCollector();
@@ -973,13 +1028,14 @@ bool GuestGpu::Process(Submission& submission) {
 	    reinterpret_cast<uint64_t>(&cp), 0, submission.sequence,
 	    reinterpret_cast<uint64_t>(submission.commands.data()), submission.commands.size_bytes(),
 	    (complete ? 1u : 0u) | (submission.command_execution.MadeProgress() ? 2u : 0u) |
-	        (submission.constant_execution.MadeProgress() ? 4u : 0u),
+	        (submission.constant_execution.MadeProgress() ? 4u : 0u) | (submission.yielded ? 8u : 0u),
 	    cp.GetSubmitId(), static_cast<uint64_t>(submission.type));
 	return complete;
 }
 
 Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
-                                           std::span<const uint32_t> commands) {
+                                           std::span<const uint32_t> commands,
+                                           Pm4PacketBudget* budget) {
 	KYTY_PROFILER_BLOCK("CommandProcessor::Process");
 	EXIT_IF(g_current_execution != nullptr);
 	EXIT_IF(commands.size() > UINT32_MAX);
@@ -988,6 +1044,7 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 	}
 	execution.m_suspended     = false;
 	execution.m_made_progress = false;
+	execution.m_yielded       = false;
 	// A submission starting or resuming: its draws must see the CPU writes made before it.
 	AdvanceBdaEpoch();
 	if (DrawSpeculator::Enabled() && !IsAsyncComputeQueue() && !m_constant_stream &&
@@ -1053,7 +1110,7 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 		m_submission_created_start = created;
 	}
 
-	ProcessPm4(execution);
+	ProcessPm4(execution, budget);
 	DrainStats::SetPm4Op(DrainStats::NoPm4Op);
 	if (execution.m_buffer_stack.empty()) {
 		m_last_submission_created = pipelines.GraphicsPipelinesCreated() +
@@ -1061,7 +1118,7 @@ Pm4ProcessResult CommandProcessor::Process(Pm4Execution&             execution,
 		                            m_submission_created_start;
 		return Pm4ProcessResult::Complete;
 	}
-	return Pm4ProcessResult::Blocked;
+	return execution.m_yielded ? Pm4ProcessResult::Yielded : Pm4ProcessResult::Blocked;
 }
 
 void CommandProcessor::ProcessIndirectBuffer(std::span<const uint32_t> commands, bool chain) {
@@ -1135,12 +1192,24 @@ static const uint32_t* Pm4ExecutionPayload(RenderContext& renderer, const uint32
 	return snapshot.data();
 }
 
-void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
+void CommandProcessor::ProcessPm4(Pm4Execution& execution, Pm4PacketBudget* budget) {
 	// KYTY_DEBUG_DRAW_PHASES: the time in each handler and between them (see Pm4OpTimer).
 	static const bool timed       = DrawPhaseTimer::Hash() != 0;
 	uint64_t          handler_end = 0;
 	std::vector<uint32_t> packet_snapshot;
 	uint32_t recording_packets = 0;
+	const auto complete_packet = [&] {
+		if (budget == nullptr || !budget->CompletePacket()) return false;
+		// A boundary at the last child packet must unwind completed return cursors
+		// before reporting Complete versus Yielded. No packet has been half run.
+		while (!execution.m_buffer_stack.empty() &&
+		       execution.m_buffer_stack.back().offset_dw == execution.m_buffer_stack.back().commands.size()) {
+			execution.m_buffer_stack.pop_back();
+		}
+		if (execution.m_buffer_stack.empty()) return false;
+		execution.m_yielded = true;
+		return true;
+	};
 	while (!execution.m_buffer_stack.empty()) {
 		if (g_gpu_state != nullptr) {
 			g_gpu_state->ProcessCommands();
@@ -1168,6 +1237,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 		if (packet_header == 0x80000000u || Pm4::PacketSizeDw(packet_header) == 1u) {
 			cursor.offset_dw++;
 			execution.m_made_progress = true;
+			if (complete_packet()) return;
 			continue;
 		}
 
@@ -1225,6 +1295,7 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 			}
 			cursor.offset_dw += packet_dw;
 			execution.m_made_progress = true;
+			if (complete_packet()) return;
 			continue;
 		}
 
@@ -1315,6 +1386,8 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 				RunPipelineLookahead(execution);
 			}
 		}
+		// Cursor, indirect transfer, speculation release and lookahead are committed.
+		if (complete_packet()) return;
 	}
 }
 

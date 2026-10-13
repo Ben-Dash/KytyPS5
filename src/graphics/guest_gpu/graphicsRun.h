@@ -77,6 +77,7 @@ private:
 		bool                      command_complete  = false;
 		bool                      constant_complete = false;
 		bool                      blocked           = false;
+		bool                      yielded           = false;
 		uint64_t                  flip_request_id   = 0;
 	};
 
