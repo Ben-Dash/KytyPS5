@@ -1,5 +1,91 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: query option no useful gain; upload RED; Main diagnostic, 2026-10-13
+
+Actual Performance world baseline2.953571 versus existing real occlusion option
+3.016 (+2.1% single pair): no useful gain, no images, default unchanged. Both
+complete650-gated30s title samples/exit0/no guards. Native8x8 same-fixture
+Flag0costRED ->Flag1GREEN retains required visible pixels. CTest new native
+occlusion1/1 PASS0.42s after test-only build015611. No game currently running.
+
+Actual public tiled upload cost fixture015650/EXE2AB4DBB4 passes BOTH128x128
+4/8-byte full native-bit/input-output-canary/legal raw view/cleanup controls,
+then intendedRED: one avoidable copyBufferToImage versus budget0. No production
+fusion applied. Native timing A015658 passes18 genuine fresh dirty uploads,
+two warm/seven measured per format;8-byte median32800ns/min32416/max33280.
+4-byte result remains in the same stdout. This is a small route screen, not
+world/4K throughput proof. Test-only fixture observes v1/core2/KHR2 without
+dropping work. Production proposal and native A/B/A/neighbor proof pending.
+
+Main CPU attribution instrumentation now WIP/defaultoff: explicit actual Main
+TLS role, existing counters filtered before bucket update, one internalID/OSTID
+identity line even in Silent mode. It changes no guest scheduler/clock/render
+behavior. Native linked build015611 PASS, core/private install and separate
+30s diagnostic pending. Count frequency/callsite is not CPU duration; instrumented
+FPS will not count as a performance gain. Three agents remain read-only/ignored
+proposal workers; root serializes native execution. WSL stays stopped.
+
+## Current checkpoint: actual Performance2.95FPS; real occlusion trial, 2026-10-13
+
+Owned-process read-only proof at01:47:12UTC confirmed saved requested/effective2,
+system default2, override-1: actual Performance accepted. Same088 EXE completed
+650-gated30s world title sample01:48:19..49UTC:28 values, mean2.953571,
+min2.8/max3.0, frames650..738, exit0/no guards, min available28.37GiB. No images
+or achieved60 claim. This combines newer source/settings and is not an isolated
+backend speedup comparison with historical329Quality mean2.6704.
+
+Existing opt-in actual occlusion route tested before game: test-only build014915
+PASS; EXECA27C318EF7F3A0AA39BFFAC2C5C744113C40801FD608C336A3AF4EBFB6C9FA2.
+Flag0 intended costRED014945 AFTER real depth/raster/counter/PM4/native work
+controls: hiddenIA3/visible3/mixed3. SAME unchanged fixture Flag1GREEN014952:
+hiddenIA0/visible3/mixed3, identical required visible pixels/canaries, ready
+publication, conservative unready/no-wait and logical-unmap suppression. Layer
+environment015018 exit0/stderr empty; active validation-layer proof pending.
+Existing CPU dump/predication neighbors015019 PASS; older CPU EXE A23D7856,
+unchanged affected mechanisms. Actual unmap/lag/capacity native neighbors pending.
+
+Actual option run started01:50:42UTC/PID28720, same088 EXE/privatePerformance/cache,
+`game-20261013-015042-perf-cycle9-occlusion1-title-30s-world-1080-fc774f`.
+Loaded193838368byte cache; at300frames actual query counters report120dumps/
+60segments/33empty/no flip waits.
+Closed01:53:42UTC: complete30s650-gated mean3.016 (25values,min2.9/max3.1,
+frames650..736), exit0/no guards. Only+2.1% versus sameEXE actualPerformance
+baseline2.953571; no useful gain established, option stays experimental/defaultoff.
+Details: [native occlusion screen](yotei-native-occlusion-screen-2026-10-13.md).
+No new production change, menus/buttons/images/push/issue posts. Three agents
+continue native upload cost/timing and Main CPU attribution; serialized root
+execution. Full effects/actual1920x1080/stable60 remain unresolved.
+
+## Current checkpoint: saved Quality overrides system Performance, 2026-10-13
+
+Native core012153 and private install012304 PASS at0889459a; installed EXE
+SHA5D681682E646363494B54B6D4B5514509F717209B71C5711F352B18E3625FCEC.
+CLI invalid preset rejects with exit1; Performance/help exit0. Neutral/full-render
+run `_Build/runs/game-20261013-012430-perf-cycle9-system-performance-title-30s-world-1080-4f55b4`
+accepted184549517 bytes of intact old driver cache; saved193704388 bytes. New
+shader compilation still took36–59s for five heavy kernels. At300s warming bound,
+exit0/frame410,650-frame gate not reached: NO completed30s worldFPS measurement.
+Physical RAM stayed above29.66GiB; no resource guard or driver reset.
+
+Read-only owned-process36-byte proof found system default2Performance but saved
+renderer requested/effective0Quality, override-1. The HLE preference works;
+saved game choice wins. Actual source deserializer/enum/checksum were then proved
+on an immutable PRIVATE runtime save: graphics dictionary entry38 reaches its
+typed terminal enum; mode at430864, exact checksum over supported0x150 content.
+Offline self-test accepts original/output and rejects six corrupt neighbors.
+Only eight preference bytes and checksum span change; all other bytes/zero tail
+and585728-byte length match. Original user data and older runtime remain intact.
+
+NEW ignored runtime `runtime-0889459a-private-performance` under cycle9 holds
+the proved Performance copy (SHAFD06CA575FDF288BA5299AC69E1263735FC3CCBCB12B15AF4FF42445A7C061EC),
+same EXE and warm driver cache. Bounded neutral game retry started01:45:47UTC,
+PID16352, run `game-20261013-014547-perf-cycle9-private-performance-title-30s-world-1080-eaf650`.
+Actual effective mode2, full30s titleFPS and rendered dimensions remain pending.
+No menus/buttons/images/push/issue publication; WSL stopped. Latest complete
+worldFPS remains2.6704. Three parallel read-only proposals cover fused tiled
+uploads, actual occlusion/predication, and saved-mode verification. Native work
+stays serialized; no production edit while this game is active.
+
 ## Current checkpoint: system Performance preset exported correctly, 2026-10-13
 
 New general CLI `--game-preset-priority Default|Performance|Resolution` sets

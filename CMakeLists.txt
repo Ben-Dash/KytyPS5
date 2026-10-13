@@ -865,6 +865,10 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
 	add_test(NAME end_of_pipe_literal_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
+	add_test(NAME native_occlusion_predication_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --occlusion-native-cost-gpu)
+	set_tests_properties(native_occlusion_predication_gpu PROPERTIES
+		TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_OCCLUSION_QUERIES=1")
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)
 	add_test(NAME ngg_vertex_count_gpu

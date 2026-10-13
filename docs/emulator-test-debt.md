@@ -1,5 +1,31 @@
 # Integration test debt
 
+## Native occlusion and tiled upload cost reproductions required, 2026-10-13
+
+Three read-only proposals screened before production changes. Existing
+`KYTY_OCCLUSION_QUERIES=1` needs actual8x8 depth-hidden/visible raster proof,
+tagged PM4 counter publication/predication and completed native IA vertex counts.
+Flag0 conservative-visible controls must pass before avoidable hidden IA3 exceeds
+budget0; this is a cost regression, not a claim Flag0 violates its fallback.
+Same unchanged fixture Flag1 must retain visible/mixed pixels and skip only
+proved hidden work. Unready/no-wait, logical unmap, lag/capacity and actual device
+feature/validation controls remain required. Ignored cycle9 fixture is uncompiled.
+
+Fused tiled upload proposal needs actual public FindImage/FindTexture path,
+independent128x128 RenderTarget64KB4/8-byte tiled source, exact native raw bits,
+input/output guards, real legal raw integer views and completed resource cleanup
+before real copyBufferToImage count1 fails expected0 cost. Production unapplied.
+Only complete supported2D/color/single-sample metadata may use a future route;
+transforms/BC/depth/partial/unsupported format features preserve original route.
+Bounded native GPU A/B/A on genuine dirty uploads must show benefit before game
+FPS attribution; source opcode/copy counts alone are insufficient.
+
+Actual private saved-mode preference is a diagnostic artifact operation, not a
+core fix: typed guest suffix/key/enum/checksum proved, exact new output hash and
+six corrupt neighbors checked. Live owned read-only36bytes at01:47:12UTC/PID16352
+confirm requested/effective2Performance, default2, override-1. Complete30s world
+FPS and actual render dimensions remain pending. Never infer60 from mode target.
+
 ## Configured user game preset required reproduction, 2026-10-13
 
 Actual shared UserService NID export -sD02mFDBh4 invoked through SymbolDatabase,

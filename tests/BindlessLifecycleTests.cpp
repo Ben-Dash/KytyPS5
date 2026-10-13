@@ -47,8 +47,8 @@ public:
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
   };
 
-  explicit VulkanHarness(bool require_push_descriptors = false, bool require_readback_queue = false) {
-    Init(require_push_descriptors, require_readback_queue);
+  explicit VulkanHarness(bool require_push_descriptors = false, bool require_readback_queue = false, bool require_occlusion_queries = false) {
+    Init(require_push_descriptors, require_readback_queue, require_occlusion_queries);
   }
   ~VulkanHarness() {
     if (m_graphics.device != nullptr) {
@@ -155,7 +155,7 @@ public:
   }
 
 private:
-  void Init(bool require_push_descriptors, bool require_readback_queue) {
+  void Init(bool require_push_descriptors, bool require_readback_queue, bool require_occlusion_queries) {
     static vk::detail::DynamicLoader loader;
     const auto get_instance_proc_addr = loader.getProcAddress<PFN_vkGetInstanceProcAddr>(
         "vkGetInstanceProcAddr");
@@ -294,6 +294,13 @@ private:
     // Enable only features reported supported by this selected device. These
     // are core Vulkan1.1/1.2/1.3 structures. The init mode also exercises the
     // actual parser's KHR push-descriptor path, queried separately above.
+    if (require_occlusion_queries) {
+      Require("NativeOcclusion", "actual queried native capabilities",
+              features12.hostQueryReset == VK_TRUE && features.features.pipelineStatisticsQuery == VK_TRUE,
+              "hostQueryReset/pipeline-statistics unsupported; not intended RED");
+      m_graphics.host_query_reset_enabled = features12.hostQueryReset == VK_TRUE;
+      m_graphics.occlusion_query_precise = features.features.occlusionQueryPrecise == VK_TRUE;
+    }
     device.pNext = &features13;
     device.pEnabledFeatures = &features.features;
     device.queueCreateInfoCount = require_readback_queue ? 2u : 1u;
@@ -353,6 +360,8 @@ private:
 #include "BindlessDescriptorRetirementNeighborTests.inc"
 #include "EmbeddedFetchGpuTests.inc"
 #include "BcAliasOwnershipTests.inc"
+#include "FusedTiledUploadCostTests.inc"
+#include "FusedTiledUploadGpuMicrobench.inc"
 #include "BcPartialBufferWriteTests.inc"
 #include "BcAliasPartialTailPaddingTests.inc"
 #include "CopyMipDestinationOwnershipTests.inc"
@@ -368,6 +377,7 @@ private:
 #include "EndOfPipeWriteGpuTests.inc"
 #include "EndOfPipeLiteralGpuTests.inc"
 #include "EndOfPipeLiteralNeighborTests.inc"
+#include "OcclusionNativeCostTests.inc"
 #include "ReadbackQueueBootstrapTests.inc"
 #include "LiteralEopPublicationCostTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
@@ -391,6 +401,9 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                   std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0))
+    Libs::Graphics::ConfigureFusedTiledUploadTests();
   if (argc == 2 && (std::strcmp(argv[1], "--user-game-preset-priority-only") == 0 ||
                    std::strcmp(argv[1], "--user-game-preset-users-only") == 0)) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -434,6 +447,9 @@ int main(int argc, char **argv) {
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+                            std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
                             std::strcmp(argv[1], "--bindless-preparation-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-feedback-neighbors") == 0 ||
                             std::strcmp(argv[1], "--bindless-image-access-age") == 0 ||
@@ -582,7 +598,9 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
+      (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
+       std::strcmp(argv[1], "--fault-bitmap-initialization-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-bitmap-initialization-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-first-binding-deferred-gpu") == 0 ||
        std::strcmp(argv[1], "--fault-first-binding-state-neighbors-gpu") == 0 ||
@@ -598,7 +616,25 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-alias-tail-padding-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
-       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode);
+       std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
+      argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
+  if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0)) {
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    renderer.GetGpu().SendCommandSync([&] {
+      if (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0)
+        CheckFusedTiledUploadCost(vulkan);
+      else
+        CheckFusedTiledUploadGpuMicrobench(vulkan);
+    });
+    renderer.ShutdownGpu();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0) {
+    CheckOcclusionNativeCost(vulkan);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--dma-base-origins-only") == 0) {
     CheckDmaBaseOrigins();
     return 0;
