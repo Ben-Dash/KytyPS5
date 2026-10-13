@@ -2071,6 +2071,8 @@ std::vector<u32> MakePassthroughVertexSpirv(bool layered, float clip_w = 1.0f) {
 
 } // namespace TestSpv
 
+#include "ComputeChainBarrierAuditTests.inc"
+
 class VulkanHarness {
 public:
   VulkanHarness() { Init(); }
@@ -5559,6 +5561,7 @@ public:
   }
 
   #include "DispatchRecordingAgeBudgetTests.inc"
+  #include "ComputeChainVisibilityTests.inc"
   #include "RecordingAgePolicyNeighbors.inc"
   #include "ActiveAgeIndirectDispatchTests.inc"
   #include "OrdinaryBufferNativeFillCostTests.inc"
@@ -38930,6 +38933,9 @@ void CheckSampledDepthResource() {
   std::printf("[host]    %-32s ok\n", "SampledDepthResource");
 }
 
+#include "ImageReadScopePlannerTests.inc"
+#include "ImageReadStageSubsetCostTests.inc"
+
 void CheckImageTransitionState(RenderContext &renderer) {
   constexpr const char *name = "ImageTransitionState";
   auto &context = renderer.GetGraphics();
@@ -42914,9 +42920,19 @@ int main(int argc, char **argv) {
   using namespace Libs::Graphics;
 
   std::setvbuf(stdout, nullptr, _IONBF, 0);
+  if (argc == 2 && std::strcmp(argv[1], "--compute-chain-visibility-only") == 0) {
+    Require("ComputeChainVisibility", "pin direct recorder and zero recording age before getters",
+        _putenv_s("KYTY_RECORD_THREAD", "0") == 0 && _putenv_s("KYTY_RECORDING_AGE_US", "0") == 0,
+        "could not pin native direct recording setup");
+  }
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && std::strcmp(argv[1], "--compute-chain-visibility-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckComputeChainVisibility();
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--dispatch-recording-age-budget-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckDispatchRecordingAgeBudget();
@@ -43340,6 +43356,69 @@ int main(int argc, char **argv) {
     RunCase(&vulkan, ImageStoreSingleMipBounds<0>());
     RunCase(&vulkan, ImageStoreSingleMipBounds<1>());
     RunCase(&vulkan, ImageStoreSingleMipBounds<2>());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--scalar-orn2-saveexec-b32-wave32-only") == 0) {
+    VulkanHarness vulkan;
+    RunCase(&vulkan, ScalarOrn2SaveexecB32(32, 32));
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--scalar-orn2-saveexec-b32-neighbors-only") == 0) {
+    VulkanHarness vulkan;
+    RunCase(&vulkan, ScalarOrn2SaveexecB32(64, 64));
+    RunCase(&vulkan, ScalarOrn2SaveexecB32(32, 4));
+    RunCase(&vulkan, ScalarOrn2SaveexecUsesSourceOrNotExec());
+    RunCase(&vulkan, ScalarSaveExecOps());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--wave64-half-uniform-supported-only") == 0) {
+    // This is a scoped opt-in control matrix, not a replacement for --wave64-only.
+    // Raw EXEC_HI read/write expectations in the two wave32 ORN2 fixtures remain
+    // unchanged and are tracked separately as an unresolved ISA/oracle boundary.
+    CheckWave64WholeWaveResults();
+    VulkanHarness vulkan;
+    Require("HalfUniformSupported", "applicability", vulkan.SubgroupSize() == 32u,
+            "half-uniform aliasing requires the two-half wave64 host32 route");
+    const char *half_option = std::getenv("KYTY_HALF_UNIFORM");
+    std::printf("[half-uniform] requested=%s hostSubgroup=%u guestWave=64\n",
+                half_option != nullptr ? half_option : "unset", vulkan.SubgroupSize());
+    const auto probe = CompileCase(Wave64CrossHalfLaneAndLds(), vulkan.SubgroupSize());
+    Require("HalfUniformSupported", "applicability",
+            probe.program.wave_size == 64u && !probe.program.dispatcher_fallback,
+            "codegen witness is not the supported structured wave64 route");
+    size_t adds = 0, muls = 0, loads = 0, phis = 0, selects = 0;
+    for (size_t offset = 5; offset < probe.spirv.size();) {
+      const u32 words = probe.spirv[offset] >> 16u;
+      Require("HalfUniformSupported", "SPIR-V witness",
+              words != 0u && offset + words <= probe.spirv.size(),
+              "malformed emitted instruction extent");
+      const auto opcode = static_cast<spv::Op>(probe.spirv[offset] & 0xffffu);
+      adds += opcode == spv::OpIAdd;
+      muls += opcode == spv::OpIMul;
+      loads += opcode == spv::OpLoad;
+      phis += opcode == spv::OpPhi;
+      selects += opcode == spv::OpSelect;
+      offset += words;
+    }
+    std::printf("[half-uniform] witness=Wave64CrossHalfLaneAndLds dispatcher=0 "
+                "spirvWords=%zu iadd=%zu imul=%zu load=%zu phi=%zu select=%zu\n",
+                probe.spirv.size(), adds, muls, loads, phis, selects);
+    RunCase(&vulkan, DsPermuteWave64UsesIndependentHalves());
+    RunCase(&vulkan, DsBpermuteWave64UsesIndependentHalves());
+    RunCase(&vulkan, Wave64CrossHalfLaneAndLds());
+    RunCase(&vulkan, Wave64RawMasksAndScalarBranch());
+    RunCase(&vulkan, Wave64PartialMultidimensionalWorkgroup());
+    RunCase(&vulkan, Wave64AppendConsumeHighHalf());
+    RunCase(&vulkan, VectorAddcWritesPerLaneCarryOut());
+    RunCase(&vulkan, VectorVop3BCarryOutWritesSgprMask());
+    RunCase(&vulkan, VectorVop3BCarryOutUsesEncodedSdst());
+    RunCase(&vulkan, ScalarOrn2SaveexecB32(64, 64));
+    RunCase(&vulkan, ScalarSubvectorLoops(64));
+    RunCase(&vulkan, ScalarSelectB64PreservesMaskProvenance(64));
+    RunCase(&vulkan, ScalarWqmB32Masks(64));
+    RunCase(&vulkan, ScalarB32MaskDataflow(64));
+    CheckWave64WorkgroupLaneGrouping(vulkan);
+    CheckWave64StridedJobLoop(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--wave64-only") == 0) {
@@ -43869,6 +43948,26 @@ int main(int argc, char **argv) {
     VulkanHarness vulkan;
     vulkan.CheckRenderExecutorColorDiscovery();
     vulkan.CheckRenderExecutorColor1DArrayDiscovery();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--image-covered-read-planner-cost-only") == 0) {
+    VulkanHarness vulkan;
+    CheckImageCoveredReadPlannerCost(vulkan.RuntimeRenderer());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--image-new-read-stage-planner-only") == 0) {
+    VulkanHarness vulkan;
+    CheckImageNewReadStagePlanner(vulkan.RuntimeRenderer());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--image-read-scope-partial-neighbors-only") == 0) {
+    VulkanHarness vulkan;
+    CheckImagePartialReadStagePlanner(vulkan.RuntimeRenderer());
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--image-read-stage-subset-cost-only") == 0) {
+    VulkanHarness vulkan;
+    CheckImageReadStageSubsetPlannerCost(vulkan.RuntimeRenderer());
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--image-transition-only") == 0) {

@@ -276,6 +276,20 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 	              range->base_layer != 0 || range->layer_count != info.resources.layers);
 	const bool has_subresource_states = !subresource_states.empty();
 
+	// A read can reuse only an already-published visibility scope. Literal stage
+	// and access subsets require no aggregate-mask expansion and cannot add a
+	// reader outside the scope to which the previous dependency published writes.
+	// Preserve the broader existing scope for a later writer and other readers.
+	constexpr vk::AccessFlags2 known_reads = vk::AccessFlagBits2::eShaderRead |
+	    vk::AccessFlagBits2::eShaderSampledRead | vk::AccessFlagBits2::eShaderStorageRead |
+	    vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eMemoryRead;
+	const auto covered_read = [&](const VulkanImageState& previous) {
+		return previous.layout == destination_layout && previous.pl_stage && destination_stage &&
+		       (previous.pl_stage & destination_stage) == destination_stage &&
+		       previous.access_mask && destination_access &&
+		       !(previous.access_mask & ~known_reads) && !(destination_access & ~known_reads) &&
+		       (previous.access_mask & destination_access) == destination_access;
+	};
 	Barriers barriers;
 	if (partial || has_subresource_states) {
 		if (!has_subresource_states) {
@@ -292,13 +306,16 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 				EXIT_IF(index >= subresource_states.size());
 				auto& subresource_state = subresource_states[index];
 
+				if (covered_read(subresource_state)) continue;
+
 				constexpr auto write_access = vk::AccessFlagBits2::eTransferWrite |
 				                              vk::AccessFlagBits2::eShaderWrite |
 				                              vk::AccessFlagBits2::eMemoryWrite;
 				const bool     repeated_write =
 				    static_cast<bool>(subresource_state.access_mask & write_access);
 				if (subresource_state.layout != destination_layout ||
-				    subresource_state.access_mask != destination_access || repeated_write) {
+				    subresource_state.access_mask != destination_access ||
+				    subresource_state.pl_stage != destination_stage || repeated_write) {
 					vk::ImageMemoryBarrier2 barrier {};
 					barrier.srcStageMask                    = subresource_state.pl_stage;
 					barrier.srcAccessMask                   = subresource_state.access_mask;
@@ -321,15 +338,30 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout                      destinat
 		}
 
 		if (!partial) {
-			subresource_states.clear();
+			// Coverage may differ after reusing a subset of the read scopes. A union
+			// would claim visibility for a mip/layer that never acquired it. Collapse
+			// only truly identical states; otherwise keep each authoritative state.
+			const auto first = subresource_states.front();
+			const bool uniform = std::ranges::all_of(subresource_states, [&](const auto& item) {
+				return item.layout == first.layout && item.pl_stage == first.pl_stage &&
+				       item.access_mask == first.access_mask;
+			});
+			if (uniform) {
+				state = first;
+				subresource_states.clear();
+			} else {
+				state = {destination_stage, destination_access, destination_layout};
+			}
+			return barriers;
 		}
 	} else {
+		if (covered_read(state)) return {};
 		constexpr auto write_access   = vk::AccessFlagBits2::eTransferWrite |
 		                                vk::AccessFlagBits2::eShaderWrite |
 		                                vk::AccessFlagBits2::eMemoryWrite;
 		const bool     repeated_write = static_cast<bool>(state.access_mask & write_access);
 		if (state.layout == destination_layout && state.access_mask == destination_access &&
-		    !repeated_write) {
+		    state.pl_stage == destination_stage && !repeated_write) {
 			return {};
 		}
 
