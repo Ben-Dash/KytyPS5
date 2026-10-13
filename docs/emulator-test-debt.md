@@ -1,33 +1,5 @@
 # Integration test debt
 
-## Ordinary proven compute fills as DMA, 2026-10-13
-
-Existing actual public DispatchDirect native fixture193418/F9B40B8B establishes
-correct native primer, complete numerical result, GPU-owned destination/old CPU
-backing before fence, canaries and cleanup, then fails intended GameDispatch1
-versus0 cost oracle. The minimal consumer reuses strict existing uniform proof
-and FillBuffer; never force CPU writes for GPU-dirty ranges. Require descriptor
-type/alignment/DST_SEL/OOB/fullcoverage, mapped range, image and full tracker-page
-pending guards. Unchanged GREEN and CPU-clean old/new native consumers, GPU-dirty
-unwritten siblings, actual pending image outside bytes on the samepage required.
-Opt-in defaultOFF until clean world FPS proves benefit; general guarded EXEC
-fill/copy matcher is separate unproved work. Actual eligible dispatch frequency
-must be counted before inferring large gain from upstream PR1430.
-
-## Compiled uniform-vector SRT read versus reference, 2026-10-13
-
-Fresh existing resource-materialization suite fails UniformVectorDescriptorRead
-compiled/reference result under verification, both with sparse diagnostic hooks
-194036/6777766E and with only IR diagnostic changes absent194135/35AE5A50.
-Observer-only194037 passes; 0x40 stderr is its intentional invalid-read control,
-not cross-fixture contamination. PlanCompiler lacks LoadBufferU32 while reference
-walker supports eligible uniform raw loads: diagnosis, not yet a proved fix.
-Before adding semantics, isolate reusable numerical raw-vector/captured-read
-CPU regression, bounds/unsupported dynamic resource cases, strict/ordinary
-reader and complete existing tests. Measure actual compiled→reference fallback
-frequency in world before claiming this explains low FPS. Preserve fallback and
-verification errors; never suppress the discrepancy.
-
 ## SRT materialization work: operation witness required, 2026-10-13
 
 Completed46fe8e8b profile191442...730fa4 identifies shared graphics/compute
