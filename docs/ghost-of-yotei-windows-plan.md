@@ -1,5 +1,49 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: after400 reject loop; DMA trial removed; Main polling confirmed
+
+User nowrequires immediate FPS evaluation afterframe400; equal/lower candidate
+mustbe removed and nexttried. This supersedes650/90s warmgate fornew trials.
+Overall goal remains actualculprit and >=2x cleanworldFPS (~7.4+ from3.7).
+Do not stopat another smallcostproof orclaimgoalcomplete. Currentlocal8b9d9118,
+8b9 nativecore200814/install200943 passed, EXE023918DBCAEF49FED47DF31AB4CBCC3EBF4B7DF029EE86EA0F48CC3D8993E828.
+
+Native DMAfill e615 had genuineRED193418/F9B40B8B→GREEN194610/104E8B0B
+and3realGPUunwritten/CPUold-new/pendingoutsidebytes-neighborPASS194611–194612.
+Actualworldeligibility only~16/frame, allGPUdirty/noCPUfastpath. Fast400trial
+200249...c5d6aa reached401; at414 title3.7==baseline3.7, rejected/closed0.
+Userrequestedrollbackexecuted65727fc1 (wholee615consumer+newfixtures/CTest
+removed); exactsources/patch archivedcycle42/rejected-DMA-fill andallrunskept.
+Independent sampledmaterialization diagnostic b829 retained; knownCPUfixture
+UniformVector compiled/reference discrepancy reproducedWITHOUTIRdiaghooks
+194135/35AE5A50, observer-only194037/6777766E PASS, notinstrumentationfault.
+MissingcompiledLoadBufferU32 remainsseparatecorrectnessdebt; CPgamefallback0.
+
+Actualdiag194922...210633 e615/EXE73FEB ended195223UTC0/noguards: CP4060/4060
+success/referencefallback0; Flatleaf1.731us abovefloor butnotdouble-FPSlead.
+NamedCPU20.032s/query0: Main13548 86.345%, GPU32100 53.823%, Spec46496 33.15%,
+recorder46620 30.26%;NVML19samplesavg48.42%GPU (30–61). MainCPUinitiallylooked
+busy; newRIP confirms WAIT. Newafter400 diagnostic201017...874d08 ended0:
+ownedMain37884/31420,10.015s73/73valid/allcleanup0, CPU81.75%;58/73 positions
+inpureRDTSCdeadlinepoll loops,10/73 nativewin32uGPUwait. Matchesexactoriginal
+SELF hash andvalidhistorical224/224 dataset; no costlyHLE/TLSbodydominance.
+PSS samples scheduling/wall positions, notCPUcyclefractions orcleanFPS.
+Rootselfcontrolcurrent5sPASS. Data cycle42/owned-main-31420-after400/pss-main.json.
+
+Next3independentagentspreparing (read-only/ignored): generaldecoded PUREclockspin
+PAUSE preservingflags/register/actualdeadline; topology-aware dedicatedCPUcore
+policy usinghostCPUsets; exactrealproducer→native→publication→guestconsumer
+latency. No guestaddress/hash/title hacks, fakecompletion, clockshortening or
+barrierdeletion. Actualcountertablewriterunknown; sourceSubmit/Suspend global
+barrier+priorcreditnativecompletion semantics must be kept. ETWprofiling
+privilegesabsent; validatedboundedPSS helper supportsStartFrame400, no explicit
+SuspendThread butcapture mayperturb scheduling. Latestzero-fileReadfail markers
++existingWindowsbounce/APRstaging ruleoutblindfileReadport asFPSclaim.
+
+No nativegame/build/testactive now; verifybeforeedits. WSLshutdownauthorized;
+no push/issues; preservehistuntrackedComputePrefetchPermutationTests.inc,
+usergame/saves/caches/oldruntime/artifacts. FullFX/60FPSand >=2xgoal unmet.
+
 ## Current checkpoint: completed SRT drill narrows next target; clean FPS still3.7
 
 NativeWindows localHEAD46fe8e8b. Both cost corrections have genuine native
