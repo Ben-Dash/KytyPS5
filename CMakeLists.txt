@@ -849,6 +849,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --draw-offset-only)
 	add_test(NAME virtual_memory_allocation
 		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests>)
+	add_test(NAME pure_timed_spin_pause
+		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests> --timed-spin-pause-only)
+	add_test(NAME pure_timed_spin_pause_off
+		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests> --timed-spin-pause-off-only)
+	add_test(NAME pure_timed_spin_pause_boundaries
+		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests> --timed-spin-pause-boundaries-only)
+	set_tests_properties(pure_timed_spin_pause pure_timed_spin_pause_off pure_timed_spin_pause_boundaries
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME guest_red_zone_patcher
 		COMMAND $<TARGET_FILE:virtual_memory_allocation_tests> --red-zone-patcher-only)
 	add_test(NAME command_scheduler_timeline

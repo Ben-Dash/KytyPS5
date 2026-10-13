@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <string>
@@ -3212,6 +3213,9 @@ struct InstructionTestScope {
 	}
 };
 
+#include "PureTimedSpinPauseTests.inc"
+#include "PureTimedSpinPauseBoundaryTests.inc"
+
 struct SavedInstructionContext {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	CONTEXT native {};
@@ -4375,6 +4379,18 @@ int main(int argc, char** argv) {
 		return g_failed_tests == 0 ? 0 : 1;
 	}
 #endif
+	if (argc == 2 && std::strcmp(argv[1], "--timed-spin-pause-only") == 0) {
+		RunTest(TestPureTimedSpinPause);
+		return g_failed_tests == 0 ? 0 : 1;
+	}
+	if (argc == 2 && std::strcmp(argv[1], "--timed-spin-pause-off-only") == 0) {
+		RunTest(TestPureTimedSpinPauseOff);
+		return g_failed_tests == 0 ? 0 : 1;
+	}
+	if (argc == 2 && std::strcmp(argv[1], "--timed-spin-pause-boundaries-only") == 0) {
+		RunTest(TestPureTimedSpinPauseBoundaries);
+		return g_failed_tests == 0 ? 0 : 1;
+	}
 	if (argc == 2 && std::strcmp(argv[1], "--red-zone-patcher-only") == 0) {
 		RunTest(TestWindowsGuestRedZoneStaticPatcher);
 		return g_failed_tests == 0 ? 0 : 1;

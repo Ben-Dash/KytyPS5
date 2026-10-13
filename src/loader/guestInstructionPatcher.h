@@ -18,6 +18,8 @@ struct GuestInstructionHostFeatures {
 };
 
 GuestInstructionHostFeatures GetGuestInstructionHostFeatures();
+// Optional decoded pure-deadline polling hint; defaultOFF.
+bool TimedSpinPauseEnabled();
 
 struct InstructionPatchCounts {
 	uint64_t found   = 0;
@@ -50,6 +52,7 @@ struct GuestInstructionPatchResult {
 	InstructionPatchCounts insertq;
 	InstructionPatchCounts rdpid;
 	InstructionPatchCounts clwb;
+	InstructionPatchCounts timed_spin_pause;
 };
 
 void RegisterGuestInstructionPatchModule(void* module_ptr, uint64_t module_size,
