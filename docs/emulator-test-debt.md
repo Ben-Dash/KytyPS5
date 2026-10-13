@@ -1,5 +1,52 @@
 # Integration test debt
 
+## TLS MOV replacement arithmetic FLAGS required reproduction, 2026-10-13
+
+Actual SafeCall and TlsRegStub in loader/jit.h adjust RSP with SUB before saved
+FLAGS and ADD after restoring FLAGS. Replaced x86 MOV FS/TLS must preserve
+arithmetic flags. Minimal standalone native CPU regression uses real byte
+templates/final-address Call9 relocations/compiled MS-ABI callback, all64
+CF/PF/AF/ZF/SF/OF patterns, two stack reservations and seven supported output
+paths. Native MOV controls, real JZ/JC/JS/JO outputs, callback once, RSP/GP/R8–R11
+neighbors must pass before intended flag/branch RED. Stop Call9 with RET before
+the independent MOV control so it cannot mask actual stub output.
+
+Production remains unchanged pending genuine native RED. Candidate flag-neutral
+LEA adjustments must cover BOTH shared stubs and preserve SetFunc/GetOffset/code
+layout expectations. No title/hash/address branch, raw FS fault, GPU/game input
+or performance claim. Caller SIMD/MXCSR and unsupported RSP/high-register forms
+remain separate existing ABI debt; do not claim those from arithmetic controls.
+Native RED032105/F0868860 has896controls PASS and882flag/branch failures.
+SAME unchanged GREEN032207/69026323 after LEA in BOTH stubs:896cases/zero
+failures, CTest1/1 PASS0.03s. Fixed pointer/rel32/output field offsets and packed
+capacities remain. Native core/install/original-game impact pending.
+
+## Nonblocking GPU WAIT_REG_MEM readback required reproduction, 2026-10-13
+
+Fresh1ea27e21 diagnostic records about100 GPU-thread read faults/full drains per
+frame at WAIT_REG_MEM. Example5s/15frames:1559full drains2071.64ms (~138ms/frame),
+277tick waits815.74ms; total readbacks274.5MiB. These timers overlap and are not
+additive. Six frequent AGC body timings sit near their empty-query measurement
+floor (~1.13% gross sampled Main-cycle estimate), so optimizing their tiny bodies
+is not justified by frequency. GPU busy/gap are real timestamp-query intervals,
+not host wait timers or GPU-unit utilization; historical17.95ms totalGPU claim
+must not drive decisions.
+
+Before production changes, bounded actual PM4 WAIT_REG_MEM fixture must record
+a real GPU producer of protected32-bit data, execute existing processor API,
+prove complete native value/comparison/publication/neighbor/cleanup controls,
+then fail an avoidable synchronous GPU-dispatcher wait/full-drain cost budget.
+No nonexistent new PollReadback API in the baseline, fake value/ready label,
+skipped comparison, unsupported range masking or deliberate driver hang.
+
+A candidate may submit required bytes once, suspend that guest queue while actual
+publication is pending and process other queues; read real memory only when
+CPU-ready. Both/all queues blocked must still drive completion and priority
+publication. Cover producer-before/after/wakeup,32/64-bit comparisons/masks,
+unmap/reuse/generation and newly GPU-dirtied pages. Exact page downloads must
+include every GPU-dirty byte before CPU page protection is removed. Prototype
+and genuine RED are pending; current raw-load path is unchanged.
+
 ## Native occlusion and tiled upload cost reproductions required, 2026-10-13
 
 Three read-only proposals screened before production changes. Existing

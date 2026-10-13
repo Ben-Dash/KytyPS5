@@ -559,6 +559,10 @@ add_executable(ime_dialog_tests EXCLUDE_FROM_ALL
 )
 target_include_directories(ime_dialog_tests PRIVATE ${inc_headers})
 
+add_executable(safe_call_flags_tests EXCLUDE_FROM_ALL "${KYTY_TESTS_DIR}/SafeCallFlagsTests.cpp")
+target_link_libraries(safe_call_flags_tests PRIVATE common xbyak::xbyak)
+target_include_directories(safe_call_flags_tests PRIVATE ${inc_headers})
+
 add_executable(memory_tracker_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/MemoryTrackerTests.cpp"
 	"${KYTY_SOURCE_DIR}/graphics/host_gpu/pageManager.cpp"
@@ -757,6 +761,8 @@ if(BUILD_TESTING)
 	add_test(NAME scalar_provenance COMMAND $<TARGET_FILE:scalar_provenance_tests>)
 	add_test(NAME image_page_table COMMAND $<TARGET_FILE:image_page_table_tests>)
 	add_test(NAME memory_tracker COMMAND $<TARGET_FILE:memory_tracker_tests>)
+	add_test(NAME safe_call_flags COMMAND $<TARGET_FILE:safe_call_flags_tests>)
+	set_tests_properties(safe_call_flags PROPERTIES TIMEOUT 10 RUN_SERIAL TRUE)
 	add_test(NAME page_manager COMMAND $<TARGET_FILE:page_manager_tests>)
 	add_test(NAME archive_file COMMAND $<TARGET_FILE:archive_file_tests>)
 	add_test(NAME trophy_system COMMAND $<TARGET_FILE:trophy_system_tests>)

@@ -1,5 +1,65 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: TLS FLAGS shared defect proved/fixed, 2026-10-13
+
+Standalone native CPU actual SafeCall/TlsRegStub/Call9 regression032105/F0868860
+passes all896nativeMOV/callback/GP/RSP controls, then intendedRED882arithmetic
+FLAGS/conditional-branch failures. LEA replaces stackSUB/ADD in BOTH shared stubs;
+entryNOP padding retains callback/relative-call/output offsets and32/0x90byte
+capacities. SAME test unchanged032207/69026323 passes all896 and actualJZ/JC/JS/
+JO neighbors; CTest1/1 PASS0.03s. Native core/install/game result pending; no FPS
+claim from this semantic proof. [Contract and limitations](yotei-tls-flags-regression-2026-10-13.md).
+
+1080 upload SAME-EXE setup repaired with real bounded guest mapping, preserving
+native device-local source/target. Build031121/native031229/CB311C9D PASS all36
+full1920x1080image trials and complete native+guest source/guard checks.4B legacy/
+fused median154400/27616ns (~82.11% operation reduction);8B304864/57984ns (~80.98%).
+Device-source preparation is outside both GPU intervals. This is throughput
+proof for that operation, NOT game improvement; world stillce9mean3.045833.
+
+Next: commit TLS fix separately, native core/new private install, ONE neutral
+uninstrumented650-gated30s world retry. Nonblocking WAIT required native cost
+fixture staged ignored-only; no PollReadback production fix applied. Extra SIMD/
+unwind/red-zone/RSP/high-register ABI forms remain explicit debt. No native task
+currently active; verify on resume. Current WIP includes only new1080tests/hooks,
+records and TLS correction; preserve prefetch WIP. No images/menus/buttons/push/
+issue posts; WSL stopped, actual1080/full effects/stable60 remain pending.
+
+## Current checkpoint: AGC bodies cheap; GPU WAIT readback target, 2026-10-13
+
+Default-off diagnostic1ea27e21 core024704/install024837 PASS. Private EXE
+C63A7BA6BCD641937A8BB9E4BC94C746E8C0FF45C57DD3EF63543700EFD2346F;
+run `game-20261013-024852-perf-cycle12-main-body-fault-cost-30s-fe66ca` completed
+02:51:51UTC/exit0/no guards, full650-gated30s instrumented window. FPS is not
+an optimization result. Owned collector30.02662s/frames602..692 confirms physical
+Main48032/internal3 at91.013% core, zero query errors. Five contained nominal
+130..155s reports: six AGC bodies gross sampled estimate1.132% of Main cycles;
+empty controls1048–1071cycles/sample versus bodies1009–1493. All query/censor/
+underflow errors0. No subtraction or MHz/time conversion: bodies are near the
+measurement floor, not the important optimization target.
+
+Fresh drain5s/15frames: WAIT_REG_MEM GPU-thread read-fault1559full drains2071.64ms
+(~138ms/frame),277tick waits815.74ms; all readbacks274.5MiB/5s. GPUbusy/gap use
+real device timestamp queries (roughly200/130ms per frame), NOT host wait timers
+or GPU-unit utilization; do not add overlapping waits. Earlier17.95ms totalGPU
+assumption is discarded. Full-drain itself does not hold TrackingSpinLock:
+QueryReadback releases region lock before waiting; Main fault-site timer includes
+later region-lock acquisition but omits IsMapped/early VEH work.
+
+Next verified lead: nonblocking required readback for PM4 WAIT_REG_MEM so pending
+publication suspends one guest queue and other queues progress. Synthetic native
+RED/all-queues completion/real-value/page/epoch safety pending in test debt; NO
+poll behavior fix applied. Three agents investigate independent mechanisms.
+
+Uninstrumented best world remains ce9 mean3.045833 (~3% single-pair change,
+no useful gain), no images/actual1080/full effects/60 proof. A new SAME-EXE1080
+upload benchmark build025910 compiled, attempt030032 exits321 on INVALID FIXTURE
+guest image range (host allocation mistaken for guest address). This is setup
+failure, NOT regression or performance proof; repair with actual bounded guest
+mapping, preserve image validation. Native process currently closed; source WIP
+is test-only1080 fixture/hooks plus these records. Preserve prefetch WIP. WSL
+stopped, no menus/buttons/push/issue posts.
+
 ## Current checkpoint: fused world3.05FPS; Main92% core, 2026-10-13
 
 Correction committed locally ce9ead1a; core022559/install022747 PASS. New private
