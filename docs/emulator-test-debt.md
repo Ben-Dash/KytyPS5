@@ -11,15 +11,16 @@ paths. Native MOV controls, real JZ/JC/JS/JO outputs, callback once, RSP/GP/R8â€
 neighbors must pass before intended flag/branch RED. Stop Call9 with RET before
 the independent MOV control so it cannot mask actual stub output.
 
-Production remains unchanged pending genuine native RED. Candidate flag-neutral
-LEA adjustments must cover BOTH shared stubs and preserve SetFunc/GetOffset/code
-layout expectations. No title/hash/address branch, raw FS fault, GPU/game input
+Baseline production stayed unchanged until genuine native RED. Flag-neutral
+LEA adjustments cover BOTH shared stubs and preserve SetFunc/GetOffset/code
+layout expectations. No title/hash/address branch, raw FS fault or game input
 or performance claim. Caller SIMD/MXCSR and unsupported RSP/high-register forms
 remain separate existing ABI debt; do not claim those from arithmetic controls.
 Native RED032105/F0868860 has896controls PASS and882flag/branch failures.
 SAME unchanged GREEN032207/69026323 after LEA in BOTH stubs:896cases/zero
 failures, CTest1/1 PASS0.03s. Fixed pointer/rel32/output field offsets and packed
-capacities remain. Native core/install/original-game impact pending.
+capacities remain. Local a980b942 core032554/install032732 PASS; original-game
+FPS retry active, impact pending.
 
 ## Nonblocking GPU WAIT_REG_MEM readback required reproduction, 2026-10-13
 
@@ -44,8 +45,15 @@ publication is pending and process other queues; read real memory only when
 CPU-ready. Both/all queues blocked must still drive completion and priority
 publication. Cover producer-before/after/wakeup,32/64-bit comparisons/masks,
 unmap/reuse/generation and newly GPU-dirtied pages. Exact page downloads must
-include every GPU-dirty byte before CPU page protection is removed. Prototype
-and genuine RED are pending; current raw-load path is unchanged.
+include every GPU-dirty byte before CPU page protection is removed.
+Native034342/203C9D2E is genuine costRED after actual values/markers/guards/
+publication/cleanup; SAME034629/BD73E808 GREEN waits1/0/1 ->0/0/0. Real
+graphics32/compute64/third-queue progress035123 PASS. Poll040047 old-arm/new
+writer/CPUoverwrite/crosspage/host controls and old typed/span/EOP/BC/mip
+neighbors pass. Focused CTest4/4 PASS1.77s. Buffer-backed mapped path now polls
+authoritative publication; image-only fallback and sustained ring-pressure
+latency remain pending. Wake-token architecture is deferred; existing wait100
+is microseconds/native Windows alternative~1ms. Native core/game impact pending.
 
 ## Native occlusion and tiled upload cost reproductions required, 2026-10-13
 

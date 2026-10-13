@@ -508,6 +508,11 @@ void CommandProcessor::WaitRegMem(uint32_t func, const T* addr, T ref, T mask, u
 	BreakComputeChain();
 	// The CPU may have written the data this wait guards just before its flag.
 	AdvanceBdaEpoch();
+	if (GuestGpu::IsGpuThread() && g_current_execution != nullptr &&
+	    !m_renderer.GetBufferCache().PollReadMemory(reinterpret_cast<uint64_t>(addr), sizeof(T))) {
+		SuspendPm4();
+		return;
+	}
 	if (!TestWaitRegMemValue(*addr, ref, mask, func)) {
 		SuspendPm4();
 	}

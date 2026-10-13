@@ -675,6 +675,30 @@ void BufferCache::RecordReadback(uint64_t vaddr, uint64_t size, bool is_write) {
 	}
 }
 
+bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
+	EXIT_IF(!GuestGpu::IsGpuThread() || CommandScheduler::InDeferredOperation());
+	// Host-only PM4 fixtures and addresses outside GPU mappings retain their old read path.
+	// The actual dereference still performs the existing validation/fault behavior.
+	if (vaddr == 0 || !GuestRange {vaddr, size}.Valid() ||
+	    !m_scheduler.Context().IsMapped(vaddr, size)) {
+		return true;
+	}
+	auto state = m_memory_tracker.QueryReadback(vaddr, size);
+	if (!state.gpu_dirty) return true;
+	if (state.unarmed) {
+		// Preserve the existing owner discovery, barriers, page-wide copies, token,
+		// staging retirement and asynchronous priority publication.
+		RecordReadback(vaddr, size, false);
+		state = m_memory_tracker.QueryReadback(vaddr, size);
+	}
+	if (!state.gpu_dirty) return true;
+	EXIT_IF(state.unarmed || state.tick > m_scheduler.CurrentTick());
+	// A publication queued on the open buffer cannot progress unless it is submitted.
+	// Submission preserves queue order; the command parser does not wait for its fence.
+	if (state.tick == m_scheduler.CurrentTick()) m_scheduler.Flush();
+	return false;
+}
+
 void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	if (!GuestGpu::IsGpuThread() && CommandScheduler::InDeferredOperation()) {
 		EXIT("unsupported buffer readback from an asynchronous GPU completion, "

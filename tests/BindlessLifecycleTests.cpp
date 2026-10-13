@@ -382,8 +382,11 @@ private:
 #include "OcclusionNativeCostTests.inc"
 #include "ReadbackQueueBootstrapTests.inc"
 #include "LiteralEopPublicationCostTests.inc"
+#include "WaitRegMemNativeNonblockingCostTests.inc"
+#include "WaitRegMemNativeQueuedNeighborTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
 #include "ArmedReadbackTypedNeighbors.inc"
+#include "WaitRegMemNativePollNeighbors.inc"
 #include "LiteralEopPublicationSpanNeighbors.inc"
 #include "LateBdaImageFringeTests.inc"
 #include "FirstUseBdaPointerChainTests.inc"
@@ -403,6 +406,11 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0))
+    Libs::Graphics::Require("WaitRegMemNativeNonblockingCost", "direct-record profile setup",
+        _putenv_s("KYTY_RECORD_THREAD", "0") == 0, "could not pin direct recording before getters");
   if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
@@ -452,6 +460,9 @@ int main(int argc, char **argv) {
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
+                            std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
@@ -577,6 +588,8 @@ int main(int argc, char **argv) {
     ConfigureVertexNonFiniteTraceGpuEnvironment();
   if (argc == 2 && std::strcmp(argv[1], "--armed-readback-window-cost-gpu") == 0)
     ConfigureArmedReadbackWindowCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0)
+    ConfigureArmedReadbackTypedNeighbors();
   if (argc == 2 && std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0)
     ConfigureArmedReadbackTypedNeighbors();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
@@ -604,7 +617,10 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+      (std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
+       std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
+       std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
        std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
@@ -642,6 +658,24 @@ int main(int argc, char **argv) {
       else
         CheckFusedTiledUploadGpuMicrobench(vulkan);
     });
+    renderer.ShutdownGpu();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0) {
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    CheckWaitRegMemNativeQueuedNeighbor(vulkan);
+    renderer.ShutdownGpu();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0) {
+    CheckWaitRegMemNativePollNeighbors(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0) {
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    renderer.GetGpu().SendCommandSync([&] { CheckWaitRegMemNativeNonblockingCost(vulkan); });
     renderer.ShutdownGpu();
     return 0;
   }

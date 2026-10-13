@@ -194,7 +194,17 @@ void CheckLiteralEopPublicationCost(VulkanHarness& vulkan) {
         const auto commands = LiteralCostWaitThenDone(address, width, reference, mask,
             done_address, done_marker);
         Pm4Execution execution;
-        const auto outcome = cp.Process(execution, commands);
+        auto outcome = cp.Process(execution, commands);
+        const auto publication_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (outcome == Pm4ProcessResult::Blocked && cache.IsRegionGpuModified(address, width) &&
+               std::chrono::steady_clock::now() < publication_deadline) {
+          std::this_thread::yield();
+          outcome = cp.Process(execution, commands);
+        }
+        Require(name, "bounded actual publication before final predicate retry",
+                !cache.IsRegionGpuModified(address, width),
+                "resumable WAIT did not publish its native producer within the bounded fixture");
+        if (outcome == Pm4ProcessResult::Blocked) outcome = cp.Process(execution, commands);
         result.wait_complete = outcome == Pm4ProcessResult::Complete;
         result.wait_blocked = outcome == Pm4ProcessResult::Blocked;
         result.consumer_after_fence = scheduler.IsFree(tick);

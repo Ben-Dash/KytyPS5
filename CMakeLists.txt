@@ -883,6 +883,14 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --fused-tiled-upload-odd-offset-gpu)
 	set_tests_properties(fused_tiled_upload_cost fused_tiled_upload_odd_offset_gpu
 		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME wait_reg_mem_nonblocking_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-nonblocking-cost-gpu)
+	add_test(NAME wait_reg_mem_queued_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-queued-neighbor-gpu)
+	add_test(NAME wait_reg_mem_poll_neighbors_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-poll-neighbors-gpu)
+	set_tests_properties(wait_reg_mem_nonblocking_gpu wait_reg_mem_queued_gpu
+		wait_reg_mem_poll_neighbors_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)
 	add_test(NAME ngg_vertex_count_gpu

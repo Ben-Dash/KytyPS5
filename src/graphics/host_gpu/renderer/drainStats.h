@@ -98,6 +98,10 @@ inline thread_local uint32_t    t_pm4_op = NoPm4Op;
 inline thread_local bool        t_predicated = false;
 // Guest instruction that raised the page fault being handled on this thread.
 inline thread_local uint64_t    t_fault_pc = 0;
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+// Native regression observation only; no shipping renderer state or control.
+inline thread_local void (*g_wait_timer_test_observer)(Kind) = nullptr;
+#endif
 
 [[nodiscard]] inline bool Enabled() noexcept {
 	return g_enabled.load(std::memory_order_relaxed);
@@ -189,6 +193,9 @@ private:
 class WaitTimer final {
 public:
 	explicit WaitTimer(Kind kind) noexcept: m_kind(kind), m_enabled(Enabled()) {
+#if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
+		if (g_wait_timer_test_observer != nullptr) g_wait_timer_test_observer(kind);
+#endif
 		if (m_enabled) {
 			m_start = std::chrono::steady_clock::now();
 		}

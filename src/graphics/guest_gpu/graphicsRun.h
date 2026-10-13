@@ -109,6 +109,7 @@ private:
 	std::jthread    m_thread;
 
 	friend class CommandProcessor;
+	friend struct WaitRegMemNativeQueueTestAccess;
 };
 } // namespace Libs::Graphics
 

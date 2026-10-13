@@ -1,5 +1,55 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: GPU WAIT poll native GREEN, world pending, 2026-10-13
+
+Three-file shared PollReadMemory/PM4 suspension correction WIP. Actual existing
+PM4 producer fixture owner setup fixed BEFORE genuine baseline034342/203C9D2E:
+native word/11/22 markers/guards/publication/cleanup PASS ->costRED1/0/1 dispatcher
+FullDrain/Tick/Priority waits. SAME unchangedGREEN034629/BD73E808 allPASS, both
+pending initially, budgets0/0/0. Real GuestGpu graphicsWAIT32/computeWAIT64 plus
+independent compute035123/153EF80B PASS bothblocked/third-before-publication and
+all native values/guards/cleanup, no waits. No wake-token framework: existing
+100-unit wait is microseconds (Windows alternative~1ms), not100ms.
+
+Native Poll040047/80BCB8D0 PASS old-arm/new-GPU-writer, CPUoverwrite/no-submit,
+cross-page mixed-arm8-byte data, host false/true fallback, guards/cleanup/0waits.
+Existing typed/span035232, resumed eight EOP literal035606, BC4/5/7+mipcopy040212/
+213 PASS. EOP driver now retries legitimate Blocked execution until real
+publication; byte/fence/false-mask/ownership/zero literal download oracles stay.
+Image-only protection keeps legacy fault route and ring-pressure retirement may
+still wait; those scoped limitations remain pending. [Details](yotei-wait-reg-mem-readback-2026-10-13.md).
+
+TLSa980 world retry closed03:30:44UTC: complete30s651..739,24titles,mean3.033333/
+min3/max3.1/exit0/no guards: no useful gain, no images. Best priorworld3.045833.
+Native1080 upload comparison committed separately1b83e3f6; operation~81–82%
+improvement does not imply game FPS. Poll commit/core/new private install/
+uninstrumented30s world retry next; no native process active, verify on resume.
+Source WIP is Poll/core test observer/fixtures/EOP driver/records; preserve
+prefetch WIP. No push/issue posts/menu/input, WSL stopped, actual1080/full effects/
+stable60 remain unresolved. Three agents propose, root serializes native work.
+## Current checkpoint: TLS correction native retry active, 2026-10-13
+
+Local a980b942 core032554/install032732 PASS. NEW private cycle13 actualPerformance
+runtime EXE4BF4B7040D2B8C9BEB62ABFECACE435E0C5DA91113A7EA53AAE3B2B605F9289B.
+Neutral/full-render/no diagnostics/no menus or input retry started03:27:44UTC,
+PID13560, run `game-20261013-032744-perf-cycle13-tls-flags-world-title-30s-3698c0`,
+300s warming bound followed by650-gated30s title sample. Root session49292;
+check actual process/run before continuing, source inputs frozen while active.
+Arithmetic FLAGS/GP/RSP/branch regression already RED ->GREEN896cases; gameFPS
+and images remain pending. Prior uninstrumentedmean3.045833; no60 claim.
+
+Nonblocking PM4 WAIT native cost proposal B64D2921 staged cycle12/wait-reg-mem,
+CLI `--wait-reg-mem-nonblocking-cost-gpu`: existing finite real compute producer,
+protected32-bit guest word, two actual PM4 processors, native timeline gate with
+1s failsafe, all actual values/masks/suffix/guards/publication/cleanup before
+GPU-dispatcher WaitTimer0 cost. No new Poll API in baseline; uncompiled/noRED
+yet. Actual GuestGpu all-queues round-robin neighbor and production lifetime/
+page/epoch proof pending. Do not edit/apply/build it alongside current game.
+
+Tracked WIP is records and test-only1080fixture/hooks; preserve historical
+prefetch WIP. No issue posts/push; WSL stopped. Source/diagnostic correctness,
+native128/1080GPU operation gains and world FPS remain distinct evidence.
+
 ## Current checkpoint: TLS FLAGS shared defect proved/fixed, 2026-10-13
 
 Standalone native CPU actual SafeCall/TlsRegStub/Call9 regression032105/F0868860
