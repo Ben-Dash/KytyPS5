@@ -1,6 +1,72 @@
 # Integration test debt
 
+## Consecutive selected eager pages native cost regression, 2026-10-13
+
+Public BufferFlush native061744/70239F69 genuine RED after all three cases'
+finite GPU/native/CPU/same-page sibling/unselected gap/owner/canary/cleanup
+controls PASS. Adjacent selected same-owner pages incur two source barriers,
+two host barriers, two copy commands and two publication tokens; expected one.
+Gap and different-owner negatives correctly require two. All cases copy exactly
+12 bytes/3 sparse ranges. Initial061057 build failure was missing test API name;
+corrected to existing TryReadGpuCleanBacking before valid RED, no oracle changes.
+
+Candidate coalesces only sorted consecutive SELECTED pages bounded by SAME
+live complete owner, with nonmutating page-table ID check; retain downloader,
+dirty-page union, staging/tick/token/native fence/publication and all gaps.
+Same unchanged GREEN and native WAIT/EOP/typed/fused-image/BC/mip neighbors
+required. Coverage of adjacent eager pages in this game and FPS gain unproved.
+
+Same unchanged GREEN062003/204BA457: adjacent source/host/copy/token1, gap and
+otherowner2; native/CPU/sibling/unhot gap/exact12bytes3regions/guards/cleanup PASS.
+Fifteen affected CTests PASS6.12s (GPU WAIT, async/foreign/literals, tiled uploads,
+BC and mip copies). Larger ring-wrap/group-pressure case remains pending.
+
+## Image read visibility and covered-scope barrier regressions, 2026-10-13
+
+Existing public GetBarriers ignores destination stage when layout/access match.
+Independent planner fixture on a real tiny two-mip/two-layer image establishes
+TransferWrite -> FragmentRead -> ComputeRead -> Write. Native055809/042570B7
+intended RED: second reader has no required barrier. Separate055808 same EXE
+cost RED: all writer/layout/new-stage-with-different-access/disjoint resource
+controls pass before coveredCost1 and heterogeneousCost1 exceed zero budget.
+No submitted GPU command/shader hang or fabricated value is used as reproduction.
+
+Candidate: only reuse nonzero known read-access subset with EXACT same stage
+and layout; retain original published coverage, preserve heterogeneous per-mip
+states instead of claiming global union. Any new stage requires its existing
+barrier, which chains visibility of already available writes. Unsupported,
+write, layout and bounds behavior retained. Same tests unchanged GREEN and
+existing image transitions/native affected resource neighbors required before
+world retry. Actual game incidence/FPS/graphics outcome unproved.
+
+Same unchanged native covered/new-stage GREEN060021/060022 (8A1E3DE6), existing
+image-transition same EXE PASS. Partial mip/layer reconciliation GREEN060548/
+93E2E211, no oracle changes. Additional actual upload-to-sampler stage/access
+subset fixture native061003/AE6734D3 intended cost RED1 after all new-stage,
+expanded access/stage, aggregate-mask and malformed-stage negatives pass.
+Follow-up permits only nonzero literal stage-bit subsets; no aggregate expansion.
+Same stage-subset test unchanged GREEN and all previous neighbors required.
+
+Same unchanged upload stage-subset GREEN061349/B7593F32; previous partial
+neighbor rerun062102 PASS without golden changes. Literal masks only, nonzero
+stages; the original broad scope is retained for the following writer. Cross-game
+rendered correctness and actual GPU/world cost improvement remain pending.
+
+Compute-chain existing configuration native061004/061005 SAME AE6734D3 PASS
+ordinary direct-buffer finite producer/consumer/disjoint dispatches with real
+guest ACQUIRE/CS_PARTIAL_FLUSH boundaries under flag0 and1. This is scoped
+configuration proof, not a defect RED, BDA/image alias proof or FPS improvement.
+
 ## Scalar ORN2 SAVEEXEC B32 wave32 baseline native failure, 2026-10-13
+
+ORACLE AUDIT: unchanged isolated32 native052707/BFB52561 fails raw EXEC_HI,
+native052708 Wave64 passes and partial32 fails. Translate.cpp masks all wave32
+EXEC_HI writes by live_lanes[1]=0 before SAVEEXEC. RDNA2 says high EXEC/VCC
+ignored; it does not explicitly promise raw nonzero high storage for SALU reads.
+Do not patch production to preserve A5 on this evidence or label the failure a
+proved SAVEEXEC defect. Old numeric fixtures remain unchanged pending stronger
+wave32 raw-high contract/native ISA hardware. Supported-wave64 scoped controls
+can independently validate HALF_UNIFORM; they are not a full-suite pass.
 
 Fresh current native shader test EXE53230EFE, --wave64-only, fails existing
 ScalarOrn2SaveexecB32Wave32 readback with HALF_UNIFORM1 (051903) AND ordinary

@@ -1,5 +1,64 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: image scopes and eager page batches native GREEN, 2026-10-13
+
+Image planner genuine RED055808/055809(042570B7) ->same GREEN060021/060022
+(8A1E3DE6), original image-transition PASS. Partial mip/layer GREEN060548
+(93E2E211); actual upload-to-sampler literal stage/access-subset RED061003
+(AE6734D3) ->same GREEN061349(B7593F32); partial neighbor repeated062102 PASS.
+Shared GetBarriers retains published read scopes, emits needed new-stage
+dependencies and preserves per-subresource heterogeneity. Conservative stage
+bit subsets only, no aggregate expansion. Planner proof is NOT rendered pixels.
+
+Real eager pages genuine native RED061744(70239F69) ->same GREEN062003
+(204BA457): adjacent SAMEowner source/host barriers/copy commands/tokens2->1,
+gap and different owner remain2. Exact12bytes/3sparse regions/native/CPU/sibling/
+unselected dirty gap/canaries/cleanup unchanged. Fifteen affected CTests PASS6.12s,
+including actual WAIT/async/foreign/EOP/fused upload/BC/mip GPU cases. Larger
+ring-pressure/adjacent-run game incidence/FPS remain unproved.
+
+Existing compute-chain configuration native061004/061005(AE6734D3) PASS under0/1:
+real ordinary-buffer finite producer/consumer/disjoint work plus guest ACQUIRE,
+CS_PARTIAL_FLUSH and explicit Break boundaries. BDA/image alias and game images
+are not proved by that fixture. Historical chain0 began as a diagnostic; no
+evidence it was required by the final artifact correction. Default benchmark0
+retained until separate in-world candidate comparison.
+
+HALF0/1 supported21native fixtures053422/053424(A6530691) PASS, actual structured
+wave64 SPIRV1655->1645words proves option active. HALF1 game053539-558a0b never
+reached650/30s sample; last161, driver pipeline403953...compile51.5s, deadline300
+then forced cleanup/exit-1 at05:40:57. GPUidle/CPUcompilation observed, no reset
+or proved GPU hang. FPS unknown; keep option off. Old raw-wave32 high mask oracle
+remains unresolved/unchanged; full-suite pass not claimed.
+
+Next: commit completed fixes separately, native core/new private install, ONE
+clean neutral30s world comparison with original shader policy; then existing
+chain candidate if safe/needed. No process active now (verify). Source WIP is
+image+eager+test/registration records; preserve historical prefetch. WSL stopped,
+no menus/input/images/new push/posts; actual1080/full effects/stable60 unresolved.
+
+## Current checkpoint: wave32 oracle unresolved; no saveexec production patch, 2026-10-13
+
+Unchanged isolated32 fixture native052707/BFB52561 reproduces earlier failure;
+native052708 Wave64 fixture passes, partial32 fails. First mismatch is raw
+EXEC_HI snapshot (A5 expected,0 actual), not SAVEEXEC destination corruption.
+Translate.cpp initializes wave32 live_lanes[1]=0 and masks every raw EXEC_HI
+write by it BEFORE SAVEEXEC. Primary RDNA2 states upper EXEC/VCC ignored in
+wave32; its SOP1 low32/SCC contract alone does not specify arbitrary raw high
+storage. A writable A5 high-half oracle is unproved; no production change or
+golden relaxation applied. Old full-suite32 failure remains explicit test debt.
+Three agents now separate supported-wave64 half-uniform correctness/config/cache
+proof from that unresolved mode. New scoped selector pending; full-suite pass
+must not be claimed from it. Native ISA32 hardware/stronger specification needed.
+
+Measured wait attribution is stronger than earlier CPU guess: all dictionary
+offsets give152/224 PSS samples (67.857%) in four decoded RDTSC GPU/job polling
+loops;40/224 (17.857%) in real driver CPU GPU-sync wait. Wall-context occupancy,
+not CPU-cycle share or FPS proof. No clock/readiness/guest address patch.
+Latest clean FPS remains3.038462; actual1080/full effects/stable60 unresolved.
+Native process idle (verify); test-only isolated selectors WIP, historical
+prefetch preserved. No menus/input/images/push/posts, WSL stopped.
+
 ## Current checkpoint: Main waits on GPU; native shader baseline defect found, 2026-10-13
 
 Diagnostic-only local3abecd72 core050211/install050306 PASS, private EXE

@@ -1102,14 +1102,32 @@ void BufferCache::RecordEagerReadbacks() {
 	pages.swap(m_eager_ready);
 	std::sort(pages.begin(), pages.end());
 	pages.erase(std::unique(pages.begin(), pages.end()), pages.end());
-	for (const auto page: pages) {
+	for (size_t index = 0; index < pages.size();) {
+		const auto page = pages[index++];
 		// The written buffer may have been retired since; its pages then have no GPU owner.
 		if (!IsRegionRegistered(page, TRACKER_PAGE_SIZE)) {
 			continue;
 		}
 		// Buffers are CACHING_PAGESIZE-aligned, so one buffer owns the whole tracker page.
-		auto& buffer = m_slot_buffers[FindBuffer(page, TRACKER_PAGE_SIZE)];
-		(void)DownloadBufferMemory(buffer, page, TRACKER_PAGE_SIZE);
+		const auto id = FindBuffer(page, TRACKER_PAGE_SIZE);
+		auto& buffer  = m_slot_buffers[id];
+		uint64_t bytes = TRACKER_PAGE_SIZE;
+		if (!IsBufferInvalid(id)) {
+			// Only consecutive SELECTED pages in this complete live owner share a batch.
+			// An unselected gap or another owner retains its own publication boundary.
+			while (index < pages.size() && pages[index] == page + bytes) {
+				const auto* next_owner = m_page_table.Find(pages[index] >> PageTable::kPageBits);
+				if (next_owner == nullptr || !*next_owner || *next_owner != id ||
+				    !buffer.IsInBounds(page, bytes + TRACKER_PAGE_SIZE)) {
+					break;
+				}
+				bytes += TRACKER_PAGE_SIZE;
+				++index;
+			}
+		}
+		// The existing downloader collects every dirty byte of these selected pages,
+		// allocates staging before arming the actual tick, and publishes its token.
+		(void)DownloadBufferMemory(buffer, page, bytes);
 	}
 }
 

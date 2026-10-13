@@ -385,6 +385,7 @@ private:
 #include "WaitRegMemNativeNonblockingCostTests.inc"
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
+#include "EagerReadbackAdjacentPagesCostTests.inc"
 #include "PollExactPageReadbackCostTests.inc"
 #include "ForeignReadbackQueuedStateCostTests.inc"
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
@@ -409,6 +410,8 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0)
+    Libs::Graphics::ConfigureEagerReadbackAdjacentPagesCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0))
@@ -476,6 +479,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0 ||
@@ -638,6 +642,7 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
@@ -744,6 +749,10 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0) {
     CheckPollExactPageReadbackCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0) {
+    CheckEagerReadbackAdjacentPagesCost(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0) {

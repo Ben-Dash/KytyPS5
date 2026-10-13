@@ -901,11 +901,30 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-notification-lifetime-gpu)
 	add_test(NAME poll_exact_page_readback_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --poll-exact-page-readback-cost-gpu)
+	add_test(NAME eager_adjacent_page_readback_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eager-readback-adjacent-pages-cost-gpu)
+	add_test(NAME image_covered_read_scope
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-covered-read-planner-cost-only)
+	add_test(NAME image_new_read_stage
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-new-read-stage-planner-only)
+	add_test(NAME image_partial_read_scopes
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-read-scope-partial-neighbors-only)
+	add_test(NAME image_uploaded_read_stage_subset
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --image-read-stage-subset-cost-only)
+	add_test(NAME compute_chain_visibility_off
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --compute-chain-visibility-only)
+	add_test(NAME compute_chain_visibility_on
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --compute-chain-visibility-only)
+	set_tests_properties(compute_chain_visibility_off PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=0")
+	set_tests_properties(compute_chain_visibility_on PROPERTIES ENVIRONMENT "KYTY_COMPUTE_CHAIN=1")
+	set_tests_properties(image_covered_read_scope image_new_read_stage image_partial_read_scopes
+		image_uploaded_read_stage_subset compute_chain_visibility_off compute_chain_visibility_on
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	set_tests_properties(wait_reg_mem_nonblocking_gpu wait_reg_mem_queued_gpu
 		wait_reg_mem_poll_neighbors_gpu wait_reg_mem_nonblocking_async_gpu
 		foreign_readback_queued_state_gpu foreign_readback_queued_armed_gpu
 		wait_reg_mem_ready_continuation_gpu wait_reg_mem_notification_lifetime_gpu
-		poll_exact_page_readback_gpu
+		poll_exact_page_readback_gpu eager_adjacent_page_readback_gpu
 		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)

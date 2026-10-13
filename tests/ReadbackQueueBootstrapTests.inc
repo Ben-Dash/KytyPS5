@@ -18,6 +18,21 @@ struct PerformanceMemoryTestAccess {
     cache.PublishQueuedReadback(*request);
   }
   static bool HasQueue(const BufferCache& cache) {return cache.m_readback_queue!=nullptr;}
+  static void MarkHot(BufferCache& cache,uint64_t page) {cache.MarkReadbackHot(page);}
+  static uint64_t ReadbackToken(const BufferCache& cache) {return cache.m_readback_token;}
+  static void ResetEagerHotPolicy(BufferCache& cache) {
+    for(const auto& [page,tick]:cache.m_hot_pages) {
+      (void)tick;cache.m_memory_tracker.SetReadbackHot(page,TRACKER_PAGE_SIZE,false);
+    }
+    cache.m_hot_pages.clear();cache.m_eager_pending.clear();cache.m_eager_ready.clear();
+  }
+  static bool EagerReadyContainsOnly(const BufferCache& cache,uint64_t a,uint64_t b) {
+    bool has_a=false,has_b=false;
+    for(const auto p:cache.m_eager_ready) {
+      if(p==a)has_a=true;else if(p==b)has_b=true;else return false;
+    }
+    return has_a&&has_b&&cache.m_eager_pending.empty();
+  }
 };
 namespace {
 void ConfigureReadbackQueueBootstrapTests() {
