@@ -389,7 +389,6 @@ private:
 #include "LiteralEopPublicationCostTests.inc"
 #include "WaitRegMemNativeNonblockingCostTests.inc"
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
-#include "Pm4NativeQueueStateNeighbors.inc"
 #include "ArmedReadbackWindowCostTests.inc"
 #include "EagerReadbackAdjacentPagesCostTests.inc"
 #include "GpuReadMemoryExactPageCostTests.inc"
@@ -402,9 +401,6 @@ private:
 #include "GpuReadMemoryCrossOwner.inc"
 #include "PollExactPageReadbackCostTests.inc"
 #include "EmptyPm4TailSubmitCostTests.inc"
-#include "Pm4RunnableQueueFairnessTests.inc"
-#include "Pm4QueueQuantumNeighbors.inc"
-#include "Pm4QueueQuantumFifoNeighbor.inc"
 #include "EmptyPm4TailRequiredWorkNeighbors.inc"
 #include "PrepareBdaUploadBatchCostTests.inc"
 #include "BdaUploadUntouchedComputeNeighbor.inc"
@@ -457,37 +453,6 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
-  const bool pm4_quantum_fifo = argc == 2 &&
-      (std::strcmp(argv[1], "--pm4-quantum-fifo") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-fifo-off") == 0);
-  const bool pm4_quantum_native = argc == 2 &&
-      (std::strcmp(argv[1], "--pm4-quantum-native") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-native-off") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-native-ib-ce") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-native-ib-ce-off") == 0);
-  const bool pm4_native_on = pm4_quantum_native &&
-      std::strcmp(argv[1], "--pm4-quantum-native-off") != 0 &&
-      std::strcmp(argv[1], "--pm4-quantum-native-ib-ce-off") != 0;
-  const bool pm4_native_ib_ce = pm4_quantum_native &&
-      (std::strcmp(argv[1], "--pm4-quantum-native-ib-ce") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-native-ib-ce-off") == 0);
-  if (pm4_quantum_native)
-    Libs::Graphics::ConfigurePm4NativeQueueStateNeighbors(pm4_native_on);
-  const bool pm4_quantum_indirect = argc == 2 &&
-      (std::strcmp(argv[1], "--pm4-quantum-indirect") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-indirect-off") == 0);
-  const bool pm4_quantum_cede = argc == 2 &&
-      (std::strcmp(argv[1], "--pm4-quantum-cede") == 0 ||
-       std::strcmp(argv[1], "--pm4-quantum-cede-off") == 0);
-  const bool pm4_quantum_neighbor = pm4_quantum_indirect || pm4_quantum_cede || pm4_quantum_fifo;
-  const bool pm4_quantum_on = pm4_quantum_neighbor &&
-      std::strcmp(argv[1], "--pm4-quantum-indirect-off") != 0 &&
-      std::strcmp(argv[1], "--pm4-quantum-cede-off") != 0 &&
-      std::strcmp(argv[1], "--pm4-quantum-fifo-off") != 0;
-  if (pm4_quantum_neighbor)
-    Libs::Graphics::ConfigurePm4QueueQuantumNeighbors(pm4_quantum_on);
-  if (argc == 2 && std::strcmp(argv[1], "--pm4-runnable-queue-fairness") == 0)
-    Libs::Graphics::ConfigurePm4RunnableQueueFairnessTests();
   if (argc == 2 && IsRepeatedGpuDirtyStateMode(argv[1]))
     Libs::Graphics::ConfigureRepeatedGpuDirtyStateCostTests();
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1]))
@@ -590,9 +555,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
-              (argc == 2 && (pm4_quantum_neighbor || pm4_quantum_native ||
-                            std::strcmp(argv[1], "--pm4-runnable-queue-fairness") == 0 ||
-                            std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+              (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
@@ -788,8 +751,7 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (pm4_quantum_neighbor || pm4_quantum_native || std::strcmp(argv[1], "--pm4-runnable-queue-fairness") == 0 ||
-       std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+      (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
@@ -840,23 +802,6 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
-  if (pm4_quantum_native) {
-    Libs::Graphics::CheckPm4NativeQueueStateNeighbors(vulkan, pm4_native_on, pm4_native_ib_ce);
-    return 0;
-  }
-  if (pm4_quantum_neighbor) {
-    if (pm4_quantum_indirect)
-      Libs::Graphics::CheckPm4QueueQuantumIndirectBoundary(vulkan, pm4_quantum_on);
-    else if (pm4_quantum_fifo)
-      Libs::Graphics::CheckPm4QueueQuantumFifo(vulkan);
-    else
-      Libs::Graphics::CheckPm4QueueQuantumCeDe(vulkan, pm4_quantum_on);
-    return 0;
-  }
-  if (argc == 2 && std::strcmp(argv[1], "--pm4-runnable-queue-fairness") == 0) {
-    Libs::Graphics::CheckPm4RunnableQueueFairness(vulkan);
-    return 0;
-  }
   if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0))) {
     auto& renderer=vulkan.RuntimeRenderer();renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&]{

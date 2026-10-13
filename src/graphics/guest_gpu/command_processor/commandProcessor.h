@@ -19,28 +19,7 @@ class DrawSpeculator;
 
 bool TestWaitRegMemValue(uint64_t value, uint64_t ref, uint64_t mask, uint32_t func);
 
-enum class Pm4ProcessResult { Complete, Blocked, Yielded };
-
-// Optional GuestGpu CPU scheduling policy; direct Process callers remain unbudgeted.
-// One budget covers both CE and DE streams/rounds of the current queue slice.
-struct Pm4PacketBudget {
-	uint32_t remaining = 0;
-	uint32_t quantum = 0;
-	void* context = nullptr;
-	bool (*another_queue_runnable)(void*) = nullptr;
-	bool yield_requested = false;
-
-	bool CompletePacket() {
-		EXIT_IF(remaining == 0 || quantum == 0 || yield_requested);
-		if (--remaining != 0) return false;
-		if (another_queue_runnable != nullptr && another_queue_runnable(context)) {
-			yield_requested = true;
-			return true;
-		}
-		remaining = quantum;
-		return false;
-	}
-};
+enum class Pm4ProcessResult { Complete, Blocked };
 
 enum class PredicateSync { None, Download, Drain };
 
@@ -85,7 +64,6 @@ private:
 	bool                      m_chain         = false;
 	bool                      m_suspended     = false;
 	bool                      m_made_progress = false;
-	bool                      m_yielded       = false;
 };
 
 // Upstream 9f83fd5f: the packet names user SGPRs that receive the draw's vertex offset,
@@ -210,8 +188,7 @@ public:
 	                    const volatile void* address, uint32_t count_in_dwords);
 	[[nodiscard]] bool ShouldSkipPredicatedPackets() const { return m_predicate_skip; }
 
-	Pm4ProcessResult Process(Pm4Execution& execution, std::span<const uint32_t> commands,
-	                         Pm4PacketBudget* budget = nullptr);
+	Pm4ProcessResult Process(Pm4Execution& execution, std::span<const uint32_t> commands);
 	void             ProcessIndirectBuffer(std::span<const uint32_t> commands, bool chain);
 
 	void SetFlip(const FlipInfo& flip) { m_flip = flip; }
@@ -230,7 +207,7 @@ private:
 	                      uint32_t cache_action, uint32_t event_index, uint32_t event_write_source,
 	                      void* dst_gpu_addr, T value, uint32_t interrupt_selector,
 	                      uint32_t interrupt_context_id);
-	void ProcessPm4(Pm4Execution& execution, Pm4PacketBudget* budget);
+	void ProcessPm4(Pm4Execution& execution);
 	// After a draw that created a pipeline: walks the rest of the command stream without
 	// executing it, replaying only register writes into a copy of the register state, and asks
 	// the pipeline cache to prefetch the shader library parts of the draws it finds, so a loading
