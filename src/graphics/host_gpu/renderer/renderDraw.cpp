@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/renderDraw.h"
 
 #include "common/assert.h"
@@ -3562,6 +3564,7 @@ void RenderExecutor::PixelHistorySample(CommandBuffer& buffer, ImageId id, const
 
 void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
                                const DrawIndexArgs& args) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DrawIndex);
 	KYTY_PROFILER_FUNCTION();
 	g_draw_phases.Begin();
 	if (HW::g_context_write_log.enabled) [[unlikely]] {
@@ -3757,6 +3760,7 @@ void RenderExecutor::DrawIndex(uint64_t submit_id, CommandBuffer& buffer,
 
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 void RenderExecutor::DrawAuto(uint64_t submit_id, CommandBuffer& buffer, const DrawAutoArgs& args) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DrawAuto);
 	KYTY_PROFILER_FUNCTION();
 	g_draw_phases.Begin(true);
 

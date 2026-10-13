@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/driverCachePolicy.h"
 #include "graphics/host_gpu/renderer/dispatchSnapshot.h"
@@ -2287,6 +2289,7 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
     std::span<const Prospero::ColorComponentMapping, 8> target_export_mapping, bool pixel_active,
     std::array<ShaderVertexInputInfo, 3>& vertex_info, ShaderPixelInputInfo& pixel_info,
     ProgramWait wait) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::GetGraphicsPrograms);
 	WaitForPrecompile();
 	const bool   tess_active = user_config.GetPrimType() == Prospero::PrimitiveType::kPatch;
 	ShaderParams pixel_params;
@@ -2488,6 +2491,7 @@ PipelineCache::Pipeline* PipelineCache::GetGraphicsPipeline(
     const ShaderPixelInputInfo* ps_input_info, vk::PrimitiveTopology topology,
     bool primitive_restart_enable, const GraphicsPrograms& programs,
     vk::ImageAspectFlags feedback_aspects, bool may_defer) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::GetGraphicsPipeline);
 	const auto& vs_input_info  = vertex_info.front();
 	const auto& vertex_program = programs.vertex[0];
 	const auto& pixel_program  = programs.pixel;

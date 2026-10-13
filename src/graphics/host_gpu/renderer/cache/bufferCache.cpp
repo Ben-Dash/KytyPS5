@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 
 #include "common/alignment.h"
@@ -344,6 +346,7 @@ void BufferCache::DeleteBuffer(BufferId id) {
 
 bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size,
                                       std::span<const uint8_t> ordered_bytes) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DownloadBufferMemory);
 	EXIT_IF(!ordered_bytes.empty() && ordered_bytes.size() != size);
 	std::vector<vk::BufferCopy>                copies;
 	std::vector<std::pair<uint64_t, uint64_t>> pages;
@@ -399,6 +402,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		// ends their GPU ownership.
 		arm();
 		m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages)] {
+			FunctionProfile::Scope function_profile(FunctionProfile::Site::BufferPublish);
 			for (const auto& [address, bytes]: pages) {
 				m_memory_tracker.FinalizeReadback(address, bytes, token);
 			}
@@ -476,6 +480,7 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	                                    owner = std::move(temporary), mapped, offset, total_size,
 	                                    buffer_address, copies = std::move(copies), vaddr,
 	                                    known_bytes = std::move(known_bytes)] {
+		FunctionProfile::Scope function_profile(FunctionProfile::Site::BufferPublish);
 		if (download != nullptr) download->Invalidate(offset, total_size);
 		for (const auto& copy: copies) {
 			Libs::LibKernel::Memory::WriteBacking(buffer_address + copy.srcOffset,
@@ -614,6 +619,7 @@ BufferCache::~BufferCache() {
 }
 
 void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size, MemoryReadOrigin origin) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::InvalidateMemory);
 	if (!GuestRange {vaddr, size}.Valid()) {
 		EXIT("BufferCache: invalid memory-invalidation range\n");
 	}
@@ -672,6 +678,7 @@ void BufferCache::ExpandWriteFault(uint64_t vaddr) {
 }
 
 void BufferCache::RecordReadback(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::RecordReadback);
 	if (is_write && !IsRegionRegistered(vaddr, size)) {
 		if (m_memory_tracker.IsRegionGpuModified(vaddr, size)) {
 			EXIT("BufferCache: GPU-dirty memory has no buffer owner, addr=0x%016" PRIx64
@@ -1025,6 +1032,7 @@ void BufferCache::PublishQueuedReadback(QueuedReadback& request) {
 }
 
 void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::ReadMemoryAsync);
 	// Thread_Gpu only records and submits the download; this thread waits for its own
 	// publication while Thread_Gpu keeps working. The caller retries the access afterwards:
 	// a page the GPU re-dirtied meanwhile simply faults again.
@@ -1046,6 +1054,7 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, 
 		const auto reason = DrainStats::CurrentReason();
 		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, origin, reason, &tick,
 		                                                &age, &queued] {
+			FunctionProfile::Scope function_profile(FunctionProfile::Site::ReadbackGpuService);
 			DrainStats::ReasonScope reason_scope(reason);
 			// The foreign snapshot preceded queueing; publication or another reader
 			// may have resolved/armed this range before the GPU callback runs.
@@ -1389,6 +1398,7 @@ static bool DeferProtectsEnabled();
 
 bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t size, bool is_written,
                                     bool is_texel_buffer) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::SynchronizeBuffer);
 	std::vector<vk::BufferCopy> copies;
 	uint64_t                    total_size = 0;
 	vk::Buffer                  source;
@@ -1608,6 +1618,7 @@ static bool DeferProtectsEnabled() {
 }
 
 void JoinAsyncUploads() noexcept {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::JoinAsyncUploads);
 	g_async_uploads.Join();
 }
 
@@ -1701,6 +1712,7 @@ static void DebugHostImportTest(GraphicContext& graphics, uint64_t address) {
 
 vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
                                      uint64_t total_size, bool deferred) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::UploadCopies);
 	DebugHostImportTest(m_graphics, buffer.CpuAddress());
 	if (copies.empty()) {
 		if (deferred) {

@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/masterSemaphore.h"
 
 #include "common/assert.h"
@@ -283,6 +285,7 @@ void MasterSemaphore::Refresh() {
 }
 
 void MasterSemaphore::Wait(uint64_t tick) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::NativeFenceWait);
 	if (IsFree(tick)) {
 		return;
 	}

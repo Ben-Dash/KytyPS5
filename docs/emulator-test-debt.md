@@ -1,5 +1,25 @@
 # Integration test debt
 
+## Repeated foreign CPU write-fault eager publication required reproduction
+
+Three existing hot-page enrollment sites exclude every is_write request.
+Cycle33 attributes most packed traffic to real foreign CPU write faults, so a
+repeated CPU/GPU ownership exchange may always require a new on-demand download
+and native submission. This is a profiling lead, not a proven correctness bug.
+Before adding an optional actual-WriteFault policy, exercise two real cycles:
+native GPU producer -> protected foreign CPU store -> BDA upload/native proof;
+then a fresh GPU producer of the same page and unwritten siblings, normal
+OnCommandRecorded/Flush/actual completion, and a second protected CPU store.
+All native/backing bytes, fault-before-retry values, guards and cleanup precede
+the second-fault copy/submission cost oracle. Required work must be relocated
+to the existing normal producer submission, not omitted or made fake-ready.
+
+Preserve ordinary explicit writes, GPU-thread writes, image alias guards,
+unknown owners, newer producers, token rearming, pending publication and the
+existing bounded hot-page policy. Any new enrollment must be opt-in; total
+readbacks may rise for pages the CPU never revisits, so only clean world FPS
+can justify a default. Native fixture/RED and production changes are pending.
+
 ## Recorder idle-spin policy required bounded reproduction, 2026-10-13
 
 Native CPU RED `124109/686EF8EF`: all four real scheduling/payload/wake/Drain/

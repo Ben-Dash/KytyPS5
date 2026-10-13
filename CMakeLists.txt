@@ -939,6 +939,9 @@ if(BUILD_TESTING)
 	add_test(NAME command_stream_idle_spin_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --command-stream-idle-spin-cost)
 	set_tests_properties(command_stream_idle_spin_cost PROPERTIES TIMEOUT 15 RUN_SERIAL TRUE)
+	add_test(NAME function_profile_cpu_smoke
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --function-profile-smoke)
+	set_tests_properties(function_profile_cpu_smoke PROPERTIES TIMEOUT 15 RUN_SERIAL TRUE)
 	add_test(NAME gpu_read_memory_foreign_fault_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --gpu-read-memory-foreign-fault-locality-gpu)
 	add_test(NAME gpu_read_memory_cross_owner_gpu

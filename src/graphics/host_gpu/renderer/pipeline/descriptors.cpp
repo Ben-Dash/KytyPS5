@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessProvenance.h"
 
@@ -2722,6 +2724,7 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 
 void RenderExecutor::PrepareBindings(const ShaderStageRuntime& runtime,
                                      PreparedBindings& prepared) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::PrepareBindings);
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(!runtime);
 	const auto& program  = *runtime.program;
@@ -2885,6 +2888,7 @@ static void NoteComputeBufferVsharp(BufferCache& cache, const ShaderRecompiler::
 }
 
 void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::FindBuffers);
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
 	const auto& program  = *prepared.runtime->program;
@@ -2923,6 +2927,7 @@ void RenderExecutor::FindBuffers(PreparedBindings& prepared) {
 }
 
 void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::RebindBuffers);
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
 	for (const auto& region: prepared.bindless_regions)
@@ -3122,6 +3127,7 @@ static void CheckViewReuse(TextureCache& cache, const TextureBinding& binding) {
 }
 
 void RenderExecutor::RebindImages(PreparedBindings& prepared) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::RebindImages);
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(prepared.runtime == nullptr || !*prepared.runtime);
 	const auto& program  = *prepared.runtime->program;
@@ -3234,6 +3240,7 @@ void RenderExecutor::RebindImages(PreparedBindings& prepared) {
 
 void RenderExecutor::PrepareGraphicsBindings(std::span<PreparedBindings* const> stages,
                                              std::span<RenderColorInfo> colors) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::PrepareGraphicsBindings);
 	bool uses_dma = false;
 	for (auto* stage: stages) {
 		FindBuffers(*stage);
@@ -3835,6 +3842,7 @@ void RenderExecutor::CommitBindings(CommandBuffer&                     buffer,
                                     const PipelineCache::Pipeline&     pipeline,
                                     std::span<PreparedBindings* const> prepared_bindings,
                                     bool                               compute_chain) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::CommitBindings);
 	KYTY_PROFILER_FUNCTION();
 	uint64_t lap              = g_draw_phases.Lap();
 	// Binding commands do not touch memory, so they leave a pending compute chain barrier pending.

@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/guest_gpu/graphicsRun.h"
 
 #include "common/assert.h"
@@ -295,6 +297,7 @@ void GuestGpu::SendCommandSync(Common::UniqueFunction<void>&& command) {
 		operation();
 		done.release();
 	});
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::ServiceWait);
 	done.acquire();
 }
 
@@ -677,6 +680,7 @@ void GuestGpu::WaitForSubmissionsBefore(uint64_t sequence) {
 }
 
 void GuestGpu::ThreadRun(void* data) {
+	FunctionProfile::SetRole(FunctionProfile::Role::Gpu);
 	auto* gpu = static_cast<GuestGpu*>(data);
 	EXIT_IF(gpu == nullptr);
 	KYTY_PROFILER_THREAD("Thread_Gpu");

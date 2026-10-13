@@ -1,5 +1,80 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: requested function timing installed; native CPU accounting verified
+
+Latest user steering is to time functions, identify the real bottleneck and
+optimize that measured mechanism. Diagnostic `KYTY_DEBUG_FUNCTION_PROFILE=1`
+now instruments finite draw/dispatch, binding, buffer/image, native submission,
+readback/publication, recorder payload and wait scopes. It defaults off. Actual
+presented frame650 starts one 10-second window; randomized roots sample1/64 and
+synchronous nested scopes inherit that decision. Per OS thread/role: calls,
+sample counts, inclusive/exclusive steady wall and raw QueryThreadCycleTime,
+matched empty probe, query overhead/errors, truncation/outstanding/depth limits.
+CPU cycles are never converted to milliseconds; nested/thread totals overlap.
+No GPU timestamp queries, forced Finish, extra native submits or memory dumps.
+
+Native CPU smoke `134728/861341F4` passes real bounded work, two actual threads,
+exact selected child subtraction for wall/raw cycles, empty-query counts,
+disabled collector and zero outstanding samples. Build `134532` passes. There
+are no allocations/global mutexes at first fault-scope registration; fixed
+diagnostic slot overflow is reported. Activation acquires the epoch; default
+inactive scopes initialize only their inactive handle before returning.
+
+Core build/private install and one game profile remain pending. This is
+diagnostic instrumentation, not an emulator correctness fix or FPS improvement.
+Heavy drain/GPU-zone/other timing switches stay off for its run. After profiling,
+choose the largest evidenced CPU body/wait relation, establish its regression,
+then perform a clean 30-second world-title FPS comparison without profiling.
+Existing two opt-in experiments/defaults and prior game artifacts are preserved;
+no new push/issue publication, full effects/60 FPS still unmet.
+
+## Current checkpoint: debug/settings trials no substantial gain; eager write lead next
+
+All owned native runs/builds/tests are closed. Local code `a533ee3d`, EXE27567CFF
+same-build full 30-second comparison: spin2000 mean3.862069 vs spin100
+mean3.820690, 29 titles each; spin100 frames650–763, range3.5–4.0, closed
+12:58:53 UTC/0/no guards. No meaningful gain/screenshots; default remains2000.
+Buffered stdout, labelinterval2000, write-window1, chain1, BDA/exactreads off.
+Earlier logging and label-interval trials likewise showed no substantial gain.
+Heavy diagnostics were already disabled; required rendering/coherence remains.
+
+Next three-agent round found a narrower cause to test: actual foreign write
+faults never enroll their page into existing eager publication, so repeated
+CPU/GPU ownership exchanges can keep forcing on-demand downloads/submissions.
+Prepare a two-cycle native regression first; required producer work must execute
+at its normal submission, all GPU/CPU bytes must remain current. Only an opt-in
+policy is contemplated; neither production change nor RED exists yet. See the
+new regression entry in `docs/emulator-test-debt.md`.
+
+Separate-queue enabling remains deferred: current writer reservation is not
+an actual writer ticket, and ownership-copy/image producers plus reverse
+dependencies need independent proof. Latest upstream df5b9b92 and Jet f9e19582
+provide no blindly compatible performance patch. All previous commits/tests/
+captures/user data are preserved; no push/issue update, 60 FPS/full effects unmet.
+
+## Current checkpoint: recorder control closed; same-build 100-spin trial active
+
+Local source `a533ee3d5c9827126632eafa0774e50d084fa14d`, native core `125151`
+and install `125238` pass. EXE
+`27567CFFCDF7702E08084506EB5CA883FE0B7031433D890C33C5D710069421F9` in private
+`_Build/analysis/yotei-performance-cycle38-20261013/runtime-a533ee3d-idle-spin`.
+Default behavior remains 2000 spins; the optional input accepts 0..2000 only.
+
+Same-build control `game-20261013-125251-perf-cycle38-idle2000-buffered-world-title-30s-abba11`
+completed clean 30 seconds, 29 titles, frames 653–770, mean 3.862069 FPS,
+range 3.5–4.1. Closed 12:55:20 UTC/0/no guards, no screenshots. Buffered output,
+write-window1, compute-chain1, BDA/exact reads off, label interval2000us,
+full rendering and neutral input. No heavy diagnostics enabled.
+
+Only spin input changes to100 in
+`game-20261013-125625-perf-cycle39-idle100-buffered-world-title-30s-4894f9`,
+PID39912 ACTIVE. Source/tests/CMake frozen until owned run closes. Measure full
+30 seconds after frame650; images only after meaningful clean gain. Three agents
+now independently prepare next shader/backend, readback writer-provenance and
+compatible fork candidates using saved evidence; none may build/edit native
+inputs or enable an unproved side queue. All current synthetic/native validation
+is complete; this workload result and actual CPU benefit remain pending.
+
 ## Current checkpoint: settings trials closed; optional recorder policy native proof
 
 All game runs are closed. Same `ac0ac772`/EXE6205371B clean 30-second title trials:

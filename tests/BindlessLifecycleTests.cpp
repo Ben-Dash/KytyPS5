@@ -428,6 +428,7 @@ private:
 #include "NativeThreadNamesTests.inc"
 
 #include "UserServiceGamePresetTests.inc"
+#include "FunctionProfileSmokeTests.inc"
 #include "CommandStreamIdleSpinCostTests.inc"
 
 int main(int argc, char **argv) {
@@ -514,6 +515,10 @@ int main(int argc, char **argv) {
       std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0;
   if (readback_queue_mode) ConfigureReadbackQueueBootstrapTests();
   std::setvbuf(stdout, nullptr, _IONBF, 0);
+  if (argc == 2 && std::strcmp(argv[1], "--function-profile-smoke") == 0) {
+    CheckFunctionProfileSmoke();
+    return 0;
+  }
   if (argc == 2 && (std::strcmp(argv[1], "--command-stream-idle-spin-cost") == 0 ||
                     std::strcmp(argv[1], "--command-stream-idle-spin-neighbors") == 0)) {
     Common::InitializeThreads();

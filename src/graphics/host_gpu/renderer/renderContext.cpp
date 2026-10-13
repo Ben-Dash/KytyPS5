@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
@@ -105,6 +107,7 @@ static bool FaultCpuDiagnosticEnabled() noexcept {
 #endif
 }
 bool RenderContext::HandleFault(PageFaultAccess access, uint64_t fault_vaddr) noexcept {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::FaultHandler);
 	// The host reports the faulting byte, not the instruction's access width. Both caches
 	// resolve its page; guessing a width can cross the end of a valid guest mapping.
 	constexpr uint64_t fault_size = 1;
@@ -314,6 +317,7 @@ void RenderContext::CacheDmaBases(const ShaderStageRuntime& runtime) {
 }
 
 void RenderContext::PrepareBda() {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::PrepareBda);
 	RecordUpload(UploadSource::BdaPass, 0, 0);
 	m_fault_process_pending = true;
 	const auto epoch        = m_bda_epoch.load(std::memory_order_acquire);
@@ -434,6 +438,7 @@ void RenderContext::ReportMipStats(void* dst, uint32_t size, bool reset) {
 }
 
 void RenderContext::TickFrame() {
+	FunctionProfile::TickFrame(m_graphics.presented_frames.load(std::memory_order_relaxed));
 	FramePassesFlip();
 	m_texture_cache.TickFrame();
 	m_buffer_cache.TickFrame();

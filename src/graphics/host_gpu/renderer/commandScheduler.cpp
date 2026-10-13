@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/commandScheduler.h"
 
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
@@ -396,6 +398,7 @@ void CommandScheduler::DrainPriorityOperations() {
 }
 
 void CommandScheduler::WaitPriorityOperations(uint64_t tick) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::PriorityWait);
 	EXIT_IF(g_deferred_callback_scheduler == this);
 	std::unique_lock lock(m_operation_mutex);
 	const auto       done = [this, tick] {
@@ -643,6 +646,7 @@ void CommandScheduler::ReadTimestamps(uint32_t slot) {
 }
 
 uint64_t CommandScheduler::Submit(SubmitInfo submit) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::Submit);
 	JoinAsyncUploads();
 	// Native copies remain immediate, but visibility must precede end diagnostics and retirement.
 	m_command.FlushUploadDependency();
@@ -697,6 +701,7 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 }
 
 void CommandScheduler::QueueSubmit(SubmitJob& job) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::QueueSubmit);
 	auto&      graphics     = m_graphics;
 	const auto reason       = static_cast<DrainStats::Reason>(job.reason);
 	const bool stats        = DrainStats::Enabled();
@@ -781,6 +786,7 @@ void CommandScheduler::EnableAsyncSubmit() {
 }
 
 void CommandScheduler::SubmitThread(std::stop_token stop) {
+	FunctionProfile::SetRole(FunctionProfile::Role::Submit);
 	KYTY_PROFILER_THREAD("GpuQueueSubmit");
 	StartThreadSampler("submit");
 	if (m_stream != nullptr) {

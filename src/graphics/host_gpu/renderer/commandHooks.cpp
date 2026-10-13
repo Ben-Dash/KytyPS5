@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/commandHooks.h"
 
 #include "common/assert.h"
@@ -573,6 +575,7 @@ void DrainAll() {
 } // namespace
 
 void CommandStream::Impl::Drain() {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::Drain);
 	// A consumer has already run everything before what it is running now.
 	const auto target = write.load(std::memory_order_acquire);
 	if (t_consuming == this || read.load(std::memory_order_acquire) >= target) {
@@ -1810,6 +1813,7 @@ void CommandStream::Consume(std::stop_token stop) {
 #if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
 				CommandStreamRegression::Observe(CommandStreamRegression::Phase::BeforeSignalWait);
 #endif
+				FunctionProfile::Scope function_profile(FunctionProfile::Site::RecorderSignalWait);
 				impl.signal.wait(signal, std::memory_order_acquire);
 			}
 			impl.sleeping.store(false, std::memory_order_relaxed);
@@ -1821,6 +1825,7 @@ void CommandStream::Consume(std::stop_token stop) {
 			// Skip to the ring's start.
 			position += Impl::RingBytes - position % Impl::RingBytes;
 		} else {
+			FunctionProfile::Scope function_profile(FunctionProfile::Site::RecorderPayload);
 			header->run(start + header->closure_offset);
 			position += header->size;
 		}

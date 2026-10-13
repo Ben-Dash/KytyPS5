@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "common/archive.h"
 #include "common/common.h"
 #include "common/consoleColors.h"
@@ -777,6 +779,9 @@ static void StartProfileWriter() {
 #endif
 
 static int Main(int argc, char* argv[]) {
+	const char* function_profile = KYTY_GETENV("KYTY_DEBUG_FUNCTION_PROFILE");
+	Libs::Graphics::FunctionProfile::Configure(function_profile != nullptr && std::strcmp(function_profile, "1") == 0);
+	Libs::Graphics::FunctionProfile::SetRole(Libs::Graphics::FunctionProfile::Role::Main);
 	ConsoleColors::Install();
 #if defined(KYTY_PGO_GENERATE)
 	StartProfileWriter();

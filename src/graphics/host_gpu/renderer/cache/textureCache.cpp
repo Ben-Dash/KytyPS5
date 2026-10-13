@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "graphics/host_gpu/renderer/cache/textureCache.h"
 
 #include "common/alignment.h"
@@ -2337,6 +2339,7 @@ ImageId TextureCache::AssociateStencil(ImageId depth_id, GuestRange stencil) {
 }
 
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_format, uint64_t* unique_generation) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::FindImage);
 	auto& command = m_scheduler.Current();
 	if (command.IsInvalid()) {
 		EXIT("TextureCache: image lookup requires a valid command buffer\n");
@@ -2627,6 +2630,7 @@ void TextureCache::MarkImagesAccessed(std::span<const ImageId> ids) {
 
 bool TextureCache::RefindImage(ImageId id, uint64_t generation, const ImageDesc& desc,
                                uint32_t metadata_base_layer) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::RefindImage);
 	// Only Thread_Gpu (the caller) registers, frees and touches images, so when this tick and GC
 	// tick already saw the image, the bookkeeping below would change nothing: skip the lock.
 	if (generation == 0 || generation != RangeGeneration(desc.info.data)) {
@@ -2772,6 +2776,7 @@ ImageId TextureCache::FindImageFromRange(uint64_t address, uint64_t size, bool e
 }
 
 vk::ImageView TextureCache::FindTexture(ImageId id, const ImageDesc& desc) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::FindTexture);
 	RefreshVia       via(desc.type == BindingType::Storage ? "storage" : "texture");
 	std::scoped_lock lock {m_lock};
 	auto&            image = m_slot_images[id];
@@ -3446,6 +3451,7 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, uint64_t vaddr, uin
 }
 
 bool TextureCache::DownloadImageMemory(ImageId id) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DownloadImageMemory);
 	auto& image = m_slot_images[id];
 	if (image.depth_id) {
 		return false;
@@ -4219,6 +4225,7 @@ bool TextureCache::CollectGarbage(bool pressure_only) {
 }
 
 void TextureCache::ProcessDownloadImages() {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::ProcessDownloadImages);
 	// KYTY_DEBUG_IMAGE_DOWNLOADS=1: every 500 batches, the linear images read back to guest
 	// memory (address, extent, format, downloads, MiB), to see which readbacks a game needs.
 	static const bool log_downloads = [] {

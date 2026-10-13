@@ -1,3 +1,5 @@
+#include "graphics/host_gpu/renderer/functionProfile.h"
+
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
@@ -755,6 +757,7 @@ static void LogDispatchBindings(RenderContext& context,
 bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
                                     uint32_t thread_group_x, uint32_t thread_group_y,
                                     uint32_t thread_group_z, uint32_t mode, bool may_defer) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DispatchDirect);
 	EXIT_IF(buffer.IsInvalid());
 	m_context.GetCommandScheduler().FlushIfRecordingAged();
 	m_context.GetCommandScheduler().PopPendingOperations(false);
@@ -1092,6 +1095,7 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 
 bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
                                       uint64_t args_addr, uint32_t mode, bool may_defer) {
+	FunctionProfile::Scope function_profile(FunctionProfile::Site::DispatchIndirect);
 	EXIT_IF(buffer.IsInvalid() || args_addr == 0 || (args_addr & 3u) != 0 ||
 	        (mode & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0);
 	m_context.GetCommandScheduler().FlushIfRecordingAged();
