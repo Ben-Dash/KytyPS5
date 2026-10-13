@@ -1,5 +1,29 @@
 # Integration test debt
 
+## PM4 polling touched-page download footprint required reproduction, 2026-10-13
+
+Unarmed GPU PollReadMemory currently widens a scalar request through ordinary
+CPU ReadMemory's 512KiB locality policy. Native scalar and cross-page fixtures
+must verify all dirty words in each touched tracker page, real native/CPU data,
+same owner, protected publication, guards and normal later far-page CPU read
+before testing redundant far-page arm and download-ring footprint. Genuine RED
+is required before narrowing only this GPU poll path. Preserve the existing
+page-wide dirty union, owner discovery, copy barriers, tokens, max actual tick,
+priority publication, ring retirement and ordinary CPU batching. Game hit and
+FPS gain unknown; aggregate 20MiB/frame readback does not prove PM4 attribution.
+
+Native genuine RED044730/E66C9D6D: scalar/cross-page native words, same-page
+sibling, real publication, later CPU far read, canaries and cleanup all PASS;
+download192 rather than128 and far page unnecessarily armed/published. Earlier
+044420 build failed due Windows near/far macros; 044617 was setup failure from
+deferred recording default and is NOT reproduction. Fixture setup corrected
+before valid RED (names, early direct0/queue0 config and native push descriptor).
+Same unchanged GREEN044825/04C7E627 after shared touched-page downloader:128bytes,
+far remains dirty/unarmed/old, all original controls PASS. Nine affected CTests
+PASS3.63s include mixed arms, new writers, true queues, async and literal EOP.
+Retained actual notification token native044617 also PASS before/after actual
+GuestGpu destruction; no sanitizer claim. Core/private install/world pending.
+
 ## Publication-to-queue notification required reproduction, 2026-10-13
 
 After GPU-backed PM4 polling, actual world throughput fell from 3.033333 to

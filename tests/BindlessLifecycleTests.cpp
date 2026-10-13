@@ -385,6 +385,7 @@ private:
 #include "WaitRegMemNativeNonblockingCostTests.inc"
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
+#include "PollExactPageReadbackCostTests.inc"
 #include "ForeignReadbackQueuedStateCostTests.inc"
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
 #include "ArmedReadbackTypedNeighbors.inc"
@@ -408,14 +409,17 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
-  if (argc == 2 && (std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
+  if (argc == 2 && (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0))
     Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0)
     Libs::Graphics::Require("WaitRegMemNativeNonblockingCostAsync", "recording profile setup",
         _putenv_s("KYTY_RECORD_THREAD", "1") == 0,
         "could not pin deferred recording before configuration and native hooks");
-  if (argc == 2 && (std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
+  if (argc == 2 && (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
+                    std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
                     std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0))
@@ -471,11 +475,13 @@ int main(int argc, char **argv) {
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
+                            std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
@@ -631,7 +637,9 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
+      (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
+       std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
@@ -686,6 +694,25 @@ int main(int argc, char **argv) {
     renderer.ShutdownGpu();
     return 0;
   }
+  if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0) {
+    auto& renderer = vulkan.RuntimeRenderer();
+    renderer.InitializeGpu(nullptr);
+    std::shared_ptr<GuestGpu::ReadbackNotification> retained;
+    renderer.GetGpu().SendCommandSync([&] {
+      retained=GuestGpu::CaptureReadbackNotification();
+      Require("WaitRegMemNotificationLifetime", "actual dispatcher token", retained!=nullptr,
+          "capture outside the real dispatcher is not a lifetime control");
+      // Exact finite native kernel, scalar, protected publication, PM4 values,
+      // masks, guards and owned mapping cleanup precede the lifetime boundary.
+      CheckWaitRegMemNativeNonblockingCost(vulkan);
+    });
+    retained->Notify();
+    renderer.ShutdownGpu(); // joins and destroys the actual GuestGpu
+    retained->Notify();    // retained callback token must be harmless after destruction
+    retained.reset();
+    std::printf("[wait-token] nativeControls=PASS notifyBeforeShutdown=PASS notifyAfterDestroyedGuestGpu=PASS tokenReleased=PASS\n");
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0) {
     auto& renderer = vulkan.RuntimeRenderer();
     renderer.InitializeGpu(nullptr);
@@ -713,6 +740,10 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0) {
     CheckOcclusionNativeCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0) {
+    CheckPollExactPageReadbackCost(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0) {

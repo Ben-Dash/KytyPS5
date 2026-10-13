@@ -897,10 +897,15 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-queued-armed-neighbor-gpu)
 	add_test(NAME wait_reg_mem_ready_continuation_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-ready-continuation-cost-gpu)
+	add_test(NAME wait_reg_mem_notification_lifetime_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-notification-lifetime-gpu)
+	add_test(NAME poll_exact_page_readback_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --poll-exact-page-readback-cost-gpu)
 	set_tests_properties(wait_reg_mem_nonblocking_gpu wait_reg_mem_queued_gpu
 		wait_reg_mem_poll_neighbors_gpu wait_reg_mem_nonblocking_async_gpu
 		foreign_readback_queued_state_gpu foreign_readback_queued_armed_gpu
-		wait_reg_mem_ready_continuation_gpu
+		wait_reg_mem_ready_continuation_gpu wait_reg_mem_notification_lifetime_gpu
+		poll_exact_page_readback_gpu
 		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME packed_buffer_offset_cost
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --packed-buffer-offset-cost)

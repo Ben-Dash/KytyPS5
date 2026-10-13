@@ -1,5 +1,19 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: exact-page Poll native GREEN, world pending, 2026-10-13
+
+Independent scalar/cross-page genuine RED044730/E66C9D6D after test setup fixes:
+all native/same-page dirty siblings/backing/publication/CPU far read/canary/cleanup
+controls pass, but redundant far page arm and192byte download exceeds128budget.
+Same unchanged GREEN044825/04C7E627 after only shared PollReadMemory change:
+all touched-page dirty spans published,128bytes, far remains dirty/unarmed/old.
+Ordinary CPU512KiB locality route, owner discovery/barriers/tokens/max tick and
+ring retirement are unchanged. Nine affected CTests PASS3.63s. Retained actual
+notification token native044617 PASS after actual GuestGpu destruction; no
+sanitizer or performance claim. Core/new private install/30s world next.
+Last actual world dca5722b mean3.028 recovered regression, no net gain; stable60,
+actual1080/full effects remain pending. No images/menu/input/push/posts, WSL stopped.
+
 ## Current checkpoint: world regression recovered, no net FPS gain, 2026-10-13
 
 dca5722b core043609/install043708 PASS. Private Performance runtime EXE

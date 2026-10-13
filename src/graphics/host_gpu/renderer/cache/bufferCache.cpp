@@ -689,9 +689,13 @@ bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
 	auto state = m_memory_tracker.QueryReadback(vaddr, size);
 	if (!state.gpu_dirty) return true;
 	if (state.unarmed) {
-		// Preserve the existing owner discovery, barriers, page-wide copies, token,
-		// staging retirement and asynchronous priority publication.
-		RecordReadback(vaddr, size, false);
+		// CPU readers batch neighboring pages for locality. A GPU label poll instead
+		// publishes only the touched tracker pages, including every dirty byte on them.
+		// Retain normal owner discovery, barriers, token and staging retirement.
+		auto& buffer = m_slot_buffers[FindBuffer(vaddr, size)];
+		if (!DownloadBufferMemory(buffer, vaddr, size)) {
+			DrainStats::Record(DrainStats::Kind::ReadbackClean, 0);
+		}
 		state = m_memory_tracker.QueryReadback(vaddr, size);
 	}
 	if (!state.gpu_dirty) return true;
