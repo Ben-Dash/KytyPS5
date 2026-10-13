@@ -3225,6 +3225,9 @@ void TextureCache::ClearImage(CommandBuffer& command, ImageId id, vk::Format for
 		rendering.layerCount           = range.layerCount;
 		rendering.colorAttachmentCount = 1;
 		rendering.pColorAttachments    = &attachment;
+		// This actual CS substitute writes through a rendering loadOp clear, not
+		// COMPUTE or TRANSFER. Conservatively retain its source until a CS flush.
+		command.NoteCsPartialFlushProducer(vk::PipelineStageFlagBits2::eColorAttachmentOutput);
 		LabelCausalTrace::NotePartialNativeClear(true,reinterpret_cast<uint64_t>(&command));
 		command.Handle().beginRendering(&rendering);
 		command.Handle().endRendering();

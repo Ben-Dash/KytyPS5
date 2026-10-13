@@ -244,6 +244,13 @@ struct TextureCacheTestAccess {
     cache.ClearImage(command, id, cache.GetImage(id).backing.format, range, clear);
   }
 
+  static void CsAliasedClear(TextureCache& cache, CommandBuffer& command, ImageId id,
+                             vk::Format view_format, const vk::ImageSubresourceRange& range,
+                             const vk::ClearValue& clear) {
+    auto lock=Lock(cache);
+    cache.ClearImage(command,id,view_format,range,clear);
+  }
+
   // Selects the GPU (conditional rendering) or CPU readback path for GPU-written DCC keys.
   static bool SetDccGpuClear(TextureCache &cache, bool enabled) {
     cache.m_dcc_gpu_clear = enabled && cache.m_dcc_resolver.Available();
@@ -2072,6 +2079,8 @@ std::vector<u32> MakePassthroughVertexSpirv(bool layered, float clip_w = 1.0f) {
 } // namespace TestSpv
 
 #include "ComputeChainBarrierAuditTests.inc"
+#include "CsPartialFlushBarrierAudit.inc"
+#include "CsPartialFlushAliasBarrierAudit.inc"
 
 class VulkanHarness {
 public:
@@ -5562,6 +5571,8 @@ public:
 
   #include "DispatchRecordingAgeBudgetTests.inc"
   #include "ComputeChainVisibilityTests.inc"
+  #include "CsPartialFlushProducerStageCostTests.inc"
+  #include "CsPartialFlushAliasRolloverTests.inc"
   #include "RecordingAgePolicyNeighbors.inc"
   #include "ActiveAgeIndirectDispatchTests.inc"
   #include "OrdinaryBufferNativeFillCostTests.inc"
@@ -42922,12 +42933,15 @@ namespace {
 #include "Pm4CleanPacketReadTests.inc"
 #include "ShaderPrecompileGpuTests.inc"
 #include "SrtMaterializationBenchmark.inc"
+#include "CsPartialFlushProducerStagePlanTests.inc"
 
 int main(int argc, char **argv) {
   using namespace Libs::Graphics;
 
   std::setvbuf(stdout, nullptr, _IONBF, 0);
-  if (argc == 2 && std::strcmp(argv[1], "--compute-chain-visibility-only") == 0) {
+  if (argc == 2 && (std::strcmp(argv[1], "--compute-chain-visibility-only") == 0 ||
+                   std::strcmp(argv[1], "--cs-partial-producer-stage-cost") == 0 ||
+                   std::strcmp(argv[1], "--cs-partial-alias-rollover") == 0)) {
     Require("ComputeChainVisibility", "pin direct recorder and zero recording age before getters",
         _putenv_s("KYTY_RECORD_THREAD", "0") == 0 && _putenv_s("KYTY_RECORDING_AGE_US", "0") == 0,
         "could not pin native direct recording setup");
@@ -42935,6 +42949,20 @@ int main(int argc, char **argv) {
   EnsureConfigInitialized();
   CheckLeastRecentlyUsedCacheOrdering();
   CheckAttachmentFeedbackPipelineKeys();
+  if (argc == 2 && std::strcmp(argv[1], "--cs-partial-alias-rollover") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckCsPartialFlushAliasRollover();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cs-partial-producer-stage-plan") == 0) {
+    CheckCsPartialFlushProducerStagePlan();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--cs-partial-producer-stage-cost") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckCsPartialFlushProducerStageCost();
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--compute-chain-visibility-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckComputeChainVisibility();

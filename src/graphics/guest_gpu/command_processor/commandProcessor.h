@@ -147,6 +147,7 @@ public:
 	void PrepareCpuFlip(uint64_t request_id);
 	void SynchronizeGpu();
 	void EmitGlobalBarrier();
+	void EmitCsPartialFlush();
 	// Records a pending compute chain barrier (KYTY_COMPUTE_CHAIN) at a guest synchronization point
 	// that records no host barrier of its own.
 	void BreakComputeChain();
