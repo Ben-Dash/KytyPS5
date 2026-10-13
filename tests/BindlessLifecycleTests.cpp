@@ -409,6 +409,11 @@ private:
 #include "EmptyPm4TailDiagnosticWorkTests.inc"
 #include "ForeignReadbackQueuedStateCostTests.inc"
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
+#include "ForeignReadbackReadyAfterWaitCostTests.inc"
+#include "ForeignReadbackReadyAfterWaitNeighbors.inc"
+#include "ForeignReadbackReadyNewWriterNeighbor.inc"
+#include "ForeignReadbackReadyAfterWaitDirtyImageGuardTests.inc"
+#include "ForeignReadbackReadyAfterWaitPendingImageGuardTests.inc"
 #include "ArmedReadbackTypedNeighbors.inc"
 #include "WaitRegMemNativePollNeighbors.inc"
 #include "LiteralEopPublicationSpanNeighbors.inc"
@@ -431,7 +436,18 @@ private:
 #include "FunctionProfileSmokeTests.inc"
 #include "CommandStreamIdleSpinCostTests.inc"
 
+static bool IsForeignReadbackReadyMode(const char* mode) {
+  return std::strcmp(mode, "--foreign-readback-ready-after-wait-cost-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-mixed-range-neighbor-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-unpublished-neighbor-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-new-writer-neighbor-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-dirty-image-neighbor-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-pending-image-neighbor-gpu") == 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc == 2 && IsForeignReadbackReadyMode(argv[1]))
+    Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0)
     Libs::Graphics::ConfigureCpuWriteFaultImageWindowGuards();
   if (argc == 2 && std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0)
@@ -531,6 +547,7 @@ int main(int argc, char **argv) {
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
               (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+       IsForeignReadbackReadyMode(argv[1]) ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
@@ -725,6 +742,7 @@ int main(int argc, char **argv) {
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+       IsForeignReadbackReadyMode(argv[1]) ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
@@ -941,6 +959,20 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0) {
     CheckForeignReadbackQueuedStateCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && IsForeignReadbackReadyMode(argv[1])) {
+    if (std::strcmp(argv[1], "--foreign-readback-ready-after-wait-cost-gpu") == 0)
+      CheckForeignReadbackReadyAfterWaitCost(vulkan);
+    else if (std::strcmp(argv[1], "--foreign-readback-ready-pending-image-neighbor-gpu") == 0)
+      CheckForeignReadbackReadyAfterWaitPendingImageGuard(vulkan);
+    else if (std::strcmp(argv[1], "--foreign-readback-ready-dirty-image-neighbor-gpu") == 0)
+      CheckForeignReadbackReadyAfterWaitDirtyImageGuard(vulkan);
+    else if (std::strcmp(argv[1], "--foreign-readback-ready-new-writer-neighbor-gpu") == 0)
+      CheckForeignReadbackReadyNewWriterNeighbor(vulkan);
+    else
+      CheckForeignReadbackReadyAfterWaitNeighbors(vulkan,
+          std::strcmp(argv[1], "--foreign-readback-ready-unpublished-neighbor-gpu") == 0 ? 1u : 0u);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0) {

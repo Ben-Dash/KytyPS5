@@ -1031,6 +1031,15 @@ void BufferCache::PublishQueuedReadback(QueuedReadback& request) {
 	if (request.notification != nullptr) request.notification->Notify();
 }
 
+static bool ReadbackReadyAfterWaitEnabled() {
+	// Keep this dependency optimization optional until clean world measurements.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_READBACK_READY_AFTER_WAIT");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+
 void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, MemoryReadOrigin origin) {
 	FunctionProfile::Scope function_profile(FunctionProfile::Site::ReadMemoryAsync);
 	// Thread_Gpu only records and submits the download; this thread waits for its own
@@ -1132,6 +1141,22 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, 
 			g_readback_age.Add(age, std::chrono::duration<double, std::milli>(
 			                            std::chrono::steady_clock::now() - start)
 			                            .count());
+		}
+	}
+	// A completed native tick is not enough: its requested backing publication
+	// must also have finished. Image aliases on the full tracker pages remain
+	// conservative. A newer buffer writer during the image scan rejects the exit.
+	if (ReadbackReadyAfterWaitEnabled() && vaddr != 0 && GuestRange {vaddr, size}.Valid() &&
+	    !m_memory_tracker.QueryReadback(vaddr, size).gpu_dirty) {
+		const auto page_begin = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
+		const auto page_end = Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE);
+		const auto page_size = page_end - page_begin;
+		if (GuestRange {page_begin, page_size}.Valid() &&
+		    m_scheduler.Context().IsMapped(page_begin, page_size) &&
+		    !m_texture_cache.HasPendingDownload(page_begin, page_size) &&
+		    !m_texture_cache.IsRegionGpuModified(page_begin, page_size) &&
+		    !m_memory_tracker.QueryReadback(vaddr, size).gpu_dirty) {
+			return;
 		}
 	}
 	m_scheduler.WaitPriorityOperations(tick);

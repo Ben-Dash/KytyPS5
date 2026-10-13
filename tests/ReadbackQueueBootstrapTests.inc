@@ -5,6 +5,10 @@
 #include "graphics/host_gpu/renderer/debug.h"
 namespace Libs::Graphics {
 struct PerformanceMemoryTestAccess {
+	static bool ArmDownload(BufferCache& cache, uint64_t address, uint64_t bytes) {
+		auto& owner = cache.m_slot_buffers[cache.FindBuffer(address, bytes)];
+		return cache.DownloadBufferMemory(owner, address, bytes);
+	}
   static bool DownloadImageActual(TextureCache& cache,ImageId id) {
     std::scoped_lock lock(cache.m_lock);
     return cache.DownloadImageMemory(id);

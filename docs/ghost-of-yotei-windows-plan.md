@@ -1,5 +1,37 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: ready-after-native-wait optimization proved; world comparison pending
+
+Cycle41, native Windows, c8dde68a plus recorded WIP. Genuine RED `184937`,
+EXE0C3747C1: two finite GPU producers/downloads on one native tick, A genuinely
+published while independent B remained gated. All native/backing/token/guard/
+cleanup controls passed; only redundant PriorityWait1 failed the zero-wait
+oracle. Unchanged GREEN `185119`, EXE33D64895, passes with PriorityWait0.
+Same executable policy0 `185132` retains the intended cost failure, all controls
+passing. Optional KYTY_READBACK_READY_AFTER_WAIT=1 rechecks full requested
+buffer state after native wait, full rounded-page pending/dirty image guards,
+mapped range, then current buffer state again. Default remains off; existing
+CPU retry/write invalidation/native completion/token paths are preserved.
+
+Old-armed and queued/new-producer controls `185130–185131` pass. Fresh mixed
+A+B and unpublished-A controls `185307–185308`, EXEA1F1252A, pass with the
+necessary PriorityWait1, real bytes, guards and no extra submission. Strong post-wait new writer185421 passes newest native/backing/faultload.
+Actual dirty/pending images outside requested bytes on the samepage185801–
+185802 EXE18E346D6 pass, retaining PriorityWait1 and complete imagepublication.
+Pending image also staysdirty; pending-only directpostwait isolation is still
+testdebt. Eight affected native CTests pass in3.89s; existing read/write image
+controls185440–185441 pass. Core185448 and privateinstall185820 pass.
+Clean matched world policy0/1 comparison remains pending. This is not yet an FPS improvement.
+
+Discard cycle41 control `game-20261013-184050-...-b5edb2` from world FPS:
+frame650 arrived while still loading; the two post-title captures show loading
+and transition, not gameplay. Its ~20.6FPS is invalid as a world baseline.
+New ignored helper cycle41/world-title-gate requires elapsed>=90seconds AND
+frame>=650 before the full30-second title sample; syntax checked. Use identical
+full-render neutral-control executable/settings for policy0/1, then inspect
+images only after meaningful clean title gain. WSL shutdown185232 exits0.
+No push/issue publication; full effects and60FPS remain unmet.
+
 ## Current checkpoint: WSL stopped; performance research and completed profile reconciled
 
 Native Windows, branch `yotei-integration-native`, investigated source `fd11eba2`.

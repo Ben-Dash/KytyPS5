@@ -912,6 +912,22 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --wait-reg-mem-nonblocking-cost-async-gpu)
 	add_test(NAME foreign_readback_queued_state_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-queued-state-cost-gpu)
+	add_test(NAME foreign_readback_ready_after_wait_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-after-wait-cost-gpu)
+	set_tests_properties(foreign_readback_ready_after_wait_gpu PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE
+		ENVIRONMENT "KYTY_READBACK_READY_AFTER_WAIT=1")
+	add_test(NAME foreign_readback_ready_mixed_range_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-mixed-range-neighbor-gpu)
+	add_test(NAME foreign_readback_ready_unpublished_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-unpublished-neighbor-gpu)
+	add_test(NAME foreign_readback_ready_new_writer_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-new-writer-neighbor-gpu)
+	add_test(NAME foreign_readback_ready_dirty_image_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-dirty-image-neighbor-gpu)
+	add_test(NAME foreign_readback_ready_pending_image_gpu
+		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-ready-pending-image-neighbor-gpu)
+	set_tests_properties(foreign_readback_ready_mixed_range_gpu foreign_readback_ready_unpublished_gpu foreign_readback_ready_new_writer_gpu foreign_readback_ready_dirty_image_gpu foreign_readback_ready_pending_image_gpu
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_READBACK_READY_AFTER_WAIT=1")
 	add_test(NAME foreign_readback_queued_armed_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --foreign-readback-queued-armed-neighbor-gpu)
 	add_test(NAME wait_reg_mem_ready_continuation_gpu

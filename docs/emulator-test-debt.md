@@ -1,5 +1,24 @@
 # Integration test debt
 
+## Ready range after native wait versus unrelated publication, 2026-10-13
+
+Function profiling shows foreign readback latency is mostly waiting. Before
+changing its final global priority wait, reproduce actual A/B producers and
+downloads at the same native tick. Hold A publication, then let it genuinely
+finish while independent B publication remains held. Read A must preserve its
+native/backing bytes, token state, guards and cleanup before the zero-unrelated-
+wait oracle. A request covering A and B, an unpublished A, a new A writer and
+pending/dirty image aliases must retain the necessary publication ordering.
+No production shortcut before a genuine RED; image guards and tracker queries
+must be authoritative and release their locks before any existing wait.
+
+Native RED184937 and unchanged GREEN185119 prove the specific redundant wait;
+policy0 retains RED and mixed/unpublished/queued/new-producer neighbors pass.
+Post-wait new-writer and direct dirty/pending-image negatives pass185421/
+185801–185802; pending case also dirty, isolatedpending-only remains debt.
+Eight affected CTests pass. Actual FPS benefit still pending.
+This is a dependency correction lead, not a proven frame-critical FPS saving.
+
 ## Repeated foreign CPU write-fault eager publication required reproduction
 
 Three existing hot-page enrollment sites exclude every is_write request.
