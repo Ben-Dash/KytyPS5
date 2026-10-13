@@ -443,6 +443,131 @@ bool ResolveComputeBufferFill(const ShaderComputeInputInfo& input, uint32_t grou
 	return true;
 }
 
+// Ignored diagnostic proposal: include in renderCompute.cpp inside namespace Libs::Graphics,
+// AFTER existing ResolveComputeBufferFill. No behavior changes or new native work.
+namespace {
+bool ResolveStrictExistingDmaFill(const ShaderComputeInputInfo& input,
+    uint32_t x, uint32_t y, uint32_t z, uint32_t mode,
+    ShaderBufferResource& descriptor, uint32_t& value, uint64_t& bytes) {
+  if (input.stage.resources == nullptr || input.stage.program == nullptr) return false;
+  const auto& resources = *input.stage.resources;
+  const auto& fill = resources.uniform_fill;
+  if (fill.kind != ShaderRecompiler::IR::UniformFillKind::Buffer || !fill.uniform ||
+      fill.words < 1 || fill.words > 4 || fill.resource >= resources.buffers.size() ||
+      !resources.specialization_reads.empty()) return false;
+  if (!ResolveComputeBufferFill(input, x, y, z, mode, descriptor, value, bytes)) return false;
+  if (descriptor.Type() != 0 || (descriptor.Base48() & 3u) != 0 ||
+      descriptor.OutOfBounds() == 3 || !GuestRange{descriptor.Base48(), bytes}.Valid()) return false;
+  for (uint32_t component = 0; component < fill.words; ++component) {
+    if (((descriptor.DstSelXYZW() >> (3u * component)) & 7u) != 4u + component) return false;
+  }
+  return true;
+}
+struct ComputeDmaFillEligibility {
+  struct Row {
+    uint64_t shader = 0, calls = 0, bytes = 0, mapped = 0, no_image = 0, no_pending = 0;
+    uint64_t clean = 0, gpu_dirty = 0;
+  };
+  std::array<Row, 64> rows{};
+  uint64_t all = 0, resolver = 0, mapped = 0, no_image = 0, no_pending = 0, overflow = 0;
+  uint64_t first_ns = 0, first_frame = 0;
+  static bool Enabled() {
+    static const bool enabled = [] {
+      const char* text = KYTY_GETENV("KYTY_DEBUG_COMPUTE_DMA_ELIGIBILITY");
+      return text != nullptr && text[0] != '0';
+    }();
+    return enabled;
+  }
+  void Observe(const char* phase, RenderContext& context, const ShaderComputeInputInfo& input,
+      uint32_t x, uint32_t y, uint32_t z, uint32_t mode) {
+    if (!Enabled()) return;
+    const auto frame = context.GetGraphics().presented_frames.load(std::memory_order_relaxed);
+    if (frame < 650) return;
+    const auto now = FunctionProfile::NowNs();
+    if (first_ns == 0) { first_ns = now; first_frame = frame; }
+    ++all;
+    ShaderBufferResource descriptor{}; uint32_t value = 0; uint64_t size = 0;
+    if (ResolveStrictExistingDmaFill(input, x, y, z, mode, descriptor, value, size)) {
+      ++resolver;
+      const auto address = descriptor.Base48();
+      const auto shader = input.stage.program->shader_hash;
+      Row* row = nullptr;
+      for (auto& candidate : rows) {
+        if (candidate.calls != 0 && candidate.shader == shader) { row = &candidate; break; }
+        if (candidate.calls == 0 && row == nullptr) row = &candidate;
+      }
+      if (row == nullptr) ++overflow;
+      else { row->shader = shader; ++row->calls; row->bytes += size; }
+      if (context.IsMapped(address, size)) {
+        ++mapped;
+        if (row != nullptr) ++row->mapped;
+        auto& images = context.GetTextureCache();
+        if (!images.IsRegionRegistered(address, size)) {
+          ++no_image;
+          if (row != nullptr) ++row->no_image;
+          if (!images.HasPendingDownload(address, size)) {
+            ++no_pending;
+            if (row != nullptr) {
+              ++row->no_pending;
+              if (context.GetBufferCache().IsRegionGpuModified(address, size)) ++row->gpu_dirty;
+              else ++row->clean;
+            }
+          }
+        }
+      }
+    }
+    if (now - first_ns >= 5'000'000'000ull) {
+      std::printf("compute-dma-eligibility scope=diagnostic phase=%s frames=%llu->%llu wall_ns=%llu "
+          "dispatches=%llu strictResolver=%llu mapped=%llu noRegisteredImage=%llu "
+          "noPendingDownload=%llu overflow=%llu\n", phase, static_cast<unsigned long long>(first_frame),
+          static_cast<unsigned long long>(frame), static_cast<unsigned long long>(now-first_ns),
+          static_cast<unsigned long long>(all), static_cast<unsigned long long>(resolver),
+          static_cast<unsigned long long>(mapped), static_cast<unsigned long long>(no_image),
+          static_cast<unsigned long long>(no_pending), static_cast<unsigned long long>(overflow));
+      for (const auto& row : rows) if (row.calls != 0) {
+        std::printf("compute-dma-eligibility phase=%s shader=%016llx calls=%llu bytes=%llu mapped=%llu "
+            "noRegisteredImage=%llu noPendingDownload=%llu clean=%llu gpuDirty=%llu\n",
+            phase, static_cast<unsigned long long>(row.shader), static_cast<unsigned long long>(row.calls),
+            static_cast<unsigned long long>(row.bytes), static_cast<unsigned long long>(row.mapped),
+            static_cast<unsigned long long>(row.no_image), static_cast<unsigned long long>(row.no_pending),
+            static_cast<unsigned long long>(row.clean),
+            static_cast<unsigned long long>(row.gpu_dirty));
+      }
+      std::fflush(stdout);
+      *this = {}; first_ns = now; first_frame = frame;
+    }
+  }
+};
+inline thread_local ComputeDmaFillEligibility g_compute_dma_fill_before_image_meta;
+inline thread_local ComputeDmaFillEligibility g_compute_dma_fill_after_image_meta;
+} // namespace
+
+// Separate opt-in behavioral proposal, only after genuine unchanged-fixture RED.
+// Requires narrow ResolveStrictExistingDmaFill from the diagnostic predicate proposal.
+static bool TryConsumeStandaloneComputeDmaFill(RenderContext& context,
+    const ShaderComputeInputInfo& input, uint32_t x, uint32_t y, uint32_t z, uint32_t mode) {
+  static const bool enabled = [] {
+    const char* text = KYTY_GETENV("KYTY_COMPUTE_DMA_FILL");
+    return text != nullptr && std::strcmp(text, "1") == 0;
+  }();
+  if (!enabled) return false;
+  ShaderBufferResource descriptor{};
+  uint32_t value = 0;
+  uint64_t bytes = 0;
+  if (!ResolveStrictExistingDmaFill(input, x, y, z, mode, descriptor, value, bytes)) return false;
+  const auto address = descriptor.Base48();
+  if (!context.IsMapped(address, bytes)) return false;
+  auto& images = context.GetTextureCache();
+  const auto page_begin = Common::AlignDown(address, TRACKER_PAGE_SIZE);
+  const auto page_end = Common::AlignUp(address + bytes, TRACKER_PAGE_SIZE);
+  if (images.IsRegionRegistered(address, bytes) ||
+      images.HasPendingDownload(page_begin, page_end - page_begin)) return false;
+  // FillBuffer preserves GPU-dirty native ordering and unwritten-page publication;
+  // its GPU-clean protected-VA path keeps the existing epoch/upload behavior.
+  context.GetBufferCache().FillBuffer(address, bytes, value, false);
+  return true;
+}
+
 // DCC comp-to-single clear (GFX10+): the game sets every DCC key of a color surface to 0x10
 // ("the block's color is stored in the image") and then writes the clear color into the first
 // element of every 256-byte block, one thread per block. The hardware then reads the whole block
@@ -881,13 +1006,19 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 			                                  thread_group_z, mode);
 			return true;
 		}
-		return TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
-		                                   thread_group_z, mode);
+		if (TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
+		                                thread_group_z, mode)) return true;
+		return TryConsumeStandaloneComputeDmaFill(m_context, input_info, thread_group_x,
+		                                          thread_group_y, thread_group_z, mode);
 	};
+	g_compute_dma_fill_before_image_meta.Observe("before-image-meta", m_context, input_info,
+	    thread_group_x, thread_group_y, thread_group_z, mode);
 	if (resources.specialization_reads.empty() && consume_fill()) {
 		ResetBindings();
 		return true;
 	}
+	g_compute_dma_fill_after_image_meta.Observe("after-image-meta", m_context, input_info,
+	    thread_group_x, thread_group_y, thread_group_z, mode);
 
 	if (Config::GraphicsDebugDumpEnabled()) {
 		const auto sampled_images = std::count_if(

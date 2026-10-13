@@ -5565,6 +5565,9 @@ public:
   #include "RecordingAgePolicyNeighbors.inc"
   #include "ActiveAgeIndirectDispatchTests.inc"
   #include "OrdinaryBufferNativeFillCostTests.inc"
+  #include "OrdinaryBufferFillUnwrittenNeighbors.inc"
+  #include "OrdinaryBufferFillCpuCleanBdaNeighbor.inc"
+  #include "OrdinaryBufferFillPendingImageNeighbor.inc"
 
   void CheckComputeMetaClearClassification() {
     constexpr const char *name = "ComputeMetaClearClassification";
@@ -42936,6 +42939,21 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--dispatch-recording-age-budget-only") == 0) {
     VulkanHarness vulkan;
     vulkan.CheckDispatchRecordingAgeBudget();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--ordinary-buffer-fill-unwritten-neighbor-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckOrdinaryBufferFillUnwrittenNeighbor();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--ordinary-buffer-fill-cpu-clean-bda-neighbor-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckOrdinaryBufferFillCpuCleanBdaNeighbor();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--ordinary-buffer-fill-pending-image-neighbor-only") == 0) {
+    VulkanHarness vulkan;
+    vulkan.CheckOrdinaryBufferFillPendingImageNeighbor();
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--ordinary-buffer-native-fill-cost-only") == 0) {

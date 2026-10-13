@@ -776,6 +776,20 @@ if(BUILD_TESTING)
 	add_test(NAME shader_vertex_metadata COMMAND $<TARGET_FILE:shader_vertex_metadata_tests>)
 	add_test(NAME resource_materialization COMMAND $<TARGET_FILE:resource_materialization_tests>)
 	add_test(NAME srt_read_residency COMMAND $<TARGET_FILE:resource_materialization_tests> --srt-residency-only)
+	add_test(NAME materialization_diagnostic_observer
+		COMMAND $<TARGET_FILE:resource_materialization_tests> --diagnostic-observer-only)
+	add_test(NAME ordinary_compute_dma_fill
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --ordinary-buffer-native-fill-cost-only)
+	add_test(NAME ordinary_compute_dma_fill_unwritten
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --ordinary-buffer-fill-unwritten-neighbor-only)
+	add_test(NAME ordinary_compute_dma_fill_cpu_order
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --ordinary-buffer-fill-cpu-clean-bda-neighbor-only)
+	add_test(NAME ordinary_compute_dma_fill_pending_page
+		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --ordinary-buffer-fill-pending-image-neighbor-only)
+	set_tests_properties(ordinary_compute_dma_fill ordinary_compute_dma_fill_unwritten
+		ordinary_compute_dma_fill_cpu_order ordinary_compute_dma_fill_pending_page
+		PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE ENVIRONMENT "KYTY_COMPUTE_DMA_FILL=1")
+	set_tests_properties(materialization_diagnostic_observer PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	set_tests_properties(srt_read_residency PROPERTIES TIMEOUT 30)
 	add_test(NAME resource_tracking COMMAND $<TARGET_FILE:resource_tracking_tests>)
 	add_test(NAME event_queue_lifetime COMMAND $<TARGET_FILE:event_queue_lifetime_tests>)
