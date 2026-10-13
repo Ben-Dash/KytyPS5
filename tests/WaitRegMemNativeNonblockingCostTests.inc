@@ -1,4 +1,5 @@
 // Include AFTER LiteralEopPublicationCostTests.inc: existing real GPU producer and PM4 helper.
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -15,13 +16,20 @@ struct WaitRegMemWaitBudget {
   }
 };
 
-void CheckWaitRegMemNativeNonblockingCost(VulkanHarness& vulkan) {
+struct WaitRegMemRecordingProbe { std::atomic<bool>* consumed; };
+void ObserveWaitRegMemRecordingProbe(VkCommandBuffer, const uint8_t* payload) {
+  WaitRegMemRecordingProbe probe{};
+  std::memcpy(&probe,payload,sizeof(probe));
+  probe.consumed->store(true,std::memory_order_release);
+}
+
+void CheckWaitRegMemNativeNonblockingCost(VulkanHarness& vulkan, bool expect_recording = false) {
   constexpr const char* name="WaitRegMemNativeNonblockingCost";
   constexpr uint64_t base=0x00000002c2400000ull,bytes=0x40000,flag_address=base+0x10000;
   constexpr uint64_t done_a=base+0x20000,done_b=base+0x20004;
   constexpr uint32_t value=0x5145a7c3u,guard=0x5a5a5a5au;
-  Require(name,"real GPU dispatcher setup",GuestGpu::IsGpuThread() && !CommandRecordingDeferred(),
-      "execute on the existing GPU worker with direct recording; setup failure is not RED");
+  Require(name,"real GPU dispatcher setup",GuestGpu::IsGpuThread() && CommandRecordingDeferred()==expect_recording,
+      "requested recording profile is not active on the existing GPU worker; setup failure is not RED");
   Require(name,"existing protected fault route",Common::HostException::InstallHandler(
     [](const Common::HostException::ExceptionInfo& info) {
       if(info.type!=Common::HostException::ExceptionType::AccessViolation ||
@@ -47,6 +55,17 @@ void CheckWaitRegMemNativeNonblockingCost(VulkanHarness& vulkan) {
   HW::Context registers{};HW::UserConfig user_config{};HW::Shader shaders{};
   scheduler.Begin(registers,user_config,shaders);
   LibKernel::Memory::InstallGpuResources(&renderer);renderer.MapMemory(base,bytes);
+  std::atomic<bool> recording_consumed{false};
+  if(expect_recording) {
+    // Same real routed-payload setup control used by the deferred-binding tests.
+    // This callback is an observer; all numerical proof still comes from native GPU work.
+    auto* payload=ReserveRecordedCall(static_cast<VkCommandBuffer>(scheduler.Current().Handle()),
+                                     sizeof(WaitRegMemRecordingProbe));
+    Require(name,"actual routed recording stream",payload!=nullptr,
+        "record-thread flag alone did not create a real GPU-worker recording route");
+    const WaitRegMemRecordingProbe probe{&recording_consumed};
+    std::memcpy(payload,&probe,sizeof(probe));CommitRecordedCall(ObserveWaitRegMemRecordingProbe);
+  }
   // A written binding must be the registered owner; clean reads may use the upload stream.
   auto [owner,offset]=cache.ObtainBuffer(flag_address,4,true,true);
   Require(name,"real native scalar owner setup",owner!=nullptr && offset==0,
@@ -118,6 +137,11 @@ void CheckWaitRegMemNativeNonblockingCost(VulkanHarness& vulkan) {
       signal_failed?1u:0u,static_cast<unsigned>(result_a),static_cast<unsigned>(result_b),
       actual,value,marker_a,marker_b,guards?1u:0u,still_gpu_dirty?1u:0u,
       budget.full,budget.tick,budget.priority);
+  Require(name,"actual routed callback completion",!expect_recording ||
+      recording_consumed.load(std::memory_order_acquire),"routed recording payload was not consumed before native cleanup");
+  std::printf("[wait-recording] expectedDeferred=%u actualDeferred=%u actualRoutedCallback=%u\n",
+      expect_recording?1u:0u,CommandRecordingDeferred()?1u:0u,
+      recording_consumed.load(std::memory_order_acquire)?1u:0u);
   Require(name,"actual native scalar and masked comparison",!signal_failed &&
       result_a==Pm4ProcessResult::Complete && result_b==Pm4ProcessResult::Complete &&
       actual==value && marker_a==11 && marker_b==22 && guards && !still_gpu_dirty,

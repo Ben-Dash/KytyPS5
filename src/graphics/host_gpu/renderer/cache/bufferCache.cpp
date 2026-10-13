@@ -965,6 +965,19 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write) 
 		m_scheduler.Context().GetGpu().SendCommandSync([this, vaddr, size, is_write, reason, &tick,
 		                                                &age, &queued] {
 			DrainStats::ReasonScope reason_scope(reason);
+			// The foreign snapshot preceded queueing; publication or another reader
+			// may have resolved/armed this range before the GPU callback runs.
+			const auto queued_state = m_memory_tracker.QueryReadback(vaddr, size);
+			if (!queued_state.gpu_dirty) {
+				tick = 0;
+				return;
+			}
+			if (!queued_state.unarmed) {
+				if (!is_write) MarkReadbackHot(vaddr);
+				tick = queued_state.tick;
+				if (tick >= m_scheduler.CurrentTick()) m_scheduler.Flush();
+				return;
+			}
 			if (ReadbackAgeEnabled()) [[unlikely]] {
 				auto& master = m_scheduler.GetMasterSemaphore();
 				master.Refresh();
