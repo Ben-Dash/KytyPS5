@@ -367,6 +367,8 @@ private:
 #include "EndOfPipeLiteralNeighborTests.inc"
 #include "ReadbackQueueBootstrapTests.inc"
 #include "LiteralEopPublicationCostTests.inc"
+#include "ArmedReadbackWindowCostTests.inc"
+#include "ArmedReadbackTypedNeighbors.inc"
 #include "LiteralEopPublicationSpanNeighbors.inc"
 #include "LateBdaImageFringeTests.inc"
 #include "FirstUseBdaPointerChainTests.inc"
@@ -425,6 +427,8 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0 ||
                             std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0 ||
                             std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0 ||
+                            std::strcmp(argv[1], "--armed-readback-window-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-literal-neighbors-gpu") == 0 ||
@@ -521,6 +525,10 @@ int main(int argc, char **argv) {
     ConfigureFaultFirstBindingDeferredGpu();
   if (argc == 2 && std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0)
     ConfigureVertexNonFiniteTraceGpuEnvironment();
+  if (argc == 2 && std::strcmp(argv[1], "--armed-readback-window-cost-gpu") == 0)
+    ConfigureArmedReadbackWindowCostTests();
+  if (argc == 2 && std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0)
+    ConfigureArmedReadbackTypedNeighbors();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0 ||
@@ -621,6 +629,10 @@ int main(int argc, char **argv) {
     CheckVertexNonFiniteTraceGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0)
     CheckGenericChannelRepetitionCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--armed-readback-window-cost-gpu") == 0)
+    CheckArmedReadbackWindowCost(vulkan);
+  else if (argc == 2 && std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0)
+    CheckArmedReadbackTypedNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0)
     CheckGenericChannelRepetitionNeighbors(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0)

@@ -1,5 +1,35 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: ready buffer reads avoid unrelated downloads, 2026-10-13
+
+ReadMemory shared GPU-thread route queries a valid fully mapped range inside one
+live existing owner before widening. CPU-clean or already armed requested bytes
+avoid copying/arming unrelated dirty pages. New/unarmed/mixed requests keep the
+original download; true native tick AND priority completion waits and is_write
+CPU/BDA markers remain. Null/invalid/unmapped/unowned/partial spans keep discovery.
+Intended native RED001020/ECA63286 -> same GREEN001450/9941F873; final001641/
+EBB5F04C preserves four exact producer/CPU/native cases and removes ring growth.
+Four typed neighbors002004/C8A3296E PASS; CTests2/2 PASS0.81s. Existing EOP/fault/
+BC-partial/mip-owner cases001451..001453 PASS. Next native build/private install,
+then full-render neutral30second titleFPS with preserved3b shader cache.
+
+Generic-kind source3b016bfc core235714/install235757 PASS; nativeEXE
+C9F1458F1C9B82A08BEC51C94DD32DDC533EB9ADA9D6C18BFFF3C53A968C721C.
+Two bounded300s attempts game235805-653813 and000322-aea57f exited0 with no guard;
+first cache-key refresh required cold pipelines/frame294, warm retry loaded147MB
+and finishedframe649, cache182240066 bytes. Neither reached a full30s frame650
+sample; FPS result remains unverified. No more identical warming retries; the
+next memory fix preserves shader identity/cache. Do not claim loading13FPS asgain.
+
+Next shader channel candidate has validRED001021/ECA63286 after52 exact native
+literal cases including three-channel, both waves, EXEC/bounds/prefix guards.
+Four general modulo/division operations per entry resource; production pending.
+ArrayLength repetition proposals and native same-buffer/different-range controls
+are ignored/uncompiled. Loop subgroup-vote removal rejected:47 distinct real
+loop predicates, no same-block repeated-vote reproduction. No push/issuepost.
+Latest complete normal control remainsbc93628e age0 mean2.6148FPS;60/full effects/
+actual1080 remain pending. See cycle6 for artifact references and boundary debt.
+
 ## Current checkpoint: generic format dispatch validated, 2026-10-13
 
 Shared runtime formatted-buffer converter selects one mutually exclusive category

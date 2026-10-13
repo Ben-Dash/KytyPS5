@@ -804,6 +804,12 @@ if(BUILD_TESTING)
 	add_test(NAME generic_formatted_dispatch_decision_cost
 	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --generic-formatted-dispatch-decision-cost)
 	set_tests_properties(generic_formatted_dispatch_decision_cost PROPERTIES TIMEOUT 45 RUN_SERIAL TRUE)
+	add_test(NAME armed_readback_window_cost
+	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --armed-readback-window-cost-gpu)
+	set_tests_properties(armed_readback_window_cost PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
+	add_test(NAME armed_readback_typed_neighbors
+	         COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --armed-readback-typed-neighbors-gpu)
+	set_tests_properties(armed_readback_typed_neighbors PROPERTIES TIMEOUT 30 RUN_SERIAL TRUE)
 	add_test(NAME ShaderRecompilerPm4CleanPacketReads
 	         COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --pm4-clean-packet-reads)
 	set_tests_properties(ShaderRecompilerPm4CleanPacketReads

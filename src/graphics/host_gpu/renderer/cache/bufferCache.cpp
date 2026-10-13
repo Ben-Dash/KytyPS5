@@ -689,8 +689,25 @@ void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
 	// (already submitted) download only need their own tick, which is not a full drain.
 	// Its reads do not mark pages hot: they read shader code sharing a page with GPU data, or
 	// arguments written just before, where an eager download only delays the next wait.
-	RecordReadback(vaddr, size, is_write);
-	const auto state = m_memory_tracker.QueryReadback(vaddr, size);
+	ReadbackState state;
+	// Only an existing, fully registered owner can take the ready-range path.
+	// Keep discovery and its validation for new, null or invalid requests.
+	bool tracked = false;
+	if (vaddr != 0 && GuestRange {vaddr, size}.Valid() && m_scheduler.Context().IsMapped(vaddr, size)) {
+		const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
+		tracked = owner != nullptr && *owner && !IsBufferInvalid(*owner) &&
+		          m_slot_buffers[*owner].IsInBounds(vaddr, size);
+	}
+	if (tracked) {
+		state = m_memory_tracker.QueryReadback(vaddr, size);
+		if (state.unarmed) {
+			RecordReadback(vaddr, size, is_write);
+			state = m_memory_tracker.QueryReadback(vaddr, size);
+		}
+	} else {
+		RecordReadback(vaddr, size, is_write);
+		state = m_memory_tracker.QueryReadback(vaddr, size);
+	}
 	if (state.gpu_dirty) {
 		EXIT_IF(state.unarmed);
 		m_scheduler.Wait(state.tick);

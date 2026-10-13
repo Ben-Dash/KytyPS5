@@ -1,5 +1,31 @@
 # Integration test debt
 
+## Next cycle required reproductions, 2026-10-13
+
+Generic channel selection:52 literal native cases before actual invocation-entry
+variable-division cost. Counts1/2/3/4, reversed/constants, exact end/OOB/prefix,
+guest wave32/64 and asymmetric EXEC. Intended native RED001021/ECA63286 passes
+all52 controls first, then four divisions per resource fail expected0 for both
+waves. Old4800 matrix unchanged. Production pending; memory fix goes first.
+
+Public GPU ReadMemory ready-A/open unrelatedB on distinct4KiB pages of same16KiB
+owner: real EOP store, old completed native tick, bounded priority publication gate,
+clean/published and real newer GPU/CPU generations. All native/backing/cleanup
+controls first, then intended native RED001020/ECA63286: oldA ring0->64,
+cleanA64->128, CPU-knownA256->320 and unrelated B armed. All four native/backing/
+cleanup controls passed first; newA truly waited its new tick8->9. Queue1 disabled;
+no shader changes needed. Same GREEN001450/9941F873 and final001641/EBB5F04C
+avoid each unrelated allocation; newA still waits10->11 and readsabcdef09.
+Typed neighbors002004/C8A3296E PASS: mixed armed/unarmed span, same-page newer
+sibling, armed/clean is_write CPU-dirty+BDA epoch BEFORE pointer write, then exact
+native CPU upload and A/B guards. CTests2/2 PASS0.81s. EOP/fault/BC partial/mip
+ownership neighbors001451..001453 PASS. Game FPS remains pending native build.
+
+Boundary not directly covered: request crossing an existing owner's end into
+mapped unowned memory; production conservatively retains original discovery.
+Invalid/null/unmapped cases also retain that path. Separate readback queue stays
+off. No all-game correctness or stableFPS proof from these synthetic checks.
+
 ## Generic format control cost validated; game comparison pending, 2026-10-13
 
 Actual emitted shared conversion helper, nine legal format inputs, bounded taken

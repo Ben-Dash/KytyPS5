@@ -4,6 +4,12 @@
 #include "graphics/host_gpu/renderer/debug.h"
 namespace Libs::Graphics {
 struct PerformanceMemoryTestAccess {
+  static bool CpuDirty(BufferCache& cache,uint64_t address,uint64_t bytes) {
+    return cache.m_memory_tracker.IsRegionCpuModified(address,bytes);
+  }
+  static ReadbackState Readback(BufferCache& cache,uint64_t address,uint64_t bytes) {
+    return cache.m_memory_tracker.QueryReadback(address,bytes);
+  }
   using Request = std::shared_ptr<BufferCache::QueuedReadback>;
   static Request Plan(BufferCache& cache,uint64_t address,uint64_t bytes) {
     return cache.QueueReadback(address,bytes,false);

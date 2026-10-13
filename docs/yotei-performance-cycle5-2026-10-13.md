@@ -34,3 +34,13 @@ Code review found the five-parameter ABI and nested merge correct; exact GPU byt
 comparison confirms this hardware's results. A single SPIR-V choice is not a
 guarantee of a single native branch or frame speedup. Native build/install and
 30second in-game title comparison next; preserve neutral input/full rendering.
+
+Native source3b016bfc core235714/install235757 PASS; privateEXE
+C9F1458F1C9B82A08BEC51C94DD32DDC533EB9ADA9D6C18BFFF3C53A968C721C.
+Cold game235805-653813 invalidated old pipeline source key naturally, compiled
+new variants and exited0 at300s/frame294 with147MB saved cache. Warm retry
+000322-aea57f loaded that cache, exited0 at300s/frame649;182240066bytecache retained.
+Neither has complete frame650/30second title benchmark. Startup FPS and partial
+world titles cannot be used as a speedup. No guards/resets/menu/buttons/images.
+Next candidate changes only readback scheduling, preserving this warmed shader
+identity. Repeated identical warming attempts are deferred.
