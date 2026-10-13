@@ -1,5 +1,19 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: world regression recovered, no net FPS gain, 2026-10-13
+
+dca5722b core043609/install043708 PASS. Private Performance runtime EXE
+0E1378A5940BF3E051161CEE1E7CDD46B710F6E411196F04BEBB2F5E76129782.
+Full-render neutral world run `game-20261013-043719-perf-cycle15-wake-requery-world-title-30s-e71467`
+closed04:40:19UTC/exit0/no guards. Complete30s frames650..738/25title values:
+mean3.028, min2.9/max3.2. Recovering from Poll2.358333 is28.4% single-pair,
+but old TLS baseline3.033333 is effectively unchanged; NOT useful net gain.
+No images inspected. Native fixes are retained; next proof is exact-page Poll
+download, preserving all dirty bytes of touched tracker pages and ordinary
+CPU locality batching. Independent native far-page/same-page/cross-page RED
+pending. Fully armed callback neighbor integration/native test pending.
+WSL stopped/no menus/input/push/posts; actual1080/full effects/stable60 pending.
+
 ## Current checkpoint: foreign requery and publication wake native GREEN, 2026-10-13
 
 Foreign CPU callback correction local e55aded4: intended cost RED042544/6A15CF7E

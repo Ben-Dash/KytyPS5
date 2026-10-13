@@ -19,6 +19,10 @@ The generation closes publication-before-requeue loss; retained token is
 detached after worker join; debug backing reads cannot fault under queue lock.
 Six affected CTests and real asynchronous recording pass. Game recovery pending.
 
+dca5722b native core/private install PASS; full neutral world30s mean3.028,
+min2.9/max3.2,frames650..738,exit0/no guards. Prior2.358333 regression recovered,
+old3.033333 baseline essentially unchanged. No useful net gain or images.
+
 ## Foreign readback queued-state race required reproduction, 2026-10-13
 
 Actual foreign CPU ReadMemory sees A unarmed then queues its existing GPU
@@ -34,6 +38,12 @@ guards and cleanup pass; stale callback allocates ring64->128 and arms B.
 Same unchanged 043231/E4AF6BA0 GREEN: ring64->64 and B remains unarmed/pending;
 new real A writer still waits and publishes abcdef09. Shared correction is local
 e55aded4. Fully-armed callback neighbor and game hit/FPS remain pending.
+
+Fully armed queued callback native044134/9C3DA782 PASS: actual old backing and
+armed/free tick proved at foreign reader wait, real priority callback held then
+released, A12345678/B76543210/guards/cleanup correct; ring64->64, B remains
+pending/unarmed and open tick3 unchanged. Actual async/foreign/ready-continuation
+registered CTests3/3 PASS1.29s. Ring-pressure and image-only neighbors pending.
 
 Candidate after genuine RED: authoritative requery inside the queued callback,
 clean ->tick0, fully armed ->owned tick/flush if current, unarmed ->existing

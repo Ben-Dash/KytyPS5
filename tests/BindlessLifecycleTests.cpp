@@ -386,6 +386,7 @@ private:
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
 #include "ForeignReadbackQueuedStateCostTests.inc"
+#include "ForeignReadbackQueuedArmedNeighborTests.inc"
 #include "ArmedReadbackTypedNeighbors.inc"
 #include "WaitRegMemNativePollNeighbors.inc"
 #include "LiteralEopPublicationSpanNeighbors.inc"
@@ -407,7 +408,8 @@ private:
 #include "UserServiceGamePresetTests.inc"
 
 int main(int argc, char **argv) {
-  if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0)
+  if (argc == 2 && (std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0))
     Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0)
     Libs::Graphics::Require("WaitRegMemNativeNonblockingCostAsync", "recording profile setup",
@@ -470,6 +472,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
+                            std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
@@ -630,6 +633,7 @@ int main(int argc, char **argv) {
   VulkanHarness vulkan(argc == 2 &&
       (std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
+       std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-async-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
@@ -713,6 +717,10 @@ int main(int argc, char **argv) {
   }
   if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0) {
     CheckForeignReadbackQueuedStateCost(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--foreign-readback-queued-armed-neighbor-gpu") == 0) {
+    CheckForeignReadbackQueuedArmedNeighbor(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--dma-base-origins-only") == 0) {
