@@ -173,7 +173,7 @@ private:
 	vk::Pipeline                            m_color_transform = nullptr;
 	vk::DescriptorSetLayout                 m_raw_upload_descriptor_layout = nullptr;
 	vk::PipelineLayout                      m_raw_upload_pipeline_layout = nullptr;
-	std::array<vk::Pipeline, 2>              m_raw_upload_pipelines {};
+	std::array<vk::Pipeline, 3>              m_raw_upload_pipelines {};
 	// Shared with the deferred operations that return buffers, which may outlive this manager.
 	std::shared_ptr<ScratchPool>            m_scratch_pool;
 };

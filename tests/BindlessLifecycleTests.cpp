@@ -361,8 +361,10 @@ private:
 #include "EmbeddedFetchGpuTests.inc"
 #include "BcAliasOwnershipTests.inc"
 #include "FusedTiledUploadCostTests.inc"
+#include "FusedTiledUpload2ByteCapabilityTests.inc"
 #include "FusedTiledUpload1080Bench.inc"
 #include "FusedTiledUploadOddOffsetNeighbors.inc"
+#include "FusedTiledUpload2ByteNeighbors.inc"
 #include "FusedTiledUploadGpuMicrobench.inc"
 #include "BcPartialBufferWriteTests.inc"
 #include "BcAliasPartialTailPaddingTests.inc"
@@ -435,6 +437,10 @@ int main(int argc, char **argv) {
     Libs::Graphics::Require("WaitRegMemNativeNonblockingCost", "direct-record profile setup",
         _putenv_s("KYTY_RECORD_THREAD", "0") == 0, "could not pin direct recording before getters");
   if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                    std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0))
@@ -497,6 +503,10 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--wait-reg-mem-notification-lifetime-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-ready-continuation-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                             std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
@@ -666,6 +676,10 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--wait-reg-mem-poll-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--wait-reg-mem-queued-neighbor-gpu") == 0 ||
        std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
        std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0 ||
@@ -688,16 +702,28 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
   if (argc == 2 && (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-neighbors-gpu") == 0 ||
+                    std::strcmp(argv[1], "--fused-tiled-upload-2byte-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0 ||
                     std::strcmp(argv[1], "--fused-tiled-upload-gpu-microbench") == 0)) {
     auto& renderer = vulkan.RuntimeRenderer();
     renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&] {
-      if (std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0)
+      if (std::strcmp(argv[1], "--fused-tiled-upload-2byte-1080-pair-gpu") == 0)
+        CheckFusedTiledUpload2Byte1080Bench(vulkan);
+      else if (std::strcmp(argv[1], "--fused-tiled-upload-1080-pair-gpu") == 0)
         CheckFusedTiledUpload1080Bench(vulkan);
       else if (std::strcmp(argv[1], "--fused-tiled-upload-odd-offset-gpu") == 0)
         CheckFusedTiledUploadOddOffsetNeighbors(vulkan);
+      else if (std::strcmp(argv[1], "--fused-tiled-upload-2byte-neighbors-gpu") == 0)
+        CheckFusedTiledUpload2ByteNeighbors(vulkan);
+      else if (std::strcmp(argv[1], "--fused-tiled-upload-2byte-capability-gpu") == 0)
+        CheckFusedTiledUpload2ByteCapability(vulkan);
+      else if (std::strcmp(argv[1], "--fused-tiled-upload-2byte-cost-gpu") == 0)
+        CheckFusedTiledUpload2ByteCost(vulkan);
       else if (std::strcmp(argv[1], "--fused-tiled-upload-cost-gpu") == 0)
         CheckFusedTiledUploadCost(vulkan);
       else

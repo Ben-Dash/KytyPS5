@@ -10,6 +10,7 @@
 #include "gpu_tiler_shaders/gpu_tiler_prt_3d_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_prt_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_render_target_spv.h"
+#include "gpu_tiler_shaders/gpu_tiler_render_target_upload16_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_render_target_upload32_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_render_target_upload64_spv.h"
 #include "gpu_tiler_shaders/gpu_tiler_standard256_spv.h"
@@ -449,8 +450,8 @@ vk::Pipeline TileManager::GetPipeline(uint32_t slot) {
 }
 
 vk::Pipeline TileManager::GetRawUploadPipeline(uint32_t bytes_per_element) {
-	EXIT_IF(bytes_per_element != 4u && bytes_per_element != 8u);
-	const auto index = bytes_per_element == 4u ? 0u : 1u;
+	EXIT_IF(bytes_per_element != 2u && bytes_per_element != 4u && bytes_per_element != 8u);
+	const auto index = bytes_per_element == 2u ? 0u : bytes_per_element == 4u ? 1u : 2u;
 	if (m_raw_upload_pipelines[index] != nullptr) return m_raw_upload_pipelines[index];
 	if (m_raw_upload_pipeline_layout == nullptr) {
 		const std::array<vk::DescriptorSetLayoutBinding, 3> bindings {{
@@ -469,7 +470,8 @@ vk::Pipeline TileManager::GetRawUploadPipeline(uint32_t bytes_per_element) {
 		RequireVulkanSuccess(m_graphics.device.createPipelineLayout(
 		    &layout, nullptr, &m_raw_upload_pipeline_layout), "create raw tiled upload pipeline layout");
 	}
-	const auto code = index == 0u ? std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD32_SPV)
+	const auto code = bytes_per_element == 2u ? std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD16_SPV)
+	    : bytes_per_element == 4u ? std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD32_SPV)
 	                              : std::span<const uint32_t>(GPU_TILER_RENDER_TARGET_UPLOAD64_SPV);
 	const auto module = CompileSPV(code, m_graphics.device);
 	vk::PipelineShaderStageCreateInfo stage {};
@@ -506,7 +508,7 @@ bool TileManager::TryUploadImage(Image& image, Result source, uint64_t linear_ca
 	    infos.size() != 1u || regions.size() != 1u || source.buffer == nullptr) return false;
 	const auto& tile = infos.front();
 	const auto& copy = regions.front();
-	if ((tile.bytes_per_element != 4u && tile.bytes_per_element != 8u) ||
+	if ((tile.bytes_per_element != 2u && tile.bytes_per_element != 4u && tile.bytes_per_element != 8u) ||
 	    tile.bytes_per_element != info.bytes_per_block || tile.family != TileBlockFamily::RenderTarget64KB ||
 	    tile.tail || tile.depth != 1u || tile.surface_z != 0u || tile.width != info.extent.width ||
 	    tile.height != info.extent.height || tile.linear_offset != 0u ||
@@ -532,11 +534,22 @@ bool TileManager::TryUploadImage(Image& image, Result source, uint64_t linear_ca
 	const auto descriptor_range = Common::AlignUp(base + source.size, uint64_t {4});
 	if (descriptor_range > limits.maxStorageBufferRange || descriptor_range > UINT32_MAX ||
 	    descriptor_offset > capacity || descriptor_range > capacity - descriptor_offset) return false;
-	const auto raw_format = tile.bytes_per_element == 4u ? vk::Format::eR32Uint
+	const auto raw_format = tile.bytes_per_element == 2u ? vk::Format::eR16Uint
+	                      : tile.bytes_per_element == 4u ? vk::Format::eR32Uint
 	                                                    : vk::Format::eR16G16B16A16Uint;
 	if (!ImageViewOps::FormatsCompatible(native.format, raw_format) ||
 	    !(m_graphics.GetFormatProperties(raw_format).optimalTilingFeatures &
 	      vk::FormatFeatureFlagBits::eStorageImage)) return false;
+	if (tile.bytes_per_element == 2u) {
+		// Vulkan 1.3 admits an Unknown-format shader only for formats advertising
+		// STORAGE_WRITE_WITHOUT_FORMAT. Unsupported devices retain the copy route.
+		vk::FormatProperties3 properties3 {};
+		vk::FormatProperties2 properties2 {};
+		properties2.pNext = &properties3;
+		m_graphics.physical_device.getFormatProperties2(raw_format, &properties2);
+		if (!(properties3.optimalTilingFeatures &
+		      vk::FormatFeatureFlagBits2::eStorageWriteWithoutFormat)) return false;
+	}
 	vk::ImageFormatProperties properties {};
 	if (m_graphics.GetImageFormatProperties(raw_format, vk::ImageType::e2D,
 	    vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eStorage, native.flags, &properties) !=

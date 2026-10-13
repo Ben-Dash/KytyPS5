@@ -46,19 +46,21 @@ public:
   int64_t direct = -1;
 };
 
-void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
+void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe,bool alternate_order=false) {
   constexpr const char* name="FusedUpload1080Pair";
   constexpr uint32_t width=1920,height=1080;
   constexpr uint64_t prefix=260,guard=256;
   constexpr uint32_t sentinel=0xdeadbeefu;
   auto& graphics=vulkan.RuntimeContext();auto& scheduler=vulkan.RuntimeRenderer().GetCommandScheduler();
   Require(name,"real GPU worker and direct recorder setup",GuestGpu::IsGpuThread() &&
-      !CommandRecordingDeferred() && graphics.max_push_descriptors>=3 && (bpe==4 || bpe==8),
+      !CommandRecordingDeferred() && graphics.max_push_descriptors>=3 && (bpe==2 || bpe==4 || bpe==8),
       "run standalone on actual GPU worker/direct recorder with the existing push-capability harness");
   HW::Context registers{};HW::UserConfig user_config{};HW::Shader shaders{};
   scheduler.Begin(registers,user_config,shaders);
-  const auto format=bpe==4 ? Prospero::BufferFormat::k8_8_8_8UNorm : Prospero::BufferFormat::k16_16_16_16Float;
-  const auto native_format=bpe==4 ? vk::Format::eR8G8B8A8Unorm : vk::Format::eR16G16B16A16Sfloat;
+  const auto format=bpe==2 ? Prospero::BufferFormat::k8_8UNorm :
+      bpe==4 ? Prospero::BufferFormat::k8_8_8_8UNorm : Prospero::BufferFormat::k16_16_16_16Float;
+  const auto native_format=bpe==2 ? vk::Format::eR8G8Unorm :
+      bpe==4 ? vk::Format::eR8G8B8A8Unorm : vk::Format::eR16G16B16A16Sfloat;
   constexpr auto tile_mode=Prospero::TileMode::kRenderTarget;
   TileSizeAlign total{};TileGetTextureTotalSize(format,width,height,1,1,tile_mode,false,total);
   const auto layout=TextureCalcUploadLayout(format,width,height,1,1,tile_mode,total.size,false,name);
@@ -90,7 +92,13 @@ void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
   bool source_valid=true;
   for(uint32_t y=0;y<height;++y)for(uint32_t x=0;x<width;++x) {
     const uint32_t pixel=y*width+x;
-    if(bpe==4)expected[pixel]=0x93a60000u^(pixel*0x01010103u);
+    if(bpe==2) {
+      // Independent encoded16-bit corners plus a full uint16 pattern; no float
+      // conversion, component normalization or reuse of previous image bytes.
+      const uint32_t value=pixel<halves.size() ? halves[pixel] :
+          ((0x93a6u^(pixel*0x0103u))&0xffffu);
+      expected[pixel/2u]|=value<<((pixel&1u)*16u);
+    } else if(bpe==4)expected[pixel]=0x93a60000u^(pixel*0x01010103u);
     else for(uint32_t word=0;word<2;++word)
       expected[pixel*2+word]=uint32_t{halves[(pixel*3+word*2)%halves.size()]} |
           (uint32_t{halves[(pixel*3+word*2+1)%halves.size()]}<<16);
@@ -102,7 +110,8 @@ void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
         (by*columns+bx)*block.block_size+(local^xor_value);
     source_valid&=valid && offset+bpe<=total.size;
     if(valid && offset+bpe<=total.size)
-      std::memcpy(mapped.data()+prefix+offset,expected.data()+uint64_t{pixel}*(bpe/4),bpe);
+      std::memcpy(mapped.data()+prefix+offset,
+          reinterpret_cast<const uint8_t*>(expected.data())+uint64_t{pixel}*bpe,bpe);
   }
   Require(name,"independent full source addresses setup",source_valid,"CPU source tile address escaped complete allocation");
   // Same seed/guards in genuine guest backing; preparation stays outside GPU timing.
@@ -118,6 +127,24 @@ void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
   image_info.bytes_per_block=bpe;image_info.samples=1;image_info.tile_mode=tile_mode;
   const auto& mip=layout.surface.mips[0];image_info.mip_layout[0]={mip.offset,mip.size,mip.padded_width,mip.padded_height};
   Libs::Graphics::Image image(graphics,scheduler,image_info);
+  if(bpe==2) {
+    vk::FormatProperties3 properties3{};
+    vk::FormatProperties2 properties2{};properties2.pNext=&properties3;
+    graphics.physical_device.getFormatProperties2(vk::Format::eR16Uint,&properties2);
+    Require(name,"actual2byte formatless mutable storage capability setup",
+        graphics.physical_device_properties.apiVersion>=VK_API_VERSION_1_3 &&
+        bool(properties3.optimalTilingFeatures&vk::FormatFeatureFlagBits2::eStorageImage) &&
+        bool(properties3.optimalTilingFeatures&vk::FormatFeatureFlagBits2::eStorageWriteWithoutFormat) &&
+        ImageViewOps::FormatsCompatible(image.backing.format,vk::Format::eR16Uint) &&
+        bool(image.backing.flags&vk::ImageCreateFlagBits::eMutableFormat) &&
+        bool(image.backing.usage&vk::ImageUsageFlagBits::eStorage),
+        "real R16Uint formatless raw view unsupported; not a timing result");
+    ImageViewInfo raw{};raw.format=vk::Format::eR16Uint;raw.type=vk::ImageViewType::e2D;
+    raw.aspect=vk::ImageAspectFlagBits::eColor;raw.level_count=raw.layer_count=1u;
+    raw.usage=vk::ImageUsageFlagBits::eStorage;
+    Require(name,"actual2byte raw image view setup",image.FindView(raw)!=nullptr,
+        "real compatible R16Uint view failed before either timed route");
+  }
   StreamBuffer parameters(graphics,scheduler,MemoryUsage::Upload,1u<<20);
   TileManager tiler(graphics,scheduler,parameters);
   FetchGpuBuffer output(graphics,guard+live_bytes+guard,vk::BufferUsageFlagBits::eTransferDst);
@@ -185,11 +212,20 @@ void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
     return ns;
   };
   // One calibration each then one additional warm;7interleaved paired samples.
-  Sample(false,0);Sample(true,0);Sample(false,1);Sample(true,1);
+  Sample(false,0);Sample(true,0);
+  if(alternate_order) {Sample(true,1);Sample(false,1);}
+  else {Sample(false,1);Sample(true,1);}
   std::array<std::vector<double>,2> measured;
   for(uint32_t sample=0;sample<7;++sample) {
-    measured[0].push_back(Sample(false,sample+2));
-    measured[1].push_back(Sample(true,sample+2));
+    // Existing4/8CLI keeps its original order. New2BCLI alternates first route
+    // by pair, with both routes on the same already seeded native resources.
+    if(alternate_order && (sample&1u)!=0u) {
+      measured[1].push_back(Sample(true,sample+2));
+      measured[0].push_back(Sample(false,sample+2));
+    } else {
+      measured[0].push_back(Sample(false,sample+2));
+      measured[1].push_back(Sample(true,sample+2));
+    }
   }
   for(uint32_t route=0;route<2;++route)std::sort(measured[route].begin(),measured[route].end());
   std::printf("[upload1080-pair] bpe=%u1920x1080 legacy_median_ns=%.1f fused_median_ns=%.1f legacy_min/max=%.1f/%.1f fused_min/max=%.1f/%.1f reduction_pct=%.2f sameEXE/sameDeviceSource/sameTarget/allbits=PASS\n",
@@ -212,6 +248,12 @@ void RunFusedUpload1080Pair(VulkanHarness& vulkan,uint32_t bpe) {
 
 void CheckFusedTiledUpload1080Bench(VulkanHarness& vulkan) {
   RunFusedUpload1080Pair(vulkan,4);RunFusedUpload1080Pair(vulkan,8);
+}
+void CheckFusedTiledUpload2Byte1080Bench(VulkanHarness& vulkan) {
+  RunFusedUpload1080Pair(vulkan,2,true);
+  // Run returned after native resources, querypool, real guest mapping and its
+  // direct-memory allocation retired; a median printed earlier is not success.
+  std::printf("[upload1080-2byte-complete] 1920x1080 liveTexels=2073600 liveWords=1036800 sameEXE/sameDeviceSource/sameTarget alternateOrder=1 allbits/sourceGuards/guestGuards/actualMappingCleanup=PASS\n");
 }
 } // namespace
 } // namespace Libs::Graphics

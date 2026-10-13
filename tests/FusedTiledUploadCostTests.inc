@@ -76,19 +76,19 @@ FusedUploadObserved RunFusedTiledUploadCase(VulkanHarness& vulkan, uint32_t bpe,
   constexpr uint64_t base = 0x00000002c0900000ull, allocation_bytes = 0x40000;
   constexpr uint64_t source_address = base + 0x10000, guard = 256;
   constexpr uint32_t sentinel = 0x5a5a5a5a;
-  Require(name, "bounded real GPU worker setup", GuestGpu::IsGpuThread() && (bpe==4 || bpe==8),
+  Require(name, "bounded real GPU worker setup", GuestGpu::IsGpuThread() && (bpe==2 || bpe==4 || bpe==8),
       "use the existing GuestGpu SendCommandSync wrapper; no missing-worker workaround");
   Require(name,"actual tiler descriptor capability setup",
       vulkan.RuntimeContext().max_push_descriptors>=3,
       "instantiate existing VulkanHarness with require_push_descriptors=true before the RED");
   Require(name,"standalone direct recording setup",!CommandRecordingDeferred(),
       "global test dispatcher observer requires standalone direct recording; setup failure");
-  const auto guest_format = bpe==4 ? Prospero::BufferFormat::k8_8_8_8UNorm :
-                                    Prospero::BufferFormat::k16_16_16_16Float;
-  const auto native_format = bpe==4 ? vk::Format::eR8G8B8A8Unorm :
-                                     vk::Format::eR16G16B16A16Sfloat;
-  const auto raw_format = bpe==4 ? vk::Format::eR32Uint :
-                                  vk::Format::eR16G16B16A16Uint;
+  const auto guest_format = bpe==2 ? Prospero::BufferFormat::k8_8UNorm :
+      bpe==4 ? Prospero::BufferFormat::k8_8_8_8UNorm : Prospero::BufferFormat::k16_16_16_16Float;
+  const auto native_format = bpe==2 ? vk::Format::eR8G8Unorm :
+      bpe==4 ? vk::Format::eR8G8B8A8Unorm : vk::Format::eR16G16B16A16Sfloat;
+  const auto raw_format = bpe==2 ? vk::Format::eR16Uint :
+      bpe==4 ? vk::Format::eR32Uint : vk::Format::eR16G16B16A16Uint;
   constexpr auto tile_mode = Prospero::TileMode::kRenderTarget;
   TileSizeAlign total{};
   TileGetTextureTotalSize(guest_format,width,height,1,1,tile_mode,false,total);
@@ -106,7 +106,10 @@ FusedUploadObserved RunFusedTiledUploadCase(VulkanHarness& vulkan, uint32_t bpe,
   constexpr std::array<uint16_t,12> halves{0x0000,0x8000,0x0001,0x03ff,0x3c00,0x7c00,
                                          0xfc00,0x7e01,0x7d55,0x3555,0xbc00,0xffff};
   for(uint32_t pixel=0;pixel<width*height;++pixel) {
-    if(bpe==4) expected[pixel]=0x93a60000u^(pixel*0x01010103u);
+    if(bpe==2) {
+      const uint32_t half=(0x93a6u^(pixel*0x0103u))&0xffffu;
+      expected[pixel/2u]|=half<<((pixel&1u)*16u);
+    } else if(bpe==4) expected[pixel]=0x93a60000u^(pixel*0x01010103u);
     else for(uint32_t word=0;word<2;++word)
       expected[pixel*2+word]=uint32_t{halves[(pixel*3+word*2)%halves.size()]} |
           (uint32_t{halves[(pixel*3+word*2+1)%halves.size()]}<<16);
@@ -124,7 +127,8 @@ FusedUploadObserved RunFusedTiledUploadCase(VulkanHarness& vulkan, uint32_t bpe,
         (by*columns+bx)*block.block_size+(local^block_xor);
     Require(name,"independent source bounds setup",offset+bpe<=tiled.size(),
         "CPU tiled source escaped real allocation; not a cost RED");
-    std::memcpy(tiled.data()+offset,expected.data()+(uint64_t{y}*width+x)*(bpe/4),bpe);
+    std::memcpy(tiled.data()+offset,reinterpret_cast<const uint8_t*>(expected.data())+
+        (uint64_t{y}*width+x)*bpe,bpe);
   }
 
   int64_t direct=-1;
@@ -185,6 +189,14 @@ FusedUploadObserved RunFusedTiledUploadCase(VulkanHarness& vulkan, uint32_t bpe,
       bool(image.backing.flags&vk::ImageCreateFlagBits::eMutableFormat) &&
       bool(image.backing.usage&vk::ImageUsageFlagBits::eStorage),
       "raw storage view is unsupported; setup failure is not cost RED");
+  if(bpe==2) {
+    vk::FormatProperties3 properties3{};
+    vk::FormatProperties2 properties2{}; properties2.pNext=&properties3;
+    graphics.physical_device.getFormatProperties2(raw_format,&properties2);
+    Require(name,"actual formatless R16 upload view capability setup",
+        bool(properties3.optimalTilingFeatures&vk::FormatFeatureFlagBits2::eStorageWriteWithoutFormat),
+        "R16Uint formatless storage writes unsupported; setup failure is not cost RED");
+  }
   auto raw_view=desc.view_info; raw_view.format=raw_format;
   raw_view.usage=vk::ImageUsageFlagBits::eStorage;
   Require(name,"legal real raw view setup",image.FindView(raw_view)!=nullptr,
@@ -241,6 +253,14 @@ FusedUploadObserved RunFusedTiledUploadCase(VulkanHarness& vulkan, uint32_t bpe,
   std::printf("[fused-upload-cost] bpe=%u128x128 all_bits=PASS guards=PASS raw_view=PASS copyBufferToImage=%zu\n",
       bpe,uploaded_targets.size());
   return {bpe,static_cast<uint32_t>(uploaded_targets.size()),gpu_ns};
+}
+
+void CheckFusedTiledUpload2ByteCost(VulkanHarness& vulkan) {
+  const auto result=RunFusedTiledUploadCase(vulkan,2);
+  // Actual public upload, all native bits/canaries/source/cleanup passed first.
+  Require("FusedTiledUpload2Byte","no full intermediate R8G8 upload transfer",
+      result.intermediate_copies==0u,
+      "R8G8UNorm render-target detile still copies a full linear intermediate into the image");
 }
 
 void CheckFusedTiledUploadCost(VulkanHarness& vulkan) {

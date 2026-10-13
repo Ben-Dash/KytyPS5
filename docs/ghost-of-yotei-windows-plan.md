@@ -1,5 +1,59 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: direct2B completed native proof; core/world next, 2026-10-13
+
+Shared2B direct upload unchanged RED091807 ->GREEN092043, copies1->0 with exact
+native data/guards/source/cleanup. Actual1080 operation paired092513/41553354
+median101184->27520ns (-72.80%), NOT game FPS. New neighbors092919/DAE6CB3D
+R8G8UNorm and R16Sfloat127x65: all16510bytes including final halfword, interior
+source4, native subsequent writer, source/output guards and cleanup PASS;
+copies0. Missing actual formatless feature bit simulated by one forwarded
+native format query092920 sameEXE: legacycopies1, exact bits/guards/cleanup PASS.
+New3CTests PASS1.21s; old4 affected cases PASS1.73s. Independent reviewer found
+no blocker. Capability-specific native2B device with absent bit is unavailable;
+simulated query tests fallback, not a second physical GPU.
+
+Completed fix will be committed separately, native core/new private install and
+neutral chain1 window-title30s compared against b8d1ceb3 mean3.771429 and prior
+repeat3.882143. No active native process now (verify). Stable60/full effects
+remain unresolved; no screenshots until useful clean title FPS gain.
+
+## Current checkpoint: direct2B native GREEN and1080 operation -72.8%; world pending
+
+On b8d1ceb3 plus shared2B upload WIP, real public UploadImage RED091807/FCAD4B4D
+exact bits/guards/source/cleanup PASS before intermediatecopies1 -> unchanged
+GREEN092043/FC1BB5F1 copies0 with all controls unchanged. Existing4/8B odd
+pitch/interior source/next GPU writer, BC owner and mip-copy4CTests PASS1.73s.
+Native shader uses shared render-target swizzle and integer half extraction;
+compatible R16Uint Unknown/writeonly view requires actual Vulkan1.3 format
+StorageWriteWithoutFormat bit. Unsupported metadata/feature retains old route.
+
+Actual SAME EXE41553354/1920x1080 native paired GPU092513: seven alternately
+ordered warmed pairs, same device-local source/target, fresh zero clear before
+each measured upload, all1036800words and output/source/guest guards plus
+mapping cleanup PASS. Legacy median101184ns, fused27520ns (-72.80%). One GPU
+upload operation only: NOT whole-game FPS or attribution of all diagnostic6.6ms.
+Artifacts in `_Build/analysis/yotei-performance-cycle1-20261012/checks/20261013-*`.
+Two-byte odd/R16half/capability fallback still pending, then commit/core/private
+install and neutral chain1 title30s. No active native process now (verify).
+Other actual games untested; independent synthetic shared-path coverage only.
+
+## Current checkpoint: empty tail world3.77; direct2B upload next, 2026-10-13
+
+Local b8d1ceb392afa10922b0811ea211d7c3891d5bc3 native core074806/install074908
+PASS; private cycle25/runtime-b8d1ceb3-empty-tail EXEEF33708B439BD3F7DA99A5091A1291AC5DF7830A016BC90D24E360400E1D6FFC.
+Neutral full-render chain1/HALFoff/scale100 world run
+`game-20261013-074923-perf-cycle25-empty-tail-world-title-30s-50ae28` complete
+30s653..761/28titles mean3.771429,min3.5/max4.0,exit0/no guards. Against previous
+chain1 repeat3.882143 this is -2.85% single-pair: NO meaningful gain, no images.
+Actual native submit reduction remains proven; useful game throughput unproved.
+No active native process after cleanup (verify before next build).
+
+Next: reproduce direct2B tiled-upload intermediate copy cost, then narrow shared
+R16Uint view/shader capability-gated correction and timing. Three-agent cycle
+delivered independent proposals/review; later child retries hit model capacity,
+root continues saved proposals sequentially. No game menu/input/new push/posts.
+
 ## Current checkpoint: redundant tail native GREEN; world comparison pending, 2026-10-13
 
 eeebdd96 plus shared optional CP flush correction: genuine native RED072755

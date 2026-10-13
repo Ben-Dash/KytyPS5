@@ -1,5 +1,40 @@
 # Integration test debt
 
+## Two-byte full color tiled upload cost reproduction, 2026-10-13
+
+Actual RED091807/FCAD4B4D on b8d1ceb3: complete128x128 R8G8UNorm native bits,
+guards, legal raw view, source and cleanup PASS before copyBufferToImage1.
+Same unchanged GREEN092043/FC1BB5F1: all controls unchanged, copies0. Shared
+render-target swizzle and UInt16 half extraction into compatible R16Uint view;
+Unknown-format writes require actual optimalStorageWriteWithoutFormat bit.
+Existing4/8B cost/odd-offset/source-next-writer, BC ownership and mip-copy
+four CTests PASS1.73s. Native2B odd-pitch/R16half/capability fallback and paired
+1080 GPU timing pending before game. Revisions local-only, no game FPS claim.
+
+Paired1080 GPU092513/41553354 PASS: seven warmed alternating pairs sameEXE,
+device-local source/target, actual copies1/0, all1036800words and guards/source/
+guest mapping cleanup. Legacy101184ns vs fused27520ns median (-72.80% operation).
+No whole-game gain implied. New2B neighbors then native core/game still required.
+Primary formatless contract: https://docs.vulkan.org/spec/latest/chapters/interfaces.html
+(Unknown OpTypeImage writes with format-specific STORAGE_WRITE_WITHOUT_FORMAT).
+
+Native2B neighbors092919/DAE6CB3D PASS R8G8UNorm/R16Sfloat127x65 all16510bytes,
+literal half NaN/denormal/negative-zero bits, source+4, actual later source writer,
+guards/cleanup, copies0. Capability092920 sameEXE forwards real R16 extended
+query and removes only its formatless-write bit once: legacycopies1/allbits/
+guards/cleanup PASS. Simulated missing host bit, not absent-capability hardware.
+Three registered2B CTests PASS1.21s. Core/private install/world FPS still pending.
+
+Jetsku U59 has a direct R16Uint storage-view upload route; ours admits only4/8B.
+Actual late Yotei2B R8G8UNorm tiled1920x1080 site measured6.641ms/frame in
+instrumented GPU zones. Before production changes, extend synthetic public
+UploadImage fixture with independent16-bit packed pattern, native exact bits,
+source/guards/cleanup and real formatless-write capability preconditions.
+Expected cost RED is one full intermediate buffer-to-image copy versus zero;
+failed setup/numeric correctness is not a valid cost RED. Keep unsupported
+capability/metadata fallback and existing4/8B semantics. Native R16float bit
+patterns, odd pitch/nonzero offset and capability fallback needed afterward.
+
 ## Redundant empty PM4 tail submission required reproduction, 2026-10-13
 
 Native RED `072755-8939373-empty-pm4-tail-baseline-red` on eeebdd96/225D7037:
