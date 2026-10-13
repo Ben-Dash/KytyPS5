@@ -1,5 +1,38 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: WSL stopped; performance research and completed profile reconciled
+
+Native Windows, branch `yotei-integration-native`, investigated source `fd11eba2`.
+The latest user requests research into the low FPS. WSL shutdown completed with
+exit0; subsequent running-distro list was empty/exit0. No native game, build or
+test is currently active. No game/build was launched during this research.
+
+The function-profile core build `135630` and install `135920` passed. Actual
+run `game-20261013-135940-diag-cycle40-sampled-function-profile-bb6889`, EXE
+`AE228D2366B103DB09C495BE50BEC84E4297A675D6F1E690EB946758E40D8C9C`, closed
+14:02:28 UTC/0/no guards. Profile: frames650–689,10.1963867s,26threads,165rows,
+no query errors/exclusive-invalid/truncated/outstanding/overflow. This resolves
+the pending core/install/profile entries below. Diagnostic FPS is not a clean
+performance result; no screenshots were taken.
+
+Self-contained Russian research:
+`docs/yotei-performance-research-2026-10-13.md`.
+Three independent notes and WSL state are preserved under
+`_Build/analysis/yotei-performance-research-20261013/`.
+Best-supported diagnosis is mixed translated GPU work, CPU/GPU publication
+dependencies and repeated resource preparation; the exact frame critical path
+remains unproved. Logging/label/spin changes gave no substantial clean gain.
+Do not treat1.2M Sync/Upload calls as1.2M actual copies or rank probe-floor CPU
+measurements as expensive code. GetGraphicsPrograms is above calibration;
+split its stage/cache/SRT work next. Correlate readback requests to actual
+producer/publication/consumer before removing waits; isolate main GPU groups
+with sparse native timestamps. No new optimization was applied in this research.
+
+Defaults/guest correctness preserved, historical Prefetch WIP untouched, no
+push/issue publication. Full effects and60FPS remain unmet. Continue serial
+native execution and30-second clean title-FPS verification after a proved fix;
+images only after meaningful clean gain. User authorizes keeping WSL stopped.
+
 ## Current checkpoint: requested function timing installed; native CPU accounting verified
 
 Latest user steering is to time functions, identify the real bottleneck and
