@@ -2,6 +2,13 @@
 
 ## Retired native-image recycling byte budget required reproduction, 2026-10-13
 
+Genuine native RED102201/DA41B93E onb351 plus diagnosticobserver/fixture:
+allreal imagebits/canaries/ticks/live sixth/cleanup PASS; nativeallocationA16384,
+requestedcap2A32768, actualretired5A81920/count5; finalcostfails. Earlier bad
+earlybootstrap draft was fixed before compilation, not counted as RED.
+Same unchanged GREEN and oversized/reuse/format/zero/count24/invalid-env
+neighbors required; policy still unapplied. Rootnative artifact savedchecks.
+
 Current recycler retains up to24 native images without an allocation-byte cap.
 JetU59 byte-budget policy is a concrete comparison lead; actual owned pool use/
 paging remains unproved. Before production, use bounded tiny real images and

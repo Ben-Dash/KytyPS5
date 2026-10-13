@@ -1,5 +1,53 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint:BDA experiment opt-in; retired-image byte-limit genuine RED
+
+b351 worldrepeat101111-191cfb complete30s650..745/27titles mean3.222222,
+min2.6/max3.6,exit0/no guards10:14:02UTC. No usefulgain/images. WSL restarted
+again (4.30GiB sampled), so label wsl-off describes launch intent only; no claim
+of isolated background load or measured causal regression. Useful60 unresolved.
+
+Keep BDA batching experimental: KYTY_BDA_UPLOAD_BATCH1 explicitly enables it;
+default0 retains original per-owner pairs. SameEXEDA41B93E six opt-in native
+checks PASS2.52s; disabled-control102315 allnativebytes/guards/repeat/generation/
+ring/temp lifetimes PASS with originalpre2post2, then intentionallyfails the
+opt-in costoracle. The regression fixture/oracle was unchanged; only config
+differs. Future sameEXE0/1 world comparisons avoid rebuilding/rolling back.
+
+Retired-image bound nativeRED102201/DA41B93E: sixreal64x64 image data/canaries/
+realcompletion/live sixth/cleanup PASS. Each actualallocation16384B; requested
+idlecap32768B; count-only pool retains81920B/5. Finalcostoracle alonefails.
+Diagnosticobserver/fixture only, no byte-policy change yet. Production cap and
+native neighbors next; allocationbytes are not physicalVRAM or FPS proof.
+
+## Current checkpoint:BDA world retry after WSL memory guard, 2026-10-13
+
+b3513063 native proof/core/install remains verified. Firstworld100608-9c4740
+closed10:06:56UTC/0 with systemMemoryGuard=true/free7.96GiB beforeframe650;
+last486/title1.7 is NOT an in-world30s FPS comparison. WSL had restarted and
+vmmemWSL used10.79GiB. Authorized native wsl--shutdown completed0; freephysical
+30.98GiB/virtual49.69GiB afterward, no other application process stopped.
+
+Repeat sameEXE47C3F888/sourceb351/privatecycle30/runtime-b3513063-wsl-off
+`game-20261013-101111-perf-cycle30-bda-batch-wsl-off-world-title-30s-191cfb`
+PID48248/root24792 ACTIVE/sourceFROZEN. Same neutralfullrender chain1/HALFoff/
+scale100/scratch1024/650gated30s/300bound warm, outcomepending. Capture ONLY
+complete sample+10%gain vs3.882143. Verify/drainbeforebuild/tests.
+Next retired-image budget fixture E8F555F6 and productionCEF34F37 savedignored
+cycle26/retired-image-budget; nativeREDNOTRUN/policyNOTAPPLIED. Early CLI
+initialization draft was caught/fixed before compile, not a regression proof.
+
+## Current checkpoint:b3513063 BDA batch world retry active, 2026-10-13
+
+Completed shared immediate-copy BDA batch localcommit b351306302e67b8cdaa5be40fbfe245adba90bee.
+Native core100416/install100605 PASS; private cycle29/runtime-b3513063-bda-batch
+EXE47C3F88826E4429DF92EA079426CB2709956EE0019E29EF7F90E217287B418A5.
+`game-20261013-100608-perf-cycle29-bda-batch-world-title-30s-9c4740` PID53436,
+root64822 ACTIVE/sourceFROZEN. Neutralfullrender chain1/HALFoff/scale100/default
+scratch1024,650gated30s afterbounded300warm. FPS result pending. Capture only
+after complete sample and>=10% gain against3.882143, excludedfromsample.
+Verify/drainownedrun beforebuild/tests. No menu/input/newpush/issueposts.
+
 ## Current checkpoint:BDA batch complete native proof; core/world next, 2026-10-13
 
 Untouched compute neighbor100259/477FBA47 PASS: real previous chained shader

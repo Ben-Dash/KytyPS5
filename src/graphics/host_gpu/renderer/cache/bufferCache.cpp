@@ -2242,14 +2242,26 @@ void BufferCache::EnsureBdaZeroPage() {
 }
 
 namespace {
+bool BdaUploadBatchEnabled() {
+	// Native cost is reduced, but a useful game throughput gain is still unproved.
+	// Keep the experiment opt-in for same-executable comparisons.
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_BDA_UPLOAD_BATCH");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
 class BdaUploadBatchScope {
 public:
-	explicit BdaUploadBatchScope(CommandBuffer& command): m_command(command) { m_command.BeginUploadBatch(); }
-	~BdaUploadBatchScope() { m_command.EndUploadBatch(); }
+	explicit BdaUploadBatchScope(CommandBuffer& command): m_command(command), m_enabled(BdaUploadBatchEnabled()) {
+		if (m_enabled) m_command.BeginUploadBatch();
+	}
+	~BdaUploadBatchScope() { if (m_enabled) m_command.EndUploadBatch(); }
 	BdaUploadBatchScope(const BdaUploadBatchScope&) = delete;
 	BdaUploadBatchScope& operator=(const BdaUploadBatchScope&) = delete;
 private:
 	CommandBuffer& m_command;
+	bool m_enabled;
 };
 } // namespace
 
