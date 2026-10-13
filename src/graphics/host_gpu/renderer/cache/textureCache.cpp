@@ -4071,6 +4071,24 @@ void TextureCache::DebugDumpImages() {
 
 void TextureCache::TickFrame() {
 	DebugDumpImages();
+	// Opt-in diagnostic, independent of drain/GPU-zone timestamps. It samples
+	// VMA statistics at most once per5s; VMA may refresh driver budget data.
+	// There are no submits, Finish calls or GPU timestamp queries. Clean FPS
+	// runs keep it off.
+	static const bool memory_budget_diagnostic=[] {
+		const char* text=KYTY_GETENV("KYTY_DEBUG_MEMORY_BUDGET");
+		return text!=nullptr && std::strcmp(text,"1")==0;
+	}();
+	if (memory_budget_diagnostic) {
+		static auto next=std::chrono::steady_clock::time_point{};
+		const auto now=std::chrono::steady_clock::now();
+		if (now>=next) {
+			next=now+std::chrono::seconds(5);
+			std::printf("vram-snapshot gcTick=%" PRIu64 " presentedFrame=%" PRIu64 "\n",
+			            m_gc_tick,m_graphics.presented_frames.load(std::memory_order_relaxed));
+			m_graphics.LogMemoryBudget();
+		}
+	}
 	std::scoped_lock lock {m_lock};
 	++m_gc_tick;
 }

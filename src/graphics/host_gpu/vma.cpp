@@ -27,6 +27,7 @@
 #include <atomic>
 #include <chrono>
 #include <cinttypes>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -225,6 +226,10 @@ void GraphicContext::DestroyAllocator() {
 	allocator = nullptr;
 }
 
+namespace {
+uint64_t RecycledImageRetainedBytesSnapshot(size_t* count);
+}
+
 void GraphicContext::LogMemoryBudget() const {
 	if (allocator == nullptr || physical_device == nullptr) {
 		return;
@@ -239,6 +244,29 @@ void GraphicContext::LogMemoryBudget() const {
 		     i, static_cast<uint64_t>(budgets[i].usage), static_cast<uint64_t>(budgets[i].budget),
 		     static_cast<uint64_t>(budgets[i].statistics.allocationBytes),
 		     static_cast<uint64_t>(budgets[i].statistics.blockBytes));
+		// The periodic diagnostic must also reach the runner's captured stdout
+		// even when the application's normal LOGF destination is a file.
+		static const bool diagnostic = [] {
+			const char* text = KYTY_GETENV("KYTY_DEBUG_MEMORY_BUDGET");
+			return text != nullptr && std::strcmp(text, "1") == 0;
+		}();
+		if (diagnostic) {
+			std::printf("vram-snapshot heap=%u deviceLocal=%u usage=%" PRIu64
+			            " budget=%" PRIu64 " allocationBytes=%" PRIu64 " blockBytes=%" PRIu64 "\n",
+			            i, static_cast<uint32_t>(static_cast<bool>(properties.memoryHeaps[i].flags &
+			                                        vk::MemoryHeapFlagBits::eDeviceLocal)),
+			            static_cast<uint64_t>(budgets[i].usage),static_cast<uint64_t>(budgets[i].budget),
+			            static_cast<uint64_t>(budgets[i].statistics.allocationBytes),
+			            static_cast<uint64_t>(budgets[i].statistics.blockBytes));
+		}
+	}
+	const char* snapshot=KYTY_GETENV("KYTY_DEBUG_MEMORY_BUDGET");
+	if (snapshot!=nullptr && std::strcmp(snapshot,"1")==0) {
+		size_t retired_count=0;
+		const auto retired_bytes=RecycledImageRetainedBytesSnapshot(&retired_count);
+		std::printf("vram-snapshot retiredImageCount=%zu retiredImageBytes=%" PRIu64
+		            " planningBudget=%" PRIu64 "\n",
+		            retired_count,retired_bytes,GetTotalMemoryBudget());
 	}
 }
 
@@ -344,6 +372,20 @@ uint64_t RecycledImageByteLimit(const GraphicContext& graphics) {
 	}
 	const auto budget = graphics.GetTotalMemoryBudget();
 	return budget != 0 ? std::min(configured, budget / 8u) : configured;
+}
+
+// Snapshot only already-retired native allocation bytes. No free, flush,
+// native queries, protection change or recorded GPU work is involved.
+uint64_t RecycledImageRetainedBytesSnapshot(size_t* count) {
+	std::scoped_lock lock {g_recycled_mutex};
+	uint64_t bytes=0;
+	for (const auto& image:g_recycled) {
+		bytes+=image.bytes;
+	}
+	if (count!=nullptr) {
+		*count=g_recycled.size();
+	}
+	return bytes;
 }
 
 bool ImageRecycleEnabled() {

@@ -351,6 +351,29 @@ struct Row {
 	uint64_t value;
 };
 
+bool ReadbackByteRowsEnabled() {
+	static const bool enabled = [] {
+		const char* value = std::getenv("KYTY_DEBUG_READBACK_BYTES");
+		return value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	return enabled;
+}
+
+const char* ReadbackSourceClass(Reason reason) {
+	switch (reason) {
+		case Reason::GuestReadFault: return "foreign_read_fault";
+		case Reason::GuestWriteFault: return "foreign_write_fault";
+		case Reason::GpuThreadReadFault: return "gpu_read_fault";
+		case Reason::GpuThreadWriteFault: return "gpu_write_fault";
+		case Reason::EagerReadback: return "eager";
+		case Reason::Unattributed:
+		case Reason::Predicate:
+		case Reason::DccClear:
+		case Reason::GdsReadback: return "explicit_candidate_unproved";
+		default: return "other_source";
+	}
+}
+
 bool IsTimeKind(Kind kind) {
 	switch (kind) {
 		case Kind::FullDrain:
@@ -408,6 +431,29 @@ void Report(const Snapshot& before, const Snapshot& after, double seconds, bool 
 	                    static_cast<double>(kind_value[rb]) / (1024.0 * 1024.0),
 	                    kind_count[static_cast<size_t>(Kind::ReadbackClean)]);
 	text += FrameTimeSummary(before, after);
+	if (ReadbackByteRowsEnabled()) {
+		// Existing immutable snapshot cells only: this table is independent of the time
+		// row cutoff below. Download values include packing, not just requested/copied bytes.
+		text += fmt::format("  readback-byte-summary scope={} report_frames={} per_frame_valid={} "
+		                    "n={} packed_bytes={} packed_MiB_per_frame={:.6f} "
+		                    "attribution=existing_reason_op eligibility=unproved time_domain=none\n",
+		                    interval ? "interval" : "session", frames, frames != 0 ? 1u : 0u,
+		                    kind_count[rb], kind_value[rb],
+		                    per(static_cast<double>(kind_value[rb]) / (1024.0 * 1024.0)));
+		for (const auto& row: rows) {
+			if (row.kind != Kind::Readback) continue;
+			text += fmt::format("  readback-byte-row scope={} reason={} source_class={} op={} op_name={} "
+			                    "n={} packed_bytes={} requests_per_frame={:.6f} "
+			                    "packed_MiB_per_frame={:.6f} packed_KiB_per_request={:.6f} "
+			                    "report_frames={} per_frame_valid={} eligibility=unproved\n",
+			                    interval ? "interval" : "session", ReasonName(row.reason),
+			                    ReadbackSourceClass(row.reason), row.op, OpName(row.op),
+			                    row.count, row.value, per(static_cast<double>(row.count)),
+			                    per(static_cast<double>(row.value) / (1024.0 * 1024.0)),
+			                    static_cast<double>(row.value) / 1024.0 / static_cast<double>(row.count),
+			                    frames, frames != 0 ? 1u : 0u);
+		}
+	}
 	// Zones are swapped out per interval, so the session total leaves them out.
 	if (interval) {
 		text += ZoneSummary(frames);

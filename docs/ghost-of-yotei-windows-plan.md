@@ -1,8 +1,28 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: defaults restored; dedicated CP/recorder diagnosis next
+
+0fe5f40f preserves original default readlocality; exactpages1 andBDA batch1 remain
+explicit experiments after wholeworld3.49/3.22 showedno usefulgain. Existing
+positive paths/nativeguard tests retained, new4GPU-read registeredPASS1.82s.
+Source39sample PSSSelfTest validated, ownedCP/recorder workload capture pending.
+
+New diagnostic-onlyreadback reporter+memorypool snapshot compile/nativebindless
+build113434 PASS, defaultOFF. ExistingEOP113809/5E5411C1 withdrain+byteflag PASS
+(doesn't callfullReport, not formatting proof). Prior113705wrongCLI used1
+instead of a case selector and failedargumentguard; corrected, not a regression.
+Reporter prints existingnonzero(reason,op) packed-byte rows beforetop48time
+cutoff; eligibilityunproved. Budget snapshot separates retiredallocbytes from
+VMAallocationBytes/blockBytes/usage/budget, gcTick frompresentedFrame. Actual
+runtime diagnosticoutput still pending. No extraGPUsubmit/Finish/timestamps
+added bythose reporters; DrainStats itself createsqueries/affects scheduling.
+Next nativecore/privateinstall and dedicated10s CP/recorder PSS +phase/byte/
+pool attribution. Nevercompare diagnosticFPS againstclean title samples.
+UserWSLNOTneeded/continue stopping; no menu/input/push/issues,oldartifactskept.
+
 ## Current checkpoint: exact-read world no gain; default restored; CP profile next
 
-4326 world111028-7e7f26 full30s650..754/27titles mean3.488889,min3.3/max3.7,
+4326 world111028-7e7f26 full30s650..754/27titles mean3.488889,min3.1/max3.8,
 exit0/no guards11:13:00UTC; against priorimagebudget3.671429 -4.97% singlepair,
 no usefulgain/images. ExactGPU pages are now experimental optin
 KYTY_GPU_READ_EXACT_PAGES1; default0 keeps old locality. SAME native7F7A49AF
