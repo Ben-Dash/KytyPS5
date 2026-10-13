@@ -875,25 +875,6 @@ if(BUILD_TESTING)
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --hardware-buffer-bounds)
 	add_test(NAME gpu_command_lane
 		COMMAND $<TARGET_FILE:shader_recompiler_compute_tests> --gpu-command-lane-only)
-	add_test(NAME dynamic_format_lookup_cost
-		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dynamic-format-lookup-cost)
-	set_tests_properties(dynamic_format_lookup_cost PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE
-		ENVIRONMENT "KYTY_FORMAT_LOOKUP_SWITCH=1")
-	foreach(format_case IN ITEMS profiles native native-off)
-		add_test(NAME dynamic_format_lookup_${format_case}
-			COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --dynamic-format-lookup-${format_case})
-		set_tests_properties(dynamic_format_lookup_${format_case} PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE)
-	endforeach()
-	foreach(cache_case IN ITEMS isolation warm)
-		add_test(NAME format_lookup_cache_${cache_case}
-			COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --format-lookup-cache-${cache_case})
-		set_tests_properties(format_lookup_cache_${cache_case} PROPERTIES TIMEOUT 20 RUN_SERIAL TRUE)
-	endforeach()
-	add_test(NAME format_audit_legacy_controls
-		COMMAND $<TARGET_FILE:shader_batch_audit> --format-audit-legacy-controls)
-	add_test(NAME format_audit_explicit_profiles
-		COMMAND $<TARGET_FILE:shader_batch_audit> --format-audit-explicit-profiles)
-	set_tests_properties(format_audit_legacy_controls format_audit_explicit_profiles PROPERTIES TIMEOUT 10 RUN_SERIAL TRUE)
 	add_test(NAME end_of_pipe_literal_gpu
 		COMMAND $<TARGET_FILE:bindless_lifecycle_tests> --eop-literal-ordering-gpu)
 	add_test(NAME native_occlusion_predication_gpu

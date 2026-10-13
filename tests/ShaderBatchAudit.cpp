@@ -4,7 +4,6 @@
 #include "common/threads.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderPrecompile.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
-#include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 #include "graphics/shader/recompiler/frontend/decode/ShaderDecoder.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "xxhash.h"
@@ -39,7 +38,7 @@ constexpr std::array EnvironmentNames {
     "KYTY_VTX_EXPLODE_CHECK", "KYTY_VTX_EXPLODE_LIMIT", "KYTY_BDA_FAST_DWORD",
     "KYTY_BDA_NO_WORD_MASKS", "KYTY_BDA_SINGLE_CROSS_BRANCH", "KYTY_BDA_ZERO_PAGE",
     "KYTY_INDIRECT_BOUNDS_ONCE", "KYTY_STRICT_RESOURCE_TRACKING",
-    "KYTY_BUFFER_SPECIALIZE", "KYTY_SAMPLER_COMPARE_SPLIT", "KYTY_FORMAT_LOOKUP_SWITCH"};
+    "KYTY_BUFFER_SPECIALIZE", "KYTY_SAMPLER_COMPARE_SPLIT"};
 
 void Progress(const char* phase) {
     std::printf("KYTY_SHADER_AUDIT_PHASE %s\n", phase);
@@ -56,16 +55,10 @@ void RestoreSettings(const Json& settings) {
     if (settings.at("schema_version") != 1 || !settings.at("profile_label").is_string())
         throw std::runtime_error("invalid explicit journal compiler settings");
     const auto& environment = settings.at("environment");
-    // Older explicit profiles predate this opt-in: restore it to OFF, never inherit host env.
-    const bool legacy_format_lookup = environment.is_object() &&
-        !environment.contains("KYTY_FORMAT_LOOKUP_SWITCH") &&
-        environment.size() + 1u == EnvironmentNames.size();
-    if (!environment.is_object() ||
-        (environment.size() != EnvironmentNames.size() && !legacy_format_lookup))
+    if (!environment.is_object() || environment.size() != EnvironmentNames.size())
         throw std::runtime_error("compiler environment must explicitly list every supported switch");
     for (const char* name : EnvironmentNames) {
-        const Json value = legacy_format_lookup && std::string_view(name) == "KYTY_FORMAT_LOOKUP_SWITCH"
-            ? Json(nullptr) : environment.at(name);
+        const auto& value = environment.at(name);
         if (!value.is_null() && !value.is_string()) throw std::runtime_error("compiler switch is not string/null");
         const auto text = value.is_null() ? std::string{} : value.get<std::string>();
         if (text.find('\0') != std::string::npos) throw std::runtime_error("compiler switch contains NUL");
@@ -83,8 +76,6 @@ void RestoreSettings(const Json& settings) {
     if (ShaderRecompiler::NativeFloat16() != Boolean(settings, "native_float16"))
         throw std::runtime_error("compiler native FP16 setting conflicts with its environment gate");
 }
-
-#include "ShaderBatchAuditFormatProfileControls.inc"
 
 std::vector<uint8_t> ReadBody(const std::filesystem::path& manifest_path, const Json& manifest) {
     const auto name = std::filesystem::u8path(manifest.at("code_file").get<std::string>());
@@ -148,8 +139,6 @@ int Audit(const char* filename, bool dump_ir) {
         result["back_code_bytes"] = record.back_code.size() * sizeof(uint32_t);
         result["compiler_settings"] = manifest.at("compiler_settings");
         RestoreSettings(manifest.at("compiler_settings"));
-        if (!result["compiler_settings"]["environment"].contains("KYTY_FORMAT_LOOKUP_SWITCH"))
-            result["compiler_settings"]["environment"]["KYTY_FORMAT_LOOKUP_SWITCH"] = nullptr;
 
         static Common::Subsystems subsystems;
         Common::InitializeThreads();
@@ -272,10 +261,6 @@ int Audit(const char* filename, bool dump_ir) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc == 2 && std::string_view(argv[1]) == "--format-audit-legacy-controls")
-        return CheckFormatAuditLegacyControls();
-    if (argc == 2 && std::string_view(argv[1]) == "--format-audit-explicit-profiles")
-        return CheckFormatAuditExplicitProfiles();
 #if defined(KYTY_RESOURCE_REGRESSION)
     if (argc == 3 && std::string_view(argv[1]) == "--texture-layout-regression")
         return Libs::Graphics::RunTextureLayoutRegression(argv[2]);
