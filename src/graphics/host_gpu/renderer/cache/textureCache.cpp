@@ -4,6 +4,7 @@
 
 #include "common/alignment.h"
 #include "common/assert.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
@@ -3224,6 +3225,7 @@ void TextureCache::ClearImage(CommandBuffer& command, ImageId id, vk::Format for
 		rendering.layerCount           = range.layerCount;
 		rendering.colorAttachmentCount = 1;
 		rendering.pColorAttachments    = &attachment;
+		LabelCausalTrace::NotePartialNativeClear(true,reinterpret_cast<uint64_t>(&command));
 		command.Handle().beginRendering(&rendering);
 		command.Handle().endRendering();
 		CommitGpuWrite(image);
@@ -3231,6 +3233,7 @@ void TextureCache::ClearImage(CommandBuffer& command, ImageId id, vk::Format for
 	}
 	image.Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {},
 	              command.Handle());
+	LabelCausalTrace::NotePartialNativeClear(false,reinterpret_cast<uint64_t>(&command));
 	auto native_range = range;
 	GpuZones::Mark(command.Handle(), DrainStats::Zone::ImageCopy);
 	if (image.info.IsVolume()) {

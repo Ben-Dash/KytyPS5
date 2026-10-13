@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
 #include "graphics/host_gpu/renderer/labelCausalTrace.h"
+#include "graphics/host_gpu/renderer/waitPollCausalDiagnostic.h"
 
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
@@ -445,6 +446,7 @@ void RenderContext::ReportMipStats(void* dst, uint32_t size, bool reset) {
 void RenderContext::TickFrame() {
 	FunctionProfile::TickFrame(m_graphics.presented_frames.load(std::memory_order_relaxed));
 	LabelCausalTrace::TickFrame(m_graphics.presented_frames.load(std::memory_order_relaxed));
+	WaitPollDiagnostic::DumpIfClosed();
 	FramePassesFlip();
 	m_texture_cache.TickFrame();
 	m_buffer_cache.TickFrame();

@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
 #include "graphics/host_gpu/renderer/labelCausalTrace.h"
+#include "graphics/host_gpu/renderer/waitPollCausalDiagnostic.h"
 
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 
@@ -750,10 +751,14 @@ bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
 	// The actual dereference still performs the existing validation/fault behavior.
 	if (vaddr == 0 || !GuestRange {vaddr, size}.Valid() ||
 	    !m_scheduler.Context().IsMapped(vaddr, size)) {
+		WaitPollDiagnostic::NotePoll(WaitPollDiagnostic::PollPath::FallbackReady);
 		return true;
 	}
 	auto state = m_memory_tracker.QueryReadback(vaddr, size);
-	if (!state.gpu_dirty) return true;
+	if (!state.gpu_dirty) {
+		WaitPollDiagnostic::NotePoll(WaitPollDiagnostic::PollPath::TrackerClean);
+		return true;
+	}
 	if (state.unarmed) {
 		// CPU readers batch neighboring pages for locality. A GPU label poll instead
 		// publishes only the touched tracker pages, including every dirty byte on them.
@@ -764,11 +769,17 @@ bool BufferCache::PollReadMemory(uint64_t vaddr, uint64_t size) {
 		}
 		state = m_memory_tracker.QueryReadback(vaddr, size);
 	}
-	if (!state.gpu_dirty) return true;
+	if (!state.gpu_dirty) {
+		WaitPollDiagnostic::NotePoll(WaitPollDiagnostic::PollPath::DownloadNowClean);
+		return true;
+	}
 	EXIT_IF(state.unarmed || state.tick > m_scheduler.CurrentTick());
 	// A publication queued on the open buffer cannot progress unless it is submitted.
 	// Submission preserves queue order; the command parser does not wait for its fence.
-	if (state.tick == m_scheduler.CurrentTick()) m_scheduler.Flush();
+	const bool wait_diag_flushed = state.tick == m_scheduler.CurrentTick();
+	if (wait_diag_flushed) m_scheduler.Flush();
+	WaitPollDiagnostic::NotePoll(wait_diag_flushed ? WaitPollDiagnostic::PollPath::UnpublishedFlushed :
+	    WaitPollDiagnostic::PollPath::UnpublishedSubmitted, state.tick);
 	return false;
 }
 

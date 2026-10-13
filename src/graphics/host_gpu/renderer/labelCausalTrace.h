@@ -4,6 +4,8 @@
 // Temporary diagnostic only, default OFF; no resource/scheduler state changes.
 #include "common/switches.h"
 #include "kernel/memory.h"
+#include "graphics/host_gpu/renderer/drainStats.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -23,7 +25,9 @@ namespace Libs::Graphics::LabelCausalTrace {
 enum class Stage : uint32_t {
   GuestEnqueue, CpStart, LabelRecord, OrderedBegin, ReadbackArm,
   NativeSubmit, NativeObserved, PublishBegin, BackingWritten, Finalized,
-  FaultBegin, FaultEnd, PointerResolved, PointerUnavailable, SliceEnter, SliceExit
+  FaultBegin, FaultEnd, PointerResolved, PointerUnavailable, SliceEnter, SliceExit,
+  WaitSite, WaitMask, WaitPollOutcome, WaitReadResult, WaitEpisodeDone, WaitEpisodeTiming,
+  WaitCvBegin, WaitCvEnd, WaitSourceNotify
 };
 struct Row {
   uint64_t ordinal, ns, owner, tick, token, address, size, value, pc, submit;
@@ -85,6 +89,86 @@ inline std::atomic_bool active {false};
 inline uint64_t requested = 0, dropped = 0, pointer_errors = 0;
 inline size_t retained = 0;
 inline bool dumped = false;
+// Temporary fixed-size counters. Share the already phase-gated 10s trace epoch;
+// no full FunctionProfile, nested function timers, GPU timestamps, row allocations or extra waits.
+inline std::array<std::atomic<uint64_t>,64> partial_event_counts{};
+inline std::array<std::atomic<uint64_t>,3> partial_chain_counts{},partial_render_counts{},partial_shader_write_counts{};
+inline std::atomic<uint64_t> partial_outside{0},partial_meta_consumed{0},partial_image_consumed{0};
+inline std::array<std::atomic<uint64_t>,4> native_clear_counts{}; // allTransfer,allColor,CStransfer,CScolor
+inline std::array<std::atomic<uint64_t>,DrainStats::Pm4OpCount+1u> chain_access_counts{},chain_full_counts{};
+inline std::atomic<uint64_t> cs_color_required{0},cs_stage_history_unknown{0};
+inline thread_local bool partial_inside_compute_clear=false;
+inline thread_local bool partial_color_pending=false,partial_stage_history_known=false;
+inline thread_local uint64_t partial_stage_owner=0;
+inline void ObservePartialOwner(uint64_t owner) noexcept {
+  if(partial_stage_owner!=owner) {
+    // A different scheduler may still have unsubmitted native producers. Discard
+    // diagnostic eligibility knowledge, never declare that other owner covered.
+    partial_stage_owner=owner;partial_stage_history_known=false;partial_color_pending=false;
+  }
+}
+inline bool PartialCaptureActive() noexcept { return active.load(std::memory_order_acquire); }
+class PartialComputeClearScope {
+public:
+  PartialComputeClearScope() noexcept : on(PartialCaptureActive()),previous(partial_inside_compute_clear) {
+    if(on)partial_inside_compute_clear=true;
+  }
+  ~PartialComputeClearScope() { if(on)partial_inside_compute_clear=previous; }
+private:
+  bool on,previous;
+};
+inline void NotePartialEvent(uint32_t type,bool chain,bool rendering,bool writes,uint64_t owner=0) noexcept {
+  if(!PartialCaptureActive())return;
+  if(type<64u)partial_event_counts[type].fetch_add(1,std::memory_order_relaxed);
+  else partial_outside.fetch_add(1,std::memory_order_relaxed);
+  const uint32_t index=type==7u?0u:type==15u?1u:type==16u?2u:3u;
+  if(index<3u) {
+    if(chain)partial_chain_counts[index].fetch_add(1,std::memory_order_relaxed);
+    if(rendering)partial_render_counts[index].fetch_add(1,std::memory_order_relaxed);
+    if(writes)partial_shader_write_counts[index].fetch_add(1,std::memory_order_relaxed);
+  }
+  if(type==7u) {
+    ObservePartialOwner(owner);
+    if(!partial_stage_history_known)cs_stage_history_unknown.fetch_add(1,std::memory_order_relaxed);
+    else if(partial_color_pending)cs_color_required.fetch_add(1,std::memory_order_relaxed);
+    // Diagnostic history only: no barrier, resource, scheduler, guest or Vulkan state mutation.
+    partial_color_pending=false;partial_stage_history_known=true;
+  }
+}
+inline void NotePartialConsumed(bool meta) noexcept {
+  if(!PartialCaptureActive())return;
+  (meta?partial_meta_consumed:partial_image_consumed).fetch_add(1,std::memory_order_relaxed);
+}
+inline void NotePartialNativeClear(bool color,uint64_t owner) noexcept {
+  if(!PartialCaptureActive())return;
+  ObservePartialOwner(owner);
+  native_clear_counts[color?1u:0u].fetch_add(1,std::memory_order_relaxed);
+  if(partial_inside_compute_clear)native_clear_counts[color?3u:2u].fetch_add(1,std::memory_order_relaxed);
+  if(color)partial_color_pending=true;
+}
+inline void NotePartialChainBoundary(uint32_t op,bool full) noexcept {
+  if(!PartialCaptureActive())return;
+  (full?chain_full_counts:chain_access_counts)[std::min(op,DrainStats::Pm4OpCount)].fetch_add(1,std::memory_order_relaxed);
+}
+inline void ReportPartialCounts() noexcept {
+  std::printf("partial-flush-counts population=all_actual_boundaries_in_label_epoch snapshot=atomic_fields_not_transactional outside=%llu meta_consumed=%llu image_consumed=%llu native_transfer_clear=%llu native_color_clear=%llu cs_transfer_clear=%llu cs_color_clear=%llu cs_color_required=%llu cs_history_unknown=%llu",
+    static_cast<unsigned long long>(partial_outside.load()),static_cast<unsigned long long>(partial_meta_consumed.load()),
+    static_cast<unsigned long long>(partial_image_consumed.load()),static_cast<unsigned long long>(native_clear_counts[0].load()),
+    static_cast<unsigned long long>(native_clear_counts[1].load()),static_cast<unsigned long long>(native_clear_counts[2].load()),
+    static_cast<unsigned long long>(native_clear_counts[3].load()),static_cast<unsigned long long>(cs_color_required.load()),
+    static_cast<unsigned long long>(cs_stage_history_unknown.load()));
+  for(uint32_t type=0;type<64u;++type)if(const auto count=partial_event_counts[type].load();count!=0)
+    std::printf(" event_%02x=%llu",type,static_cast<unsigned long long>(count));
+  std::printf("\n");
+  for(uint32_t i=0;i<3u;++i)std::printf("partial-flush-state event=%02x pending_chain=%llu rendering=%llu shader_writes=%llu\n",
+    i==0u?7u:i==1u?15u:16u,static_cast<unsigned long long>(partial_chain_counts[i].load()),
+    static_cast<unsigned long long>(partial_render_counts[i].load()),static_cast<unsigned long long>(partial_shader_write_counts[i].load()));
+  for(uint32_t op=0;op<chain_access_counts.size();++op) {
+    const auto access=chain_access_counts[op].load(),full=chain_full_counts[op].load();
+    if(access+full!=0)std::printf("partial-chain-boundary pm4=%u access=%llu full=%llu\n",op,
+      static_cast<unsigned long long>(access),static_cast<unsigned long long>(full));
+  }
+}
 inline uint64_t Now() noexcept {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -194,6 +278,7 @@ inline void TickFrame(uint64_t frame) {
     n = requested; loss = dropped; errors = pointer_errors;
   }
   // No cache/queue wait or object query; print after releasing trace mutex.
+  ReportPartialCounts();
   std::printf("label-causal end frame=%" PRIu64 " requested=%" PRIu64
               " retained=%zu dropped=%" PRIu64 " pointer_errors=%" PRIu64
               " completion_domain=cpu_observed_timeline_upper_bound\n",

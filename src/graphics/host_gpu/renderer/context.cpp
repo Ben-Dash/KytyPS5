@@ -1,4 +1,5 @@
 #include "common/assert.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 #include "common/common.h"
 #include "common/profiler.h"
 #include "common/threads.h"
@@ -88,6 +89,7 @@ vk::CommandBuffer CommandBuffer::Handle() const {
 	FlushUploadDependency();
 	NoteSubmissionWork();
 	if (m_compute_access_pending) [[unlikely]] {
+		LabelCausalTrace::NotePartialChainBoundary(DrainStats::t_pm4_op,false);
 		m_compute_access_pending = false;
 		ShaderAccessBarrier(m_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
@@ -105,6 +107,7 @@ vk::CommandBuffer CommandBuffer::HandleForFullBarrier() const {
 	EXIT_IF(IsInvalid());
 	FlushUploadDependency();
 	NoteSubmissionWork();
+	if(m_compute_access_pending)LabelCausalTrace::NotePartialChainBoundary(DrainStats::t_pm4_op,true);
 	m_compute_access_pending = false;
 	return m_buffer;
 }

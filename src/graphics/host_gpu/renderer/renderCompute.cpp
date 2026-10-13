@@ -1,6 +1,7 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
 
 #include "common/assert.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
@@ -876,13 +877,18 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	// base, so every later "Clear G-Buffer" fill of the mask became an HTile clear only and the
 	// mask kept stale contents. The fill writes the same bytes under both, so both get the clear.
 	const auto consume_fill = [&] {
+		LabelCausalTrace::PartialComputeClearScope diagnostic_clear_scope;
 		if (TryConsumeComputeMetaClear(input_info, buffer)) {
-			(void)TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
+			LabelCausalTrace::NotePartialConsumed(true);
+			const bool image=TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
 			                                  thread_group_z, mode);
+			if(image)LabelCausalTrace::NotePartialConsumed(false);
 			return true;
 		}
-		return TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
+		const bool image=TryConsumeComputeImageClear(input_info, buffer, thread_group_x, thread_group_y,
 		                                   thread_group_z, mode);
+		if(image)LabelCausalTrace::NotePartialConsumed(false);
+		return image;
 	};
 	if (resources.specialization_reads.empty() && consume_fill()) {
 		ResetBindings();

@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/functionProfile.h"
 #include "graphics/host_gpu/renderer/labelCausalTrace.h"
+#include "graphics/host_gpu/renderer/waitPollCausalDiagnostic.h"
 
 #include "graphics/guest_gpu/graphicsRun.h"
 
@@ -246,6 +247,7 @@ std::shared_ptr<GuestGpu::ReadbackNotification> GuestGpu::CaptureReadbackNotific
 void GuestGpu::NotifyReadbackReady() {
 	Common::LockGuard lock(m_queue_mutex);
 	++m_readback_generation;
+	WaitPollDiagnostic::SourceNotify(reinterpret_cast<uint64_t>(this), m_readback_generation);
 	for (auto& queue: m_queues) {
 		if (!queue.empty()) queue.front().blocked = false;
 	}
@@ -537,12 +539,25 @@ void CommandProcessor::WaitRegMem(uint32_t func, const T* addr, T ref, T mask, u
 	BreakComputeChain();
 	// The CPU may have written the data this wait guards just before its flag.
 	AdvanceBdaEpoch();
+	WaitPollDiagnostic::Attempt wait_attempt({
+	    .owner = reinterpret_cast<uint64_t>(this), .submit = GetSubmitId(),
+	    .packet = g_current_execution != nullptr ?
+	        reinterpret_cast<uint64_t>(g_current_execution->RemainingCommands().data()) : 0,
+	    .address = reinterpret_cast<uint64_t>(addr), .ref = ref, .mask = mask,
+	    .queue = m_interrupt_event_id >= 0x20 ? 1u + static_cast<uint32_t>(m_interrupt_event_id - 0x20) : 0u,
+	    .stream = m_constant_stream ? 1u : 0u, .width = sizeof(T), .func = func, .poll = poll, .operation = wait_op
+	}, GuestGpu::IsGpuThread() && g_current_execution != nullptr);
 	if (GuestGpu::IsGpuThread() && g_current_execution != nullptr &&
 	    !m_renderer.GetBufferCache().PollReadMemory(reinterpret_cast<uint64_t>(addr), sizeof(T))) {
+		wait_attempt.Finish(true, false);
 		SuspendPm4();
 		return;
 	}
-	if (!TestWaitRegMemValue(*addr, ref, mask, func)) {
+	wait_attempt.ReadBegin();
+	const auto value = *addr; // Same single actual guest read, including its normal fault path.
+	const bool satisfied = TestWaitRegMemValue(value, ref, mask, func);
+	wait_attempt.Finish(false, satisfied, value);
+	if (!satisfied) {
 		SuspendPm4();
 	}
 }
@@ -686,6 +701,7 @@ void GuestGpu::WaitForSubmissionsBefore(uint64_t sequence) {
 
 void GuestGpu::ThreadRun(void* data) {
 	FunctionProfile::SetRole(FunctionProfile::Role::Gpu);
+	static_assert(WaitPollDiagnostic::QueueCount == QueueCount && ComputeQueueBase == 0x20);
 	auto* gpu = static_cast<GuestGpu*>(data);
 	EXIT_IF(gpu == nullptr);
 	KYTY_PROFILER_THREAD("Thread_Gpu");
@@ -749,7 +765,17 @@ void GuestGpu::ThreadRun(void* data) {
 					if (DrainStats::g_blocked_wait_enter_test_observer != nullptr)
 						DrainStats::g_blocked_wait_enter_test_observer();
 #endif
+					uint64_t wait_diag_mask = 0;
+					if (WaitPollDiagnostic::Active()) {
+						for (uint32_t id = 0; id < QueueCount; ++id)
+							if (!gpu->m_queues[id].empty() && gpu->m_queues[id].front().blocked)
+								wait_diag_mask |= uint64_t{1} << id;
+					}
+					const auto wait_diag_begin = WaitPollDiagnostic::CvBegin(
+					    reinterpret_cast<uint64_t>(gpu), gpu->m_readback_generation, wait_diag_mask);
 					[[maybe_unused]] const bool notified = gpu->m_work_available.WaitFor(&gpu->m_queue_mutex, 100);
+					WaitPollDiagnostic::CvEnd(reinterpret_cast<uint64_t>(gpu), wait_diag_begin,
+					    notified, gpu->m_readback_generation);
 #if defined(KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS)
 					if (DrainStats::g_blocked_wait_exit_test_observer != nullptr)
 						DrainStats::g_blocked_wait_exit_test_observer(notified);
@@ -2376,6 +2402,15 @@ void CommandProcessor::TriggerEopEventAtEndOfPipe(uint32_t interrupt_context_id)
 
 void CommandProcessor::TriggerEvent(uint32_t event_type, uint32_t event_index,
                                     uint64_t event_address) {
+  // Default OFF must not acquire/create CurrentBuffer merely for observation.
+  if(LabelCausalTrace::PartialCaptureActive()) {
+    if((event_type==7u||event_type==15u||event_type==16u)&&GetScheduler().Active()) {
+      // These original partial-event paths necessarily access CurrentBuffer for the barrier.
+      const auto& diagnostic_buffer=CurrentBuffer();
+      LabelCausalTrace::NotePartialEvent(event_type,diagnostic_buffer.ComputeChainPending(),
+        diagnostic_buffer.IsRendering(),diagnostic_buffer.HasPendingShaderWrites(),reinterpret_cast<uint64_t>(&diagnostic_buffer));
+    }else LabelCausalTrace::NotePartialEvent(event_type,false,false,false);
+  }
 	if (GraphicsRunDebugDumpEnabled()) {
 		LOGF("CommandProcessor::TriggerEvent()\n"
 		     "\t event_type  = 0x%08" PRIx32 "\n"
