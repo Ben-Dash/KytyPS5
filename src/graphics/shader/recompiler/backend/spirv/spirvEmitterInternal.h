@@ -234,6 +234,7 @@ struct EmitterState {
 	// Private tables of the per-format layout words, indexed by the V# format
 	// (LookupDynamicBufferFormat).
 	std::array<uint32_t, 4>                          format_tables {};
+	uint32_t                                         dynamic_format_lookup_function = 0;
 	// Formatted loads through GPU-selected V#s: one helper function per variant, emitted after
 	// the entry function (EmitIndirectFormattedHelpers).
 	struct IndirectFormattedHelper {

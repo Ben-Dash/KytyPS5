@@ -1,4 +1,5 @@
 #include "graphics/shader/recompiler/backend/spirv/spirvEmitterInstructions.h"
+#include "graphics/shader/recompiler/backend/spirv/SpirvEmitter.h"
 
 #include "graphics/host_gpu/renderer/cache/bufferCache.h"
 #include "graphics/shader/recompiler/ShaderRecompiler.h"
@@ -7,7 +8,18 @@
 #include <algorithm>
 #include <bit>
 #include <cstring>
+#include <map>
 #include <utility>
+
+namespace Libs::Graphics::ShaderRecompiler::Spirv {
+
+bool DynamicFormatLookupSwitchEnabled() {
+	// Audits restore settings between compilations; never cache a prior profile's value.
+	const char* text = KYTY_GETENV("KYTY_FORMAT_LOOKUP_SWITCH");
+	return text != nullptr && std::strcmp(text, "1") == 0;
+}
+
+} // namespace Libs::Graphics::ShaderRecompiler::Spirv
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 namespace {
@@ -1804,28 +1816,57 @@ struct DynamicBufferFormat {
 	uint32_t valid;
 };
 
+// Exact shared metadata for one seven-bit guest buffer-format code.
+std::array<uint32_t, 4> DynamicBufferFormatWords(uint32_t code) {
+	constexpr auto last = static_cast<uint32_t>(Prospero::BufferFormat::k32_32_32_32Float);
+	const auto info = Format::GetFormatInfo(static_cast<Prospero::BufferFormat>(code));
+	std::array<uint32_t, 4> words {};
+	if (code == 0u || code > last || info.type == Format::ComponentType::Unknown) {
+		return {1u, 32u, 0u, 0u}; // Preserve the existing invalid-format metadata exactly.
+	}
+	words[0] = info.component_count | (info.byte_size << 3u) |
+	           (uint32_t {info.packed_bitfield} << 8u) | (1u << 9u);
+	for (uint32_t component = 0; component < 4; ++component) {
+		words[1] |= info.component_bits[component] << (component * 6u);
+		words[2] |= info.component_bit_offset[component] << (component * 7u);
+	}
+	words[3] = static_cast<uint32_t>(info.type);
+	return words;
+}
+
 // The layout of a V# format known only at run time: four Private arrays indexed by the 7-bit
 // format, declared once per module. A select chain or switch over every format at each of a
 // hundred loads made Yotei's tile-lighting shaders too large for the driver to compile.
 DynamicBufferFormat LookupDynamicBufferFormat(EmitterState& state, uint32_t format) {
+	if (DynamicFormatLookupSwitchEnabled()) {
+		if (state.dynamic_format_lookup_function == 0) {
+			state.dynamic_format_lookup_function = state.builder.AllocateId();
+			state.builder.AddName(state.dynamic_format_lookup_function, "dynamic_buffer_format_lookup");
+		}
+		const auto index = Binary(state, spv::OpBitwiseAnd, TypeU32(state), format,
+		                          ConstantU32(state, 127));
+		const auto packed = state.builder.AllocateId();
+		state.builder.AddFunction(spv::OpFunctionCall, TypeU32Composite(state, 4), packed,
+		                          state.dynamic_format_lookup_function, index);
+		std::array<uint32_t, 4> values {};
+		for (uint32_t field = 0; field < values.size(); ++field) {
+			values[field] = state.builder.AllocateId();
+			state.builder.AddFunction(spv::OpCompositeExtract, TypeU32(state), values[field],
+			                          packed, field);
+		}
+		const auto valid = Binary(state, spv::OpINotEqual, TypeBool(state),
+		    Binary(state, spv::OpBitwiseAnd, TypeU32(state), values[0], ConstantU32(state, 1u << 9u)),
+		    ConstantU32(state, 0));
+		return {values[0], values[1], values[2], values[3], valid};
+	}
 	const auto array = state.builder.Type(spv::OpTypeArray, TypeU32(state), ConstantU32(state, 128));
 	if (state.format_tables[0] == 0) {
-		constexpr auto last = static_cast<uint32_t>(Prospero::BufferFormat::k32_32_32_32Float);
 		std::array<std::array<uint32_t, 128>, 4> words {};
 		for (uint32_t code = 0; code < 128u; ++code) {
-			const auto info = Format::GetFormatInfo(static_cast<Prospero::BufferFormat>(code));
-			if (code == 0u || code > last || info.type == Format::ComponentType::Unknown) {
-				words[0][code] = 1u;
-				words[1][code] = 32u;
-				continue;
+			const auto metadata = DynamicBufferFormatWords(code);
+			for (uint32_t field = 0; field < metadata.size(); ++field) {
+				words[field][code] = metadata[field];
 			}
-			words[0][code] = info.component_count | (info.byte_size << 3u) |
-			                 (uint32_t {info.packed_bitfield} << 8u) | (1u << 9u);
-			for (uint32_t component = 0; component < 4; ++component) {
-				words[1][code] |= info.component_bits[component] << (component * 6u);
-				words[2][code] |= info.component_bit_offset[component] << (component * 7u);
-			}
-			words[3][code] = static_cast<uint32_t>(info.type);
 		}
 		for (uint32_t table = 0; table < 4u; ++table) {
 			std::vector<uint32_t> ids;
@@ -1862,6 +1903,60 @@ DynamicBufferFormat LookupDynamicBufferFormat(EmitterState& state, uint32_t form
 	                               ConstantU32(state, 1u << 9u)),
 	                        ConstantU32(state, 0));
 	return result;
+}
+
+// One constant-returning lookup per module, shared by all formatted loads. Emit after
+// the formatted helpers, since their emission can request the function for the first time.
+void EmitDynamicBufferFormatLookup(EmitterState& state) {
+	if (state.dynamic_format_lookup_function == 0) return;
+	const auto u32 = TypeU32(state);
+	const auto result_type = TypeU32Composite(state, 4);
+	const auto function_type = state.builder.Type(spv::OpTypeFunction, result_type, u32);
+	state.builder.AddFunction(spv::OpFunction, result_type, state.dynamic_format_lookup_function,
+	                          spv::FunctionControlMaskNone, function_type);
+	const auto parameter = state.builder.AllocateId();
+	state.builder.AddFunction(spv::OpFunctionParameter, u32, parameter);
+	EmitLabel(state, state.builder.AllocateId());
+	std::map<std::array<uint32_t, 4>, std::vector<uint32_t>> groups;
+	for (uint32_t code = 0; code < 128u; ++code) {
+		groups[DynamicBufferFormatWords(code)].push_back(code);
+	}
+	const auto invalid = DynamicBufferFormatWords(0);
+	const auto default_label = state.builder.AllocateId();
+	const auto merge_label = state.builder.AllocateId();
+	std::vector<uint32_t> labels;
+	std::vector<uint32_t> switch_words {spv::OpSwitch, parameter, default_label};
+	for (const auto& [words, codes]: groups) {
+		const auto label = words == invalid ? default_label : state.builder.AllocateId();
+		labels.push_back(label);
+		if (words == invalid) continue;
+		for (const auto code: codes) {
+			switch_words.push_back(code);
+			switch_words.push_back(label);
+		}
+	}
+	state.builder.AddFunction(spv::OpSelectionMerge, merge_label, spv::SelectionControlMaskNone);
+	state.builder.AddFunction(switch_words);
+	const auto result = state.builder.AllocateId();
+	std::vector<uint32_t> phi {spv::OpPhi, result_type, result};
+	size_t i = 0;
+	for (const auto& [words, codes]: groups) {
+		const auto label = labels[i++];
+		std::array<uint32_t, 4> ids {};
+		for (uint32_t field = 0; field < words.size(); ++field) {
+			ids[field] = ConstantU32(state, words[field]);
+		}
+		const auto value = state.builder.Constant(spv::OpConstantComposite, result_type,
+		                                         std::span<const uint32_t>(ids));
+		EmitLabel(state, label);
+		state.builder.AddFunction(spv::OpBranch, merge_label);
+		phi.push_back(value);
+		phi.push_back(label);
+	}
+	EmitLabel(state, merge_label);
+	state.builder.AddFunction(phi);
+	state.builder.AddFunction(spv::OpReturnValue, result);
+	state.builder.AddFunction(spv::OpFunctionEnd);
 }
 
 // NormalizeFormatComponent with the width and component type as values.
@@ -2408,6 +2503,7 @@ void EmitIndirectFormattedHelpers(EmitterState& state) {
 		state.builder.AddFunction(spv::OpReturnValue, value);
 		state.builder.AddFunction(spv::OpFunctionEnd);
 	}
+	EmitDynamicBufferFormatLookup(state);
 }
 
 namespace {

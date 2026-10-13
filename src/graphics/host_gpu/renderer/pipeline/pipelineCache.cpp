@@ -189,6 +189,7 @@ std::string DriverBinarySignature(const vk::PhysicalDeviceProperties& properties
 		signature += "vtxexplode=1\n";
 	}
 	signature += ShaderRecompiler::IR::VertexTraceCacheSignature();
+	if (ShaderRecompiler::Spirv::DynamicFormatLookupSwitchEnabled()) signature += "fmtLookupShared1=1\n";
 	return signature;
 }
 
@@ -211,6 +212,22 @@ void PipelineCacheLog(fmt::format_string<Args...> format, Args&&... args) {
 	auto message = fmt::format(format, std::forward<Args>(args)...);
 	message += '\n';
 	Log::WriteToConsoleAndLog(message);
+}
+
+// Candidate-only warming from a validated ordinary driver blob. The source file is
+// never changed: Vulkan creates the candidate cache from its original opaque payload.
+std::pair<std::filesystem::path, bool>
+DriverCacheReadSource(const std::filesystem::path& candidate_path) {
+	if (!ShaderRecompiler::Spirv::DynamicFormatLookupSwitchEnabled() ||
+	    Common::File::IsFileExisting(candidate_path)) return {candidate_path, false};
+	constexpr std::string_view variant = ".fmtLookupShared1";
+	auto filename = candidate_path.filename().string();
+	const auto position = filename.find(variant);
+	if (position == std::string::npos) return {candidate_path, false};
+	filename.erase(position, variant.size());
+	const auto ordinary_path = candidate_path.parent_path() / filename;
+	return Common::File::IsFileExisting(ordinary_path)
+	    ? std::pair {ordinary_path, true} : std::pair {candidate_path, false};
 }
 
 bool ReadShaderGuestMemory(void*, uint64_t address, std::span<uint32_t> values) {
@@ -1628,9 +1645,10 @@ void PipelineCache::InitializeDriverCache() {
 
 	// KYTY_VTX_EXPLODE_CHECK changes every vertex shader: its pipelines go to own files.
 	const bool        explode    = ShaderRecompiler::IR::VertexExplodeCheck().enabled;
-	const std::string cache_name = ShaderRecompiler::IR::VertexValueTrace().enabled
+	std::string       cache_name = ShaderRecompiler::IR::VertexValueTrace().enabled
 	                                 ? title_id + ".vtxtrace"
 	                                 : explode ? title_id + ".vtxexplode" : title_id;
+	if (ShaderRecompiler::Spirv::DynamicFormatLookupSwitchEnabled()) cache_name += ".fmtLookupShared1";
 	if (explode) {
 		PipelineCacheLog("Vulkan pipeline cache: KYTY_VTX_EXPLODE_CHECK uses its own files");
 	}
@@ -1649,7 +1667,7 @@ void PipelineCache::InitializeDriverCache() {
 	size_t           last_loaded = 0;
 	for (uint32_t index = 0; index < max_shards; index++) {
 		const auto path = shard_path(index);
-		if (index > 0 && !Common::File::IsFileExisting(path)) {
+		if (index > 0 && !Common::File::IsFileExisting(DriverCacheReadSource(path).first)) {
 			break;
 		}
 		auto cache = LoadDriverCacheShard(path, &last_loaded);
@@ -1684,9 +1702,14 @@ void PipelineCache::InitializeDriverCache() {
 
 vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::path& cache_path,
                                                       size_t*                      loaded) {
-	*loaded                 = 0;
-	const auto path         = Common::PathToString(cache_path);
-	const bool cache_exists = Common::File::IsFileExisting(cache_path);
+	*loaded = 0;
+	const auto [read_path, ordinary_seed] = DriverCacheReadSource(cache_path);
+	const auto path = Common::PathToString(read_path);
+	const bool cache_exists = Common::File::IsFileExisting(read_path);
+	if (ordinary_seed) {
+		PipelineCacheLog("Vulkan pipeline cache: seeding {} from unchanged {} opaque input",
+		                 Common::PathToString(cache_path), path);
+	}
 	if (cache_exists) {
 		PipelineCacheLog("Vulkan pipeline cache: loading {}", path);
 	} else {
@@ -1694,7 +1717,7 @@ vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::pat
 	}
 	std::vector<uint8_t> initial_data;
 	if (cache_exists) {
-		Common::File file(cache_path, Common::File::Mode::Read);
+		Common::File file(read_path, Common::File::Mode::Read);
 		const auto file_size = file.IsInvalid() ? 0 : file.Size();
 		const auto& properties = m_graphics.GetPhysicalDeviceProperties();
 		DriverCachePolicy::HostIdentity host {.vendor = properties.vendorID, .device = properties.deviceID,
@@ -1704,6 +1727,8 @@ vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::pat
 		std::string diagnostic;
 		if (ShaderRecompiler::IR::VertexExplodeCheck().enabled) diagnostic += "vtxexplode=1\n";
 		diagnostic += ShaderRecompiler::IR::VertexTraceCacheSignature();
+		if (!ordinary_seed && ShaderRecompiler::Spirv::DynamicFormatLookupSwitchEnabled())
+			diagnostic += "fmtLookupShared1=1\n";
 		if (file_size > sizeof(uint64_t) && file_size <= std::numeric_limits<uint32_t>::max()) {
 			// Read only the bounded wrapper prefix first. A legacy source-key wrapper
 			// is longer than the new host-only header; its original payload offset
@@ -1773,7 +1798,8 @@ void PipelineCache::InitializeShaderPrecompile() {
 		return;
 	// Keep older journals intact: legacy pixel records omit compiler-affecting inputs.
 	const auto journal_title = PipelineCacheTitleId() +
-	                           (ShaderRecompiler::IR::VertexValueTrace().enabled ? ".vtxtrace" : "");
+	                           (ShaderRecompiler::IR::VertexValueTrace().enabled ? ".vtxtrace" : "") +
+	                           (ShaderRecompiler::Spirv::DynamicFormatLookupSwitchEnabled() ? ".fmtLookupShared1" : "");
 	auto path = m_driver_cache_path.parent_path() /
 	            fmt::format("{}.v{}.shaders", journal_title,
 	                        ShaderPrecompile::CurrentRecordVersion);

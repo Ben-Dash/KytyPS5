@@ -17,6 +17,9 @@ public:
 	using std::runtime_error::runtime_error;
 };
 
+// Strict per-compilation opt-in, also used by cache profile admission.
+[[nodiscard]] bool DynamicFormatLookupSwitchEnabled();
+
 std::vector<uint32_t> EmitProgram(const IR::Program& program,
                                   ShaderStageInputInfo input_info);
 

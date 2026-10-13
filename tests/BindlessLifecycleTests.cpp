@@ -375,7 +375,11 @@ private:
 #include "NggVertexCountTests.inc"
 #include "VertexValueTraceGpuTests.inc"
 #include "GenericBufferCodegenTests.inc"
+#include "DynamicFormatLookupSpirvCostTests.inc"
+#include "DynamicFormatLookupProfileLifetimeTests.inc"
+#include "DynamicFormatLookupNativeNeighbors.inc"
 #include "DriverCacheNativeRoundTripTests.inc"
+#include "DynamicFormatLookupCacheAdmissionNativeTests.inc"
 #include "ArrayLengthDescriptorCostTests.inc"
 #include "GenericGpuMicrobenchFixture.inc"
 #include "GenericChannelRepetitionTests.inc"
@@ -453,6 +457,20 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
+  const bool format_cache_isolation = argc == 2 &&
+      std::strcmp(argv[1], "--format-lookup-cache-isolation") == 0;
+  const bool format_cache_warm = argc == 2 &&
+      std::strcmp(argv[1], "--format-lookup-cache-warm") == 0;
+  const bool format_cache_mode = format_cache_isolation || format_cache_warm;
+  if (format_cache_mode)
+    Libs::Graphics::ConfigureFormatLookupCacheAdmissionNative();
+  const bool format_lookup_native = argc == 2 &&
+      (std::strcmp(argv[1], "--dynamic-format-lookup-native") == 0 ||
+       std::strcmp(argv[1], "--dynamic-format-lookup-native-off") == 0);
+  const bool format_lookup_on = format_lookup_native &&
+      std::strcmp(argv[1], "--dynamic-format-lookup-native-off") != 0;
+  if (format_lookup_native)
+    Libs::Graphics::ConfigureDynamicFormatLookupNativeNeighbors(format_lookup_on);
   if (argc == 2 && IsRepeatedGpuDirtyStateMode(argv[1]))
     Libs::Graphics::ConfigureRepeatedGpuDirtyStateCostTests();
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1]))
@@ -555,7 +573,8 @@ int main(int argc, char **argv) {
     return 0;
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
-              (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+              (argc == 2 && (format_lookup_native || format_cache_mode ||
+                            std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
@@ -599,6 +618,8 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--vertex-value-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--vertex-nf-trace-gpu-readback") == 0 ||
                             std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                            std::strcmp(argv[1], "--dynamic-format-lookup-cost") == 0 ||
+                            std::strcmp(argv[1], "--dynamic-format-lookup-profiles") == 0 ||
                     std::strcmp(argv[1], "--driver-cache-native-roundtrip") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0 ||
@@ -715,6 +736,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0)
     ConfigureArmedReadbackTypedNeighbors();
   if (argc == 2 && (std::strcmp(argv[1], "--generic-buffer-codegen-cost") == 0 ||
+                    std::strcmp(argv[1], "--dynamic-format-lookup-cost") == 0 ||
+                    std::strcmp(argv[1], "--dynamic-format-lookup-profiles") == 0 ||
                     std::strcmp(argv[1], "--driver-cache-native-roundtrip") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-cost") == 0 ||
                     std::strcmp(argv[1], "--generic-channel-repetition-neighbors") == 0 ||
@@ -751,7 +774,7 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+      (format_lookup_native || format_cache_mode || std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
@@ -802,6 +825,25 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
+  if (format_cache_mode) {
+    if (format_cache_isolation)
+      CheckFormatLookupCacheExistingOnIsolation(vulkan);
+    else
+      CheckFormatLookupCacheMissingOnWarmNeighbor(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--dynamic-format-lookup-profiles") == 0) {
+    CheckDynamicFormatLookupProfileLifetime(vulkan);
+    return 0;
+  }
+  if (format_lookup_native) {
+    CheckDynamicFormatLookupNativeNeighbors(vulkan, format_lookup_on);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--dynamic-format-lookup-cost") == 0) {
+    CheckDynamicFormatLookupSpirvCost(vulkan);
+    return 0;
+  }
   if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0))) {
     auto& renderer=vulkan.RuntimeRenderer();renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&]{
