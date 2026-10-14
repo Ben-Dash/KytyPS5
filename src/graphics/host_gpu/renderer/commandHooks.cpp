@@ -53,6 +53,7 @@ namespace {
 	X(vkCmdEndRendering)                                                                          \
 	X(vkCmdDraw)                                                                                  \
 	X(vkCmdDrawIndexed)                                                                           \
+	X(vkCmdDrawIndirect)                                                                          \
 	X(vkCmdDrawIndexedIndirect)                                                                   \
 	X(vkCmdDrawMeshTasksEXT)                                                                      \
 	X(vkCmdDrawMeshTasksIndirectEXT)                                                              \
@@ -111,7 +112,6 @@ namespace {
 	X(vkCmdWaitEvents)                                                                            \
 	X(vkCmdSetDepthBounds)                                                                        \
 	X(vkCmdBindVertexBuffers)                                                                     \
-	X(vkCmdDrawIndirect)                                                                          \
 	X(vkCmdBlitImage)                                                                             \
 	X(vkCmdBeginRenderPass)                                                                       \
 	X(vkCmdNextSubpass)                                                                           \
@@ -1024,6 +1024,31 @@ void VKAPI_PTR HookCmdDrawIndexed(VkCommandBuffer buffer, uint32_t index_count,
 	                        first_instance);
 }
 
+// Default OFF: one shared copied-command case, no resource or shader semantic changes.
+void VKAPI_PTR HookCmdDrawIndirect(VkCommandBuffer buffer, VkBuffer args,
+                                  VkDeviceSize offset, uint32_t count, uint32_t stride) {
+    static const bool copied = [] {
+        const char* text = KYTY_GETENV("KYTY_DRAW_INDIRECT_RECORD");
+        return text != nullptr && std::strcmp(text, "1") == 0;
+    }();
+    if (t_consuming != nullptr) {
+        g_real.vkCmdDrawIndirect(buffer, args, offset, count, stride);
+        return;
+    }
+    if (copied && Routed(buffer)) {
+        Emit([=] { g_real.vkCmdDrawIndirect(buffer, args, offset, count, stride); });
+        return;
+    }
+    // OFF and unrouted/foreign routes preserve the original FallbackHook ordering.
+    if (auto* stream = StreamFor(buffer); stream != nullptr) {
+        g_fallback_calls.fetch_add(1, std::memory_order_relaxed);
+        stream->Drain();
+    } else {
+        BeforeDirect();
+    }
+    g_real.vkCmdDrawIndirect(buffer, args, offset, count, stride);
+}
+
 void VKAPI_PTR HookCmdDrawIndexedIndirect(VkCommandBuffer buffer, VkBuffer args,
                                           VkDeviceSize offset, uint32_t count, uint32_t stride) {
 	if (Routed(buffer)) {
@@ -1550,6 +1575,7 @@ struct FallbackHook<Tag, R(VKAPI_PTR*)(VkCommandBuffer, A...)> {
 #define KYTY_HOOK_FUNCTION_vkCmdEndRendering HookCmdEndRendering
 #define KYTY_HOOK_FUNCTION_vkCmdDraw HookCmdDraw
 #define KYTY_HOOK_FUNCTION_vkCmdDrawIndexed HookCmdDrawIndexed
+#define KYTY_HOOK_FUNCTION_vkCmdDrawIndirect HookCmdDrawIndirect
 #define KYTY_HOOK_FUNCTION_vkCmdDrawIndexedIndirect HookCmdDrawIndexedIndirect
 #define KYTY_HOOK_FUNCTION_vkCmdDrawMeshTasksEXT HookCmdDrawMeshTasksEXT
 #define KYTY_HOOK_FUNCTION_vkCmdDrawMeshTasksIndirectEXT HookCmdDrawMeshTasksIndirectEXT

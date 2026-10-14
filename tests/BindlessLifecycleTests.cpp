@@ -436,6 +436,7 @@ private:
 #include "FunctionProfileSmokeTests.inc"
 #include "CommandStreamIdleSpinCostTests.inc"
 #include "CommandStreamDrawIndirectRecordingTests.inc"
+#include "CommandStreamDrawIndirectGpuTests.inc"
 #include "RepeatedGpuDirtyStateCostTests.inc"
 #include "RepeatedGpuDirtyStateNeighbors.inc"
 
@@ -454,6 +455,10 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--command-stream-draw-indirect-gpu") == 0) {
+    Libs::Graphics::Require("CommandStreamDrawIndirectGpu", "recording setup before native hooks",
+        _putenv_s("KYTY_RECORD_THREAD", "1") == 0, "cannot enable deferred recording");
+  }
   if (argc == 2 && std::strcmp(argv[1], "--command-stream-draw-indirect-recording-cost") == 0) {
     Common::InitializeThreads();
     Libs::Graphics::CheckCommandStreamDrawIndirectRecording();
@@ -561,7 +566,8 @@ int main(int argc, char **argv) {
     return 0;
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
-              (argc == 2 && (std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
+              (argc == 2 && (std::strcmp(argv[1], "--command-stream-draw-indirect-gpu") == 0 ||
+                            std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
                             std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
@@ -900,6 +906,10 @@ int main(int argc, char **argv) {
     renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&] { CheckWaitRegMemNativeNonblockingCost(vulkan); });
     renderer.ShutdownGpu();
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--command-stream-draw-indirect-gpu") == 0) {
+    CheckCommandStreamDrawIndirectGpu(vulkan);
     return 0;
   }
   if (argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0) {
