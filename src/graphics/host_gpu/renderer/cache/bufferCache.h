@@ -3,7 +3,6 @@
 
 #include "common/abi.h"
 #include "common/common.h"
-#include "common/uniqueFunction.h"
 #include "common/lruCache.h"
 #include "common/slotVector.h"
 #include "graphics/host_gpu/memoryTracker.h"
@@ -17,7 +16,6 @@
 #include <deque>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -229,17 +227,6 @@ private:
 	// the readback queue and returns it; null otherwise. The guest thread then submits and
 	// publishes it (PublishQueuedReadback); a priority operation at the arming tick does so too,
 	// for waiters that only know that tick.
-	// Optional ordinary graphics-download publication. Callback/reader share one
-	// owned operation; unknown callbacks and ring retirement retain FIFO order.
-	struct OrdinaryReadbackPublication;
-	void QueueOrdinaryReadbackPublication(uint64_t token, uint64_t tick,
-	    std::vector<std::pair<uint64_t, uint64_t>> pages, bool foreground_safe,
-	    Common::UniqueFunction<void>&& operation);
-	void PublishOrdinaryReadback(OrdinaryReadbackPublication& request);
-	[[nodiscard]] bool TryPublishCompletedOrdinaryReadback(uint64_t vaddr, uint64_t size, uint64_t tick);
-	std::mutex m_ordinary_readback_mutex;
-	std::mutex m_ordinary_publication_mutex;
-	std::vector<std::weak_ptr<OrdinaryReadbackPublication>> m_ordinary_readbacks;
 	struct QueuedReadback;
 	[[nodiscard]] std::shared_ptr<QueuedReadback> QueueReadback(uint64_t vaddr, uint64_t size,
 	                                                            bool is_write);

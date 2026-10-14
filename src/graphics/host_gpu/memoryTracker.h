@@ -44,9 +44,6 @@ public:
 	[[nodiscard]] ReadbackState QueryReadback(uint64_t vaddr, uint64_t size);
 	void ArmReadback(uint64_t vaddr, uint64_t size, uint64_t token, uint64_t tick);
 	void FinalizeReadback(uint64_t vaddr, uint64_t size, uint64_t token);
-	// Every tracker page in the range still belongs to this exact download.
-	[[nodiscard]] bool IsReadbackArmedBy(uint64_t vaddr, uint64_t size,
-	                                     uint64_t token, uint64_t tick);
 	// Hot pages (guest threads keep reading them after GPU writes; see BufferCache) are the only
 	// ones GrantStaleRead opens.
 	void SetReadbackHot(uint64_t vaddr, uint64_t size, bool hot) {
