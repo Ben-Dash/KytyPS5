@@ -237,6 +237,7 @@ private:
 		return m_gpu_writes_on && completed >= m_gpu_writes_from;
 	}
 	void QueueEagerReadback(uint64_t vaddr, uint64_t size);
+	[[nodiscard]] bool TryRecordPackedEagerReadbacks(std::span<const uint64_t> selected);
 	// Whether a recorded download of these bytes has not finished publishing.
 	[[nodiscard]] bool InFlightIntersects(uint64_t vaddr, uint64_t size);
 	void               PruneInFlight();
