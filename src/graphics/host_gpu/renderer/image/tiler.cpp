@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/image/tiler.h"
+#include "graphics/host_gpu/renderer/labelCausalTrace.h"
 
 #include "common/alignment.h"
 #include "common/assert.h"
@@ -778,6 +779,51 @@ void TileManager::TileImage(Image& image, std::span<const vk::BufferImageCopy> r
 	image.Download(regions, linear.buffer, 0, linear.size, linear.capacity);
 	Record(linear.buffer, 0, linear_capacity, tiled, tiled_offset, tiled_capacity,
 	       dispatches, false);
+
+	// Diagnostic only: count completed command-recording calls in the existing
+	// ten-second epoch, not GPU completion or actual transfer-engine duration.
+	// No extra format queries, guest reads, native API work or per-event output.
+	if (LabelCausalTrace::PartialCaptureActive() && tiled != nullptr &&
+	    image.backing.image != nullptr && !dispatches.empty()) [[unlikely]] {
+		using TiledDownloadDiagnostic::Key;
+		Key key {};
+		const auto& native = image.backing;
+		const auto& info = image.info;
+		key[0] = info.extent.width; key[1] = info.extent.height; key[2] = info.extent.depth;
+		if (!infos.empty()) {
+			const auto& tile = infos.front();
+			key[3] = tile.bytes_per_element; key[4] = static_cast<uint32_t>(tile.family);
+			key[5] = tile.tail; key[6] = tile.surface_z;
+			key[7] = tile.width; key[8] = tile.height; key[9] = tile.depth;
+			for (const auto& other : infos) {
+				key[32] |= other.bytes_per_element != tile.bytes_per_element ||
+				    other.family != tile.family || other.tail != tile.tail ||
+				    other.width != tile.width || other.height != tile.height ||
+				    other.depth != tile.depth || other.surface_z != tile.surface_z;
+			}
+			const auto raw = tile.bytes_per_element == 2u ? vk::Format::eR16Uint :
+			    tile.bytes_per_element == 4u ? vk::Format::eR32Uint :
+			    tile.bytes_per_element == 8u ? vk::Format::eR16G16B16A16Uint : vk::Format::eUndefined;
+			key[26] = raw != vk::Format::eUndefined &&
+			    ImageViewOps::FormatsCompatible(native.format, raw);
+		}
+		key[10] = regions.size(); key[11] = infos.size();
+		key[12] = static_cast<uint32_t>(transform); key[13] = static_cast<uint32_t>(info.tile_mode);
+		key[14] = static_cast<uint32_t>(info.guest_format); key[15] = static_cast<uint32_t>(native.format);
+		key[16] = static_cast<VkImageCreateFlags>(native.flags);
+		key[17] = static_cast<VkImageUsageFlags>(native.usage);
+		key[18] = info.samples; key[19] = info.resources.levels; key[20] = info.resources.layers;
+		key[21] = static_cast<uint32_t>(native.image_type); key[22] = info.HasMetadata();
+		key[23] = info.HasStencil(); key[24] = info.IsBlock(); key[25] = info.IsDepth();
+		key[27] = m_graphics.max_push_descriptors;
+		key[28] = static_cast<VkImageAspectFlags>(regions.front().imageSubresource.aspectMask);
+		key[29] = static_cast<uint32_t>(image.binding.attachment_layout);
+		key[30] = regions.front().bufferRowLength; key[31] = regions.front().bufferImageHeight;
+		// Recheck after metadata observation: no call admitted after epoch closure.
+		if (LabelCausalTrace::PartialCaptureActive())
+			TiledDownloadDiagnostic::Add(key, linear_capacity, tiled_capacity, info.data.address,
+			    m_graphics.presented_frames.load(std::memory_order_relaxed));
+	}
 }
 
 TileManager::Result TileManager::GetScratchBuffer(uint64_t size) {

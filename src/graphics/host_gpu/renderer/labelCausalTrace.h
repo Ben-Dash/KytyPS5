@@ -5,6 +5,7 @@
 #include "common/switches.h"
 #include "kernel/memory.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
+#include "graphics/host_gpu/renderer/tiledDownloadDiagnostic.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -279,6 +280,7 @@ inline void TickFrame(uint64_t frame) {
   }
   // No cache/queue wait or object query; print after releasing trace mutex.
   ReportPartialCounts();
+  TiledDownloadDiagnostic::Report();
   std::printf("label-causal end frame=%" PRIu64 " requested=%" PRIu64
               " retained=%zu dropped=%" PRIu64 " pointer_errors=%" PRIu64
               " completion_domain=cpu_observed_timeline_upper_bound\n",
