@@ -1,6 +1,31 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: three new research results and host-only RED, 2026-10-14
+## Current checkpoint: post-Dota native measurements, 2026-10-14
+
+Record HEAD5dc3f3c3, production42c6c601, installed EXE8E3D9CD6 unchanged.
+User closed Dota; before native launch it/WSL/task jobs were absent, GPU2%.
+Same runtime, neutral full-render1080, after400/min90:
+clean `195656…ad75c5` completed6s mean3.85FPS;
+drain-only `195953…487850` completed10s mean3.475FPS;
+clean recovery `200245…1e8184` first gated title3.3, exited0 before completing
+6s. Recovery has NO mean; cause of early normal exit unknown. All runs exit0,
+no guards/timeouts; no native job remains. User confirmed character/world
+during recovery; no independent scene image or prior-run scene equivalence.
+First-run post-FPS screen captures were withheld because foreground acquisition
+failed. See [exact results and renderer strategy](yotei-post-dota-measurements-2026-10-14.md).
+
+Sub1FPS is not reproduced here. Historical0.95 also differs in executable/source;
+do not attribute its entire drop to Dota or call recovery a code optimization.
+Last diagnostic reports intervalbusy129–144/gap143–166ms/frame and logical
+readback20–22MiB/frame. Scopes overlap; GPU intervalbusy is not hardware GPU%.
+No exact debug penalty, full renderer rewrite,2x original3.7,60FPS or new
+publication milestone. Cycle50's host-only indirect cost RED remains unfixed.
+New census/counts-only observer proposals are parked/uncompiled/unrun.
+Next actual eligibility census or bounded hardware queue evidence, then a shared
+mechanism regression/correction; preserve real compute-to-CPU dependencies.
+Preserve user untracked test. No production change/push/issue comment.
+
+## Historical checkpoint: three new research results and host-only RED, 2026-10-14
 
 Branch `yotei-integration-native`; production remains42c6c601 (documentation
 HEAD52fef513 before this round). Installed native EXE unchanged8E3D9CD6...,

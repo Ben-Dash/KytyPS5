@@ -1,5 +1,22 @@
 # Integration test debt
 
+## Post-Dota measurement limits and next renderer witness, 2026-10-14
+
+Native source42c unchanged; cycle51 clean6s titlemean3.85 versus drain-only10s
+3.475. Recovery exits0 after first gated title3.3, before6s completion; no mean.
+User confirms actual character/world during recovery, independently captured
+images and equal scene proof for prior runs absent. No accepted source speedfix,
+exact diagnostic penalty or2x original3.7FPS. See
+[post-Dota evidence](yotei-post-dota-measurements-2026-10-14.md).
+
+Next instrumentation is diagnostic, not production correction: actual producer
+nonindexed API census or hardware-queue trace; optional upload counts-only/BDA
+volume to rank candidates. Preserve genuine dependencies and unsupported cases.
+Existing copied-hook CPU cost RED still requires unchanged GREEN plus finite
+native indirect argument lifetime/draw/readback and neighboring routing tests.
+Logical readback volume and overlapping waits cannot prove removable cost.
+No full renderer rewrite or game-title branch has been tested or applied.
+
 ## Nonindexed indirect recording and typed tiler candidates, 2026-10-14
 
 Cycle50 read-only source audit finds vkCmdDrawIndirect in fallback hooks:
