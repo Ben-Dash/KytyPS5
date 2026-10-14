@@ -1,6 +1,40 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: readback trial rejected; renderer research saved, 2026-10-14
+## Current checkpoint: three new research results and host-only RED, 2026-10-14
+
+Branch `yotei-integration-native`; production remains42c6c601 (documentation
+HEAD52fef513 before this round). Installed native EXE unchanged8E3D9CD6...,
+runtime `cycle49/runtime-current-42c6c601`; no game/GPU test in this round.
+Preserve untracked user `tests/ComputePrefetchPermutationTests.inc`.
+
+Three agents completed [cycle50 research](yotei-performance-research-cycle50-2026-10-14.md):
+nonindexed indirect recorder Drain; typed16-bit tiler instead of two RMWs/element;
+proven readonly BDA footprint without losing dirty pages/epoch hints. Production
+proposals remain unapplied. Actual Yōtei branch eligibility/cost still pending.
+No2x/FPS/cross-game correctness or new menu/gameplay publication proof.
+
+New manual host-only realCommandStream regression (early CLI before Vulkan init)
+build194126 PASS; original production intended RED194322. Added only stdout flush
+for evidence; build194503 PASS, logged RED194639/EABD645F. All five arguments,
+64-bit offset, order1/2/3, prior-work dependency, worker/stream cleanup, environment
+restore pass; actualProducerDrains1 versus intended0 fails after those controls.
+No native GPU calls. This manual expected-RED mode is not registered in CTest.
+GPU/game correctness and unchanged GREEN remain unproved; no production fix yet.
+
+Important new confound: Dota2 PID35348 started18:46:30Z, after diag575 at18:32
+and before clean49 games19:08+. Without emulator GPU37%/4907MiB; short later
+snapshot33–36%/5455MiB. These are aggregate background GPU values, not Dota-only
+or whole3x causality. Prior3.1diag versus0.95clean cannot prove emulator or
+DrainStats regression. User chose to close Dota personally; no foreign process
+was stopped. GPU benchmarks deferred while it remains active; CPU/code research
+continued. No task-owned process or WSL remains after bounded CPU runs.
+
+Next: clean same-world baseline after foreign GPU activity resolves, then sparse
+actual nonindexed API hit/upload refusal/BDA upload counters and one selected
+shared correction with regression-first proof. No blanket pool Drain removal,
+metadata bypass, raw donor clipping, unsafe age retry or work skipping.
+
+## Historical checkpoint: readback trial rejected; renderer research saved, 2026-10-14
 
 Active branch `yotei-integration-native`, native Windows `42c6c601`.
 Correctness candidate4e784308 is FULLY reverted here; commit/proposal/native

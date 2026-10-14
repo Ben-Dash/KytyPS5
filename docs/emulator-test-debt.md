@@ -1,5 +1,39 @@
 # Integration test debt
 
+## Nonindexed indirect recording and typed tiler candidates, 2026-10-14
+
+Cycle50 read-only source audit finds vkCmdDrawIndirect in fallback hooks:
+the routed producer drains its recorder before forwarding five scalar arguments.
+Indexed indirect already has a copied hook. Before any production change, add
+the bounded host-only real-CommandStream fixture: forward all five arguments
+(including64-bit offset), order around a withheld consumer gate, require that
+forwarding follows prior recorded work, join/drain/restore ownership before the
+final avoidable producer-drain count1 versus0 RED. No driver/GPU calls required.
+Build/setup/timeout/order failure is not RED. Actual Yōtei nonindexed branch hit
+is still unobserved; aggregate draw/indirect/meshargs counts cannot prove it.
+
+Typed2-byte tiler proposal independently requires unchanged numeric/byte/padding
+controls through actual TileManager::Detile, then specialize the captured module
+with its actual BPE=2 VkSpecializationInfo and DCE before cost counting. Whole
+module atomics include the preserved1-byte path and are not a valid RED/GREEN.
+Current storageBuffer16BitAccess is already required/enabled. Preserve current
+alignment/range/metadata/synchronization restrictions; no broad donor gate port.
+Source conditional RMW counts are not observed native throughput or world FPS.
+
+Current foreign GPU activity: Dota2 began18:46:30Z, after diagnostic575166 and
+before cycle49 games. Parent saw37%GPU/4907MiB without an emulator. User chose
+to close Dota2 personally; continue code/CPU research, no foreign process action.
+No clean GPU benchmark while it remains active. This is a comparison confound,
+not proof that all prior FPS loss came from Dota2 or from the emulator.
+
+Actual host-only RED completed: build194126 PASS, original production RED194322
+reaches intended final cost oracle. Logging-only stdout flush then build194503
+PASS and logged RED194639/EABD645F: all five arguments/64-bit offset/order1,2,3,
+forward-after-prior-work/worker/stream/environment cleanup pass, no timeouts or
+GPU initialization; producerDrain1 fails intended0. Manual CLI before Vulkan
+init, not registered in CTest. The fixture is an expected-RED research mode;
+production fix, unchanged GREEN and actual Yōtei branch hits still pending.
+
 ## Renderer paths selected by actual semantics, 2026-10-14
 
 Current source294a854d; see

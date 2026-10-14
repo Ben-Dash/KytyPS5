@@ -435,6 +435,7 @@ private:
 #include "UserServiceGamePresetTests.inc"
 #include "FunctionProfileSmokeTests.inc"
 #include "CommandStreamIdleSpinCostTests.inc"
+#include "CommandStreamDrawIndirectRecordingTests.inc"
 #include "RepeatedGpuDirtyStateCostTests.inc"
 #include "RepeatedGpuDirtyStateNeighbors.inc"
 
@@ -453,6 +454,11 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::strcmp(argv[1], "--command-stream-draw-indirect-recording-cost") == 0) {
+    Common::InitializeThreads();
+    Libs::Graphics::CheckCommandStreamDrawIndirectRecording();
+    return 0;
+  }
   if (argc == 2 && IsRepeatedGpuDirtyStateMode(argv[1]))
     Libs::Graphics::ConfigureRepeatedGpuDirtyStateCostTests();
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1]))
