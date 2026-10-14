@@ -262,6 +262,19 @@ void MemoryTracker::FinalizeReadback(uint64_t vaddr, uint64_t size, uint64_t tok
 	});
 }
 
+bool MemoryTracker::IsReadbackArmedBy(uint64_t vaddr, uint64_t size,
+                                     uint64_t token, uint64_t tick) {
+	CheckNotInUploadCallback();
+	uint64_t covered = 0;
+	bool matches = true;
+	Iterate<false>(vaddr, size, [&](RegionManager* manager, uint64_t offset, uint64_t bytes) {
+		std::scoped_lock lock(manager->lock);
+		matches = manager->IsReadbackArmedBy(manager->GetCpuAddr() + offset, bytes, token, tick) && matches;
+		covered += bytes;
+	});
+	return matches && covered == size;
+}
+
 bool MemoryTracker::HasArmedPages(uint64_t vaddr, uint64_t size) {
 	if (m_armed_pages.load(std::memory_order_relaxed) == 0) {
 		return false;
