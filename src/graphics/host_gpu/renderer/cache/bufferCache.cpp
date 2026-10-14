@@ -875,22 +875,16 @@ void BufferCache::NoteGpuWrite(uint64_t vaddr, uint64_t size) {
 	m_gpu_writes.push_back({vaddr, vaddr + size, 0});
 }
 
-void BufferCache::StampGpuWrites(uint64_t tick) {
-	for (; m_gpu_writes_stamped < m_gpu_writes.size(); ++m_gpu_writes_stamped) {
-		m_gpu_writes[m_gpu_writes_stamped].tick = tick;
-	}
-	if (m_gpu_writes_on && m_gpu_writes_from == UINT64_MAX) {
-		m_gpu_writes_from = tick;
-	}
-}
-
 uint64_t BufferCache::InflightWriteTick(uint64_t begin, uint64_t end, uint64_t completed) {
 	const uint64_t current = m_scheduler.CurrentTick();
-	// A prepared binding may survive a submission before its command is recorded.
-	// Queries must not permanently date it: only OnCommandRecorded owns that stamp.
-	// Completed recorded writes form a prefix; an unrecorded reservation stays pending.
+	for (; m_gpu_writes_stamped < m_gpu_writes.size(); ++m_gpu_writes_stamped) {
+		m_gpu_writes[m_gpu_writes_stamped].tick = current;
+	}
+	if (m_gpu_writes_from == UINT64_MAX) {
+		m_gpu_writes_from = current;
+	}
+	// Stamps never decrease: the completed writes are a prefix.
 	while (m_gpu_writes_head < m_gpu_writes.size() &&
-	       m_gpu_writes[m_gpu_writes_head].tick != 0 &&
 	       m_gpu_writes[m_gpu_writes_head].tick <= completed) {
 		++m_gpu_writes_head;
 	}
@@ -904,7 +898,7 @@ uint64_t BufferCache::InflightWriteTick(uint64_t begin, uint64_t end, uint64_t c
 	for (size_t i = m_gpu_writes_head; i < m_gpu_writes.size(); ++i) {
 		const auto& write = m_gpu_writes[i];
 		if (write.begin < end && begin < write.end) {
-			tick = std::max(tick, write.tick != 0 ? write.tick : current);
+			tick = std::max(tick, write.tick);
 		}
 	}
 	return tick;
@@ -1231,13 +1225,6 @@ void BufferCache::QueueEagerReadback(uint64_t vaddr, uint64_t size) {
 }
 
 void BufferCache::OnCommandRecorded() {
-	// Writes are prepared while resolving bindings, which can submit an older tick.
-	// Stamp only after the actual command is recorded. This also bootstraps the
-	// side-queue log with AGE diagnostics disabled; a later read must not assign
-	// already submitted writes to an unrelated new open command buffer.
-	if (m_gpu_writes_on) {
-		StampGpuWrites(m_scheduler.CurrentTick());
-	}
 	if (m_eager_pending.empty()) {
 		return;
 	}

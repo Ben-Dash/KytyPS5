@@ -386,7 +386,6 @@ private:
 #include "EndOfPipeLiteralNeighborTests.inc"
 #include "OcclusionNativeCostTests.inc"
 #include "ReadbackQueueBootstrapTests.inc"
-#include "ReadbackQueuePreparedRolloverTests.inc"
 #include "LiteralEopPublicationCostTests.inc"
 #include "WaitRegMemNativeNonblockingCostTests.inc"
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
@@ -538,8 +537,7 @@ int main(int argc, char **argv) {
   } drain_stats_scope(drain_stats_mode);
   using namespace Libs::Graphics;
   const bool readback_queue_mode = argc == 2 &&
-      (std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0 ||
-       std::strcmp(argv[1], "--readback-queue-prepared-rollover-gpu") == 0);
+      std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0;
   if (readback_queue_mode) ConfigureReadbackQueueBootstrapTests();
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   if (argc == 2 && std::strcmp(argv[1], "--function-profile-smoke") == 0) {
@@ -612,7 +610,6 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--generic-buffer-numeric-measurement") == 0 ||
                             std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0 ||
                             std::strcmp(argv[1], "--readback-queue-ageoff-gpu") == 0 ||
-                            std::strcmp(argv[1], "--readback-queue-prepared-rollover-gpu") == 0 ||
                             std::strcmp(argv[1], "--armed-readback-window-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--armed-readback-typed-neighbors-gpu") == 0 ||
                             std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0 ||
@@ -1101,12 +1098,8 @@ int main(int argc, char **argv) {
     return MeasureGenericBufferNumeric(vulkan) == 0u ? 0 : 2;
   else if (argc == 2 && std::strcmp(argv[1], "--formatted-buffer-static-numeric-measurement") == 0)
     return MeasureGenericBufferNumeric(vulkan, true) == 0u ? 0 : 2;
-  else if (readback_queue_mode) {
-    if (std::strcmp(argv[1], "--readback-queue-prepared-rollover-gpu") == 0)
-      CheckReadbackQueuePreparedRollover(vulkan);
-    else
-      CheckReadbackQueueBootstrap(vulkan);
-  }
+  else if (readback_queue_mode)
+    CheckReadbackQueueBootstrap(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--eop-write-ordering-gpu") == 0)
     CheckEndOfPipeWriteGpu(vulkan);
   else if (argc == 2 && std::strcmp(argv[1], "--eop-literal-ordering-gpu") == 0)
