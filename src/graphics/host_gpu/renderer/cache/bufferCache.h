@@ -220,8 +220,9 @@ private:
 	void MarkReadbackHot(uint64_t vaddr);
 	// GPU writes that may still be in flight (KYTY_DEBUG_READBACK_AGE): NoteGpuWrite logs a
 	// written range; Thread_Gpu, between commands, InflightWriteTick returns the latest tick of a
-	// possibly unfinished write overlapping [begin, end) (0: none). Writes get their tick at the
-	// next point between commands, so one is never dated earlier than its command buffer.
+	// possibly unfinished write overlapping [begin, end) (0: none). OnCommandRecorded stamps
+	// prepared writes after their native command, so later reads retain the actual producer tick.
+	// Queries treat unrecorded reservations as open without assigning a permanent tick.
 	// KYTY_READBACK_QUEUE=1 (ReadbackQueue). Thread_Gpu, for a guest thread's readback: when every
 	// GPU write of the readback window has finished, arms its GPU-dirty pages for a download on
 	// the readback queue and returns it; null otherwise. The guest thread then submits and
@@ -232,6 +233,7 @@ private:
 	                                                            bool is_write);
 	void PublishQueuedReadback(QueuedReadback& request);
 	void                   NoteGpuWrite(uint64_t vaddr, uint64_t size);
+	void                   StampGpuWrites(uint64_t tick);
 	[[nodiscard]] uint64_t InflightWriteTick(uint64_t begin, uint64_t end, uint64_t completed);
 	[[nodiscard]] bool     GpuWriteLogComplete(uint64_t completed) const noexcept {
 		return m_gpu_writes_on && completed >= m_gpu_writes_from;
