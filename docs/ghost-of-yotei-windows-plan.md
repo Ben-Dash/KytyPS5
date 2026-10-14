@@ -1,6 +1,113 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: post-Dota native measurements, 2026-10-14
+## Current checkpoint: four algorithm trials finished; stop, 2026-10-15
+
+Branch yotei-integration-native. Production b1a9698e is byte-equivalent to the
+separately tested targeted candidate941fc65f (src/CMake/3rdparty diff empty).
+Only targeted publication remains, strict KYTY_READBACK_TARGETED_PUBLICATION=1,
+defaultOFF. Indirect, packed and PM4 production are reverted; their regression
+fixtures, commits and artifacts are preserved. User's OLD+THREE NEW scope is
+complete: STOP, no fifth algorithm or new game retry. Preserve untracked
+tests/ComputePrefetchPermutationTests.inc. No push or issue comment this round.
+
+See [four-trial evidence](yotei-four-read-algorithms-2026-10-15.md) and
+[public developer references](yotei-public-developer-references.md).
+Old indirect202651/6a668b controlmean3.58; ON203006/2cfcd6 cut at3.4, reverted
+e3f22a9c. Packed205520/beb2d6 cut at3.5<=3.58, reverted a1c414dc. PM4 candidate
+532a54db core212217/install212310 PASS, EXE D9F916EBBDA5698CC71704EE93F0CADC5573FC186AD98BA11728B0C6ABC8B12D;
+ON212312/117d59 gated557/90.102s, cut at569/title3.6<=latestcontrol3.60,
+no completedmean/image, exit0/no guards. Reverted3dfd4664.
+
+Targeted native RED203705 -> unchanged GREEN210105/C20BDE31 PASS; four existing
+new-writer/image/typed neighbors PASS210637/210638/210710/210711. Older wider
+A1+C1/newer exact A2 neighbor211230/FD7CD216 PASS after fixture owner setup
+repair; original210941 failure is NOT a production RED. Distinct tokens/ticks,
+required older-overlap wait1 and exact native/backing A2 after ALL callbacks.
+Native core211248/install211348 PASS, tested EXE
+0A95CCA6A82FA9AA458B66DCE0E6A614CE5A11FD2D3105253B35B31A4D97D275
+at cycle53/runtime-targeted-publication. Same EXE ON211350/87a248 completed6s
+mean3.8333 versus OFF211625/320d63 mean3.60, about6.5% difference. One window
+each and no image/equal-scene proof; stable throughput gain remains unproved.
+No verified2x from original3.7 (target7.4) or60FPS. Internal resolution pending.
+
+PM4 corrected resource-plan205059 and intendedRED205131 -> unchanged
+GREEN212021/83AF97CB PASS: native header/payload/current markers/guards/cleanup,
+independent queue progress with A blocked/old and dispatcher waits0/0/0.
+Queued WAIT212038, image aliases212039, fresh parser predication212147 and
+command lane/nested-resume212148 PASS. GPU-owned nested/predicated/legacy
+extended payload and concurrent targeted once-claim remain explicit test debt.
+
+Final native core212529/install212808 for selected b1a9698e PASS. Installed
+cycle53/runtime-selected-targeted-publication EXE
+E46E5CC99DAFA8B4E67177C854FA7A7DE8E8CA1391DE6AB43169F562212E8ABE
+is build-checked, not game-tested. Archived tested runtime0A95 is preserved.
+No task-owned native process or WSL/Dota remains at final check. Next unresolved work is proving
+actual workload eligibility and dominant removable frame cost, not another
+speculative core rewrite. WSL/Dota absent at last native run; task-owned games
+closed normally. No new menu/gameplay/visual correctness milestone is claimed.
+
+## Historical checkpoint: three read cost REDs; packed readback GREEN/core build, 2026-10-14
+
+HEADf9fc0a9e, fixturesdb979491; active native core build for opt-in packed
+readback. FREEZE source/test/CMake until completion; root owns native execution.
+Old indirect trial is rejected/revertede3. User cap remains OLD+THREE NEW,
+then STOP; no fifth algorithm. Preserve user untracked prefetch fixture.
+
+All read fixtures compiled203551/A4C60E5B. Packed203704 and targeted203705
+are intended cost REDs AFTER native/numerical/guard/cleanup controls pass.
+Packed unselected-gap/different-owner has2tokens/barrierCalls vs1; targeted
+A is native-complete/armed/old behind B, actualPriorityWait1 vs0.
+Initial PM4 run203703 exited321/deviceLost from a TEST invalid copy: CPU
+ObtainBuffer returned ActiveStream; discarded offset caused8GiB source offset
+on64MiB stream. NOT RED or emulator mechanism defect. Test-only registered
+owner acquisition, pre-copy capacity checks and shared helper bounds repaired.
+Build204921/2A82 PASS; safe resourceplan205059 PASS (invalid guest-derived
+offset rejected, actual owner4092/16384). One corrected bounded GPU retry
+205131 now intended RED: both header/payload current native values/markers,
+guards/cleanup pass; actual waits prevent independent queue before release.
+No timeout/driver loss/reset in that corrected run. New PM4 core pending.
+
+Packed correctionf9 actual unchanged GREEN204725/CD6E1093: all3cases preserve
+12bytes/3regions/exact native/backing/gap guards; one token/hostbarrier and
+one copy per real owner. Original eager OFF204919 and armed typed ON204920
+neighbors PASS. Strict defaultOFF KYTY_READBACK_PACKED_BATCH=1; original
+downloader fallback retained, source identity regather after stagingMap.
+Game native core build active; FPS pending. Targeted safe updated proposal
+has older-overlap/coherent-allocation guards; remains unapplied/uncompiled.
+
+## Historical checkpoint: indirect experiment rejected; three read algorithms pending, 2026-10-14
+
+Branch yotei-integration-native, correctness candidatec7c199fd, production
+reverted by e3f22a9c to42c byte-equivalent. Native GPU fixture/tests retained.
+Latest user scope supersedes earlier three-check
+wording: TRY this experiment PLUS THREE NEW read algorithms, then stop.
+Three agents prepare distinct PM4 continuation, selected eager multi-owner
+batching and targeted publication fixtures; no new read production changes yet.
+User test WIP preserved.
+
+Genuine CPU cost RED194639/EABD on42c remains the reproduction. Fixture
+SHA35498FA3 unchanged. Native target201108 PASS; unchanged GREEN201249/02CEA345:
+fivearguments/64-bit offset/order/dependency/worker cleanup pass and actual
+producerDrains0 instead of1. Existing idle-spin routing neighbors201249 PASS.
+These are host-only proofs, no native GPU commands or game outcome.
+Native test target201903 PASS, initial GPU201947/C9F2 rejected as SETUP error:
+fixture redundantly enabled an already-enabled scheduler. This was not RED,
+driver hang or production defect. Removed only redundant enable; build202048
+PASS. Actual GPU202320/F01C5AF6 ON and202352 sameEXE OFF PASS: IA vertices0/3/6,
+all64 pixels, deferred GPU args copy, argument/pixel guards, finite2s waits,
+worker joins and native resource retirement. ON producerDrains0/OFF1 percase.
+Native candidate core202524/install202639 PASS, runtimecycle52/
+runtime-indirect-recording-experiment, EXE9806136746FA2D90788D0CD27AD5B9648A06A5015BCFBDC3302B7C7CC51AFA63.
+Same EXE/runtime/neutral1080 after400/min90: control202651/6a668b completed6s
+mean3.58; ON203006/2cfcd6 gated531/90.180s but rejected at563/title3.4<=3.58
+before10s completion. ON has NO mean; both exit0/no guards, phase/image pending.
+Production correction removed per user; source/CMake diff42c empty. Archived
+candidate runtime is c7, NOT the reverted source. THREE NEW read algorithms
+remain unapplied/uncompiled/unrun; batch test-only harness merge in progress.
+Do not run a fifth algorithm. [Public SDK/engine references](yotei-public-developer-references.md)
+were checked during the user's question; no private SDK access or game source.
+
+## Historical checkpoint: post-Dota native measurements, 2026-10-14
 
 Record HEAD5dc3f3c3, production42c6c601, installed EXE8E3D9CD6 unchanged.
 User closed Dota; before native launch it/WSL/task jobs were absent, GPU2%.

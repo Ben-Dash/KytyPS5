@@ -1,5 +1,70 @@
 # Integration test debt
 
+## Cycle53: three new read algorithms, 2026-10-14
+
+User requests old indirect experiment PLUS THREE NEW read-core variants and
+then stop. New read production behavior must await each intended actual RED:
+PM4 header/payload suspension must preserve cursor/snapshot and original queue
+ordering while allowing an independent queue to progress; selected eager pages
+across owners may share packed staging/barriers/publication without widening
+admission or losing newer GPU writes; range/token publication must return A
+while unrelated B publisher is held, with exact A/B bytes and generations.
+Keep fixtures finite, retire all CPU/GPU/native resources before cost oracles,
+and never count setup/timeout/driver-hang errors as RED. Agents own ignored
+fixture proposals, root all native runs/production mutations. Preserve normal
+metadata/unknown-case fallback. Actual packed203704 and targeted203705/A4C60E5B
+cost REDs now pass all data/guard/cleanup controls first. PM4 initial203703 was
+a fixture invalid-copy device loss, NOT RED; acquisition and bounds repaired,
+resourceplan205059 PASS; corrected205131/2A82 now genuine header/payload wait
+and progress RED with exact native/source/markers/cleanup. Packed f9fc0a9e
+unchanged GREEN204725/CD6 passes all3cases; original eagerOFF and armedtypedON
+neighbors PASS204919/204920. Ringblocked/generation-changed fallback and broader
+cross-game live coverage remain limits. All four algorithm trials are now
+finished; no further algorithm/game run belongs to this bounded task.
+
+Packed game trial205520/beb2d6 rejected firstbelow title3.5<=3.58 within gated
+window; no completedmean or visualgain. Native f9 core/installPASS, EXEE9BB9F99
+archived, production reverted a1c414dc. Targeted revised proposal eaee (older
+overlap/coherent guards) native205750 and unchanged GREEN210105/C20BDE31 PASS;
+new-writer210637, dirty-image210638, pending-image210710 and armed-typed210711
+neighbors PASS. Older-wider neighbor210941/50547530 has exact native/backing
+A2 and all ordering/guard/cleanup checks PASS but invalid same-owner A+B+C
+fixture assumption fails; this is NOT a production regression. Corrected
+registered A+C owner setup211230/FD7CD216 PASS with unchanged numeric/order
+checks, native/backing A2 current after all callbacks and required wait1.
+Safety test b28793c5, production941fc65f; native core/install PASS211248/211348.
+ON game211350/87a248 completed6s titlemean3.8333 (earlier control3.58); visible
+scene/equivalence unproved. Same EXE OFF control211625/320d63 completed6s
+mean3.60, about6.5% difference from ON; no scene proof or replicated gain.
+Concurrent same-request once claim and live cross-game remain limits; no
+verified2x gain. Targeted was temporarily reverted2349d757 to isolate final PM4,
+then restored b1a9698e, exactly matching tested941 production, defaultOFF.
+Native PM4 target211920 PASS; unchanged PM4 GREEN212021/
+83AF97CB with fixture SHA D0D84C55 PASS: actual GPU header/payload, original
+markers/canaries/current values, independent progress while A blocked/old,
+dispatcher full/tick/priority waits0/0/0 and finite cleanup. Queued WAIT212038
+and image alias212039 neighbors PASS. Fresh shader target212040, predication
+212147 and command-lane212148 neighbors PASS. Native core212217/install212310
+PASS; game212312/117d59 cut atframe569/title3.6<=latestcontrol3.60, before
+completion, no mean/image; production reverted3dfd4664. Host/unmapped parser
+tests do not cover GPU-owned
+nested/predicated/legacy extended payload, kept as explicit coverage limits.
+No correctness proof should be relabeled as gameplay/FPS success.
+
+## Cycle52: copied indirect command experiment, 2026-10-14
+
+Before production change, existing unchanged host-only fixture SHA35498FA3
+has intended logged RED194639/EABD645F on production42c: all argument/order,
+prior-work dependency and retirement controls pass; producerDrain1 fails0.
+Reuse this recorded reproduction; no build/setup failure is the oracle.
+Next shared copied vkCmdDrawIndirect hook remains opt-in until actual native
+draw/argument-write/barrier/readback/resource-retirement proof and clean world
+FPS improvement. Add finite zero/one/multiple-count and direct/foreign/consumer
+routing neighbors. No GPU hang/repeated reset or game-title special path.
+An independent bounded producer census must prove actual workload eligibility;
+nonzero counts alone do not prove material removable wait time. New diagnostic
+instrumentation is not a correctness or performance fix.
+
 ## Post-Dota measurement limits and next renderer witness, 2026-10-14
 
 Native source42c unchanged; cycle51 clean6s titlemean3.85 versus drain-only10s
