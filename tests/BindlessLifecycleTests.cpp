@@ -413,6 +413,7 @@ private:
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
 #include "ForeignReadbackReadyAfterWaitCostTests.inc"
 #include "TargetedReadbackPublicationCostTests.inc"
+#include "TargetedReadbackOlderPublisherNeighborTests.inc"
 #include "ForeignReadbackReadyAfterWaitNeighbors.inc"
 #include "ForeignReadbackReadyNewWriterNeighbor.inc"
 #include "ForeignReadbackReadyAfterWaitDirtyImageGuardTests.inc"
@@ -449,7 +450,8 @@ static bool IsRepeatedGpuDirtyStateMode(const char* mode) {
 }
 
 static bool IsForeignReadbackReadyMode(const char* mode) {
-  return std::strcmp(mode, "--targeted-readback-publication-cost-gpu") == 0 ||
+  return std::strcmp(mode, "--targeted-readback-older-publisher-neighbor-gpu") == 0 ||
+         std::strcmp(mode, "--targeted-readback-publication-cost-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-after-wait-cost-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-mixed-range-neighbor-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-unpublished-neighbor-gpu") == 0 ||
@@ -544,6 +546,13 @@ int main(int argc, char **argv) {
   }
   const bool drain_stats_mode = argc == 3 && std::strcmp(argv[1], "--drain-stats") == 0;
   if (drain_stats_mode) { --argc; ++argv; }
+  if (argc == 2 && std::strcmp(argv[1], "--targeted-readback-older-publisher-neighbor-gpu") == 0) {
+    Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
+    Libs::Graphics::Require("TargetedReadbackOlderPublisherNeighbor", "forced targeted safety path",
+        drain_stats_mode && _putenv_s("KYTY_READBACK_TARGETED_PUBLICATION", "1") == 0 &&
+        _putenv_s("KYTY_READBACK_READY_AFTER_WAIT", "1") == 0,
+        "run --drain-stats; targeted/ready options must be enabled before native hooks");
+  }
   if (argc == 2 && std::strcmp(argv[1], "--targeted-readback-publication-cost-gpu") == 0) {
     Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
     Libs::Graphics::Require("TargetedReadbackPublicationCost", "existing fastpath enabled before native setup",
@@ -1024,7 +1033,9 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1])) {
-    if (std::strcmp(argv[1], "--targeted-readback-publication-cost-gpu") == 0)
+    if (std::strcmp(argv[1], "--targeted-readback-older-publisher-neighbor-gpu") == 0)
+      CheckTargetedReadbackOlderPublisherNeighbor(vulkan);
+    else if (std::strcmp(argv[1], "--targeted-readback-publication-cost-gpu") == 0)
       CheckTargetedReadbackPublicationCost(vulkan);
     else if (std::strcmp(argv[1], "--foreign-readback-ready-after-wait-cost-gpu") == 0)
       CheckForeignReadbackReadyAfterWaitCost(vulkan);
