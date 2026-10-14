@@ -1,5 +1,210 @@
 # Integration test debt
 
+## Renderer paths selected by actual semantics, 2026-10-14
+
+Current source294a854d; see
+[GTA/Yōtei renderer research](yotei-renderer-performance-research-2026-10-14.md).
+Fresh575166 has only16-byte tiny tiled downloads; the prepared4B direct-download
+cost fixture/candidate remains unapplied/uncompiled/unrun, with no applicability
+witness. Do not call this a failed native test or an accepted optimization.
+
+Next eligible witnesses: bounded q0 Process CPU cycles + timings of real native
+counter query/semaphore wait/publication CV calls; bounded uploads/direct-route
+admission refusal metadata. Diagnostic measurements are not fixes and require
+no artificial speed RED. Do not add resource/driver queries or change scheduling
+while observing. Account for censoring/overflow and overlapping time scopes.
+
+If subword detile cost is confirmed, first prove byte/halfword tiling independently
+with nonuniform finite data, odd dimensions/base offsets, padding/guard preservation,
+tails/subresources and exact unsupported fallback. Only after byte/layout/cleanup
+controls may excess native atomics/work fail as intended RED. A one-writer-per-word
+path must retain correct partial-word ownership; no blind atomic removal.
+
+If repeated backing lookup is confirmed, first exercise the real shared backing
+store with independent mappings and generation changes. Exact bytes, owner changes,
+remap/unmap/gaps and overflow must pass before excess locked lookup count RED.
+Multi-entry cache is a candidate, not demonstrated current frame cause.
+Existing last-writer transfer readback queue must be measured before proposing
+another queue. CPU command assembly from GPU results cannot simply be discarded.
+
+Fresh native bootstrap reproduction now confirmed on294: build target185126 PASS,
+test185233 (`--readback-queue-ageoff-gpu`, EXE96E84A5F...) uses actual graphics
+family0/transfer1. Warm unknown producer fallback and native A=abcdef09 pass;
+completed A still rejected (`queued=0`, backingA=5a5a5a5a) while unrelated B
+remains OPEN. All finalA/finalB numerical controls and owned cleanup pass before
+the intended eligibility assertion fails. Exit-1073740791 is that explicit
+Require/abort, not a driver hang or unrelated crash. Same fixture must remain
+unchanged for GREEN. Root is investigating late/missing write-tick stamping;
+do not enable queue1 in the game before this regression and neighbors pass.
+
+Bootstrap RED185233→unchanged GREEN185634 after a post-command stamping draft
+(native target185504 PASS, EXE8BA64F41...). Before accepting that draft, add a
+finite pending-reservation/query/rollover neighbor: reserve A, query and reject
+its OPEN producer, submit that preparation tick, record actual A on the next
+OPEN tick, then a new plan must still reject. Finish and independently verify
+native A/backing values/owned cleanup before checking the rejection oracle.
+The query must never permanently assign an unrecorded reservation to an earlier
+tick. Query-side pending0 must conservatively mean current/open; completed-prefix
+pruning must stop at pending0. Also preserve same-tracker-page/new-A-writer denial.
+No queue1 game trial until these actual ordering controls pass. Draft is not
+a completed fix or demonstrated FPS increase.
+
+Completed safe correction4e784308: pending/query/rollover RED190348/A3450E49
+passes real producer values/guards/cleanup but openReject=0; unchanged
+GREEN190538/AF3C72E4 has openReject=1 and samePageReject/newAReject=1. Queries
+no longer permanently stamp pending writes and prefix pruning stops at pending0.
+Final old bootstrap190600 and existing armed4/EOP3 neighbors190601/190603 pass.
+Trust floor and overflow policy preserved. Native correction completed locally;
+game queue activation/FPS comparison and broader cross-game coverage pending.
+
+Runtime disposition: candidate4e FULLY reverted42c6c601 after no-gain queue1
+trialcc7b05 firstframe400/title0.9<=control0.95 (df0078 completed6smean).
+No ON averaged FPS/percentage or new visible-world proof. Both closed0 without
+guards. Correctness artifacts remain archived; current implementation again
+contains the reproduced debt. Initial41ad9a uses AGE='0' presence-enabled diagnostic
+and is excluded. Next diagnostic-work test must distinguish a legitimate empty
+timestamp tail from a real unmarked required command, including deferred recorder;
+no actual missing mark has been found. Controlled same-executable drain setting
+comparison and actual phase confirmation precede any new production correction.
+
+After the actual defect/cost witness: unchanged GREEN, smallest affected neighbors,
+native Windows build, clean warmed real-world title FPS A/B. New visual acceptance
+is pending for575166: owned scene capture was withheld, not a world screenshot.
+The minimum90s/frame400 gate alone is not scene proof. No2x increase claimed.
+
+## Immutable shader format metadata storage, 2026-10-14
+
+Actual captured compiler output has four readonly Private128-u32 tables,
+2048 declaredbytes per invocation. This is a storage-cost witness, not measured
+driver spills or proof of the world bottleneck. Before emitter changes, compile
+the existing synthetic generic-buffer program with the requested optional mode
+and independently check all128 metadata words/validity/width/type/prefix values
+and seven-bit masking. Only after those preservation controls may the old2048
+versus expected0 declared Private-byte budget fail as the intended cost RED.
+Keep the same fixture/goldens unchanged for GREEN; build/validator failures
+are not RED. Keep old invalid-format metadata and unsupported errors.
+
+A real finite GPU probe must exercise the actual emitted old tables/new lookup,
+not upload CPU expected values to GPU. Validate module layout before execution,
+all128 values and wrapped/invalid boundaries, output guards and cleanup using
+one bounded dispatch/fence. Neighbor actual generic formatted loads/EXEC/raw
+and D16 cases before any original-game trial. A shared helper may be inlined by
+the driver or increase pressure, so storage removal alone proves no speedup.
+Fingerprint the experimental mode in cache/audit provenance or use isolated
+matching build profiles without deleting/retagging old caches. Native module
+statistics and valid phase-matched world FPS remain required for acceptance.
+Production candidate9a8b61da is defaultOFF. Storage RED221328→GREEN221553,
+option lifetime RED222703→GREEN223230, native388 metadata/60 canary probe,
+52 actual channel/wave32/64/EXEC neighbors both modes PASS. Actual D16 coverage
+remains pending. Generic4800 outputs equal exactly across modes, but both retain
+144 preexisting UNorm8 endpoint errors/exit2; strict numeric pass is not claimed.
+Six native GPU workload microbench medians differ below0.5%, no meaningful gain.
+Exact full-record FC6 compile-only statistics OFF20s/ON30s both timed out before
+driver pipeline creation returned; no spill/allocation statistics obtained.
+Game OFF230053 mean3.75 (90s+400), ON230455 timed out compiling before game.
+World benefit is UNPROVED. Warmed retry230912 also timed out240s atframe2,
+second changed pipeline160.8s, third still compiling. FULL candidate9a8 reverted
+ce0b3848, original patch/fixtures/caches retained outside tracked source.
+This is no measured steady-world FPS rejection or cold-vs-cold compile comparison.
+
+Experimental option lifetime must also preserve actual batch audit input:
+fresh production compilations 0→1→0 in the same process must retain all128
+metadata and produce2048→0→2048 Privatebytes. Run against the cached getter
+first; only middle2048 instead of0 after guest/env cleanup is the intended RED.
+Use one public per-compilation option reader and matching cache/audit policy;
+do not fingerprint1 while actually recompiling with a cached0.
+
+Cache mode admission must use the actual native loader and real empty Vulkan
+cache bytes: OFF identity loads exactly, bad checksum/host are rejected and
+source files/objects clean up before an existing ON filename with OFF header
+must reject. Only wrongVariantLoaded>0 versus expected0 is the intended RED.
+After namespace isolation, a missing ON file may seed from unchanged validated
+OFF opaque bytes; malformed seed still rejects, inputs remain byte-exact and
+the read-only loader creates no files. Never retag raw journals across keys.
+
+CPU audit must preserve strict old manifest handling while adding the option:
+an accepted legacy environment missing only the newly introduced switch must
+clear inherited ON to OFF. Existing missing-other/type/extra-field denials and
+complete parent-environment cleanup precede that final RED. Explicit saved
+0→1→0 profiles must then match actual fresh compilation settings in one process.
+
+Actual cache admission RED224353→GREEN225654 plus missing-ON warm225655 PASS;
+legacy audit RED225525→GREEN225548 and explicit profiles PASS. Genuine checksum,
+host, old missing/type/extra denials and byte-exact input preservation retained.
+
+## World-phase WAIT and partial-flush diagnosis, 2026-10-14
+
+Earlier frame400 slice trace started during loading and lost159763 rows; it is
+not a world critical-path witness. Next sparse diagnostic starts after90s+400,
+uses current SliceExit mask7 (no reverted quantum bit8), reports dropped/censored
+rows and must associate a real world scene. Raw madeProgress can be stale; do
+not interpret zero as proof of no work. Join blocked intervals to the actual
+WAIT site, existing PollReadMemory outcome, single existing dereference/comparator
+and real CV timeout/notification without adding memory queries or notifications.
+100us requests round to at least1ms on Windows Clang; cumulative95ms/frame is
+many waits, not one100ms wait. WriteFault is before the guest store retry and
+cannot establish completed CPU-store→resume latency or justify an early notify.
+
+CS partial flush07 currently uses ALL_COMMANDS and consumes compute-chain state.
+Before narrowing it, establish actual native producer stage substitutions:
+compute image clears may become Transfer or ColorAttachmentOutput loadOp clear,
+and depth clears need early/late stages. Adding ColorAttachmentOutput everywhere
+includes logically earlier graphics stages and may preserve serialization.
+Require synthetic real RMW/transfer/dependency/guards/cleanup controls plus an
+independent stage-cost RED, pending-chain/rendering and VS/PS/EOP neighbors. No
+game-specific omission or unconditional Compute-only barrier is permitted.
+
+Actual world run231842/692d96d8/EXEBF6F PASS native cleanup0/no guards; viewed
+frame505 scene. Full94258-row label trace has0drops; CS07=9991 in35frames,
+7930pendingcompute/34rendering. Actual413 nativeTransfer clears/0Color clears.
+This is frequency, not measured barrier wall cost. WAIT cap suppressed49181
+of65565 forwarded requests, so sparse complete episode attribution remains debt;
+all-attempt counters and actual CV histogram are separately available. CS native
+cost RED232311/EXE6E3EC6FD on unchanged692d96+fixture passes native numeric,
+guards, cleanup, pending-chain, compute/transfer coverage and VS/PS/cache controls;
+only final broad-source cost oracle fails (both src10000=ALL_COMMANDS). Native
+target232152 build PASS. Unchanged GREEN232612/EXE2434AF70 passes src1800
+Compute|Transfer versus prior10000, preserving all numeric/state/cleanup checks.
+CPU planner neighbors232614 PASS, actual CS cost chain0 neighbor232700 PASS;
+existing compute-chain default-scope0/1 neighbors232614/232616 PASS.
+Native alias/rollover OFF/ON232954/232955 pass; their guest span initially omitted
+padded linear rows, so correct fixture span0x800 (two0x400 slices) was used for
+final233322/233323/EXED80348D2 PASS without footprint warnings. All32 native
+texels perpass+readbackguards retain raw0.5/0.25 bits. Actual stage sequences
+ON1800,1c00,1c00,1800 prove color history persists across native Flush/BeginNext
+and resets only after recorded covering CS event; OFFall10000. Four new CTests
+233411 PASS1.43s. Production/test commitb052877f was defaultOFF. Actual clean
+sameEXE B7FA control233527 mean3.6 versusON233737 rejected3.4 at547/90.27s,
+bothexit0/no guards. FULL trial reverted165a1530; exactcode/evidence preserved.
+No FPS gain or whole-frame bottleneck proof. No other local game available;
+cross-game runtime untested.
+
+Existing broader compute-meta-clear group stops earlier at NativeIndirectDispatch's
+old host-drain assertion with scopeOFF/ON and chain0/1, BEFORE later numerical
+goldens. It asserts tick advance and CPU-clean args after dispatch. Verified also ORIGINAL
+pre-CS native EXE6E3EC6FD via232847-with-dlls control: same host-drain assertion.
+This is NOT proof of wrong numerical output. First232821 archive attempt failed
+missingDLLs and is NOT reproduction.
+Separate actual color-clear232756 scoped1 passes; do not claim the
+whole meta-clear group passes or alter old numeric goldens. Diagnose old count
+fixture/API contract separately: older57cf08688 assertion predates25194ba42's
+GPU-built IndirectBuffer descriptor path. Suspected stale expectation still
+requires a separate diagnostic that executes unchanged numerical goldens.
+Diagnostic234420/EXE072B passes packet-consumption, logs count3/tick9→9/
+argsGPUdirty1, then original CPU numerical golden failsword0. Independent
+actual-native-owner234602/EXE89F1 probe copies64B from writable PeekPage owner,
+proper shader→transfer→host dependencies and real Finish; native16 words EXACT
+4,5,6 thenA5sentinels, both guardsPASS. Existing CPU golden still failsword0
+and outputGpuDirty0. This confirms the first native count3 math and identifies
+untracked BDA output publication as a separate boundary; not whole-suite GREEN,
+not a minimal cleanup-safe semantic RED, not a proven performance cause.
+Test-only diagnostics preserve originaldefault predicate/numeric asserts.
+Correct old-binary provenance is RED232311
+archive source692d+fixture, not launcher-recorded current3f1d HEAD.
+WAIT forwarding cap raised131072 based on actual65565 requests+77874nonWAIT
+rows (projected143439<262144 ring); future traffic can still overflow and must
+report loss. No completed re-run with the new cap yet.
+
 ## PM4 queue service and bounded yielding, 2026-10-14
 
 Actual causal diagnostic `aeb13a50` after frame 400 joins 73 real completion

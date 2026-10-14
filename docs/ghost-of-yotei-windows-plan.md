@@ -1,5 +1,213 @@
 # Ghost of Yōtei: active integration and session resume
 
+## Current checkpoint: readback trial rejected; renderer research saved, 2026-10-14
+
+Active branch `yotei-integration-native`, native Windows `42c6c601`.
+Correctness candidate4e784308 is FULLY reverted here; commit/proposal/native
+RED/GREEN artifacts remain preserved. No source/test WIP except user-owned
+untracked `tests/ComputePrefetchPermutationTests.inc`; preserve it. Documentation
+commits after42c do not change executable behavior.
+
+Actual finite proof: original bootstrap RED185233→unchanged final GREEN190600;
+pending/query/rollover RED190348→unchanged GREEN190538. All native values/guards
+and owned cleanup precede intended failed assertions. Final armed4/EOP3 neighbors
+190601/190603 PASS. Native candidate core190636/install190755 PASS, EXE
+`035F6EF30FE33163EA94C2D1D38EBC6A587F20A62F0E1DB1FE262E3223897D21`.
+That executable contains REVERTED4e; never relabel it as42c. Fresh42c native
+core192003/install192310 PASS. Current runtime
+`_Build/analysis/yotei-performance-cycle49-20261014/runtime-current-42c6c601`,
+EXE SHA256 `8E3D9CD6546A63307CF8559D302C6DB67B2A40E7B93035B89C421751A8633F7C`.
+No game retry on the freshly rebuilt revert; no native job remains active.
+
+Same candidate EXE, isolated copies of the same saved runtime, neutral/fullrenderer
+1920x1080 output/full replay, min90s+frame400:
+`game-20261014-191111-perf-cycle49-clean-world-readback-queue0-df0078`
+control title6smean0.95, gate400/136.575s, closed0/no guards;
+`game-20261014-191535-perf-cycle49-clean-world-readback-queue1-cc7b05`
+real transfer family1 created, first evaluation at400 title0.9<=0.95 immediately
+rejected peruser, closed0/no guards. ON has no completed6smean: do not invent a
+percentage regression. No FPS gain/no post-gain screenshot. Actual visible phase
+for BOTH new clean runs remains pending; gate time/frame alone is not world proof.
+No new original3.7→2x acceptance. No scene equivalence to older3.1 diagnostics.
+
+Initial candidate control `190847…41ad9a` EXCLUDED: `KYTY_DEBUG_READBACK_AGE='0'`
+still enables this presence-tested diagnostic. It is not a clean control. Corrected
+pair omits the variable; no readback-age output. Other omitted experimental flags
+defaultOFF confirmed. No unrelated task-owned process or vmmemWSL remained after
+ON ended. Do not stop unowned containers merely because their name includes vmmem.
+
+Three-agent source audit confirms --drain-stats injects real timestamp commands
+and NoteSubmissionWork on every command buffer, changing otherwise-empty optional
+flush admission. No actual missing native-command mark found in audited paths.
+Existing empty-tail tests deliberately cover direct recording; shipping deferred
+recording coverage remains a lead. Next one controlled discriminator: SAME fresh
+EXE/runtime/actual scene, AGE absent/queue0, change ONLY drain-stats setting, then
+bounded independent actual-command-versus-recorded-work witness if justified.
+Do not promote debug/clean differences to a proven scheduler bug or enable empty
+flushing blindly. No unsafe recording-age retry.
+
+[Renderer research and options](yotei-renderer-performance-research-2026-10-14.md)
+records primary GTA sources, official Yōtei compute→CPU command assembly, game
+shader-package inventory limits and shared semantic fast paths. Parked proposals:
+upload admission observer cycle48/upload-route-research (unapplied/uncompiled);
+4B direct download does not match observed tiny16B downloads; bounded DMA footprint
+and multi-mapping cache require current cost witnesses. Source/workflow evidence
+and three agents' ignored notes remain preserved. No push or issue publication.
+At least2x original3.7FPS and60FPS/fullFX goals remain unmet.
+
+## Historical checkpoint: GTA comparison and actual path admission, 2026-10-14
+
+Native Windows, `yotei-integration-native`; current correction `4e784308`.
+Fresh readback bootstrap RED185233/96E84A5F→unchanged GREEN185634/8BA64F41,
+then independent pending-query/rollover RED190348/A3450E49→unchanged
+GREEN190538/AF3C72E4. All native values, canaries and cleanup pass before each
+intended failure. Final unchanged bootstrap190600 plus armed4/EOP3 neighboring
+cases190601/190603 PASS. Actual same-page and new-open-writer denial pass in
+rollover fixture. Original bootstrap file remains byte-identical. Queued mode
+remains defaultOFF. No FPS improvement proved yet. Current native core build
+at4e is active; source/tests/CMake FROZEN until completion.
+
+The last completed diagnostic executable below is source
+`294a854d97a52d860d91f569a3d064f555ed94fc`, before the4e correction. Format
+candidate9a8 and CS candidateb052 remain
+fully reverted byce0/165a. Preserved untracked `tests/ComputePrefetchPermutationTests.inc`
+is unrelated WIP; do not delete or stage it automatically.
+
+Native core `checks/20261014-165607-8915943-build-core` and install
+`checks/20261014-183015-7204444-install` PASS. Exact installed EXE SHA256
+`FD5A4CE0D7699F93C579331007E5B0A793578528838BF5DCD621C8839B015E78`, runtime
+`_Build/analysis/yotei-performance-cycle48-20261014/runtime-tiled-download-cost`.
+Completed run `_Build/runs/game-20261014-183219-diag-cycle48-world-tiled-downloads-575166`:
+exit0/no timeout/no memory guards, full pipeline replay, neutral1080 output,
+title gate frame562/91.018s. Instrumented25s mean3.0952 is NOT a clean FPS trial.
+Owned scene capture withheld because task window was not foreground; no new
+image exists, visible outcome remains pending. Last independently viewed world
+is `game-20261013-231842-diag-cycle46-world-wait-partial-slices-8c6611/world-phase-diagnostic.png`.
+No new menu/gameplay publication milestone or issue comment.
+
+Latest full label epoch565–597:141640/141640 rows,drop0,pointererrors0;
+60917 WAIT attempts forwarded,0suppressed. TileImage observer:1152 recordings,
+six192-call buckets, all16B RGBA32_FLOAT/2..64px; bucket overflow0. This rejects
+the current applicability of the parked4B direct-download proposal, not the
+general feature. Capacity arguments are not actual transferred byte counts;
+format-read caps/per-download GPU completion unobserved. NativeFormat107 is
+RGBA32_FLOAT, not a16B raw-format incompatibility proof. Tiler zones21–24ms/frame
+mostly have different large-resource keys and include possible unmarked work.
+
+Previous complete `164640…d1d523` identifies upper flag GPU publishers and
+pre-producer q0 delay. Post-finalization8060=.074ms,8340=.183ms; no generic
+CPU-notify/timer fix is justified. ThreadGpu PSS72/72 valid with matching PDB
+GUID/age shows native waits and scattered CPU work, no single dominant function.
+Its preferred-base-only historical symbolization is not valid for ASLR.
+Actual native indirect observationb250 proves GPU output4,5,6/guards but not
+CPU publication; the original host/numeric assertions remain failing. No full
+group pass or proven frame bottleneck from that observation.
+
+Three-agent GTA/code audit and official Sucker Punch rendering explanation are
+saved in [renderer performance research](yotei-renderer-performance-research-2026-10-14.md).
+GTA external FPS does not prove intrinsically better optimization. Many general
+donor optimizations already exist. Last-writer transfer readback is implemented
+but defaultsOFF (`KYTY_READBACK_QUEUE` unset in current diagnostics). Preserved
+bootstrap test has now reproduced RED and unchanged GREEN above, plus a second
+query/rollover RED/GREEN. Root is building the4e emulator before a clean queue0/1
+game trial. Verify build completion before source edits or another native job.
+Yōtei explicitly uses compute→CPU readback→command assembly. Next: bounded q0
+CPU/native-call attribution and upload admission counts; then select one shared
+semantic correction, real RED/GREEN/neighbors, clean warmed same-world title A/B.
+Do not replace required CPU reads with native indirect without a semantic proof,
+skip required effects, or switch core behavior by title/hash/address.
+
+Before new native work verify processes and exact build inputs. No task-owned
+emulator/Ninja/MSBuild or vmmemWSL remained at the start of this research round.
+WSL stopped in the prior round; continue stopping it if it restarts as authorized.
+No native game was launched for this read-only comparison. No push/issue comment.
+At least2x original3.7FPS and60FPS/fullFX goals remain unmet.
+
+## Historical checkpoint: actual world confirmed; CS stage trial rejected and reverted
+
+Native Windows local `165a1530`, branch `yotei-integration-native`.
+The optional format lookup `9a8b61da` is FULLY reverted by `ce0b3848`; exact
+feature patch/caches/test artifacts remain archived under cycle45 outside
+tracked source. Genuine storage RED/GREEN
+`221328/221553` preserves all128 metadata and removes2048 declared Privatebytes;
+same-process0/1/0 RED/GREEN `222703/223230` preserves per-compilation profiles.
+Native388-format probe/60 canaries and52 channel/wave32/64/EXEC neighbors pass
+both modes. All4800 generic numeric outputs match exactly; BOTH retain144 old
+UNorm8 endpoint failures/exit2, so strict numeric suite is not passing. Six
+native microbench cases differ below0.5%; no meaningful throughput benefit.
+Cache admission RED224353→GREEN225654 and warm missing-ON neighbor225655 pass;
+legacy audit RED225525→GREEN225548 plus explicit0/1/0 profiles pass. OFF cache
+identity remains unchanged, ON files isolated; no cache headers retagged.
+
+Native core225814/install230026 pass. Current EXE SHA256
+`516BCF5B0F2A708990040DE8F24B4C23C799BEA5C190DE8D829E7F2087913C4D` in
+`_Build/analysis/yotei-performance-cycle45-20261014/runtime-format-world`.
+OFF control `game-20261013-230053-perf-cycle45-format-control0-world-37dc99`
+closed0,90.136s gate,frames447–467,title6s mean3.75,no guards. No new visual
+claim for that control. ON `230455…90a07a` did NOT reach the game: one actual
+driver compile151.6s,next still compiling; timeout180/forced cleanup/exit-1.
+No sampled world FPS and no performance rejection/acceptance from loading.
+Warmed ON retry `230912…6e3456` also ended timeout240/forced cleanup/exit-1,
+onlyframe2, no world sample. Second changed pipeline compiled160.8s, third
+still compiling. This is a startup-budget failure, not a steady-world FPS
+comparison. Both wrappers drained/native processes absent before the revert.
+Candidate acceptance declined without a throughput witness; no cold-vs-warm
+compile regression claim. Installed6a77 EXE still contains reverted code;
+do not relabel it as currentsource. Fresh native build required.
+
+User correction: frame400 alone may be loading. Use minimum90s PLUS400 for
+short6s title samples; positive acceptance additionally requires actual world
+pixels. A time guard alone also cannot prove scene readiness. Do not stop a
+startup merely for high loading FPS or compare a cold load with warmed world.
+Retain neutral input/no menus/1080p/full render. Exact FC6 compile-only stats
+OFF20s/ON30s both timed out before native pipeline creation returned: no
+statistics/spill values obtained and no dispatch occurred. Do not extend/retry
+that diagnostic repeatedly. Stats-only tooling6a77 remains independent/defaultOFF.
+
+Observer0b9133f6 initially hit ordinary ADL compile error, corrected692d96d8;
+native core231739/install231808 PASS. EXE
+`BF6F44211BB6D1E2EAD4A657C41C4E755D0565F5746A3ED5F10E8E15A1C8B5A7`.
+Actual world diagnostic `game-20261013-231842-diag-cycle46-world-wait-partial-slices-8c6611`
+closed0/no guards. Screenshot `world-phase-diagnostic.png` viewed: character,
+village, vegetation and particles in real3D world; no claim of interactive
+controls or stable fullFX from this single still. Frame505 capture metadata,
+20s title mean3.4588 is instrumented, NOT clean FPS rejection/acceptance.
+Trace frames480–515:94258requested/retained,dropped0,pointererrors0; actual
+CS07=9991,pendingcompute7930,rendering34; PS10=5574,rendering2458. Native
+Transfer clears413,actualColor clears0. Counts alone are not GPU elapsed cost.
+WAIT all-attempt totals captured, BUT requested65565/forwarded16384/suppressed49181
+means sparse episode joins are incomplete; do not claim whole-window causes.
+CV6286returns/2029timeouts/4257signalled,3.247s inclusive instrumented total;
+overlaps queue/episode gaps and is not wholly removable. No CPU-store timestamp.
+
+Native CS cost RED232311/6E3→unchangedGREEN232612/2434 proves broad stage cost
+after actual numeric/guards/cleanup controls. Actual alias/color/rollover/reset
+neighbors OFF/ON final233322/233323/D803 PASS with padded guestspan0x800 and
+unchanged native float bits; four CTests233411 PASS1.43s. Newproduction b052877f
+remained defaultOFF. Native core233424/install233525 PASS; EXE
+`B7FAEB3D02CEE8DA35DD352C43F59DCFFD841E6EBD25D4AC7A9F273894EDE82C`.
+Clean SAME EXE/runtimes/args/neutral1080 fullrenderer AFTER90s+400:
+control `game-20261013-233527-perf-cycle46-world-cs-scope0-aacac7` title6smean3.6,
+start509/90.348s,exit0. ON `233737…264cee` began543/90.271s, then547/title3.4
+<=3.6 was immediately rejected peruser,exit0/no guards. No post-gain screenshot
+or FPS gain. FULL b052 production/tests/CTest reverted165a1530, exactpatch/test
+artifacts kept cycle46/rejected-cs-scopes. Earlier native behavior/storage cost
+proof was not a frame bottleneck proof. Do not blindly carry this into PS10.
+InstalledB7FA still contains archived feature; do not relabel it as currentsource.
+
+Next: expanded complete WAIT diagnostic (cap131072 already3f1d, pointer span10000
+or bounded allwriter capture) for upper counterbank CPU/GPU producer causality.
+Existing100us CV floor and pre-store faults do not prove an earlier-readyCPUflag.
+Separate TEST-only native-indirect observation WIP preserves the old original
+host-drain assertion bydefault and unchanged later numerical goldens; it examines
+a likely stale test expectation, not a production fix. Current test target build
+active; sourceFROZEN. Fullcodecoverage/group PASS not claimed; original group
+stops before numerics even on pre-CS6E3 archive. Three agents audit exact cause,
+clean A/B parity and remaining shared barriers. No pre-store notify, no blind
+barrier deletion. WSL
+stopped again23:09UTC; user data/old caches/Prefetch WIP preserved. No push or
+issue comment. At least2x original3.7FPS and60FPS/fullFX goals remain unmet.
+
 ## Current checkpoint: warmed control disproves quantum gain; candidate reverted
 
 Native Windows `406395a4` on `yotei-integration-native`.
