@@ -1122,6 +1122,39 @@ static bool IsDispatchOpcode(uint32_t opcode) {
 
 // These legacy handlers consume a following centroid packet or an unbounded
 // diagnostic string. Keep their original guest span until they have bounded APIs.
+// Default OFF. Preserve the guest compute-to-CPU dependency, but do not monopolize
+// the parser while a buffer-only packet is waiting for its actual publication.
+static bool Pm4NonblockingFetchEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_PM4_NONBLOCKING_FETCH");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+
+static bool Pm4FetchReady(RenderContext& renderer, const uint32_t* packet, uint64_t bytes) {
+	if (!Pm4NonblockingFetchEnabled() || !GuestGpu::IsGpuThread()) return true;
+	// MRT diagnostics peek at packet payloads before execution. Retain their original
+	// synchronous boundaries rather than change the diagnostic capture contract here.
+	static const bool diagnostic_peeks = KYTY_GETENV("KYTY_DEBUG_MRT_SHADER") != nullptr;
+	if (diagnostic_peeks) return true;
+	const auto address = reinterpret_cast<uint64_t>(packet);
+	if (!GuestRange {address, bytes}.Valid() || !renderer.IsMapped(address, bytes)) return true;
+	auto& buffers = renderer.GetBufferCache();
+	// A dirty page hint alone is insufficient: clean packet bytes may share its page.
+	// This query also retains downloaded-but-unpublished byte ownership.
+	if (!buffers.HasGpuDirtyBytes(address, bytes)) return true;
+	const auto page_begin = address & ~uint64_t {TRACKER_PAGE_SIZE - 1u};
+	const auto page_end = (address + bytes + TRACKER_PAGE_SIZE - 1u) &
+	                      ~uint64_t {TRACKER_PAGE_SIZE - 1u};
+	auto& textures = renderer.GetTextureCache();
+	// PollReadMemory publishes buffer tracker pages. Keep the old synchronization
+	// whenever any image ownership/publication aliases those full pages.
+	if (textures.HasPendingDownload(page_begin, page_end - page_begin) ||
+	    textures.IsRegionGpuModified(page_begin, page_end - page_begin)) return true;
+	return buffers.PollReadMemory(address, bytes);
+}
+
 static bool Pm4NeedsOriginalPayload(uint32_t header, uint32_t first_word) {
 	return ((header & ~1u) == 0xc0106900u &&
 	        (first_word & ~0x70000000u) == Pm4::PA_SC_AA_SAMPLE_LOCS_PIXEL_X0Y0_0) ||
@@ -1185,6 +1218,10 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 		const auto        total_dw      = static_cast<uint32_t>(cursor.commands.size());
 		const auto        remaining_dw  = total_dw - cursor.offset_dw;
 		uint32_t packet_header = 0;
+		if (!Pm4FetchReady(m_renderer, packet, sizeof(packet_header))) {
+			SuspendPm4();
+			return; // The original cursor and header remain untouched for the retry.
+		}
 		LibKernel::Memory::ReadGuestOnGpuThread(reinterpret_cast<uint64_t>(packet), &packet_header,
 		                                    sizeof(packet_header));
 		const auto        opcode        = (packet_header >> 8u) & 0xffu;
@@ -1254,6 +1291,12 @@ void CommandProcessor::ProcessPm4(Pm4Execution& execution) {
 			continue;
 		}
 
+		// Predicated packets that were skipped retain their old no-payload-read path.
+		// No handler/speculation side effect has occurred when this fetch suspends.
+		if (!Pm4FetchReady(m_renderer, packet, uint64_t {decoded_packet_dw} * sizeof(uint32_t))) {
+			SuspendPm4();
+			return;
+		}
 		auto handler = g_cp_op_func[opcode];
 		DrainStats::SetPm4Op(DrainStats::Pm4Op(opcode, KYTY_PM4_R(packet_header)));
 		DrainStats::t_predicated = (packet_header & 1u) != 0;
