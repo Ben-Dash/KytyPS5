@@ -390,7 +390,9 @@ private:
 #include "WaitRegMemNativeNonblockingCostTests.inc"
 #include "WaitRegMemNativeQueuedNeighborTests.inc"
 #include "ArmedReadbackWindowCostTests.inc"
+#include "GpuPm4FetchYieldTests.inc"
 #include "EagerReadbackAdjacentPagesCostTests.inc"
+#include "PackedReadbackBatchCostTests.inc"
 #include "GpuReadMemoryExactPageCostTests.inc"
 #include "CpuWriteFaultWindowCostTests.inc"
 #include "CpuWriteFaultWindowNeighbors.inc"
@@ -410,6 +412,7 @@ private:
 #include "ForeignReadbackQueuedStateCostTests.inc"
 #include "ForeignReadbackQueuedArmedNeighborTests.inc"
 #include "ForeignReadbackReadyAfterWaitCostTests.inc"
+#include "TargetedReadbackPublicationCostTests.inc"
 #include "ForeignReadbackReadyAfterWaitNeighbors.inc"
 #include "ForeignReadbackReadyNewWriterNeighbor.inc"
 #include "ForeignReadbackReadyAfterWaitDirtyImageGuardTests.inc"
@@ -446,7 +449,8 @@ static bool IsRepeatedGpuDirtyStateMode(const char* mode) {
 }
 
 static bool IsForeignReadbackReadyMode(const char* mode) {
-  return std::strcmp(mode, "--foreign-readback-ready-after-wait-cost-gpu") == 0 ||
+  return std::strcmp(mode, "--targeted-readback-publication-cost-gpu") == 0 ||
+         std::strcmp(mode, "--foreign-readback-ready-after-wait-cost-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-mixed-range-neighbor-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-unpublished-neighbor-gpu") == 0 ||
          std::strcmp(mode, "--foreign-readback-ready-new-writer-neighbor-gpu") == 0 ||
@@ -455,6 +459,10 @@ static bool IsForeignReadbackReadyMode(const char* mode) {
 }
 
 int main(int argc, char **argv) {
+  if (argc == 2 && (std::strcmp(argv[1], "--gpu-pm4-fetch-yield-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-pm4-fetch-resource-plan-only") == 0))
+    Libs::Graphics::ConfigureGpuPm4FetchYieldTests();
+  if (argc == 2 && std::strcmp(argv[1], "--packed-readback-batch-cost-gpu") == 0)
+    Libs::Graphics::ConfigurePackedReadbackBatchCostTests();
   if (argc == 2 && std::strcmp(argv[1], "--command-stream-draw-indirect-gpu") == 0) {
     Libs::Graphics::Require("CommandStreamDrawIndirectGpu", "recording setup before native hooks",
         _putenv_s("KYTY_RECORD_THREAD", "1") == 0, "cannot enable deferred recording");
@@ -482,7 +490,7 @@ int main(int argc, char **argv) {
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                     std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0))
     Libs::Graphics::ConfigureEmptyPm4TailSubmitCostTests();
-  if (argc == 2 && (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)))
+  if (argc == 2 && ((std::strcmp(argv[1], "--packed-readback-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0) || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)))
     Libs::Graphics::ConfigureEagerReadbackAdjacentPagesCostTests();
   if (argc == 2 && (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
                     std::strcmp(argv[1], "--foreign-readback-queued-state-cost-gpu") == 0 ||
@@ -536,6 +544,12 @@ int main(int argc, char **argv) {
   }
   const bool drain_stats_mode = argc == 3 && std::strcmp(argv[1], "--drain-stats") == 0;
   if (drain_stats_mode) { --argc; ++argv; }
+  if (argc == 2 && std::strcmp(argv[1], "--targeted-readback-publication-cost-gpu") == 0) {
+    Libs::Graphics::ConfigureArmedReadbackWindowCostTests();
+    Libs::Graphics::Require("TargetedReadbackPublicationCost", "existing fastpath enabled before native setup",
+        drain_stats_mode && _putenv_s("KYTY_READBACK_READY_AFTER_WAIT", "1") == 0,
+        "run with --drain-stats; existing clean-range fastpath must be enabled");
+  }
   struct DrainStatsScope {
     bool previous;
     explicit DrainStatsScope(bool enabled)
@@ -566,6 +580,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   Require("BindlessLifecycle", "arguments", argc == 1 ||
+              (argc == 2 && (std::strcmp(argv[1], "--gpu-pm4-fetch-yield-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-pm4-fetch-resource-plan-only") == 0)) ||
               (argc == 2 && (std::strcmp(argv[1], "--command-stream-draw-indirect-gpu") == 0 ||
                             std::strcmp(argv[1], "--bindless-lifecycle-only") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
@@ -577,7 +592,7 @@ int main(int argc, char **argv) {
                             std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--wait-reg-mem-nonblocking-cost-gpu") == 0 ||
                             std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
-                            (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
+                            ((std::strcmp(argv[1], "--packed-readback-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0) || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
                             std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
                             std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
@@ -763,14 +778,15 @@ int main(int argc, char **argv) {
   subsystems.Initialize<Libs::LibKernel::Memory::Lifecycle>();
   ShaderInit();
   VulkanHarness vulkan(argc == 2 &&
-      (std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
+      ((std::strcmp(argv[1], "--gpu-pm4-fetch-yield-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-pm4-fetch-resource-plan-only") == 0) ||
+       std::strcmp(argv[1], "--poll-exact-page-readback-cost-gpu") == 0 ||
        IsForeignReadbackReadyMode(argv[1]) ||
        IsRepeatedGpuDirtyStateMode(argv[1]) ||
        std::strcmp(argv[1], "--cpu-write-fault-window-cost-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-window-boundary-gpu") == 0 ||
        std::strcmp(argv[1], "--cpu-write-fault-image-window-guards-gpu") == 0 ||
-       (std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
+       ((std::strcmp(argv[1], "--packed-readback-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0) || std::strcmp(argv[1], "--gpu-read-memory-exact-page-cost-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-foreign-fault-locality-gpu") == 0 || (std::strcmp(argv[1], "--gpu-read-memory-cross-owner-gpu") == 0 || std::strcmp(argv[1], "--gpu-read-memory-image-alias-guards-gpu") == 0)) ||
        std::strcmp(argv[1], "--empty-pm4-tail-submit-cost-gpu") == 0 ||
                     (std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-legacy-gpu") == 0 || std::strcmp(argv[1], "--prepare-bda-upload-batch-cost-checked-gpu") == 0) ||
        std::strcmp(argv[1], "--empty-pm4-tail-required-work-neighbors-gpu") == 0 ||
@@ -814,6 +830,14 @@ int main(int argc, char **argv) {
        std::strcmp(argv[1], "--bc-partial-buffer-neighbors-gpu") == 0 ||
        std::strcmp(argv[1], "--bc-partial-buffer-flag-neighbors-gpu") == 0), readback_queue_mode,
       argc == 2 && std::strcmp(argv[1], "--occlusion-native-cost-gpu") == 0);
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-pm4-fetch-resource-plan-only") == 0) {
+    CheckGpuPm4FetchResourcePlan(vulkan);
+    return 0;
+  }
+  if (argc == 2 && std::strcmp(argv[1], "--gpu-pm4-fetch-yield-cost-gpu") == 0) {
+    CheckGpuPm4FetchYield(vulkan);
+    return 0;
+  }
   if (argc == 2 && (std::strcmp(argv[1], "--retired-image-byte-budget-gpu") == 0 || (std::strcmp(argv[1], "--retired-image-byte-budget-neighbors-gpu") == 0 || std::strcmp(argv[1], "--retired-image-mixed-size-gpu") == 0))) {
     auto& renderer=vulkan.RuntimeRenderer();renderer.InitializeGpu(nullptr);
     renderer.GetGpu().SendCommandSync([&]{
@@ -952,6 +976,10 @@ int main(int argc, char **argv) {
     CheckGpuReadMemoryForeignFaultLocality(vulkan);
     return 0;
   }
+  if (argc == 2 && std::strcmp(argv[1], "--packed-readback-batch-cost-gpu") == 0) {
+    CheckPackedReadbackBatchCost(vulkan);
+    return 0;
+  }
   if (argc == 2 && std::strcmp(argv[1], "--eager-readback-adjacent-pages-cost-gpu") == 0) {
     CheckEagerReadbackAdjacentPagesCost(vulkan);
     return 0;
@@ -996,7 +1024,9 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc == 2 && IsForeignReadbackReadyMode(argv[1])) {
-    if (std::strcmp(argv[1], "--foreign-readback-ready-after-wait-cost-gpu") == 0)
+    if (std::strcmp(argv[1], "--targeted-readback-publication-cost-gpu") == 0)
+      CheckTargetedReadbackPublicationCost(vulkan);
+    else if (std::strcmp(argv[1], "--foreign-readback-ready-after-wait-cost-gpu") == 0)
       CheckForeignReadbackReadyAfterWaitCost(vulkan);
     else if (std::strcmp(argv[1], "--foreign-readback-ready-pending-image-neighbor-gpu") == 0)
       CheckForeignReadbackReadyAfterWaitPendingImageGuard(vulkan);

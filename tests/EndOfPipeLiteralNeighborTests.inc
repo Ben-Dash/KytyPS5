@@ -95,6 +95,10 @@ void ResetEopIrq(LibKernel::EventQueue::KernelEqueueEvent* event) {
 }
 void CopyEopNativeLabel(CommandScheduler& scheduler,Buffer& source,uint64_t offset,
                         FetchGpuBuffer& readback,uint64_t destination,uint64_t bytes) {
+  Require("EopNativeProofCopy","source/destination byte capacity BEFORE recording",
+      bytes!=0u&&offset<=source.Size()&&bytes<=source.Size()-offset&&
+      destination<=readback.size&&bytes<=readback.size-destination,
+      "invalid native proof-copy span; refusing BEFORE vkCmdCopyBuffer");
   auto command=scheduler.Current().Handle();
   vk::MemoryBarrier before{};before.srcAccessMask=vk::AccessFlagBits::eMemoryWrite;
   before.dstAccessMask=vk::AccessFlagBits::eTransferRead|vk::AccessFlagBits::eTransferWrite;
