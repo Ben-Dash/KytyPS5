@@ -326,6 +326,18 @@ public:
 		m_armed_pages.fetch_add(armed, std::memory_order_relaxed);
 	}
 
+	// Caller holds lock. Exact ownership, not a highest-tick approximation.
+	[[nodiscard]] bool IsReadbackArmedBy(uint64_t vaddr, uint64_t size,
+	                                     uint64_t token, uint64_t tick) const {
+		if (m_arms == nullptr) return false;
+		const auto [start, end] = GetPageRange(vaddr, size);
+		for (size_t page = start; page < end; page++) {
+			if (!m_gpu_dirty.Get(page) || !m_arms->armed.Get(page) ||
+			    m_arms->token[page] != token || m_arms->tick[page] != tick) return false;
+		}
+		return true;
+	}
+
 	// Publication of `token` finished: pages still armed by it are no longer GPU-dirty. Pages
 	// re-dirtied or re-armed since keep their state. Caller holds lock.
 	void Finalize(uint64_t vaddr, uint64_t size, uint64_t token) {

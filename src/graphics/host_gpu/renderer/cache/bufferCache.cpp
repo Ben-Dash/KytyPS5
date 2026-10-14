@@ -346,6 +346,101 @@ void BufferCache::DeleteBuffer(BufferId id) {
 	}
 }
 
+namespace {
+[[nodiscard]] bool TargetedReadbackPublicationEnabled() {
+	static const bool enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_READBACK_TARGETED_PUBLICATION");
+		return text != nullptr && std::strcmp(text, "1") == 0;
+	}();
+	return enabled;
+}
+} // namespace
+
+struct BufferCache::OrdinaryReadbackPublication {
+	uint64_t token = 0, tick = 0;
+	std::vector<std::pair<uint64_t, uint64_t>> pages;
+	Common::UniqueFunction<void> operation;
+	std::mutex mutex;
+	std::atomic_bool published {false};
+	bool foreground_safe = false;
+};
+
+void BufferCache::PublishOrdinaryReadback(OrdinaryReadbackPublication& request) {
+	std::scoped_lock lock(request.mutex);
+	if (request.published.load(std::memory_order_relaxed)) return;
+	EXIT_IF(!request.operation);
+	// Serialize only real download publication, never an unrelated FIFO callback.
+	std::scoped_lock publication_lock(m_ordinary_publication_mutex);
+	request.operation(); // Original invalidate/copy/token-finalize/notify, unchanged.
+	request.published.store(true, std::memory_order_release);
+	request.operation = {}; // Retire captured dedicated staging after actual publication.
+}
+
+void BufferCache::QueueOrdinaryReadbackPublication(uint64_t token, uint64_t tick,
+    std::vector<std::pair<uint64_t, uint64_t>> pages, bool foreground_safe,
+    Common::UniqueFunction<void>&& operation) {
+	if (!TargetedReadbackPublicationEnabled()) {
+		m_scheduler.DeferPriorityOperation(std::move(operation));
+		return;
+	}
+	auto request = std::make_shared<OrdinaryReadbackPublication>();
+	request->token = token;request->tick = tick;
+	request->foreground_safe = foreground_safe;
+	request->pages = std::move(pages);request->operation = std::move(operation);
+	{
+		std::scoped_lock lock(m_ordinary_readback_mutex);
+		std::erase_if(m_ordinary_readbacks, [](const auto& weak) { return weak.expired(); });
+		m_ordinary_readbacks.emplace_back(request);
+	}
+	m_scheduler.DeferPriorityOperation([this, request] { PublishOrdinaryReadback(*request); });
+}
+
+bool BufferCache::TryPublishCompletedOrdinaryReadback(uint64_t vaddr, uint64_t size, uint64_t tick) {
+	if (!TargetedReadbackPublicationEnabled() || m_readback_queue != nullptr ||
+	    vaddr == 0 || !GuestRange{vaddr, size}.Valid()) return false;
+	static const bool packed = [] {
+		const char* value = KYTY_GETENV("KYTY_READBACK_PACKED_BATCH");
+		return value != nullptr && std::strcmp(value, "1") == 0;
+	}();
+	if (packed) return false; // Other publication families are not in this registry.
+	const auto begin = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
+	const auto end = Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE);
+	const auto bytes = end - begin;
+	if (!GuestRange{begin, bytes}.Valid() || !m_scheduler.Context().IsMapped(begin, bytes) ||
+	    m_texture_cache.HasPendingDownload(begin, bytes) ||
+	    m_texture_cache.IsRegionGpuModified(begin, bytes)) return false;
+	std::shared_ptr<OrdinaryReadbackPublication> selected;
+	{
+		std::scoped_lock lock(m_ordinary_readback_mutex);
+		bool older_overlap = false;
+		for (const auto& weak : m_ordinary_readbacks) {
+			auto request = weak.lock();
+			if (request == nullptr) continue;
+			// Conservative first case: one exact contiguous tracker-page span.
+			if (request->foreground_safe && request->tick == tick && request->pages.size() == 1 &&
+			    request->pages[0] == std::pair<uint64_t, uint64_t>{begin, bytes} &&
+			    m_memory_tracker.IsReadbackArmedBy(begin, bytes, request->token, request->tick)) {
+				// An older wider/different-token publisher must never write stale
+				// backing after this newer request made its pages accessible.
+				if (older_overlap) return false;
+				selected = std::move(request);break;
+			}
+			if (!request->published.load(std::memory_order_acquire)) {
+				for (const auto& [address, length] : request->pages) {
+					older_overlap = older_overlap || (address < end && begin < address + length);
+				}
+			}
+		}
+	}
+	if (selected == nullptr || !m_scheduler.GetMasterSemaphore().IsFree(selected->tick)) return false;
+	PublishOrdinaryReadback(*selected);
+	// A concurrent new writer or image alias retains the original conservative path.
+	return !m_memory_tracker.QueryReadback(begin, bytes).gpu_dirty &&
+	    !m_texture_cache.HasPendingDownload(begin, bytes) &&
+	    !m_texture_cache.IsRegionGpuModified(begin, bytes) &&
+	    !m_memory_tracker.QueryReadback(begin, bytes).gpu_dirty;
+}
+
 bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t size,
                                       std::span<const uint8_t> ordered_bytes) {
 	FunctionProfile::Scope function_profile(FunctionProfile::Site::DownloadBufferMemory);
@@ -398,6 +493,8 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	// so they cannot observe an arm before its publication is queued.
 	const auto token = ++m_readback_token;
 	const auto notification = GuestGpu::CaptureReadbackNotification();
+	auto publication_pages = TargetedReadbackPublicationEnabled() ? pages
+	    : std::vector<std::pair<uint64_t, uint64_t>>{};
 	const auto arm   = [this, &pages, token] {
 		for (const auto& [address, bytes]: pages) {
 			m_memory_tracker.ArmReadback(address, bytes, token, m_scheduler.CurrentTick());
@@ -407,7 +504,8 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 		// Dirty pages without recorded bytes carry nothing to copy; their publication only
 		// ends their GPU ownership.
 		arm();
-		m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages)] {
+		QueueOrdinaryReadbackPublication(token, m_scheduler.CurrentTick(), std::move(publication_pages), true,
+		    [this, token, notification, pages = std::move(pages)] {
 			FunctionProfile::Scope function_profile(FunctionProfile::Site::BufferPublish);
 			for (const auto& [address, bytes]: pages) {
 				m_memory_tracker.FinalizeReadback(address, bytes, token);
@@ -487,7 +585,9 @@ bool BufferCache::DownloadBufferMemory(Buffer& buffer, uint64_t vaddr, uint64_t 
 	// Known bytes also remain GPU-owned until this tick is actually published.
 	// Otherwise a clean-backing read could observe the old CPU label before the fence.
 	inflight.ranges = std::move(pending_ranges);
-	m_scheduler.DeferPriorityOperation([this, token, notification, pages = std::move(pages), download,
+	QueueOrdinaryReadbackPublication(token, causal_tick, std::move(publication_pages),
+	    download == nullptr || download->IsCoherent(),
+	    [this, token, notification, pages = std::move(pages), download,
 	                                    owner = std::move(temporary), mapped, offset, total_size,
 	                                    buffer_address, copies = std::move(copies), vaddr,
 	                                    known_bytes = std::move(known_bytes), causal_tick, causal_value, causal_ordered] {
@@ -1176,6 +1276,7 @@ void BufferCache::ReadMemoryAsync(uint64_t vaddr, uint64_t size, bool is_write, 
 			                            .count());
 		}
 	}
+	if (TryPublishCompletedOrdinaryReadback(vaddr, size, tick)) return;
 	// A completed native tick is not enough: its requested backing publication
 	// must also have finished. Image aliases on the full tracker pages remain
 	// conservative. A newer buffer writer during the image scan rejects the exit.
