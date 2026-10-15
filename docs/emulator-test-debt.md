@@ -1,5 +1,34 @@
 # Integration test debt
 
+## Cycle54: measured performance candidates, 2026-10-15
+
+Public research + four native profiling runs completed on unchanged b1 core,
+record ce620, EXEE46E. No production fix/new optimization algorithm. Function
+report174rows650->686/10.185s all errors0; CPU counters and independent MAIN
+PSS36/36 prove high Main CPU accompanies guest deadline polling, not an identified
+hot HLE function. GPU109lateframes attribute buffer-copy32.59ms/frame and tiler
+20.65, about385submits/131readbacks/frame; exact removable critical path remains
+unproved. Full evidence: [research report](yotei-render-research-and-profile-2026-10-15.md).
+
+Before resource behavior changes, required synthetic cases:
+- Aliased views with different formats/extents over shared storage, unchanged
+  repeated consumption, partial CPU/GPU writes at tile and subresource boundaries.
+  Reuse must preserve latest native values, untouched bytes and read/write ordering.
+- Eager old-token completion after new GPU writes, later demand reads and periodic
+  retry. Measure stale-token admission separately; never suppress required current
+  data publication or assume CPU consumption from an unprotected clean-page load.
+- Actual hot shader resource kind/permutation: independently test8/16-bit stores,
+  dynamic descriptor views and Workgroup/LDS atomics including neighboring-byte
+  preservation and concurrency. Historical fc6f module CAS is LDS, not evidence of
+  current SSBO byte-store defect. Native8/16-bit path already exists.
+
+Diagnostic limits: noScopeProcessPm4/idleSpin, sampled same-thread-only exclusive,
+rawCPUcycles notms, histogram saturation100ms, syncQueueLockWait includes drain,
+GPUzones perturb overlap/have query coverage limits. Exact fresh SPIRV, hardware
+queue critical path, image/view-specific upload reasons, used/superseded eager
+token counts and VRAM residency remain pending. Scene must be inspected from
+task-window captures; user says do not ask him to identify the phase.
+
 ## Cycle53: three new read algorithms, 2026-10-14
 
 User requests old indirect experiment PLUS THREE NEW read-core variants and

@@ -1,6 +1,47 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: four algorithm trials finished; stop, 2026-10-15
+## Current checkpoint: public research and four profiling runs completed, 2026-10-15
+
+New user-authorized research/timing task is complete; no production fix was
+applied. Tested record ce620a1f, core b1a9698e, same EXE E46E5CC99DAFA8B4E67177C854FA7A7DE8E8CA1391DE6AB43169F562212E8ABE.
+See [research and measurements](yotei-render-research-and-profile-2026-10-15.md).
+Three agents researched GitHub, primary articles and timers; root ran native
+Windows serially. Clean073924/b2e5c9 mean3.80; functions074305/ee1163 diagnostic
+mean3.59; GPU074724/0053ef3.67; dedicated MAIN-IP075115/b77dcb3.72. These are
+20/20/20/25s title windows, gated>=90s and frame650/650/650/550. All exit0,
+no timeout/memory guard; no build needed, targeted option OFF, neutral full1080p.
+
+Function collector650->686/10.185s:174rows/27threads, all query/exclusive/
+truncated/outstanding/overflow errors0. Separate20s CPU counter: Main86.8%
+onecore, GPU-command46.9%, drawspec32.4%, recorder25.7%; process3.32cores.
+Fresh PSS selftest39/39 PASS and separate MAIN36/36 PASS5.015s/allcleanup0;
+Main88.18%CPU but29/36positions in guestRDTSC/deadlinepoll,3GPUwait,3alertwait,
+1otherguest. Position fractions are NOT CPU-cycle fractions or removable time.
+
+Late GPU109frames: busy135.23ms/frame, inter-buffer gap140.00, zones buffer-copy
+32.59/tiler20.65/gamecompute52.57. About385submits/131readbacks/21.06packedMiB
+perframe; zones/waits overlap, not additive. Whole-subresource upload-side
+tiling of two aliased surfaces is a measured candidate; exact view/extent and
+unused-prefetch generations remain unproved. Main load alone is not the culprit.
+Fresh liveSPIRV/permutation and full causal critical path still pending.
+
+Scene verified independently through PrintWindow without input/focus changes:
+function-run frame557 and both sides of MAIN-IP sample show character/world.
+User explicitly says determine phase ourselves, DO NOT ASK him. Clean/GPU-only
+run scene was not captured directly; matching save/input is supporting inference.
+Source reports/raw JSON under _Build/analysis/yotei-performance-cycle54-20261015.
+AnyPS5c92ae6e narrow-store and SharpEmuf9fe5cb adaptive-readback are useful code
+references; ordinary8/16stores/hot epochs/poll throttling already exist locally.
+Peepostarexx public main/YOTEI API404. No blind port or claimed2x/60FPS gain.
+
+WSL helper exceeded20s but vmmem stopped before first game; WSL/Dota/native
+task processes absent at final check. Preserve untracked user prefetch fixture,
+game/saves/caches/artifacts. No push/issue comment. Next required synthetic
+tests: shared alias/dirty-subresource reuse, eager token stale/demand semantics,
+and actual hot-shader storage paths; see test debt. Existing four-algorithm
+series remains historical; this profiling round did not add a fifth algorithm.
+
+## Historical checkpoint: four algorithm trials finished; stop, 2026-10-15
 
 Branch yotei-integration-native. Production b1a9698e is byte-equivalent to the
 separately tested targeted candidate941fc65f (src/CMake/3rdparty diff empty).

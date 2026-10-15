@@ -30,3 +30,8 @@ in the official sources checked; this is a bounded search result, not proof
 that no public sample exists anywhere. The
 [AMD RDNA2 ISA guide announcement](https://gpuopen.com/news/rdna2-isa-available/)
 is useful for shared shader semantics, not reconstruction of the game's frame graph.
+
+The2026-10-15 [GitHub research and measured function/GPU follow-up](yotei-render-research-and-profile-2026-10-15.md)
+records concrete AnyPS5/SharpEmu implementations, what already exists locally,
+four native measurement runs and the remaining limits. Main CPU polling is
+measured separately from CPU function work and GPU pass time.
