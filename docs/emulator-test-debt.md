@@ -1,5 +1,26 @@
 # Integration test debt
 
+## Actual bound temporal image view, 2026-10-15
+
+Game200706/5b82c5 reaches a visible world/cinematic with NGX initialized but
+completed DLSS count0: Role rejects original descriptor view metadata. Saved
+prep input0 requests R32_SFLOAT/COLOR; Image::FindView creates and caches actual
+D32_SFLOAT_S8_UINT/DEPTH. Required synthetic CPU regression: resolve metadata
+by the exact selected VkImageView in its owning cached records, independent of
+the original request. Known normalized depth view must succeed; null, unknown,
+foreign handles must fail, and another cached view must not substitute. Keep
+all existing full-range/extent/channel/format/usage guards. Live diagnostic
+201352/ce483a confirms exactly backingformat130 versus requestedformat100,
+aspect1, mip/layer1, correct1920x1080; exits0. Intended CPU RED201620/aa29ae
+passes null/color controls then fails native depth selection. Same unchanged
+oracle (SHA1C53FC30) GREEN201654/8a43fb passes normalized depth, exact-handle,
+foreign/empty cache, stencil and property-preservation neighbors. Production
+now copies metadata from that exact bound view before the unchanged guards.
+Game retry pending. Preceding201257/ba6dfa failed before prep in loading memcpy,
+so is not evidence about role admission. Offline PDB identifies the AMPR worker
+as nearest calling function; its raw file-read destination only has null/overflow
+checks, with mapping/permissions/lifetime validation still separate test debt.
+
 ## Native host ASLR and fixed guest mappings, 2026-10-15
 
 Early-device startup let NGX initialize but claimed a foreign reserved region

@@ -1,5 +1,6 @@
 #include "graphics/host_gpu/renderer/temporalDlss.h"
 #include "graphics/host_gpu/renderer/dlssBoundConstants.h"
+#include "graphics/host_gpu/renderer/image/imageView.h"
 
 #include "common/switches.h"
 #include "graphics/host_gpu/renderer/commandHooks.h"
@@ -304,7 +305,10 @@ struct TemporalDlss::State {
     Image& Role(const PreparedBindings& bindings, uint32_t index, DlssExtent extent, bool written,
                 DlssTemporalChannels channels = DlssTemporalChannels::ColorRgba) {
         auto& image = context.GetTextureCache().GetImage(bindings.images[index].image_id);
-        const auto& view = bindings.images[index].desc.view_info;
+        const auto* selected = ResolveDlssTemporalRoleView(bindings.images[index].desc.view_info,
+            image.views, bindings.images[index].image_view);
+        Require(selected != nullptr, "bound temporal role view is absent from its owning image");
+        const auto view = *selected;
         const bool full_role = image.backing.image && image.backing.mip_levels == 1 && image.backing.layers == 1 &&
                 view.base_level == 0 && view.base_layer == 0 && view.level_count == 1 && view.layer_count == 1 &&
                 view.min_lod == 0 && RoleMapping(view.mapping, channels) && view.format == image.backing.format &&

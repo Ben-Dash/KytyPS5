@@ -8,6 +8,22 @@
 
 namespace Libs::Graphics {
 
+// Resolve metadata for the view actually bound to a descriptor. The request may
+// have been normalized (for example R32/COLOR to native depth/DEPTH). Never use
+// it as a fallback for a missing handle. Copy the result before creating views:
+// that can grow the owning image's cached-view vector.
+// The cache range contains records with ImageViewInfo info and vk::ImageView view.
+template <typename CachedViews>
+[[nodiscard]] inline const ImageViewInfo* ResolveDlssTemporalRoleView(
+    const ImageViewInfo& requested, const CachedViews& cached, vk::ImageView selected) noexcept {
+	(void)requested;
+	if (selected == nullptr) return nullptr;
+	for (const auto& candidate : cached) {
+		if (candidate.view == selected) return &candidate.info;
+	}
+	return nullptr;
+}
+
 namespace ImageViewOps {
 
 [[nodiscard]] vk::ImageAspectFlags DepthAspectMask(vk::Format format);
