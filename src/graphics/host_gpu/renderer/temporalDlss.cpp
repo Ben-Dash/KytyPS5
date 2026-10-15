@@ -247,7 +247,7 @@ struct TemporalDlss::State {
     std::optional<uint64_t> last_serial;
     std::optional<uint32_t> prep_frame;
     bool disabled = false, merge_ready = false, reset_required = true;
-    uint32_t refusals = 0, constant_reads = 0;
+    uint32_t refusals = 0, constant_reads = 0, role_diagnostics = 0;
     State(RenderContext& c, std::shared_ptr<DlssVulkan> b) : context(c), backend(std::move(b)) {
         if (Metadata() && backend && backend->Initialized() && !backend->FeatureCreated()) recipe = &*Metadata();
     }
@@ -305,12 +305,23 @@ struct TemporalDlss::State {
                 DlssTemporalChannels channels = DlssTemporalChannels::ColorRgba) {
         auto& image = context.GetTextureCache().GetImage(bindings.images[index].image_id);
         const auto& view = bindings.images[index].desc.view_info;
-        Require(image.backing.image && image.backing.mip_levels == 1 && image.backing.layers == 1 &&
+        const bool full_role = image.backing.image && image.backing.mip_levels == 1 && image.backing.layers == 1 &&
                 view.base_level == 0 && view.base_layer == 0 && view.level_count == 1 && view.layer_count == 1 &&
                 view.min_lod == 0 && RoleMapping(view.mapping, channels) && view.format == image.backing.format &&
                 image.backing.extent == vk::Extent3D{extent.width, extent.height, 1} &&
                 view.aspect == (NativeDepth(image.backing.format) ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor) &&
-                bindings.images[index].image_view, "role must preserve consumed channels of an exact full image");
+                bindings.images[index].image_view;
+        if (!full_role && role_diagnostics++ < 4) {
+            std::printf("temporal-dlss: role-guard index=%u channels=%u written=%d backing=%ux%u mips=%u layers=%u format=%u image=%d "
+                "view=%u:%u/%u:%u lod=%g format=%u aspect=%u mapping=%u,%u,%u,%u handle=%d expected=%ux%u\n",
+                index, unsigned(channels), written ? 1 : 0, image.backing.extent.width, image.backing.extent.height,
+                image.backing.mip_levels, image.backing.layers, unsigned(image.backing.format), bool(image.backing.image) ? 1 : 0,
+                view.base_level, view.level_count, view.base_layer, view.layer_count, double(view.min_lod), unsigned(view.format),
+                unsigned(static_cast<VkImageAspectFlags>(view.aspect)), unsigned(view.mapping.r), unsigned(view.mapping.g),
+                unsigned(view.mapping.b), unsigned(view.mapping.a), bool(bindings.images[index].image_view) ? 1 : 0,
+                extent.width, extent.height);
+        }
+        Require(full_role, "role must preserve consumed channels of an exact full image");
         Require(written ? bool(image.backing.usage & vk::ImageUsageFlagBits::eStorage) :
                           bool(image.backing.usage & vk::ImageUsageFlagBits::eTransferSrc), "role usage unsupported");
         return image;
