@@ -22,6 +22,9 @@ public:
     TemporalDlss& operator=(const TemporalDlss&) = delete;
 
     [[nodiscard]] static std::optional<DlssProjectInfo> ProjectFromEnvironment();
+    // Native NGX evaluation + RGB merge ticks retired by the real GPU timeline.
+    // This is neither an initialization flag nor an SDL-presented-frame count.
+    [[nodiscard]] uint64_t CompletedCount() const noexcept;
     // Call after final image/buffer rebinding. A true result requires an ordinary
     // primary dispatch, with compute chaining disabled, followed by AfterDispatch.
     [[nodiscard]] bool BeforeDispatch(const ShaderComputeInputInfo&, const PreparedBindings&,

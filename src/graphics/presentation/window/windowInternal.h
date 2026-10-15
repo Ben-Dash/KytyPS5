@@ -88,6 +88,10 @@ struct WindowContext {
     // An unavailable optional requirement leaves the ordinary renderer usable;
     // inspect DlssNegotiationStatus before InitializeDlssBackend.
     void CreateVulkan(const DlssProjectInfo* dlss_project = nullptr);
+    // Device preparation has no RenderContext, guest-memory callbacks or Presenter.
+    // CreateVulkan remains the complete convenience path for existing callers.
+    void CreateVulkanDevice(const DlssProjectInfo* dlss_project = nullptr);
+    void InitializeRenderer();
     [[nodiscard]] DlssStatus DlssNegotiationStatus() const noexcept { return dlss_negotiation_status; }
     [[nodiscard]] DlssStatus InitializeDlssBackend(DlssVulkan& backend) const;
 	void                                                    RecreateSurface();
@@ -102,6 +106,7 @@ struct WindowContext {
 
 	GraphicContext                 graphic_ctx;
 	SDL_Window*                    window        = nullptr;
+	bool                           host_input_initialized = false;
 	vk::SurfaceKHR                 surface       = nullptr;
 	SurfaceCapabilities            surface_capabilities;
     // Exact names passed to vkCreateInstance/vkCreateDevice, never all advertised names.
@@ -113,6 +118,7 @@ struct WindowContext {
 	std::unique_ptr<Presenter>     presenter;
 	WindowLoopState                loop;
 	FrameStatistics                frame_statistics;
+    std::atomic<uint64_t>          title_dlss_completed{0};
 
 	Common::Mutex mutex;
 };

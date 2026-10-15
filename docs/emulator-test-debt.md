@@ -19,10 +19,19 @@ Console logging/validation and confirms the driver failure without a VUID.
 Raw native NGX and earlier presenter fixtures passed. A primary NVIDIA forum
 minimal reproduction reports this failure with NVX_binary_import after large
 Windows placeholder reservations; this emulator reserves guest ranges first.
-Required next evidence: current unchanged full-presenter control, then a bounded
-synthetic reservation/NGX-device ordering regression if the difference persists.
-Do not remove required extensions, shrink guest ranges or alter production
-initialization order without that reproduction and address-space neighbors.
+Full-presenter control191149/ad29b9 passes with real Memory first. Corrected
+shared-prefix fixture192430/0e8972 initializes NGX but times out in no-guest
+teardown; this is not the intended RED. Actual core diagnostic now stops after
+host initialization, before loading any ELF. Owned empty directory + synthetic
+156MiB param reproduces the driver failure192638/ace881, exit321; the same
+native regression passes193149/7c9ad0, exit0 after a staged native-device
+preparation before guest VA reservation. Memory and direct-placeholder
+self-tests pass; renderer/input remain after Memory/Controller. Parsing early
+or querying extensions early alone did not repair it. Required extensions and
+guest ranges were retained. Ordinary metadata-OFF193227/0cbf46 initializes its
+device but times out in no-guest teardown, also observed before this correction;
+do not report that neighbor as a full PASS. Full presenter and actual game retry
+on the completed source remain pending.
 
 ## Explicit temporal pass integration, 2026-10-15
 

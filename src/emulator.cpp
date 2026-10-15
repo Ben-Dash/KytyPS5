@@ -140,7 +140,12 @@ static void Init(const Config::ConfigOptions& cfg, const std::filesystem::path& 
 		}
 	}
 
-	// Initialization order is explicit; destruction is automatic and reversed.
+	InitializeHostSubsystems(subsystems);
+}
+
+void InitializeHostSubsystems(Common::Subsystems& subsystems) {
+    Libs::Graphics::WindowPrepareDevice(Config::GetScreenWidth(), Config::GetScreenHeight());
+    // Initialization order is explicit; destruction is automatic and reversed.
 	subsystems.Initialize<Loader::Timer::Lifecycle>();
 	subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
 	subsystems.Initialize<Profiler::Lifecycle>();
@@ -192,6 +197,16 @@ void Run(const RunOptions& options) {
 	const auto         param_json = options.app0_dir / "sce_sys" / "param.json";
 	Common::Subsystems subsystems(true);
 	Init(options.config, param_json, subsystems);
+
+	// Bounded host-startup diagnosis uses the actual executable and configuration,
+	// but stops before clearing captures, mounting content or loading guest code.
+	if (const char* host_only = KYTY_GETENV("KYTY_DEBUG_HOST_STARTUP_ONLY");
+	    host_only != nullptr && std::string_view(host_only) == "1") {
+		LOGF("HOST STARTUP INITIALIZED: no guest ELF loaded; normal reverse teardown\n");
+		subsystems.Destroy();
+		std::puts("HOST STARTUP PASS: host initialization and teardown completed");
+		return;
+	}
 
 	ClearDebugTextureFolder();
 

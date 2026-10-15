@@ -394,6 +394,9 @@ std::optional<DlssProjectInfo> TemporalDlss::ProjectFromEnvironment() {
 }
 TemporalDlss::TemporalDlss(RenderContext& context, std::shared_ptr<DlssVulkan> backend)
     : m_state(std::make_unique<State>(context, std::move(backend))) {}
+uint64_t TemporalDlss::CompletedCount() const noexcept {
+    return m_state->counters->completed.load(std::memory_order_relaxed);
+}
 TemporalDlss::~TemporalDlss() {
     auto& s = *m_state;
     std::printf("temporal-dlss: evaluations=%llu merges=%llu completed=%llu active=%d\n",
@@ -507,6 +510,7 @@ struct TemporalDlss::State {};
 TemporalDlss::TemporalDlss(RenderContext&, std::shared_ptr<DlssVulkan>) : m_state(std::make_unique<State>()) {}
 TemporalDlss::~TemporalDlss() = default;
 std::optional<DlssProjectInfo> TemporalDlss::ProjectFromEnvironment() { return std::nullopt; }
+uint64_t TemporalDlss::CompletedCount() const noexcept { return 0; }
 bool TemporalDlss::BeforeDispatch(const ShaderComputeInputInfo&, const PreparedBindings&,
                                 std::array<uint32_t, 3>, uint32_t) { return false; }
 void TemporalDlss::AfterDispatch(const ShaderComputeInputInfo&, const PreparedBindings&,

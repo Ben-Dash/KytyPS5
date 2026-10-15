@@ -12,6 +12,7 @@
 #include "graphics/host_gpu/renderer/commandHooks.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/shader/shader.h"
+#include "emulator.h"
 #include "common/subsystems.h"
 #include "common/logging/log.h"
 #include "common/threads.h"
@@ -710,9 +711,12 @@ void CaptureRenderDocBootstrap(GraphicContext& graphics, const std::filesystem::
                 static_cast<unsigned long long>(std::filesystem::file_size(path)));
     std::fflush(stdout);
 }
+#include "DlssHostStartupTests.inc"
 } // namespace
 
 int main(int argc, char** argv) {
+    if (const auto* host_startup = std::getenv("KYTY_DLSS_HOST_STARTUP_TEST");
+        host_startup && host_startup[0] == '1') return RunHostStartupTest();
     // A failed check exits immediately: no failure path can fall into an
     // unbounded device.waitIdle destructor after a bad GPU submission.
     const auto runtime = argc > 1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();

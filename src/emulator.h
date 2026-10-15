@@ -6,6 +6,8 @@
 
 #include <filesystem>
 
+namespace Common { class Subsystems; }
+
 namespace Emulator {
 
 struct RunOptions {
@@ -16,6 +18,10 @@ struct RunOptions {
 };
 
 void Run(const RunOptions& options);
+
+// Shared native startup after Config/Log and guest memory-size configuration.
+// Also exercised by the bounded host-only startup regression (no ELF or game).
+void InitializeHostSubsystems(Common::Subsystems& subsystems);
 
 } // namespace Emulator
 
