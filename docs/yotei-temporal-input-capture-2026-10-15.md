@@ -164,9 +164,9 @@ while original PS/VS binding and constant limitations remain.
 The actual captured camera-fill module has no PushConstant variable. Its12
 coefficients come from StorageBuffer descriptor set1/binding109, flattened SRT
 indices16..27: descriptor-relative bytes[64,112). Both retained128-byte pushes
-at its two draw records are zero, and they are not this matrix. Next resolve
-the actual descriptor buffer/offset/range and its correct upload/submission
-generation; do not interpret zero pushes as zero camera coefficients. Image
+at its two draw records are zero, and they are not this matrix. The later
+selected-event reads below recover the actual descriptor and matrix bytes;
+do not interpret zero pushes as zero camera coefficients. Image
 and sampler/vertex payloads also remain explicit requirements. Original guest
 SRT byte offsets256..300 and compact host buffer offsets64..112 are distinct.
 
@@ -217,8 +217,8 @@ host `replay-host-20261015T1809554987906Z`.
 Camera matrices resolve to VkBuffer194 at bytes[57066048,57066096) and
 [61334080,61334128). Same-capture accumulation CBs resolve to VkBuffer896713
 offsets11776/12544,144B each. Representative geometry A/B/current/other matrix
-buffers are also located; no matrix values have been read yet. These are buffer
-offsets, not device-memory offsets.
+buffers are also located. These are buffer offsets, not device-memory offsets;
+the CPU metadata export alone did not read their contents.
 
 Pinned RenderDoc1.46 Python bindings copy an entire selected opaque blob before
 a Python slice. Therefore do not claim a1KiB read bound by slicing a potentially
@@ -234,6 +234,81 @@ The required correlation is captured baked recording plus original work-call
 identity, with ambiguity rejected. Preserve the failed records
 `selected-constant-bytes-0d35c1.json` and `...-v2.json`; do not treat their guessed
 numeric event associations as confirmed data.
+
+### Selected-event GPU reads
+
+The revised diagnostic mapper identifies a recorded call by its unique baked
+command-buffer recording and combined ordinal of direct Draw/DrawIndexed/Dispatch
+calls, then verifies the API, serialized length, thread ID and scalar arguments.
+Synthetic indirect expansion changes replay chunk indices; its generated chunks
+do not enter this ordinal. Raw timing is excluded because CPU ticks and replay
+microseconds are different time bases. The same8 selected calls map uniquely
+to actual API events, and the submitted pipeline is checked again after
+`SetFrameEvent`. An unchanged synthetic8-case CPU check rejects the old timing
+identity and passes the new mapper, including recording reuse, signed vertex
+offset and duplicate-recording rejection. This repairs diagnostic correlation,
+not an emulator semantic defect.
+
+V4 then reads696B from6/8 requests, with actual replay buffer ID, descriptor
+offset and range exactly matching the independent V5 recording trace. Both
+camera48B mappings, both representative geometry current/other matrices and
+UV scale/bias, and both144B accumulation CBs are retained. The CBs identify
+guest frames432/433, distinct from the earlier550/551 snapshot run. Their current
+offsets are respectively(0.09375,-0.0185185075) and(-0.40625,-0.351851881),
+with frame433's previous pair equal to frame432's current pair. Both observed
+geometry UV scale/bias vectors are(0.5,-0.5,0.5,0.5); both selected additive XYZ
+vectors are zero. Those zero values do not establish every geometry variant.
+
+V4 is explicitly **partial**: the two PS array elements are absent from
+RenderDoc's access-feedback getter. They were not guessed or read from another
+descriptor. All actual reads are explicit shader-readonly ranges selected at
+the correct event, not claims about arbitrary pre-dispatch RW bytes. Evidence:
+`selected-constant-bytes-0d35c1-v4.json` and its `-files/` directory, frozen
+helper SHA256 `7B8C2359D45A4FBA3CDF679631229EAA4D7FB07DFFD402364C358CE0E6C7C39B`,
+host `replay-host-20261015T1827526042281Z`. Both Shutdown calls returned, capture
+stat unchanged, elapsed75.578s, host exit0/streams drained/no guards. The wrapper
+correctly rejects this as a full pass because its required8/8 status is absent.
+
+V5 completes all8 requests,744B total, by resolving the two missing SSBO array
+elements directly from the actually bound Vulkan descriptor store. Each lookup
+uses7 one-cell location queries and1 descriptor query, never an entire resource
+enumeration. Unsupported dynamic offsets/descriptor-buffer/inline cases remain
+rejected; a unique reflected SSBO declaration and the same independent exact
+buffer/offset/range gate are required before any buffer read. Ten pure Python
+mock cases pass, including array bounds, missing/ambiguous bindings,32-bit store
+bounds and unsupported store forms. The8 mapper cases also pass unchanged.
+Both PS normalization vectors are(0.5,-0.5,0.5,0.5) and their pixel-to-UV scales
+are the float32 values of(1/1920,1/1080). Evidence:
+`selected-constant-bytes-0d35c1-v5.json` plus its `-files/` directory, helper SHA256
+`ADDA4722772BB763AA0AC5D3DD9D6CA772AFA265D7C3FAAC8CC52D035631DE60`,
+host `replay-host-20261015T1835158678112Z`: required complete status PASS,
+elapsed76.546s, both Shutdown returned, host exit0/streams drained/no guards,
+capture stat unchanged. No game run or NGX evaluation was performed by replay.
+
+Independent saved-byte CPU arithmetic matches both camera mappings to geometry
+`Pother * inverse(Pcurrent)` with the captured UV↔NDC bias. Maximum coefficient
+errors are5.86e-8 and7.86e-8; deliberately crossed frame pairs differ by>1e-4.
+Frame433's other transform uses frame432's current first3 columns re-jittered
+by the exact captured current-offset difference: maximum XY residual2.60e-8,
+Z/W rows identical. Thus jitter-delta is cancelled by the selected geometry
+transform pair. This does not prove all object paths, branch predicates or full
+motion coverage. Reproducible ignored checker:
+`check-selected-rdc-motion-jitter-0d35c1-v4.py`, result
+`selected-rdc-motion-jitter-0d35c1-v4-check.json`. Its extended current output,
+`selected-rdc-motion-jitter-0d35c1-v5-check.json`, also verifies all744B of V5
+artifacts, exact float32 PS reciprocals and byte identity of the previous six
+successful reads. Original V4 evidence remains preserved.
+
+The smallest next integration experiment should reuse the saved real inputs
+in a separate bounded NGX GPU fixture. Record feature initialization, actual
+evaluation, completed submission/copy/readback, exact loaded runtime and final
+teardown validation; keep game evaluations and presented DLSS frames at zero
+for this offline test. Do not repeat a full5GB capture or enumerate every
+geometry variant when the saved tuple answers the next concrete question.
+The captured1920×1080 input feeds a3840×2160 game HDR reconstruction:1080→1080
+would be DLAA and would not prove lower upstream game rendering. A later live
+replacement must preserve downstream tone mapping/HUD and both RGB/alpha output
+contracts; HDR cannot be routed through the existing SDR presentation bridge.
 
 All workers have outer180s/process-memory/disk guards, fresh outputs and
 task-owned cleanup. Command recording order must not be presented as proven

@@ -23,6 +23,18 @@ The actual camera module has no PushConstant; zero pushes are not its matrix.
 The existing SDR presenter must still reject HDR; actual HDR insertion requires
 later game tone mapping/HUD. No shader-hash/address/title-based core selection.
 
+Selected-event replay now verifies the submitted pipeline and exact descriptor
+tuple before744B of readonly constant reads:8/8 requests pass, including both
+camera matrices, representative geometry transforms and temporal CBs for guest
+frames432/433. Sparse actual-set lookup resolves the two PS array entries omitted
+by access feedback; exact buffer/offset/range checks remain mandatory. Stable
+baked-recording/work-ordinal correlation passes8 synthetic CPU
+cases; raw chunk index/timestamp equality is invalid. These diagnostic reads
+and numerical reprojection/re-jitter checks establish the selected matrix path,
+not full motion coverage or a generic live resource provider.
+Next use the saved real inputs in a separate bounded NGX fixture, retaining the
+camera/object/jitter/exposure/reset and ordered-resource regressions above.
+
 One-shot capture control tests and real Vulkan bootstrap capture pass, but the
 first actual game capture expired during initial-state preparation and the pass
 trace is partial. Do not treat partial spills or render metadata as a complete

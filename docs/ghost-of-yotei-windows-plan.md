@@ -21,7 +21,12 @@ deadline; bothShutdownreturn/hostexit0. PureCPU structured decode12.61s+scan6.68
 exports1115shaders2356pipelines157538chunks and174rawsamples. LinkedGPL is
 resolved. V5 corrects the BeginCommandBuffer field case and traces only actual
 selected descriptor sets, preserving128/4096 bounds:174/174prior associations
-pass, all8selected buffer bindings resolved. No GPU-visible matrix bytes yet.
+pass, all8selected buffer bindings resolved. Subsequent selected-event GPU
+replay reads744B from8/8 requests with exact pipeline/buffer/offset/range checks;
+camera matrices, representative geometry transforms and temporal CBs are real
+captured values. Two PS array elements omitted by access feedback are resolved
+through bounded sparse actual-set lookup,7 metadata probes+1 descriptor each.
+Clean replay shutdown/host0/no guards; no game NGX evaluation.
 
 No-RenderDoc targeted run172948/61b90f exited0/no guards, player/world/HUD
 visually confirmed at551; four complete snapshots550/551 preserve liveSPV,
@@ -43,13 +48,19 @@ complete guest-work coverage claimed. No new issue milestone, post or push.
 Both CS live modules byte-match CPU/regenerated outputs;2349sampledpoints/frame
 confirm preparedMV/MAX-depth exactly andlinearDepth/luma withinFP16. Actual
 camera PS hasNO PushConstant:12matrixfloats are set1/binding109 SSBO bytes64..112,
-not its128Bzero pushes. Need actual descriptor/buffer bytes and upload/submit
-generation. Camera buffer194 matrix ranges are57066048..57066096 and
-61334080..61334128. CPU and replay structured chunk indices differ; selected
-read attempts rejected wrong/ambiguous associations before any buffer read.
-Next: stable baked-recording/work-call matching for bounded actual GPU reads,
-then obtain actual camera matrix/sampler/UV and exposure/reset conventions,
-then synthetic generic provider/ordering regressions before a production change.
+not its128Bzero pushes. Actual48B matrices from both submitted camera draws
+and representative geometry matrices are now retained. CPU/replay chunk
+indices and timing bases differ; the repaired diagnostic mapper uses unique
+baked recording plus direct-work ordinal/arguments, with8 synthetic CPU cases
+passing. Same-capture temporal CBs identify guest frames432/433; do not conflate
+them with the independent earlier550/551 snapshots.
+Camera mappings numerically match geometry other*inverse(current) in both
+selected frames, coefficient errors<8e-8. Previous geometry transforms use the
+current jitter, with independently checked re-jitter residual<3e-8; this proves
+the selected path, not complete motion coverage. PS UV normalizers are actual
+(1/1920,1/1080). Next: evaluate saved real inputs in an offline NGX GPU fixture
+before designing the live provider. Full UV/motion coverage and exposure/reset remain pending;
+synthetic provider/ordering regressions still precede a production change.
 HDR insertion belongs before actual game tonemap/HUD; do not feed sceneHDR into
 the existing SDR presenter. Preserve user prefetch fixture/save/cache/captures.
 
