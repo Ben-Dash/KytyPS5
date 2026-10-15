@@ -1126,11 +1126,6 @@ static void VulkanCheckInstanceVersion() {
 }
 
 void WindowContext::CreateVulkan(const DlssProjectInfo* dlss_project) {
-    CreateVulkanDevice(dlss_project);
-    InitializeRenderer();
-}
-
-void WindowContext::CreateVulkanDevice(const DlssProjectInfo* dlss_project) {
 	EXIT_IF(window == nullptr);
 	EXIT_IF(graphic_ctx.instance != nullptr);
 	EXIT_IF(graphic_ctx.physical_device != nullptr);
@@ -1454,11 +1449,7 @@ void WindowContext::CreateVulkanDevice(const DlssProjectInfo* dlss_project) {
 	if (!graphic_ctx.CreateAllocator()) {
 		EXIT("Could not create Vulkan memory allocator");
 	}
-}
 
-void WindowContext::InitializeRenderer() {
-	EXIT_IF(window == nullptr || graphic_ctx.device == nullptr || graphic_ctx.allocator == nullptr);
-	EXIT_IF(render_context != nullptr || presenter != nullptr);
 	render_context = std::make_unique<RenderContext>(graphic_ctx);
 	LibKernel::Memory::InstallGpuResources(render_context.get());
 	presenter = std::make_unique<Presenter>(*this);
@@ -1510,13 +1501,9 @@ void WindowContext::RecreateSurface() {
 }
 
 WindowContext::~WindowContext() {
-	if (host_input_initialized) {
-		ShutdownSystemOverlayInput();
-	}
+	ShutdownSystemOverlayInput();
 	presenter.reset();
-	if (render_context != nullptr) {
-		LibKernel::Memory::InstallGpuResources(nullptr);
-	}
+	LibKernel::Memory::InstallGpuResources(nullptr);
 	render_context.reset();
 
 	if (graphic_ctx.device != nullptr) {

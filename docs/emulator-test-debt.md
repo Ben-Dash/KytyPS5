@@ -1,5 +1,26 @@
 # Integration test debt
 
+## Native host ASLR and fixed guest mappings, 2026-10-15
+
+Early-device startup let NGX initialize but claimed a foreign reserved region
+covering a fixed guest heap. Game195159/05c419 and diagnostic195355/f790eb fail
+writing0x1000000020 after BatchMap64GiB. Loader guard is0x1a08888000 and no
+unresolved object is bound, so weak-import/guard attribution is rejected.
+New actual-core no-ELF probe independently reproduces intendedRED195954/db3411:
+NGXinit0, fixed16KiB BatchMap at canonical user base returns0x8002000c,count0;
+native foreign MEM_PRIVATE region is preserved, physical allocation cleaned.
+High host PEbase16TiB with no-ASLR200042/5e05f7 still fails device creation.
+Changing only to ASLR/HIGHENTROPYVA with ordinary Memory-first startup passes
+200127/64ea68, exit0: NGXinit0, exact fixed map/count1, guest/native ownership,
+RW canaries, unmap/release and normal teardown. Actual PEbase is randomized.
+ASLR is now the intended native default; retire the early-device workaround.
+Final ordinary-startup/default-preferred-base coreFED1A83B also completes NGX
+and the same map/canary/cleanup probe200606/709b17, then hits the previously
+observed no-guest teardown timeout; this run is a scoped mapping PASS, not a
+full-process PASS. Preserve that teardown debt separately from device/mapping.
+Do not claim an NVIDIA internal allocation owner from VirtualQuery alone.
+Build/wiring failures and stale-executable attempts are not regression REDs.
+
 ## Actual native constant-buffer snapshot, 2026-10-15
 
 The temporal provider safely rejects ordinary cached GPU constant bindings;

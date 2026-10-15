@@ -1,4 +1,5 @@
 #include "graphics/presentation/window.h"
+#include "graphics/presentation/renderDoc.h"
 
 #include <SDL3/SDL.h>
 
@@ -21,7 +22,6 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/renderer/temporalDlss.h"
 #include "graphics/host_gpu/vulkanCommon.h"
-#include "graphics/presentation/renderDoc.h"
 #include "graphics/presentation/systemOverlay.h"
 #include "graphics/presentation/window/hostInput.h"
 #include "graphics/presentation/window/windowInternal.h"
@@ -157,9 +157,6 @@ struct EventController {
 namespace {
 
 std::unique_ptr<WindowContext> g_window;
-// Own the early native window/device until the ordinary graphics lifecycle can
-// install renderer resources. No controller or guest-memory callbacks live here.
-std::unique_ptr<WindowContext> g_prepared_window;
 
 } // namespace
 
@@ -774,18 +771,7 @@ void WindowContext::Run() {
 	}
 }
 
-static void WindowInitializeHostInput(WindowContext& context, bool initialize_gamepad) {
-	EXIT_IF(context.window == nullptr || context.host_input_initialized);
-	if (initialize_gamepad && !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
-		EXIT("%s\n", SDL_GetError());
-	}
-	HostInputInit(context.window);
-	InitializeSystemOverlayInput(context.window);
-	context.host_input_initialized = true;
-	context.UpdateIcon();
-}
-
-static void WindowCreate(WindowContext& context, bool initialize_host_input = true) {
+static void WindowCreate(WindowContext& context) {
 	EXIT_IF(context.window != nullptr);
 	EXIT_IF(context.graphic_ctx.screen_width == 0);
 	EXIT_IF(context.graphic_ctx.screen_height == 0);
@@ -799,8 +785,7 @@ static void WindowCreate(WindowContext& context, bool initialize_host_input = tr
 		SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "x11,wayland");
 	}
 #endif
-	const auto sdl_subsystems = SDL_INIT_VIDEO | (initialize_host_input ? SDL_INIT_GAMEPAD : 0u);
-	if (!SDL_InitSubSystem(sdl_subsystems)) {
+	if (!SDL_InitSubSystem(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
 		EXIT("%s\n", SDL_GetError());
 	}
 
@@ -839,9 +824,9 @@ static void WindowCreate(WindowContext& context, bool initialize_host_input = tr
 	}
 
 	SDL_SetWindowPosition(context.window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-	if (initialize_host_input) {
-		WindowInitializeHostInput(context, false);
-	}
+	HostInputInit(context.window);
+	InitializeSystemOverlayInput(context.window);
+	context.UpdateIcon();
 }
 
 uint32_t WindowContext::InitialWindowFlags(bool fullscreen) noexcept {
@@ -852,55 +837,16 @@ uint32_t WindowContext::InitialWindowFlags(bool fullscreen) noexcept {
 	return flags;
 }
 
-void WindowPrepareDevice(uint32_t width, uint32_t height) {
-	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
-	const auto temporal_project = TemporalDlss::ProjectFromEnvironment();
-	if (!temporal_project) {
-		return;
-	}
-	// Preserve the existing graphics lifecycle's capture-before-Vulkan ordering.
-	if (Config::RenderDocEnabled()) {
-		RenderDocInit();
-	}
-	EXIT_IF(g_window != nullptr);
-	if (g_prepared_window != nullptr) {
-		EXIT_IF(g_prepared_window->graphic_ctx.screen_width != width ||
-		        g_prepared_window->graphic_ctx.screen_height != height);
-		return;
-	}
-	auto prepared = std::make_unique<WindowContext>();
-	prepared->graphic_ctx.screen_width = width;
-	prepared->graphic_ctx.screen_height = height;
-	WindowCreate(*prepared, false);
-	prepared->CreateVulkanDevice(&*temporal_project);
-	std::printf("temporal-dlss: native window/device prepared; renderer/input deferred until normal graphics startup\n");
-	std::fflush(stdout);
-	g_prepared_window = std::move(prepared);
-}
-
 Presenter& WindowInit(uint32_t width, uint32_t height) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	EXIT_IF(g_window != nullptr);
 
-	std::optional<DlssProjectInfo> temporal_project;
-	std::unique_ptr<WindowContext> window;
-	if (g_prepared_window != nullptr) {
-		window = std::move(g_prepared_window);
-		temporal_project = TemporalDlss::ProjectFromEnvironment();
-		EXIT_IF(!temporal_project || window->graphic_ctx.screen_width != width ||
-		        window->graphic_ctx.screen_height != height);
-		// Controller and guest Memory lifecycles now exist. Finish their integration
-		// without recreating the SDL window, Vulkan instance, device or allocator.
-		WindowInitializeHostInput(*window, true);
-		window->InitializeRenderer();
-	} else {
-		window = std::make_unique<WindowContext>();
-		window->graphic_ctx.screen_width = width;
-		window->graphic_ctx.screen_height = height;
-		WindowCreate(*window);
-		temporal_project = TemporalDlss::ProjectFromEnvironment();
-		window->CreateVulkan(temporal_project ? &*temporal_project : nullptr);
-	}
+	auto window = std::make_unique<WindowContext>();
+	window->graphic_ctx.screen_width = width;
+	window->graphic_ctx.screen_height = height;
+	WindowCreate(*window);
+    const auto temporal_project = TemporalDlss::ProjectFromEnvironment();
+    window->CreateVulkan(temporal_project ? &*temporal_project : nullptr);
     if (temporal_project) {
         auto backend = std::make_shared<DlssVulkan>();
         const auto status = window->InitializeDlssBackend(*backend);
@@ -929,9 +875,6 @@ void WindowShutdown() {
 		Controller::EmergencyShutdown();
 		g_window.reset();
 	}
-	// An early preparation that never reached graphics startup owns no controller
-	// hooks or guest renderer; its native resources can be released independently.
-	g_prepared_window.reset();
 }
 
 static int WindowIconRead(void* user, char* data, int size) {

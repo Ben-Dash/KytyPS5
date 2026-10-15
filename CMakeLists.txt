@@ -409,6 +409,7 @@ list(APPEND kyty_emulator_src ${gpu_blit_shader_headers})
 list(APPEND kyty_emulator_src
 	"${KYTY_SOURCE_DIR}/emulator.h"
 	"${KYTY_SOURCE_DIR}/emulator.cpp"
+	"${KYTY_SOURCE_DIR}/diagnostics/dlssHostMemoryProbe.cpp"
 )
 list(REMOVE_DUPLICATES kyty_emulator_src)
 
@@ -1366,12 +1367,25 @@ set(KYTY_EMULATOR_MAP_LINK_PATH "${CMAKE_CURRENT_BINARY_DIR}/${KYTY_EMULATOR_MAP
 set(KYTY_EMULATOR_PDB_LINK_PATH "${CMAKE_CURRENT_BINARY_DIR}/kyty_emulator.pdb")
 
 if(KYTY_CLANG_CL)
+	set(KYTY_WINDOWS_HOST_IMAGE_BASE "" CACHE STRING "Optional native host PE image base")
+	# Native host allocations must not claim the guest's fixed virtual ranges.
+	# The no-ASLR process layout also prevents NGX's NVX device from starting
+	# after the large guest placeholders were reserved (native regression).
+	option(KYTY_WINDOWS_HOST_ASLR "Randomize native host image and allocations" ON)
+	if(KYTY_WINDOWS_HOST_ASLR)
+		set(kyty_host_dynamicbase /DYNAMICBASE /HIGHENTROPYVA)
+	else()
+		set(kyty_host_dynamicbase /DYNAMICBASE:NO)
+	endif()
 	target_link_options(kyty_emulator PRIVATE
-		"/DYNAMICBASE:NO"
+		${kyty_host_dynamicbase}
 		"/DEBUG:FULL"
 		"/PDB:${KYTY_EMULATOR_PDB_LINK_PATH}"
 		"/lldmap:${KYTY_EMULATOR_MAP_LINK_PATH}"
 	)
+	if(KYTY_WINDOWS_HOST_IMAGE_BASE)
+		target_link_options(kyty_emulator PRIVATE "/BASE:${KYTY_WINDOWS_HOST_IMAGE_BASE}")
+	endif()
 	add_custom_command(TARGET kyty_emulator POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "${KYTY_THIRD_PARTY_DIR}/winpthread/bin/libwinpthread-1.dll" $<TARGET_FILE_DIR:kyty_emulator>/libwinpthread-1.dll)
 elseif(WIN32 OR LINUX)
 	set_target_properties(kyty_emulator PROPERTIES LINK_FLAGS "${KYTY_LD_OPTIONS}")

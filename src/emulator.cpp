@@ -1,4 +1,5 @@
 #include "emulator.h"
+#include "diagnostics/dlssHostMemoryProbe.h"
 
 #include "common/abi.h"
 #include "common/assert.h"
@@ -144,7 +145,6 @@ static void Init(const Config::ConfigOptions& cfg, const std::filesystem::path& 
 }
 
 void InitializeHostSubsystems(Common::Subsystems& subsystems) {
-    Libs::Graphics::WindowPrepareDevice(Config::GetScreenWidth(), Config::GetScreenHeight());
     // Initialization order is explicit; destruction is automatic and reversed.
 	subsystems.Initialize<Loader::Timer::Lifecycle>();
 	subsystems.Initialize<Libs::LibKernel::PthreadLifecycle>();
@@ -203,6 +203,10 @@ void Run(const RunOptions& options) {
 	if (const char* host_only = KYTY_GETENV("KYTY_DEBUG_HOST_STARTUP_ONLY");
 	    host_only != nullptr && std::string_view(host_only) == "1") {
 		LOGF("HOST STARTUP INITIALIZED: no guest ELF loaded; normal reverse teardown\n");
+		if (const auto* coexistence = KYTY_GETENV("KYTY_DEBUG_HOST_ADDRESS_COEXISTENCE");
+		    coexistence && std::string_view(coexistence) == "1") {
+			EXIT_IF(!Diagnostics::RunDlssHostMemoryProbe());
+		}
 		subsystems.Destroy();
 		std::puts("HOST STARTUP PASS: host initialization and teardown completed");
 		return;
