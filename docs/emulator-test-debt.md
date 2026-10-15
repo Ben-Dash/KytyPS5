@@ -1,5 +1,21 @@
 # Integration test debt
 
+## Internal unresolved-object guard versus foreign host reservations, 2026-10-15
+
+Game193625/59f5aa on f5d5db0f/core26F95B reaches NGX initialization0 then
+Relocate2041 fails allocating its fixed internal guard0x840000000. Before
+changing allocation policy, require a native synthetic occupied-preferred-page
+regression against the actual extracted loader allocator. Preserve a distinct
+guest-owned NoAccess guard, the occupied page/canary and cleanup; no ELF bytes.
+Native intendedRED194159/e67335 reproduces the occupied-hint failure. Allowing
+the internal guard to relocate exposes separate intendedRED194236/f77be3:
+kernel metadata is NoAccess but native protection is PAGE_READWRITE. Private
+GuestAddressSpace::Commit now preserves explicit NoAccess. The same unchanged
+test GREEN194401/eb0d81 verifies PAGE_NOACCESS, relocated ownership, two intact
+neighbor canaries/permissions and cleanup. Full memory suite194401/0ff471
+passes its available cases (two native SSE4a-host cases skipped). Game retry
+on the combined fix remains pending; no game/DLSS/FPS claim follows.
+
 ## Copied temporal input channel mapping, 2026-10-15
 
 Resolved a provider guard that rejected valid depth RRRR and motion RG01 views.

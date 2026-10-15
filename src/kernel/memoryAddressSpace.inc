@@ -942,9 +942,11 @@ public:
 		if (!ConsumeUnlocked(vaddr, size)) {
 			return false;
 		}
-		const auto host_mode = VirtualMemory::IsExecute(mode)
-		                           ? VirtualMemory::Mode::ExecuteReadWrite
-		                           : VirtualMemory::Mode::ReadWrite;
+		const auto host_mode = mode == VirtualMemory::Mode::NoAccess
+		                           ? VirtualMemory::Mode::NoAccess
+		                           : VirtualMemory::IsExecute(mode)
+		                                 ? VirtualMemory::Mode::ExecuteReadWrite
+		                                 : VirtualMemory::Mode::ReadWrite;
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 		auto* ptr = VirtualAlloc2(GetCurrentProcess(), reinterpret_cast<void*>(vaddr), size,

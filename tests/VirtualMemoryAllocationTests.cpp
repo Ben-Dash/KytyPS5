@@ -1103,6 +1103,98 @@ void TestFragmentedBackingUnmapRollback() {
 	std::printf("[host]    %-48s ok\n", test);
 }
 
+void TestUnresolvedObjectGuardCollision() {
+	const char* test = "UnresolvedObjectGuardCollision";
+	// This is the loader's internal preferred address, not a guest/game ABI.
+	constexpr uint64_t preferred = 0x840000000ull;
+	constexpr uint64_t canary_a = 0x47554152444c4546ull;
+	constexpr uint64_t canary_b = 0x4755415244524947ull;
+	struct Allocations {
+		std::vector<uint64_t> pages;
+		~Allocations() {
+			for (auto it = pages.rbegin(); it != pages.rend(); ++it) {
+				if (*it && !Libs::LibKernel::Memory::FreeGuestMemory(*it, SceKernelPageSize)) {
+					std::fprintf(stderr, "UnresolvedObjectGuardCollision: cleanup failed at 0x%" PRIx64 "\n", *it);
+				}
+			}
+		}
+		void Own(uint64_t address) { if (address) pages.push_back(address); }
+	} allocations;
+
+	const auto control = Loader::AllocateUnresolvedObjectGuard();
+	allocations.Own(control);
+	Check(test, control != 0, "unoccupied guard allocation failed (setup, not collision RED)");
+	Check(test, Libs::LibKernel::Memory::TestGuestAddressRangeIsOwned(control, SceKernelPageSize),
+	      "unoccupied guard escaped the guest address-space owner");
+	const auto control_info = Query(test, control);
+	Check(test, control_info.protection == 0 && control_info.is_committed,
+	      "unoccupied guard lacks semantic NoAccess runtime protection");
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	MEMORY_BASIC_INFORMATION control_native{};
+	Check(test, VirtualQuery(reinterpret_cast<const void*>(control), &control_native, sizeof(control_native)) == sizeof(control_native),
+	      "cannot inspect unoccupied guard native protection");
+	// Record this independently. The collision assertion must be the first RED;
+	// after it is corrected, the native NoAccess assertion below remains required.
+	std::printf("[guard-control] address=0x%" PRIx64 " guest_protection=0x%x native_state=0x%lx native_protection=0x%lx\n",
+	            control, control_info.protection, static_cast<unsigned long>(control_native.State),
+	            static_cast<unsigned long>(control_native.Protect));
+#endif
+	Check(test, Libs::LibKernel::Memory::FreeGuestMemory(control, SceKernelPageSize), "control guard cleanup failed");
+	allocations.pages.back() = 0;
+
+	const auto left = Libs::LibKernel::Memory::AllocateRuntimeMemory(preferred, SceKernelPageSize,
+	    Common::VirtualMemory::Mode::ReadWrite, "guard_collision_occupied", true);
+	allocations.Own(left);
+	Check(test, left == preferred, "preferred page unavailable to synthetic occupant (setup, not collision RED)");
+	const auto right_address = preferred + 2 * SceKernelPageSize;
+	const auto right = Libs::LibKernel::Memory::AllocateRuntimeMemory(right_address, SceKernelPageSize,
+	    Common::VirtualMemory::Mode::ReadWrite, "guard_collision_neighbor", true);
+	allocations.Own(right);
+	Check(test, right == right_address, "synthetic right neighbor allocation failed (setup)");
+	const auto write_canaries = [](uint64_t page, uint64_t value) {
+		*reinterpret_cast<uint64_t*>(page) = value;
+		*reinterpret_cast<uint64_t*>(page + SceKernelPageSize - sizeof(value)) = ~value;
+	};
+	write_canaries(left, canary_a); write_canaries(right, canary_b);
+
+	const auto guard = Loader::AllocateUnresolvedObjectGuard();
+	allocations.Own(guard);
+	std::printf("[guard-collision] preferred=0x%" PRIx64 " returned=0x%" PRIx64 "\n", preferred, guard);
+	std::fflush(stdout);
+	Check(test, guard != 0,
+	      "loader guard failed when its internal preferred address was occupied (intended collision RED)");
+	Check(test, (guard + SceKernelPageSize <= left || guard >= left + SceKernelPageSize) &&
+	            (guard + SceKernelPageSize <= right || guard >= right + SceKernelPageSize),
+	      "loader guard overlaps an occupied runtime page");
+	Check(test, Libs::LibKernel::Memory::TestGuestAddressRangeIsOwned(guard, SceKernelPageSize),
+	      "relocated guard escaped the guest address-space owner");
+	const auto info = Query(test, guard);
+	Check(test, info.protection == 0 && info.is_committed,
+	      "relocated guard lacks semantic NoAccess runtime protection");
+	const auto check_canaries = [&](uint64_t page, uint64_t value) {
+		Check(test, *reinterpret_cast<const uint64_t*>(page) == value &&
+		            *reinterpret_cast<const uint64_t*>(page + SceKernelPageSize - sizeof(value)) == ~value,
+		      "guard allocation/protection changed an occupied neighbor");
+	};
+	check_canaries(left, canary_a); check_canaries(right, canary_b);
+#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
+	MEMORY_BASIC_INFORMATION native{};
+	Check(test, VirtualQuery(reinterpret_cast<const void*>(guard), &native, sizeof(native)) == sizeof(native),
+	      "cannot inspect relocated guard native protection");
+	std::printf("[guard-native] state=0x%lx protection=0x%lx\n", static_cast<unsigned long>(native.State),
+	            static_cast<unsigned long>(native.Protect));
+	Check(test, native.State == MEM_COMMIT && (native.Protect & 0xffu) == PAGE_NOACCESS,
+	      "relocated guard must trap host access with PAGE_NOACCESS (separate protection requirement)");
+	for (const auto neighbor : {left, right}) {
+		MEMORY_BASIC_INFORMATION neighbor_info{};
+		Check(test, VirtualQuery(reinterpret_cast<const void*>(neighbor), &neighbor_info, sizeof(neighbor_info)) == sizeof(neighbor_info) &&
+		            neighbor_info.State == MEM_COMMIT && (neighbor_info.Protect & 0xffu) == PAGE_READWRITE,
+		      "guard protection changed an occupied neighbor's native permissions");
+	}
+#endif
+	std::printf("[host]    %-48s ok\n", test);
+}
+
 void TestRuntimeMemoryOwnerLifecycle() {
 	const char* test = "RuntimeMemoryOwnerLifecycle";
 	Check(test,
@@ -4347,6 +4439,10 @@ void TestSmallFiberStacksAndMigration() {
 
 int main(int argc, char** argv) {
 	InitSubsystems();
+	if (argc == 2 && std::strcmp(argv[1], "--unresolved-object-guard-only") == 0) {
+		RunTest(TestUnresolvedObjectGuardCollision);
+		return g_failed_tests == 0 ? 0 : 1;
+	}
 #if defined(__linux__)
 	if (argc == 2 && std::strcmp(argv[1], "--fixed-direct-replacement-only") == 0) {
 		RunTest(TestFixedDirectReplacementPreservesAccess);
@@ -4409,6 +4505,7 @@ int main(int argc, char** argv) {
 	RunTest(TestMainEntryUsesGuestStackAndDisablesHostChecks);
 	RunTest(TestFragmentedBackingUnmapRollback);
 	RunTest(TestRuntimeMemoryOwnerLifecycle);
+	RunTest(TestUnresolvedObjectGuardCollision);
 	RunTest(TestFlexibleMapQueryAndWholeMunmap);
 	RunTest(TestPartialFlexibleMunmapAndFindNext);
 	RunTest(TestReserveMapFixedAndNoOverwrite);

@@ -19,6 +19,10 @@ struct Elf64_Sym;
 struct Elf64_Rela;
 class RuntimeLinker;
 
+// Internal unresolved-object guard allocation, shared by relocation and the
+// host-only collision regression. Caller owns the returned runtime allocation.
+[[nodiscard]] uint64_t AllocateUnresolvedObjectGuard();
+
 using module_func_t                          = KYTY_SYSV_ABI int (*)(size_t args, const void* argp);
 using application_heap_free_func_t           = KYTY_SYSV_ABI void (*)(void*);
 using application_heap_malloc_func_t         = KYTY_SYSV_ABI void* (*)(uint64_t);

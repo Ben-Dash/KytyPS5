@@ -228,6 +228,13 @@ constexpr uint64_t INVALID_MEMORY   = SYSTEM_RESERVED + INVALID_OFFSET;
 static uint64_t g_desired_base_addr = SYSTEM_RESERVED + CODE_BASE_OFFSET;
 static uint64_t g_invalid_memory    = 0;
 
+uint64_t AllocateUnresolvedObjectGuard() {
+	// Relocations use the returned address. A host driver may own the preferred
+	// location, so the internal inaccessible guard can occupy another owned page.
+	return Libs::LibKernel::Memory::AllocateRuntimeMemory(
+	    INVALID_MEMORY, 4096, Common::VirtualMemory::Mode::NoAccess, "invalid_memory", false);
+}
+
 static Program*              g_tls_main_program        = nullptr;
 static thread_local Program* g_tls_cached_main_program = nullptr;
 static thread_local uint8_t* g_tls_cached_main_tcb     = nullptr;
@@ -2036,8 +2043,7 @@ void RuntimeLinker::Relocate(Program* program) {
 	EXIT_IF(program == nullptr);
 
 	if (g_invalid_memory == 0) {
-		g_invalid_memory = Libs::LibKernel::Memory::AllocateRuntimeMemory(
-		    INVALID_MEMORY, 4096, Common::VirtualMemory::Mode::NoAccess, "invalid_memory", true);
+		g_invalid_memory = AllocateUnresolvedObjectGuard();
 		EXIT_NOT_IMPLEMENTED(g_invalid_memory == 0);
 	}
 
