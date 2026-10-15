@@ -1,6 +1,8 @@
 #include "graphics/presentation/renderDoc.h"
+#include "graphics/presentation/renderDocCaptureRequest.h"
 
 #include "common/logging/log.h"
+#include "common/switches.h"
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 
@@ -46,6 +48,37 @@ static void Say(const char* format, Args... args) {
 	std::fflush(stdout);
 }
 
+static RenderDocCaptureRequest& AutomaticCaptureRequest() {
+	static RenderDocCaptureRequest request(KYTY_GETENV("KYTY_DEBUG_RENDERDOC_CAPTURE_REQUEST_FILE"));
+	return request;
+}
+
+static void ArmAutomaticCaptureRequest() {
+	using Status = RenderDocCaptureRequest::Status;
+	const auto status = AutomaticCaptureRequest().ArmStatus();
+	if (status == Status::Pending) {
+		Say("RenderDoc: automatic request armed; waiting for a fresh empty gate file\n");
+	} else if (status != Status::Disabled) {
+		Say("RenderDoc: automatic request rejected at startup (status %u)\n",
+		    static_cast<unsigned>(status));
+	}
+}
+
+static void PollAutomaticCaptureRequest() {
+	using Status = RenderDocCaptureRequest::Status;
+	const auto status = AutomaticCaptureRequest().Poll(
+	    g_api != nullptr, g_state.load(std::memory_order_acquire) == RenderDocState::Idle);
+	static auto last_status = Status::Disabled;
+	if (status == Status::Request) {
+		Say("RenderDoc: fresh gate requested one guest-flip capture\n");
+		RenderDocRequestCapture();
+	} else if (status != last_status &&
+	           (status == Status::FileError || status == Status::InvalidGate)) {
+		Say("RenderDoc: automatic request rejected (status %u)\n", static_cast<unsigned>(status));
+	}
+	last_status = status;
+}
+
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 
 static bool BindRenderDocApi(HMODULE module) {
@@ -73,6 +106,7 @@ static bool BindRenderDocApi(void* module) {
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 
 void RenderDocInit() {
+	ArmAutomaticCaptureRequest();
 	if (g_api != nullptr) {
 		return;
 	}
@@ -110,6 +144,7 @@ void RenderDocInit() {
 #else
 
 void RenderDocInit() {
+	ArmAutomaticCaptureRequest();
 	if (g_api != nullptr) {
 		return;
 	}
@@ -174,8 +209,12 @@ static void StartCapture() {
 }
 
 void RenderDocOnGuestFlip(RenderContext& renderer) {
+	if (g_api == nullptr) {
+		return;
+	}
+	PollAutomaticCaptureRequest();
 	const auto state = g_state.load(std::memory_order_acquire);
-	if (g_api == nullptr || state == RenderDocState::Idle) {
+	if (state == RenderDocState::Idle) {
 		return;
 	}
 	if (state == RenderDocState::Capturing) {

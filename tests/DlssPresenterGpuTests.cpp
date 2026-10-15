@@ -18,6 +18,7 @@
 #include "kernel/memory.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
+#include <renderdoc_app.h>
 #include <memory>
 #if !defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
 #error This native fixture requires KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS on every full target source.
@@ -674,6 +675,41 @@ void ReadbackBorrowed(Vulkan& recorder, const DlssImage& image, Buffer& destinat
                                   0, 0, nullptr, 1, &host, 0, nullptr);
     recorder.Barrier(raw, original, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
 }
+void CaptureRenderDocBootstrap(GraphicContext& graphics, const std::filesystem::path& artifacts) {
+    const auto module = GetModuleHandleW(L"renderdoc.dll");
+    Require(module != nullptr, "bootstrap capture requires injected RenderDoc DLL");
+    const auto get_api = reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(module, "RENDERDOC_GetAPI"));
+    void* raw_api = nullptr;
+    Require(get_api && get_api(eRENDERDOC_API_Version_1_6_0, &raw_api) == 1 && raw_api,
+            "bootstrap injected RenderDoc API unavailable");
+    const auto api = static_cast<RENDERDOC_API_1_6_0*>(raw_api);
+    const auto soft_mib = api->GetCaptureOptionU32(eRENDERDOC_Option_SoftMemoryLimit);
+    std::printf("RENDERDOC BOOTSTRAP: before=%u softMemoryLimitMiB=%u\n", api->IsFrameCapturing(), soft_mib);
+    Require(api->IsFrameCapturing() == 0 && soft_mib == 512,
+            "bootstrap capture requires no active capture and injected 512MiB soft limit");
+    const auto capture_template = (artifacts / "renderdoc-bootstrap").string();
+    api->SetCaptureFilePathTemplate(capture_template.c_str());
+    const auto prior_count = api->GetNumCaptures();
+    const auto instance = static_cast<VkInstance>(graphics.instance);
+    const auto device = RENDERDOC_DEVICEPOINTER_FROM_VKINSTANCE(instance);
+    api->StartFrameCapture(device, nullptr);
+    std::printf("RENDERDOC BOOTSTRAP: started IsFrameCapturing=%u\n", api->IsFrameCapturing());
+    Require(api->IsFrameCapturing() != 0, "Vulkan RenderDoc frame capturer not registered");
+    Require(api->EndFrameCapture(device, nullptr) != 0 && api->IsFrameCapturing() == 0,
+            "bootstrap RenderDoc capture failed to finish");
+    const auto count = api->GetNumCaptures();
+    uint32_t length = 0;
+    Require(count > prior_count && api->GetCapture(count - 1, nullptr, &length, nullptr) && length,
+            "bootstrap capture did not publish a new capture path");
+    std::string path(length, '\0');
+    Require(api->GetCapture(count - 1, path.data(), &length, nullptr) != 0,
+            "bootstrap capture path unavailable");
+    path.resize(std::strlen(path.c_str()));
+    Require(std::filesystem::is_regular_file(path), "bootstrap capture file missing");
+    std::printf("RENDERDOC BOOTSTRAP PASS: IsFrameCapturing=0 capture=%s bytes=%llu\n", path.c_str(),
+                static_cast<unsigned long long>(std::filesystem::file_size(path)));
+    std::fflush(stdout);
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -725,6 +761,11 @@ int main(int argc, char** argv) {
                 !window.requested_dlss_project.has_value(), "ordinary bootstrap unexpectedly negotiated DLSS");
         Require(window.render_context && window.presenter && window.graphic_ctx.bindless_enabled,
                 "ordinary bootstrap did not construct the actual bindless renderer");
+        const auto* renderdoc_capture = std::getenv("KYTY_RENDERDOC_BOOTSTRAP_CAPTURE");
+        if (renderdoc_capture && std::strcmp(renderdoc_capture, "1") == 0) {
+            Require(argc > 2, "bootstrap capture requires an explicit artifact directory argument");
+            CaptureRenderDocBootstrap(window.graphic_ctx, artifacts);
+        }
         // Release the normal owners exactly as WindowContext does, retaining the
         // real allocator/device for an observational cache snapshot only. Their
         // destruction invokes actual production DeleteImage, never test Clear.

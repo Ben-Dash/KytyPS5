@@ -542,6 +542,14 @@ add_executable(frame_statistics_tests EXCLUDE_FROM_ALL
 )
 target_include_directories(frame_statistics_tests PRIVATE ${inc_headers})
 
+add_executable(renderdoc_capture_request_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/RenderDocCaptureRequestTests.cpp"
+)
+target_include_directories(renderdoc_capture_request_tests PRIVATE ${KYTY_SOURCE_DIR})
+if(KYTY_CLANG_CL)
+	target_compile_options(renderdoc_capture_request_tests PRIVATE /EHsc)
+endif()
+
 add_executable(dlss_contract_tests EXCLUDE_FROM_ALL "${KYTY_TESTS_DIR}/DlssContractTests.cpp")
 target_link_libraries(dlss_contract_tests PRIVATE kyty_dlss)
 add_executable(dlss_presentation_contract_tests EXCLUDE_FROM_ALL
@@ -799,6 +807,8 @@ if(BUILD_TESTING)
 	add_test(NAME avplayer_file COMMAND $<TARGET_FILE:avplayer_file_tests>)
 	add_test(NAME bit_array COMMAND $<TARGET_FILE:bit_array_tests>)
 	add_test(NAME frame_statistics COMMAND $<TARGET_FILE:frame_statistics_tests>)
+	add_test(NAME renderdoc_capture_request COMMAND $<TARGET_FILE:renderdoc_capture_request_tests>)
+	set_tests_properties(renderdoc_capture_request PROPERTIES TIMEOUT 10)
 	add_test(NAME mesh_dispatch COMMAND $<TARGET_FILE:mesh_dispatch_tests>)
 	add_test(NAME shader_precompile_record COMMAND $<TARGET_FILE:shader_precompile_record_tests>)
 	add_test(NAME lru_cache COMMAND $<TARGET_FILE:lru_cache_tests>)
@@ -1245,6 +1255,7 @@ if(BUILD_TESTING)
 		avplayer_file_tests
 		bit_array_tests
 		frame_statistics_tests
+		renderdoc_capture_request_tests
 		dlss_contract_tests
 		dlss_presentation_contract_tests
 		mesh_dispatch_tests
