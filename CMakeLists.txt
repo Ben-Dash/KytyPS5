@@ -416,7 +416,8 @@ if (KYTY_CLANG_CL)
 	set_source_files_properties(${kyty_emulator_src} PROPERTIES COMPILE_FLAGS "-Wno-pragma-pack -Wno-deprecated-declarations -D_TIMESPEC_DEFINED")
 endif()
 
-set(kyty_emulator_link_libraries common Vulkan::Headers spirv-tools-opt spirv-tools SDL3::SDL3-static imgui xxhash FFmpeg::ffmpeg fmt::fmt nlohmann_json::nlohmann_json LibAtrac9 kyty_git_version Zydis::Zydis xbyak::xbyak opus)
+include("${KYTY_SOURCE_DIR}/dlss.cmake")
+set(kyty_emulator_link_libraries common Vulkan::Headers spirv-tools-opt spirv-tools SDL3::SDL3-static imgui xxhash FFmpeg::ffmpeg fmt::fmt nlohmann_json::nlohmann_json LibAtrac9 kyty_git_version Zydis::Zydis xbyak::xbyak opus kyty_dlss)
 
 # Linux system libraries.
 if(LINUX)
@@ -535,6 +536,29 @@ add_executable(frame_statistics_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/FrameStatisticsTests.cpp"
 )
 target_include_directories(frame_statistics_tests PRIVATE ${inc_headers})
+
+add_executable(dlss_contract_tests EXCLUDE_FROM_ALL "${KYTY_TESTS_DIR}/DlssContractTests.cpp")
+target_link_libraries(dlss_contract_tests PRIVATE kyty_dlss)
+add_executable(dlss_presentation_contract_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/DlssPresentationContractTests.cpp")
+target_link_libraries(dlss_presentation_contract_tests PRIVATE kyty_dlss)
+if(WIN32)
+	add_executable(dlss_vulkan_gpu_tests EXCLUDE_FROM_ALL "${KYTY_TESTS_DIR}/DlssVulkanGpuTests.cpp")
+	target_link_libraries(dlss_vulkan_gpu_tests PRIVATE kyty_dlss)
+	if(KYTY_CLANG_CL)
+		target_compile_options(dlss_vulkan_gpu_tests PRIVATE /EHsc)
+	endif()
+endif()
+if(BUILD_TESTING)
+	add_test(NAME dlss_temporal_contract COMMAND $<TARGET_FILE:dlss_contract_tests>)
+	add_test(NAME dlss_presentation_contract COMMAND $<TARGET_FILE:dlss_presentation_contract_tests>)
+	set_tests_properties(dlss_temporal_contract PROPERTIES TIMEOUT 10)
+	set_tests_properties(dlss_presentation_contract PROPERTIES TIMEOUT 10)
+	if(NOT KYTY_DLSS)
+		add_test(NAME dlss_disabled_no_sdk COMMAND $<TARGET_FILE:dlss_contract_tests> --expect-disabled)
+		set_tests_properties(dlss_disabled_no_sdk PROPERTIES TIMEOUT 10)
+	endif()
+endif()
 
 add_executable(mesh_dispatch_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/MeshDispatchTests.cpp"
@@ -1216,6 +1240,8 @@ if(BUILD_TESTING)
 		avplayer_file_tests
 		bit_array_tests
 		frame_statistics_tests
+		dlss_contract_tests
+		dlss_presentation_contract_tests
 		mesh_dispatch_tests
 		shader_precompile_record_tests
 		lru_cache_tests

@@ -11,6 +11,8 @@ namespace Libs::Graphics {
 class CommandBuffer;
 class RenderContext;
 struct ImageInfo;
+struct DlssPresentationInput;
+struct DlssStatus;
 struct WindowContext;
 
 class Presenter final {
@@ -27,6 +29,11 @@ public:
 	KYTY_CLASS_NO_COPY(Presenter);
 
 	[[nodiscard]] Frame&         PrepareFrame(CommandBuffer& command, const ImageInfo& info);
+    // Optional explicit semantic path. Null on failure; the caller may present
+    // its original guest color with PrepareFrame. No input discovery/fabrication.
+    // Producer command buffer must still be submitted/retired on SDK failure.
+    [[nodiscard]] Frame* PrepareTemporalFrame(CommandBuffer& command,
+        const DlssPresentationInput& input, DlssStatus& status);
 	[[nodiscard]] Frame&         PrepareBlankFrame(uint32_t width, uint32_t height, bool opaque,
 	                                               CommandBuffer* producer = nullptr);
 	[[nodiscard]] bool           PresentLastFrame();

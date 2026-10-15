@@ -14,6 +14,7 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/presentation/presenter.h"
+#include "graphics/presentation/dlss/dlssPresentation.h"
 #include "graphics/presentation/systemOverlay.h"
 #include "graphics/presentation/videoOut.h"
 #include "graphics/presentation/window/windowInternal.h"
@@ -603,6 +604,9 @@ struct Presenter::Impl {
 	Common::Mutex         present_mutex;
 	std::array<Layer, 2>  layers {};
 	std::atomic<uint64_t> presented_overlay_revision {0};
+    uint64_t last_temporal_frame_id = 0;
+    bool temporal_reset_required = true;
+    std::weak_ptr<DlssVulkan> last_temporal_backend;
 };
 
 void Swapchain::Create() {
@@ -1130,6 +1134,100 @@ Presenter::Frame& Presenter::PrepareFrame(CommandBuffer& buffer, const ImageInfo
 	                 {image.backing.extent.width, image.backing.extent.height}, frame_format);
 	frame->CopyFrom(buffer, image);
 	return *frame;
+}
+
+Presenter::Frame* Presenter::PrepareTemporalFrame(CommandBuffer& buffer,
+    const DlssPresentationInput& request, DlssStatus& status) {
+    status = ValidateDlssPresentationInput(request, m_impl->last_temporal_frame_id);
+    if (!status) return nullptr;
+    auto& scheduler = m_impl->renderer.GetCommandScheduler();
+    if (buffer.IsInvalid() || &buffer.GetContext() != &m_impl->renderer ||
+        !scheduler.Active() || &scheduler.Current() != &buffer) {
+        status = {DlssStatusCode::InvalidArgument, 0, "DLSS needs the renderer's recording command buffer"};
+        return nullptr;
+    }
+    if (!request.backend->Initialized() || !request.backend->FeatureCreated()) {
+        status = {DlssStatusCode::InvalidState, 0, "DLSS feature has not been initialized and created"};
+        return nullptr;
+    }
+    const auto* created_configuration = request.backend->Configuration();
+    if (request.backend->Device() != static_cast<VkDevice>(m_impl->window.graphic_ctx.device) ||
+        created_configuration == nullptr ||
+        !DlssPresentationConfigurationMatches(*created_configuration, request.configuration)) {
+        status = {DlssStatusCode::InvalidArgument, 0, "DLSS backend device/configuration does not match the request"};
+        return nullptr;
+    }
+    const auto& output = request.inputs.output;
+    const auto native_format = static_cast<vk::Format>(output.format);
+    const auto features = m_impl->window.graphic_ctx.GetFormatProperties(native_format).optimalTilingFeatures;
+    const auto required = vk::FormatFeatureFlagBits::eBlitSrc |
+        vk::FormatFeatureFlagBits::eSampledImageFilterLinear | vk::FormatFeatureFlagBits::eSampledImage |
+        vk::FormatFeatureFlagBits::eTransferSrc | vk::FormatFeatureFlagBits::eTransferDst;
+    if ((features & required) != required) {
+        status = {DlssStatusCode::Unsupported, 0, "DLSS output format cannot be presented"};
+        return nullptr;
+    }
+    auto* frame = m_impl->frames.Acquire({output.extent.width, output.extent.height}, native_format);
+    Common::LockGuard render_lock(m_impl->renderer.GetMutex());
+    frame->Configure(m_impl->window.graphic_ctx,
+        {output.extent.width, output.extent.height}, native_format);
+    buffer.EndRendering();
+    auto native = buffer.Handle(); // Flush pending upload/compute dependencies first.
+    // NGX calls native Vulkan directly; the producer's copied calls must first
+    // be recorded. This drains CPU recording only, without a GPU wait/submit.
+    DrainGpuThreadCommands();
+    // Register lifetime BEFORE evaluate: failure can follow partial native work.
+    scheduler.DeferOperation([lease = request.resource_lease, backend = request.backend] {});
+    auto inputs = request.inputs;
+    const auto previous_backend = m_impl->last_temporal_backend.lock();
+    inputs.reset_history |= m_impl->temporal_reset_required || previous_backend != request.backend ||
+        request.frame_id != m_impl->last_temporal_frame_id + 1u;
+    scheduler.NoteCommandRecorded(); // Native SDK may record commands even before reporting failure.
+    status = request.backend->RecordEvaluate(static_cast<VkCommandBuffer>(native), inputs);
+    buffer.InvalidateGraphicsState(); // SDK may change pipeline/descriptor/dynamic state.
+    if (!status) {
+        m_impl->temporal_reset_required = true;
+        m_impl->frames.Release(frame);
+        return nullptr;
+    }
+    // Copy to a presentation-owned frame so borrowed SDK resources are needed
+    // only through this producer tick, independently of later repeated presents.
+    vk::ImageMemoryBarrier2 to_copy{};
+    to_copy.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+    to_copy.srcAccessMask = vk::AccessFlagBits2::eMemoryWrite;
+    to_copy.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    to_copy.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+    to_copy.oldLayout = vk::ImageLayout::eGeneral;
+    to_copy.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+    to_copy.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_copy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_copy.image = output.image;
+    to_copy.subresourceRange = output.subresource;
+    vk::DependencyInfo dependency{};
+    dependency.imageMemoryBarrierCount = 1;
+    dependency.pImageMemoryBarriers = &to_copy;
+    native.pipelineBarrier2(dependency);
+    frame->Transit(native, vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite);
+    vk::ImageCopy copy{};
+    copy.srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+    copy.dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1};
+    copy.extent = {output.extent.width, output.extent.height, 1};
+    native.copyImage(output.image, vk::ImageLayout::eTransferSrcOptimal, frame->image.image,
+        vk::ImageLayout::eTransferDstOptimal, copy);
+    // Preserve the explicit caller/TextureCache layout contract on return.
+    auto restore = to_copy;
+    restore.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    restore.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
+    restore.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+    restore.dstAccessMask = vk::AccessFlagBits2::eMemoryWrite | vk::AccessFlagBits2::eMemoryRead;
+    restore.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+    restore.newLayout = vk::ImageLayout::eGeneral;
+    dependency.pImageMemoryBarriers = &restore;
+    native.pipelineBarrier2(dependency);
+    m_impl->last_temporal_frame_id = request.frame_id;
+    m_impl->last_temporal_backend = request.backend;
+    m_impl->temporal_reset_required = false;
+    return frame;
 }
 
 Presenter::Frame& Presenter::PrepareBlankFrame(uint32_t width, uint32_t height, bool opaque,

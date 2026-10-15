@@ -1,0 +1,35 @@
+# Optional, externally supplied NVIDIA NGX SDK. No SDK download, redistributable
+# binary, or acceptance of third-party terms is hidden in the default build.
+option(KYTY_DLSS "Build the NVIDIA DLSS Vulkan Super Resolution backend" OFF)
+set(KYTY_DLSS_SDK "" CACHE PATH "External NVIDIA/DLSS SDK root (include/ and lib/)")
+add_library(kyty_dlss STATIC
+	"${KYTY_SOURCE_DIR}/graphics/presentation/dlss/dlssVulkan.cpp")
+target_include_directories(kyty_dlss PUBLIC "${KYTY_SOURCE_DIR}")
+target_link_libraries(kyty_dlss PUBLIC Vulkan::Headers)
+if(KYTY_DLSS)
+	if(NOT WIN32 OR NOT KYTY_CLANG_CL)
+		message(FATAL_ERROR "KYTY_DLSS currently supports native Windows x64 clang-cl only")
+	endif()
+	if(NOT EXISTS "${KYTY_DLSS_SDK}/include/nvsdk_ngx_helpers_vk.h")
+		message(FATAL_ERROR "KYTY_DLSS requires an external NVIDIA/DLSS SDK: set KYTY_DLSS_SDK")
+	endif()
+	# Use the evaluated target runtime, including configuration-dependent values.
+	# CMP0091's default /MD is independent of legacy CMAKE_CXX_FLAGS string edits.
+	if(NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+		set_property(TARGET kyty_dlss PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+	elseif(CMAKE_MSVC_RUNTIME_LIBRARY STREQUAL "")
+		message(FATAL_ERROR "KYTY_DLSS requires an explicit MSVC runtime or CMake's default runtime")
+	endif()
+	foreach(variant d s d_dbg s_dbg)
+		if(NOT EXISTS "${KYTY_DLSS_SDK}/lib/Windows_x86_64/x64/nvsdk_ngx_${variant}.lib")
+			message(FATAL_ERROR "KYTY_DLSS requires the SDK's four CRT loader variants (missing ${variant})")
+		endif()
+	endforeach()
+	set(ngx_runtime "$<TARGET_GENEX_EVAL:kyty_dlss,$<TARGET_PROPERTY:kyty_dlss,MSVC_RUNTIME_LIBRARY>>")
+	set(ngx_dll "$<OR:$<STREQUAL:${ngx_runtime},MultiThreadedDLL>,$<STREQUAL:${ngx_runtime},MultiThreadedDebugDLL>>")
+	set(ngx_debug "$<OR:$<STREQUAL:${ngx_runtime},MultiThreadedDebug>,$<STREQUAL:${ngx_runtime},MultiThreadedDebugDLL>>")
+	target_compile_definitions(kyty_dlss PRIVATE KYTY_DLSS=1)
+	target_include_directories(kyty_dlss SYSTEM PRIVATE "${KYTY_DLSS_SDK}/include")
+	target_link_libraries(kyty_dlss PRIVATE
+		"${KYTY_DLSS_SDK}/lib/Windows_x86_64/x64/nvsdk_ngx_$<IF:${ngx_dll},d,s>$<IF:${ngx_debug},_dbg,>.lib")
+endif()
