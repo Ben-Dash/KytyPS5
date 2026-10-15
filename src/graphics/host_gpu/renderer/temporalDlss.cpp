@@ -1,4 +1,5 @@
 #include "graphics/host_gpu/renderer/temporalDlss.h"
+#include "graphics/host_gpu/renderer/dlssBoundConstants.h"
 
 #include "common/switches.h"
 #include "graphics/host_gpu/renderer/commandHooks.h"
@@ -284,22 +285,10 @@ struct TemporalDlss::State {
         Require(dword < bindings.shader_data.size(), "constant adjustment outside prepared shader data");
         const auto adjustment = (bindings.shader_data[static_cast<size_t>(dword)] >> ((r.cb_slot % 4u) * 8u)) & 0xffu;
         const auto& view = bindings.buffers[r.cb_slot];
-        auto& stream = context.GetBufferCache().ActiveStream();
-        Require(view.buffer && view.buffer == stream.Handle() && stream.Usage() == MemoryUsage::Stream &&
-                (stream.MemoryProperties() & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) != 0,
-                "unsupported constants: bound buffer is not the immutable active host stream");
-        Require(view.range != VK_WHOLE_SIZE && adjustment <= view.range && r.cb_bytes <= view.range - adjustment,
-                "constant bytes outside actual descriptor range");
-        const auto mapped = stream.Mapped();
-        Require(view.offset <= mapped.size() && adjustment <= mapped.size() - view.offset,
-                "constant start outside mapped stream");
-        const auto start = view.offset + adjustment;
-        Require(r.cb_bytes <= mapped.size() - start, "constant bytes outside mapped stream");
         std::array<uint8_t, 1024> bytes{};
-        // Read exactly the host-written ring slice the guest shader is bound to.
-        // Its reservation remains immutable until scheduler retirement; never read
-        // current guest backing or arbitrary mapped device-local storage here.
-        std::memcpy(bytes.data(), mapped.data() + static_cast<size_t>(start), r.cb_bytes);
+        const auto snapshot = ReadDlssBoundConstants(context, view, adjustment,
+            std::span<uint8_t>(bytes.data(), r.cb_bytes));
+        Require(bool(snapshot), snapshot.message);
         const auto read = [&](uint32_t offset) { float value; std::memcpy(&value, bytes.data() + offset, 4); return value; };
         Constants result;
         for (size_t i = 0; i < 2; ++i) { result.jitter[i] = read(r.jitter_offsets[i]) * r.jitter_scale[i]; Require(std::isfinite(result.jitter[i]), "non-finite jitter"); }
@@ -308,7 +297,7 @@ struct TemporalDlss::State {
         Require(std::isfinite(serial) && serial >= 0 && serial <= 16777216.0f && std::trunc(serial) == serial &&
                 std::isfinite(result.dt_ms) && result.dt_ms > 0, "invalid temporal serial/frame time");
         result.serial = static_cast<uint64_t>(serial);
-        if (constant_reads++ < 4) std::printf("temporal-dlss: constants=bound-immutable-host-stream bytes=%u adjustment=%u serial=%llu\n",
+        if (constant_reads++ < 4) std::printf("temporal-dlss: constants=actual-bound-snapshot bytes=%u adjustment=%u serial=%llu\n",
             r.cb_bytes, adjustment, static_cast<unsigned long long>(result.serial));
         return result;
     }

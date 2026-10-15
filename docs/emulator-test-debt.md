@@ -1,5 +1,26 @@
 # Integration test debt
 
+## Actual native constant-buffer snapshot, 2026-10-15
+
+The temporal provider safely rejects ordinary cached GPU constant bindings;
+historical d428/6a97 CBbuffer896713 differs from ActiveStream194. A synthetic
+native fixture writes independent144B via GPU update at descriptor+adjust12,
+while later CPU bytes differ. Extracted unchanged ActiveStream-only helper
+produces intendedRED194552/18b44c: immutable-stream/short-range controls and
+two completed native source/continuation readbacks pass, then ordinary actual
+binding is Unsupported. Required GREEN: same fixture reads those exact GPU
+bytes without current guest backing, mid-dispatch retirement callbacks or
+unbounded waits; retain staging until its real GPU tick completes. An earlier
+fixture build error and stale-executable missing-runtime exit are not RED.
+Unchanged native GREEN194902/c136e7 passes the exact GPU bytes, continuation,
+lease and final validation0. Extended neighbor195134/9f156a also passes with
+the actual recording thread enabled and9 invalid requests rejected without a
+submit or output write. The shared helper retains the stream fast path and
+copies ordinary native bindings through a retained Download staging allocation,
+finite5s timeline wait and fresh current command buffer without retirements.
+Caller must supply a valid live native descriptor with TRANSFER_SRC/range
+ownership; no new lookup or current guest-memory read occurs. Live retry pending.
+
 ## Internal unresolved-object guard versus foreign host reservations, 2026-10-15
 
 Game193625/59f5aa on f5d5db0f/core26F95B reaches NGX initialization0 then

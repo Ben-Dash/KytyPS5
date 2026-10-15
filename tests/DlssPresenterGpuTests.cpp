@@ -10,6 +10,7 @@
 #include "graphics/presentation/window/windowInternal.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/renderer/commandHooks.h"
+#include "graphics/host_gpu/renderer/dlssBoundConstants.h"
 #include "graphics/guest_gpu/hardwareContext.h"
 #include "graphics/shader/shader.h"
 #include "emulator.h"
@@ -712,11 +713,14 @@ void CaptureRenderDocBootstrap(GraphicContext& graphics, const std::filesystem::
     std::fflush(stdout);
 }
 #include "DlssHostStartupTests.inc"
+#include "DlssBoundConstantsTests.inc"
 } // namespace
 
 int main(int argc, char** argv) {
     if (const auto* host_startup = std::getenv("KYTY_DLSS_HOST_STARTUP_TEST");
         host_startup && host_startup[0] == '1') return RunHostStartupTest();
+    if (const auto* bound_constants = std::getenv("KYTY_DLSS_BOUND_CONSTANTS_TEST");
+        bound_constants && std::strcmp(bound_constants, "1") == 0) return RunBoundConstantsTest();
     // A failed check exits immediately: no failure path can fall into an
     // unbounded device.waitIdle destructor after a bad GPU submission.
     const auto runtime = argc > 1 ? std::filesystem::absolute(argv[1]) : std::filesystem::current_path();
