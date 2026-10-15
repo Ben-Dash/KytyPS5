@@ -1,10 +1,13 @@
-// Synthetic, bounded Vulkan/NGX integration fixture. No guest data or game heuristics.
+// Bounded Vulkan/NGX fixtures. Synthetic by default; explicit external capture opt-in.
 #define VK_NO_PROTOTYPES
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <winver.h>
+#include <bcrypt.h>
 #include "graphics/presentation/dlss/dlssVulkan.h"
+#include "graphics/presentation/dlss/dlssRgbMerge.h"
+#include "../3rdparty/nlohmann_json/single_include/nlohmann/json.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -199,7 +202,7 @@ struct Vulkan {
         for (const auto& value : strings) pointers.push_back(value.c_str());
         return pointers;
     }
-    void Initialize(const DlssProjectInfo& project) {
+    void Initialize(const DlssProjectInfo& project, bool request_dlss = true) {
         char input_layout_text[32]{};
         if (GetEnvironmentVariableA("KYTY_DLSS_SMOKE_INPUT_LAYOUT", input_layout_text,
                 static_cast<DWORD>(sizeof(input_layout_text))) > 0) {
@@ -221,7 +224,8 @@ struct Vulkan {
 #define GLOBAL(name) name = reinterpret_cast<PFN_##name>(gipa(nullptr, #name)); Require(name != nullptr, #name);
         GLOBAL_FUNCS(GLOBAL)
 #undef GLOBAL
-        instance_query = DlssVulkan::QueryInstanceExtensions(project, instance_extensions);
+        if (request_dlss)
+            instance_query = DlssVulkan::QueryInstanceExtensions(project, instance_extensions);
         std::printf("NGX REQUIRED INSTANCE EXTENSIONS: count=%zu\n", instance_extensions.size());
         for (const auto& extension : instance_extensions) std::printf("  NGX instance: %s\n", extension.c_str());
         const char* validation_layer = "VK_LAYER_KHRONOS_validation";
@@ -304,7 +308,8 @@ struct Vulkan {
             family = i; found = true; break;
         }
         Require(found, "graphics+compute queue unavailable");
-        device_query = DlssVulkan::QueryDeviceExtensions(project, instance, physical, device_extensions);
+        if (request_dlss)
+            device_query = DlssVulkan::QueryDeviceExtensions(project, instance, physical, device_extensions);
         std::printf("NGX REQUIRED DEVICE EXTENSIONS: count=%zu\n", device_extensions.size());
         for (const auto& extension : device_extensions) std::printf("  NGX device: %s\n", extension.c_str());
         Check(vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr), "device extension count");
@@ -527,6 +532,10 @@ void CheckOutput(const void* memory, DlssExtent size, unsigned frame) {
     Require(object > background + 0.20f && brightest > 0.45f,
             "DLSS output did not reconstruct the synthetic visible object");
 }
+
+#include "DlssCapturedInputTests.inc"
+#include "DlssRgbMergeTests.inc"
+#include "DlssRgbMergeLeaseTests.inc"
 } // namespace
 
 int main(int argc, char** argv) {
@@ -535,12 +544,22 @@ int main(int argc, char** argv) {
         const auto artifacts = argc > 2 ? std::filesystem::absolute(argv[2]) :
                                          std::filesystem::current_path() / "dlss-smoke-artifacts";
         std::filesystem::create_directories(artifacts);
-        Require(std::filesystem::exists(runtime / "nvngx_dlss.dll"),
+        const bool rgb_merge_mode = std::getenv("KYTY_DLSS_RGB_MERGE_TEST") != nullptr;
+        const bool rgb_lease_mode = std::getenv("KYTY_DLSS_RGB_MERGE_LEASE_TEST") != nullptr;
+        Require(rgb_merge_mode || rgb_lease_mode || std::filesystem::exists(runtime / "nvngx_dlss.dll"),
                 "runtime DLL missing: dependency failure is not a regression reproduction");
         DlssProjectInfo project{};
         project.project_id = "2b495df0-739f-4900-8f48-8e5ef313ce70";
         project.engine_version = "KytyPS5-synthetic-smoke-1";
         project.application_data_path = artifacts.wstring(); project.feature_search_path = runtime.wstring();
+        Require(!(rgb_merge_mode && rgb_lease_mode), "select one RGB merge fixture mode");
+        if (rgb_lease_mode) return RunRgbMergeLeaseTest(project);
+        if (rgb_merge_mode) return RunRgbMergeTest(project);
+        if (const wchar_t* manifest = _wgetenv(L"KYTY_DLSS_CAPTURE_MANIFEST")) {
+            Require(*manifest != L'\0', "capture manifest opt-in must not be empty");
+            project.engine_version = "KytyPS5-captured-input-experiment-1";
+            return RunCapturedInputs(std::filesystem::path(manifest), runtime, artifacts, project);
+        }
         Vulkan vk; vk.Initialize(project); ResourceControl(vk);
         CheckDlss(vk.instance_query, "QueryInstanceExtensions after resource controls");
         CheckDlss(vk.device_query, "QueryDeviceExtensions after resource controls");

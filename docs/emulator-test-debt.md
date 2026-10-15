@@ -1,5 +1,25 @@
 # Integration test debt
 
+## Explicit temporal pass integration, 2026-10-15
+
+User requests actual game DLSS use. Before wiring production behavior, reproduce
+the missing explicit temporal association with independent synthetic tuples:
+immutable private input copies, ordered same-frame producer/consumer, exact
+color identity/generation, distinct resources and monotonic temporal serial.
+Also require a native two-output RGB merge regression preserving each distinct
+alpha and an untouched auxiliary R8 output, with downstream readback. Native
+RED/GREEN must precede enabling the new pass. External pass metadata declares
+roles; formats/counts alone do not infer them. Existing captured-input NGX
+fixture is a separate acceptance experiment, not game activation.
+
+These synthetic gates now pass with intended RED/GREEN and independent native
+controls: association185348/b4756f→185423/8e50ce; merge185506/875a49→190059/a7fd38;
+external descriptor retirement190541/23f9fa. CPU contracts190630/5b91bc pass3/3.
+Saved real-input NGX185520/a018a4 passes two isolated resets/readbacks and final
+validation0; temporal continuity/global exposure/full motion remain unproved.
+First actual game provider retry is still pending. See
+[the integration record](dlss-temporal-pass-integration.md).
+
 ## Captured temporal math narrows the provider debt, 2026-10-15
 
 Diagnostic b4aa51cb produced four complete native dispatch snapshots550/551,

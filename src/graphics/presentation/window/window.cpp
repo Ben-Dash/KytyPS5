@@ -19,6 +19,7 @@
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/temporalDlss.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/presentation/renderDoc.h"
 #include "graphics/presentation/systemOverlay.h"
@@ -846,7 +847,16 @@ Presenter& WindowInit(uint32_t width, uint32_t height) {
 	window->graphic_ctx.screen_height = height;
 
 	WindowCreate(*window);
-	window->CreateVulkan();
+    const auto temporal_project = TemporalDlss::ProjectFromEnvironment();
+    window->CreateVulkan(temporal_project ? &*temporal_project : nullptr);
+    if (temporal_project) {
+        auto backend = std::make_shared<DlssVulkan>();
+        const auto status = window->InitializeDlssBackend(*backend);
+        std::printf("temporal-dlss: initialize status=%u native=0x%08x message=%s\n",
+            static_cast<unsigned>(status.code), status.native_result, status.message);
+        std::fflush(stdout);
+        if (status) window->render_context->EnableTemporalDlss(std::move(backend));
+    }
 	auto& presenter = *window->presenter;
 	g_window        = std::move(window);
 	return presenter;

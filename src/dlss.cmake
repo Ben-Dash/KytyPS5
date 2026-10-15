@@ -3,7 +3,8 @@
 option(KYTY_DLSS "Build the NVIDIA DLSS Vulkan Super Resolution backend" OFF)
 set(KYTY_DLSS_SDK "" CACHE PATH "External NVIDIA/DLSS SDK root (include/ and lib/)")
 add_library(kyty_dlss STATIC
-	"${KYTY_SOURCE_DIR}/graphics/presentation/dlss/dlssVulkan.cpp")
+	"${KYTY_SOURCE_DIR}/graphics/presentation/dlss/dlssVulkan.cpp"
+    "${KYTY_SOURCE_DIR}/graphics/presentation/dlss/dlssRgbMerge.cpp")
 target_include_directories(kyty_dlss PUBLIC "${KYTY_SOURCE_DIR}")
 target_link_libraries(kyty_dlss PUBLIC Vulkan::Headers)
 if(KYTY_DLSS)

@@ -30,6 +30,8 @@ class VideoOutDriver;
 namespace Libs::Graphics {
 
 class GuestGpu;
+class TemporalDlss;
+class DlssVulkan;
 
 // The game re-read the same large file several times in a row: a texture streamer asked to keep
 // more than it can fit (see RenderContext::ReportMipStats).
@@ -45,6 +47,8 @@ public:
 	void                                    InitializeGpu(VideoOut::VideoOutDriver* video_out);
 	void                                    ShutdownGpu();
 	[[nodiscard]] GuestGpu&                 GetGpu() const;
+    void EnableTemporalDlss(std::shared_ptr<DlssVulkan> backend);
+    [[nodiscard]] TemporalDlss* GetTemporalDlss() const noexcept { return m_temporal_dlss.get(); }
 	[[nodiscard]] VideoOut::VideoOutDriver& GetVideoOut() const;
 
 	Common::Mutex&      GetMutex() { return m_mutex; }
@@ -109,6 +113,7 @@ private:
 	mutable std::shared_mutex m_mapped_ranges_mutex;
 	RangeSet                  m_mapped_ranges;
 	std::unique_ptr<GuestGpu> m_gpu;
+    std::unique_ptr<TemporalDlss> m_temporal_dlss;
 	VideoOut::VideoOutDriver* m_video_out = nullptr;
 	bool                      m_fault_process_pending = false;
 	// PrepareBda's current epoch and the epoch of its last synchronization (Thread_Gpu only).

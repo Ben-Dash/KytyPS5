@@ -25,6 +25,7 @@
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
 #include "graphics/host_gpu/renderer/render.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/temporalDlss.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/ir/ShaderIR.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
@@ -1038,8 +1039,13 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 
 	// The large shared memory buffer is reused by every dispatch: no chaining past one. A
 	// snapshotted dispatch reads its outputs back right after it.
+
+    auto* temporal_dlss = m_context.GetTemporalDlss();
+    const bool temporal_boundary = temporal_dlss != nullptr &&
+        temporal_dlss->BeforeDispatch(input_info, bindings,
+            {thread_group_x, thread_group_y, thread_group_z}, m_context.GetGpu().GetFrameNum());
 	const bool chain = ComputeChainEnabled() && bindings.shared_memory.buffer == nullptr &&
-	                   snapshot.id == 0;
+	                   snapshot.id == 0 && !temporal_boundary;
 	auto              vk_buffer        = chain ? buffer.ChainHandle() : buffer.Handle();
 	PreparedBindings* descriptor_stage = &bindings;
 	CommitBindings(buffer, vk::PipelineBindPoint::eCompute, pipeline,
@@ -1082,6 +1088,10 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
+    if (temporal_dlss != nullptr) {
+        temporal_dlss->AfterDispatch(input_info, bindings,
+            {thread_group_x, thread_group_y, thread_group_z}, m_context.GetGpu().GetFrameNum());
+    }
 	if (snapshot.id != 0) [[unlikely]] {
 		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}

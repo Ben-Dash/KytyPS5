@@ -4,6 +4,7 @@
 
 #include "graphics/host_gpu/renderer/vertexExplode.h"
 #include "graphics/host_gpu/renderer/renderContext.h"
+#include "graphics/host_gpu/renderer/temporalDlss.h"
 
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
@@ -52,6 +53,14 @@ RenderContext::RenderContext(GraphicContext& graphics)
 RenderContext::~RenderContext() {
 	ShutdownGpu();
 	m_command_scheduler.Shutdown();
+    // Feature, merge descriptors and private images retire before the device
+    // and caches; callbacks capturing the provider were drained above.
+    m_temporal_dlss.reset();
+}
+
+void RenderContext::EnableTemporalDlss(std::shared_ptr<DlssVulkan> backend) {
+    EXIT_IF(m_temporal_dlss != nullptr);
+    m_temporal_dlss = std::make_unique<TemporalDlss>(*this, std::move(backend));
 }
 
 void RenderContext::InitializeGpu(VideoOut::VideoOutDriver* video_out) {
