@@ -44,7 +44,11 @@ Optional ON core + verified GPU executables are preserved separately in
 Installed core SHA25645F8FDE3C20086900BDAAA615CDF86930D53D4C72FFC3002537E1DDCFB6C6460;
 presenter fixture AF8ED3171609574C66D7308723427233EBAE1E49D31033E2A270B050588019FC.
 They were built while HEAD was360fc774 with the later committed production
-changes present; final OFF core embeds84a9c1ec. No game launch used these artifacts.
+changes present; final OFF core embeds84a9c1ec. A subsequent optional-build game
+run reached the visually confirmed world, mean3.3389 titleFPS over20s, exit0.
+DLSS was inactive: no production temporal provider/caller. This is launch
+verification, not DLSS performance proof; see
+[the exact game check and incomplete control](yotei-dlss-game-verification-2026-10-15.md).
 
 Local validation SDK: NVIDIA/DLSS revision
 `374959484e79a640feaba44c93ac8cfb0a03f5b5`. Release runtime file version

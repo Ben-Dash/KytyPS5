@@ -1,5 +1,25 @@
 # Integration test debt
 
+## Yōtei temporal provider and game activation remain unproved, 2026-10-15
+
+Optional SDK build091119/61af2f reaches visually confirmed world,20s title mean
+3.3389FPS/exit0, but ordinary production never requests/evaluates DLSS. Fresh
+historical control091438/714d55 closed before the gate; no matchedFPS conclusion.
+No production behavior changed in this game-verification round.
+
+Before a provider/resource change, establish a complete guest-frame capture,
+actual temporal producer order, pre-upscale/pre-HUD color, matching depth/full
+camera-and-object motion, render-pixel jitter, exposure and history resets.
+Synthetic RED/GREEN must prove the specific diagnosed resource/ordering contract;
+generic image formats or saved shader identities are not expected semantics.
+Cover camera-only/object-only motion, depth convention, dynamic extents,
+reprojection reset, resource reuse/retirement and later postprocessing/HUD.
+An external RenderDoc native-present capture can contain only repeated Frame
+presentation; verify actual guest work before treating it as a full frame.
+Real evaluated/completed/presented game output and genuinely lower render work
+must precede any DLSS image-quality/FPS claim. See
+[current game evidence](yotei-dlss-game-verification-2026-10-15.md).
+
 ## Native image recycler teardown discovered during DLSS validation
 
 Actual full-presenter run084857/29b86e passed SR/copy/lease/guards but is NOT

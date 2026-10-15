@@ -1,6 +1,33 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: native DLSS SR and presenter validated; game provider pending, 2026-10-15
+## Current checkpoint: optional build reaches world; game DLSS inactive, 2026-10-15
+
+User requested actual game/FPS verification and then explicitly asked whether
+the displayed3.7 meant DLSS was active. Answer: NO. Production startup still
+does not request NGX; ordinary flips call PrepareFrame, and no game semantic
+provider or temporal callsite exists. Host fixture PASS is separate evidence.
+See [the game verification record](yotei-dlss-game-verification-2026-10-15.md).
+
+Record f3dcf785, optional EXE45F8FDE3C20086900BDAAA615CDF86930D53D4C72FFC3002537E1DDCFB6C6460,
+production content34e725f4+84a9c1ec built on360fc774. Native game run
+091119/61af2f reached visually confirmed character/world at frame653;20s title
+mean3.3389FPS, exit0/no guards. Copied byte-matching save/cache into independent
+optional runtime; shader key matches; neutral input/full1080 output. Scene
+PrintWindow at sample start is diagnostic, not capture-free benchmark. No
+improvement claimed. Fresh historical E46 control091438/714d55 exited0 before
+frame650/sample; closure reason unknown, no complete comparison or regression
+proof. Current save already Performance; no new production fix/build this round.
+
+Three agents audited call graph/resource captures/internal resolution. No
+verified pre-upscale color+depth+full motion+jitter provider yet. Existing
+end-of-frame image dumps skip depth. Portable RenderDoc dependency prepared
+outside tracked source, no capture/execution yet; native-present captures may
+omit a full guest frame. Next: bounded complete guest-frame capture, semantic
+producer proof and genuinely lower internal workload; then real NGX evaluations,
+presented output and matched20–30s FPS. No zero inputs/guessed roles/placebo toggle.
+Preserve saves/caches/game/artifacts/user prefetch fixture. No push/issue post.
+
+## Previous checkpoint: native DLSS SR and presenter validated; game provider pending, 2026-10-15
 
 User authorized integration. Backend360fc774, explicit host negotiation/native
 Presenter fixture34e725f4, allocator teardown fix84a9c1ec, all local commits.
