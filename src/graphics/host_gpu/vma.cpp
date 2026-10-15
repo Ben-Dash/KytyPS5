@@ -51,6 +51,8 @@ struct SmallImagePool {
 };
 SmallImagePool g_small_image_pool;
 
+void ClearRecycledImages(VmaAllocator allocator);
+
 bool SmallImagePoolEnabled() {
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_SMALL_IMAGE_POOL");
@@ -215,6 +217,10 @@ void GraphicContext::DestroyAllocator() {
 	if (allocator == nullptr) {
 		return;
 	}
+	// DeleteImage retires native handles into the recycler after their GPU use.
+	// They still own VMA allocations, including allocations in the small pool.
+	// Destroy them while that pool and allocator are alive, before the VkDevice.
+	ClearRecycledImages(allocator);
 	{
 		std::scoped_lock lock(g_small_image_pool.mutex);
 		if (g_small_image_pool.pool != VK_NULL_HANDLE) {
@@ -417,10 +423,16 @@ uint64_t NativeImageRecyclerRetainedBytesForTests(VmaAllocator allocator, size_t
   return bytes;
 }
 
-void NativeImageRecyclerClearForTests(VmaAllocator allocator) {
+namespace {
+void ClearRecycledImages(VmaAllocator allocator) {
   std::vector<RecycledImage> retired;
   {std::scoped_lock lock(g_recycled_mutex);retired.swap(g_recycled);}
   for(const auto& image:retired)vmaDestroyImage(allocator,image.image,image.allocation);
+}
+} // namespace
+
+void NativeImageRecyclerClearForTests(VmaAllocator allocator) {
+  ClearRecycledImages(allocator);
 }
 
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
