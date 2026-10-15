@@ -1,5 +1,37 @@
 # Integration test debt
 
+## Captured temporal math narrows the provider debt, 2026-10-15
+
+Diagnostic b4aa51cb produced four complete native dispatch snapshots550/551,
+actual player/world/HUD confirmed. Prep actually1920×1080, accumulation actually
+3840×2160; larger allocations do not imply larger prep execution. Captured
+previous-output feedback and current/previous subpixel offsets are established.
+Consumer math uses3×3MAX reverse-depth and normalized backward displacement
+from negated rawRG16F.12 PS/VS and2compute offline variants pass CPU/IR/SPIRV;
+that does not establish live PS/VS bindings, projection jitter or exposure.
+
+Before introducing a provider or changing resource behavior, required synthetic
+cases remain: camera-only matrix reprojection and independently moving object;
+finite-motion preservation versus invalid-lane camera fill; UV orientation,
+units/sign and whether jitter was removed; depth inversion and viewport subrect
+versus backing extent; pre-exposed scene-linear color and changing exposure;
+history reset/discontinuity, ping-pong resource reuse and ordered retirement.
+Also prove command-buffer recording generation versus submission visibility:
+descriptor-relative compact SRT offsets differ from original guest SRT offsets;
+mapped constant uploads can follow draw recording but precede submission.
+The actual camera module has no PushConstant; zero pushes are not its matrix.
+The existing SDR presenter must still reject HDR; actual HDR insertion requires
+later game tone mapping/HUD. No shader-hash/address/title-based core selection.
+
+One-shot capture control tests and real Vulkan bootstrap capture pass, but the
+first actual game capture expired during initial-state preparation and the pass
+trace is partial. Do not treat partial spills or render metadata as a complete
+guest frame. Retry173950/0d35c1 after user freed space completed5,016,579,112-byte
+RDC over two guest flips, game exit0/no guards; replay coverage/producer analysis
+is a separate pending stage. See
+[capture evidence](yotei-temporal-input-capture-2026-10-15.md). Game DLSS/FPS
+improvement remains unproved; no new production semantic fix in this round.
+
 ## Yōtei temporal provider and game activation remain unproved, 2026-10-15
 
 Optional SDK build091119/61af2f reaches visually confirmed world,20s title mean

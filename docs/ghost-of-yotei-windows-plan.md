@@ -1,6 +1,59 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: optional build reaches world; game DLSS inactive, 2026-10-15
+## Current checkpoint: real temporal snapshots and shader math; game DLSS inactive, 2026-10-15
+
+Continue from diagnostic source b4aa51cb, coreBB06268F83F9F0F45351BAF07268C74F3D81826689FD974BCCD99D7C6F4D4AF4
+(built on a78a6dbd WIP later committed unchanged; embedded a78a6db-dirty).
+See [capture evidence and remaining gates](yotei-temporal-input-capture-2026-10-15.md).
+User says continue/stopWSL and subsequently freed disk; WSL stopped. Three
+agents analyze metadata, shader math/constants and captured pixel statistics;
+root owns native build/game/GPU execution. No game NGX provider/evaluation yet.
+
+New one-shot RenderDoc guest-flip file gate and CPU state/filesystem tests pass;
+actual Vulkan layer bootstrap produced267686-byte RDC with final validation0,
+exit0. API injection alone was insufficient. First real guest capture timed out
+during initial-state spilling;34 partials/15.72GiB preserved onF, not a readyRDC.
+After approximately92GiB became free onG, retry173950/0d35c1 completed a
+5,016,579,112-byte RDC (SHA98F8570B80A5E2E577EE6D099F96EFE40D65551F94EC2E5B4079653964DBCE45),
+146.55s/two guest flips, game exit0/no guards. Player/world confirmed552;
+20s pre-capture title mean3.4333FPS. FirstGPUreplay loads but misses cooperative
+deadline; bothShutdownreturn/hostexit0. PureCPU structured decode12.61s+scan6.687s
+exports1115shaders2356pipelines157538chunks and174rawsamples. LinkedGPL is
+resolved. V5 corrects the BeginCommandBuffer field case and traces only actual
+selected descriptor sets, preserving128/4096 bounds:174/174prior associations
+pass, all8selected buffer bindings resolved. No GPU-visible matrix bytes yet.
+
+No-RenderDoc targeted run172948/61b90f exited0/no guards, player/world/HUD
+visually confirmed at551; four complete snapshots550/551 preserve liveSPV,
+CBs and before/after native image bytes. Actual prep dispatch is1920×1080
+despite4K backing allocations; actual next temporal accumulation is3840×2160.
+Byte-identical previous-output feedback and changing current/previous subpixel
+offsets established. Consumer math establishes reverse-depth3×3 selection and
+normalized backward reprojection of negated rawtwo-channel input. Full motion
+producer/projection-jitter/exposure/reset conventions remain pending.
+
+Frozen v9 journal1983records checksums verified; all12 selected PS/VS variants
+and2compute variants pass native CPU decode/emission/Vulkan1.3 SPIRV validation.
+Explicit reconstructed profiles are not original PS/VS userdata/live-module
+proof. Metadata trace172259/a39773 is partial (noEND):4208rows/7279calls;
+do not call it a complete frame. Diagnostic title samples around3.4FPS are
+not matched optimization results. No FPS gain, active gameDLSS or verified
+complete guest-work coverage claimed. No new issue milestone, post or push.
+
+Both CS live modules byte-match CPU/regenerated outputs;2349sampledpoints/frame
+confirm preparedMV/MAX-depth exactly andlinearDepth/luma withinFP16. Actual
+camera PS hasNO PushConstant:12matrixfloats are set1/binding109 SSBO bytes64..112,
+not its128Bzero pushes. Need actual descriptor/buffer bytes and upload/submit
+generation. Camera buffer194 matrix ranges are57066048..57066096 and
+61334080..61334128. CPU and replay structured chunk indices differ; selected
+read attempts rejected wrong/ambiguous associations before any buffer read.
+Next: stable baked-recording/work-call matching for bounded actual GPU reads,
+then obtain actual camera matrix/sampler/UV and exposure/reset conventions,
+then synthetic generic provider/ordering regressions before a production change.
+HDR insertion belongs before actual game tonemap/HUD; do not feed sceneHDR into
+the existing SDR presenter. Preserve user prefetch fixture/save/cache/captures.
+
+## Previous checkpoint: optional build reaches world; game DLSS inactive, 2026-10-15
 
 User requested actual game/FPS verification and then explicitly asked whether
 the displayed3.7 meant DLSS was active. Answer: NO. Production startup still
