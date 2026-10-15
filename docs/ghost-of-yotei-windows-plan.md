@@ -1,6 +1,44 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: public research and four profiling runs completed, 2026-10-15
+## Current checkpoint: native DLSS SR and presenter validated; game provider pending, 2026-10-15
+
+User authorized integration. Backend360fc774, explicit host negotiation/native
+Presenter fixture34e725f4, allocator teardown fix84a9c1ec, all local commits.
+Three agents researched/audited; root
+performed native execution serially. Default OFF, external SDK/runtime only.
+See [DLSS implementation and evidence](dlss-vulkan-integration.md).
+
+Actual RTX5060Ti directNGX8frames960x540->1920x1080 requestedM, both GENERAL
+and shader-read-only inputs, exact loaded runtime310.9.1.0, validation errors0.
+Original unsupported-adapter RED082323/c047d0 -> unchanged GREEN082520/d44151.
+CPU input contract unchanged GREEN082545/c24232; HDR->SDR guardRED3b5c64 ->
+GREENf16d84; SDKOFF3contractsPASS083744/0b3ca6. Full hiddenSDL actualrenderer/
+NGX/PrepareTemporalFrame tested085517/1c5915: GPUcopybytes/owninglease/firstreset/
+dupid/independentFrame after source destruction/guards/finaldevicevalidation0.
+
+First full attempt29b86e is NOTcleanPASS despiteexit0: observermissedfinal24-image
+leak. Corrected ordinarybootstrap(noNGX,runtimeabsent)fixtureSHA6C0B0483 has
+intendedRED085350/7fca00 errors1/exit2 -> unchangedGREEN085516/561efe errors0/exit0.
+DestroyAllocator now drains retired VkImages BEFORE VMApool/allocator teardown.
+Existing hostallocation/presentdownscale2/2PASS085608/73aa85. No driverreset/hang.
+Final84a9 coreSDKOFF build085856/bbf444 PASS, finalSDKOFF CPUcontracts3/3
+085958/516e65 PASS; optionalON core085610/64db36 and install085824/0667ed PASS.
+ON installed _Build/analysis/dlss-integration-20261015/runtime-emulator-optional,
+EXE45F8FDE3C20086900BDAAA615CDF86930D53D4C72FFC3002537E1DDCFB6C6460;
+preserved presenter GPU EXEAF8ED3171609574C66D7308723427233EBAE1E49D31033E2A270B050588019FC.
+Those ON artifacts were built on360fc774 working tree containing exactly the
+later34e725f4+84a9c1ec production changes; finalOFF rebuild embeds84a9c1ec.
+The optional installed runtime was build/test checked, not game-tested.
+
+No current Yotei semantic provider exists for correct pre-upscale/HUD color,
+depth, full motion and jitter; ordinary game startup never requests DLSS. Do not
+fabricate inputs or expose a placebo enabled setting. Presenter supports explicit
+display-ready LDR only; earlier HDR insertion plus tonemap still pending. No game
+activation, FG/MFG or FPS improvement claimed. Next: verified game resource-role
+provider and actual lower internal workload, then image/FPS comparison. Preserve
+user prefetch fixture, saves/caches/artifacts. No push/issue comment/game retry.
+
+## Previous checkpoint: public research and four profiling runs completed, 2026-10-15
 
 New user-authorized research/timing task is complete; no production fix was
 applied. Tested record ce620a1f, core b1a9698e, same EXE E46E5CC99DAFA8B4E67177C854FA7A7DE8E8CA1391DE6AB43169F562212E8ABE.

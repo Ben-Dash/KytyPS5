@@ -1,5 +1,49 @@
 # Integration test debt
 
+## Native image recycler teardown discovered during DLSS validation
+
+Actual full-presenter run084857/29b86e passed SR/copy/lease/guards but is NOT
+a clean pass: real WindowContext teardown reported VUID-vkDestroyDevice-device-05137,
+24 leaked images. The fixture's observer ended too early and process exit0 did
+not establish success. BindlessTable releases24 placeholders through DeleteImage
+into the global recycler; DestroyAllocator destroys pool/allocator without
+draining those native images. No driver loss/reset occurred.
+
+Before production correction, bound a minimal ordinary hidden-Window bootstrap
+with NO DLSS init/evaluate or guest; keep a validation ERROR observer alive through
+the actual WindowContext destructor and record intended cleanup failure. Same
+fixture must pass after recycler drain before VMA pool/allocator destruction,
+then rerun full presenter and affected allocation/reuse tests. Do not replace
+cleanup with test-only drain, ignore teardown errors or claim FPS improvement.
+Multiple simultaneous allocator ownership is a separate unproved case; no such
+compatibility claim follows from the current one-renderer lifecycle regression.
+Verified: ordinary bootstrap with missing runtime/noNGX, fixture SHA6C0B0483,
+085350/7fca00 intended exit2/errors1, actual24 retired native images/19968bytes.
+Production drain before VMA pool/allocator -> same unchanged085516/561efe exit0,
+errors0. Full actual presenter085517/1c5915 also passes through final device
+destruction: SDKoutput==ownedFrame GPU bytes, independent readback after source
+destruction, duplicate ID/first reset/lease/guards/provenance all pass. Native
+host-allocation/present neighbors085608/73aa85 pass2/2. No game or FPS claim.
+
+## Optional host DLSS integration, 2026-10-15
+
+User authorizes real Vulkan DLSS SR integration. This is new host functionality,
+not a diagnosed guest emulation defect. Before SDK evaluation, prove a synthetic
+moving scene's native uploads/readbacks and lifetime guards; capture explicit
+Unsupported from the baseline adapter as the missing feature, then rerun the
+same fixture against the real backend. Setup/driver errors are not that RED.
+Contract cases require actual depth/full camera-and-object motion, known jitter,
+valid extents/formats/layouts/usages, nonaliasing output, exposure convention,
+finite frame timing, reset/recreation and bounded GPU retirement. No guessed
+textures or title/shader/address selection in the core. Game activation remains
+pending until a semantic provider exists; final presentation color alone is
+insufficient. GPU smoke is not proof of Yotei support or FPS improvement.
+Presenter HDR boundary: official NGX guide3.1.2 requires perceptually encoded
+0..1 LDR; linear scene color uses HDR. Existing SDR swapchain does no tone map.
+CPU guard initially accepted HDR and failed the new explicit unsupported-case
+oracle (083023/3b5c64). Restrict this presentation bridge to display-ready LDR;
+the standalone backend continues supporting real HDR SR before postprocessing.
+
 ## Cycle54: measured performance candidates, 2026-10-15
 
 Public research + four native profiling runs completed on unchanged b1 core,
