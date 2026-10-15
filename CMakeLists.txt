@@ -485,6 +485,11 @@ target_compile_definitions(shader_batch_audit PRIVATE KYTY_RESOURCE_REGRESSION=1
 # Real bindless allocator host-state regression with a minimal native Vulkan bootstrap.
 add_kyty_full_emulator_test(bindless_lifecycle_tests "${KYTY_TESTS_DIR}/BindlessLifecycleTests.cpp")
 target_compile_definitions(bindless_lifecycle_tests PRIVATE KYTY_BINDLESS_LIFECYCLE_TEST_ACCESS=1)
+if(WIN32)
+	# Explicit opt-in native GPU fixture: no game, input automation or default CTest run.
+	add_kyty_full_emulator_test(dlss_presenter_gpu_tests "${KYTY_TESTS_DIR}/DlssPresenterGpuTests.cpp")
+	target_compile_definitions(dlss_presenter_gpu_tests PRIVATE KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS=1)
+endif()
 add_executable(shader_writer_history_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/ShaderWriterHistoryTests.cpp")
 target_include_directories(shader_writer_history_tests PRIVATE "${KYTY_SOURCE_DIR}")

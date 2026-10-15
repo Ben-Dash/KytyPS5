@@ -1125,7 +1125,7 @@ static void VulkanCheckInstanceVersion() {
 	}
 }
 
-void WindowContext::CreateVulkan() {
+void WindowContext::CreateVulkan(const DlssProjectInfo* dlss_project) {
 	EXIT_IF(window == nullptr);
 	EXIT_IF(graphic_ctx.instance != nullptr);
 	EXIT_IF(graphic_ctx.physical_device != nullptr);
@@ -1144,6 +1144,28 @@ void WindowContext::CreateVulkan() {
 	VulkanExtensions r;
 	VulkanGetExtensions(r);
 	VulkanCheckInstanceVersion();
+    // Query optional feature requirements BEFORE their corresponding Vulkan objects.
+    // Own strings until creation; pointer lists must never refer to transient SDK storage.
+    std::vector<std::string> dlss_instance_extensions;
+    std::vector<std::string> dlss_device_extensions;
+    requested_dlss_project.reset();
+    dlss_negotiation_status = {DlssStatusCode::Unsupported, 0, "DLSS device negotiation was not requested"};
+    if (dlss_project != nullptr) {
+        requested_dlss_project = *dlss_project;
+        dlss_negotiation_status = DlssVulkan::QueryInstanceExtensions(*dlss_project, dlss_instance_extensions);
+        if (dlss_negotiation_status) {
+            const bool supported = std::all_of(dlss_instance_extensions.begin(), dlss_instance_extensions.end(),
+                [&](const auto& name) { return !name.empty() && name.find('\0') == std::string::npos &&
+                    HasExtension(r.available_extensions, name.c_str()); });
+            if (!supported) {
+                dlss_negotiation_status = {DlssStatusCode::Unsupported, 0, "A required DLSS instance extension is unavailable"};
+            } else {
+                for (const auto& name : dlss_instance_extensions)
+                    if (!HasExtension(r.required_extensions, name.c_str()))
+                        r.required_extensions.push_back(name.c_str());
+            }
+        }
+    }
 
 	vk::ApplicationInfo app_info {};
 	// The product name (KYTY_PRODUCT_NAME), spelled out here so this file does not rebuild with
@@ -1220,6 +1242,8 @@ void WindowContext::CreateVulkan() {
 		default: EXIT("Could not create a Vulkan instance (for unknown reasons)");
 	}
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.instance);
+    enabled_instance_extensions.clear();
+    for (const auto* name : r.required_extensions) enabled_instance_extensions.emplace_back(name);
 
 	if (r.enable_validation_layers) {
 		dbg_create_info.pNext = nullptr;
@@ -1316,6 +1340,23 @@ void WindowContext::CreateVulkan() {
 			        nullptr, count, values);
 		    });
 
+        if (requested_dlss_project && dlss_negotiation_status) {
+            dlss_negotiation_status = DlssVulkan::QueryDeviceExtensions(*requested_dlss_project,
+                static_cast<VkInstance>(graphic_ctx.instance),
+                static_cast<VkPhysicalDevice>(graphic_ctx.physical_device), dlss_device_extensions);
+            if (dlss_negotiation_status) {
+                const bool supported = std::all_of(dlss_device_extensions.begin(), dlss_device_extensions.end(),
+                    [&](const auto& name) { return !name.empty() && name.find('\0') == std::string::npos &&
+                        HasExtension(available_extensions, name.c_str()); });
+                if (!supported) {
+                    dlss_negotiation_status = {DlssStatusCode::Unsupported, 0, "A required DLSS device extension is unavailable on the selected renderer device"};
+                } else {
+                    for (const auto& name : dlss_device_extensions)
+                        if (!HasExtension(device_extensions, name.c_str()))
+                            device_extensions.push_back(name.c_str());
+                }
+            }
+        }
 		if (HasExtension(available_extensions, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) {
 			device_extensions.push_back(VK_EXT_MEMORY_BUDGET_EXTENSION_NAME);
 			graphic_ctx.memory_budget_ext_enabled = true;
@@ -1395,6 +1436,8 @@ void WindowContext::CreateVulkan() {
 		EXIT("Could not create device");
 	}
 	VULKAN_HPP_DEFAULT_DISPATCHER.init(graphic_ctx.device);
+    enabled_device_extensions.clear();
+    for (const auto* name : device_extensions) enabled_device_extensions.emplace_back(name);
 	graphic_ctx.device.getQueue(graphic_ctx.queue_family, 0, &graphic_ctx.queue);
 	EXIT_IF(graphic_ctx.queue == nullptr);
 	if (graphic_ctx.readback_family != static_cast<uint32_t>(-1)) {
@@ -1410,6 +1453,32 @@ void WindowContext::CreateVulkan() {
 	render_context = std::make_unique<RenderContext>(graphic_ctx);
 	LibKernel::Memory::InstallGpuResources(render_context.get());
 	presenter = std::make_unique<Presenter>(*this);
+}
+
+DlssStatus WindowContext::InitializeDlssBackend(DlssVulkan& backend) const {
+    if (!requested_dlss_project) return {DlssStatusCode::Unsupported, 0, "DLSS device negotiation was not requested"};
+    if (!dlss_negotiation_status) return dlss_negotiation_status;
+    if (graphic_ctx.instance == nullptr || graphic_ctx.physical_device == nullptr || graphic_ctx.device == nullptr)
+        return {DlssStatusCode::InvalidState, 0, "Renderer Vulkan device is not initialized"};
+    if (backend.Initialized()) return {DlssStatusCode::InvalidState, 0, "DLSS backend is already initialized"};
+    auto instance_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+    if (instance_proc == nullptr) return {DlssStatusCode::Unsupported, 0, "The renderer Vulkan loader is unavailable"};
+    auto device_proc = reinterpret_cast<PFN_vkGetDeviceProcAddr>(
+        instance_proc(static_cast<VkInstance>(graphic_ctx.instance), "vkGetDeviceProcAddr"));
+    if (device_proc == nullptr) return {DlssStatusCode::Unsupported, 0, "The renderer device resolver is unavailable"};
+    DlssInitializeInfo info;
+    info.project = *requested_dlss_project;
+    info.instance = static_cast<VkInstance>(graphic_ctx.instance);
+    info.physical_device = static_cast<VkPhysicalDevice>(graphic_ctx.physical_device);
+    info.device = static_cast<VkDevice>(graphic_ctx.device);
+    info.get_instance_proc_addr = instance_proc;
+    info.get_device_proc_addr = device_proc;
+    info.enabled_instance_extensions = enabled_instance_extensions;
+    info.enabled_device_extensions = enabled_device_extensions;
+    // Caller owns backend lifetime and must shut it down AFTER its producer GPU
+    // work retires, BEFORE this WindowContext/device is destroyed. No game input
+    // provider, feature creation, queue submit, or renderer setting is invented.
+    return backend.Initialize(info);
 }
 
 void WindowContext::RefreshSurfaceCapabilities() {

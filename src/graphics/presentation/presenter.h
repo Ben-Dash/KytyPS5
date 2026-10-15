@@ -13,6 +13,9 @@ class RenderContext;
 struct ImageInfo;
 struct DlssPresentationInput;
 struct DlssStatus;
+#if defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
+struct DlssImage;
+#endif
 struct WindowContext;
 
 class Presenter final {
@@ -44,6 +47,13 @@ public:
 	void                         Present(std::span<const Layer> layers);
 	void                         ClearLayer(int bus);
 	void                         Discard(Frame& frame);
+#if defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
+    // Native fixture read-only observation; no shipping API or resource mutation.
+    [[nodiscard]] static DlssImage TestFrameImage(const Frame& frame);
+    [[nodiscard]] uint64_t TestLastTemporalFrameId() const;
+    [[nodiscard]] uint64_t TestEvaluationAttempts() const;
+    [[nodiscard]] bool TestLastEvaluationReset() const;
+#endif
 
 private:
 	struct Impl;

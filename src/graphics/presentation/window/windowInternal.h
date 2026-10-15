@@ -5,11 +5,14 @@
 #include "graphics/host_gpu/graphicContext.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/presentation/frameStatistics.h"
+#include "graphics/presentation/dlss/dlssVulkan.h"
 
 #include <SDL3/SDL.h>
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace Libs::Graphics {
@@ -81,7 +84,12 @@ struct WindowContext {
 	[[nodiscard]] static vk::PhysicalDeviceVulkan12Features RequiredVulkan12Features() noexcept;
 	[[nodiscard]] static vk::PhysicalDeviceVulkan13Features RequiredVulkan13Features() noexcept;
 	[[nodiscard]] static uint32_t InitialWindowFlags(bool fullscreen) noexcept;
-	void                                                    CreateVulkan();
+    // Explicit host integration only: null preserves ordinary renderer startup.
+    // An unavailable optional requirement leaves the ordinary renderer usable;
+    // inspect DlssNegotiationStatus before InitializeDlssBackend.
+    void CreateVulkan(const DlssProjectInfo* dlss_project = nullptr);
+    [[nodiscard]] DlssStatus DlssNegotiationStatus() const noexcept { return dlss_negotiation_status; }
+    [[nodiscard]] DlssStatus InitializeDlssBackend(DlssVulkan& backend) const;
 	void                                                    RecreateSurface();
 	void                                                    RefreshSurfaceCapabilities();
 	void                                                    UpdateIcon();
@@ -96,6 +104,11 @@ struct WindowContext {
 	SDL_Window*                    window        = nullptr;
 	vk::SurfaceKHR                 surface       = nullptr;
 	SurfaceCapabilities            surface_capabilities;
+    // Exact names passed to vkCreateInstance/vkCreateDevice, never all advertised names.
+    std::vector<std::string> enabled_instance_extensions;
+    std::vector<std::string> enabled_device_extensions;
+    std::optional<DlssProjectInfo> requested_dlss_project;
+    DlssStatus dlss_negotiation_status{DlssStatusCode::Unsupported, 0, "DLSS device negotiation was not requested"};
 	std::unique_ptr<RenderContext> render_context;
 	std::unique_ptr<Presenter>     presenter;
 	WindowLoopState                loop;

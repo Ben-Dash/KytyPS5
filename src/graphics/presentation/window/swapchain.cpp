@@ -607,6 +607,10 @@ struct Presenter::Impl {
     uint64_t last_temporal_frame_id = 0;
     bool temporal_reset_required = true;
     std::weak_ptr<DlssVulkan> last_temporal_backend;
+#if defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
+    uint64_t temporal_evaluation_attempts = 0;
+    bool last_temporal_evaluation_reset = false;
+#endif
 };
 
 void Swapchain::Create() {
@@ -1183,6 +1187,10 @@ Presenter::Frame* Presenter::PrepareTemporalFrame(CommandBuffer& buffer,
     inputs.reset_history |= m_impl->temporal_reset_required || previous_backend != request.backend ||
         request.frame_id != m_impl->last_temporal_frame_id + 1u;
     scheduler.NoteCommandRecorded(); // Native SDK may record commands even before reporting failure.
+#if defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
+    ++m_impl->temporal_evaluation_attempts;
+    m_impl->last_temporal_evaluation_reset = inputs.reset_history;
+#endif
     status = request.backend->RecordEvaluate(static_cast<VkCommandBuffer>(native), inputs);
     buffer.InvalidateGraphicsState(); // SDK may change pipeline/descriptor/dynamic state.
     if (!status) {
@@ -1344,6 +1352,24 @@ void Presenter::Impl::Present(bool new_frame) {
 	}
 	LOGF("Vulkan presentation retry exhausted; dropping frame\n");
 }
+
+#if defined(KYTY_DLSS_PRESENTER_GPU_TEST_ACCESS)
+DlssImage Presenter::TestFrameImage(const Frame& frame) {
+    DlssImage result;
+    result.image = static_cast<VkImage>(frame.image.image);
+    result.view = static_cast<VkImageView>(frame.view);
+    result.format = static_cast<VkFormat>(frame.image.format);
+    result.extent = {frame.image.extent.width, frame.image.extent.height};
+    result.subresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    result.layout = static_cast<VkImageLayout>(frame.image.state.layout);
+    result.usage = static_cast<VkImageUsageFlags>(frame.image.usage);
+    result.samples = static_cast<VkSampleCountFlagBits>(frame.image.samples);
+    return result;
+}
+uint64_t Presenter::TestLastTemporalFrameId() const { return m_impl->last_temporal_frame_id; }
+uint64_t Presenter::TestEvaluationAttempts() const { return m_impl->temporal_evaluation_attempts; }
+bool Presenter::TestLastEvaluationReset() const { return m_impl->last_temporal_evaluation_reset; }
+#endif
 
 void Presenter::Discard(Frame& frame) {
 	m_impl->frames.Release(&frame);
