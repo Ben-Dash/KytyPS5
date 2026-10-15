@@ -1,5 +1,29 @@
 # Integration test debt
 
+## Copied temporal input channel mapping, 2026-10-15
+
+Resolved a provider guard that rejected valid depth RRRR and motion RG01 views.
+The private physical copy needs unchanged R for depth, RG for motion, and RGBA
+for color; unused sampled outputs may be replicated or constant. The extracted
+unchanged predicate reproduced RED192856/3be7ac, then the same test passed
+GREEN192944/af4a05:7203 independently resolved mappings,898 accepted, invalid
+enums and unknown roles rejected. Full-view/subresource/format/usage/extent
+guards remain. This CPU result alone does not establish a live game evaluation.
+
+## NGX device creation versus guest address reservation, 2026-10-15
+
+First e5f3e1f9/B830 game retries190729/fd8f87 and190831/2e035d fail with
+VK_ERROR_INITIALIZATION_FAILED in vkCreateDevice, before backend initialization.
+No semantic game output or FPS sample exists. The second diagnostic enables
+Console logging/validation and confirms the driver failure without a VUID.
+Raw native NGX and earlier presenter fixtures passed. A primary NVIDIA forum
+minimal reproduction reports this failure with NVX_binary_import after large
+Windows placeholder reservations; this emulator reserves guest ranges first.
+Required next evidence: current unchanged full-presenter control, then a bounded
+synthetic reservation/NGX-device ordering regression if the difference persists.
+Do not remove required extensions, shrink guest ranges or alter production
+initialization order without that reproduction and address-space neighbors.
+
 ## Explicit temporal pass integration, 2026-10-15
 
 User requests actual game DLSS use. Before wiring production behavior, reproduce

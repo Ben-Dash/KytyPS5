@@ -7,6 +7,7 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/presentation/dlss/dlssRgbMerge.h"
 #include "graphics/presentation/dlss/dlssTemporalContract.h"
+#include "graphics/presentation/dlss/dlssTemporalChannels.h"
 #include "graphics/shader/shader.h"
 #include <nlohmann/json.hpp>
 #include <vulkan/vulkan_format_traits.hpp>
@@ -173,11 +174,9 @@ const std::optional<Recipe>& Metadata() {
 struct Counters { std::atomic<uint64_t> inflight{0}, evaluations{0}, merges{0}, completed{0}; };
 uint64_t Handle(vk::Image image) { return reinterpret_cast<uint64_t>(static_cast<VkImage>(image)); }
 bool NativeDepth(vk::Format f) { return f == vk::Format::eD32Sfloat || f == vk::Format::eD32SfloatS8Uint; }
-bool IdentityMapping(const vk::ComponentMapping& mapping) {
-    return (mapping.r == vk::ComponentSwizzle::eIdentity || mapping.r == vk::ComponentSwizzle::eR) &&
-           (mapping.g == vk::ComponentSwizzle::eIdentity || mapping.g == vk::ComponentSwizzle::eG) &&
-           (mapping.b == vk::ComponentSwizzle::eIdentity || mapping.b == vk::ComponentSwizzle::eB) &&
-           (mapping.a == vk::ComponentSwizzle::eIdentity || mapping.a == vk::ComponentSwizzle::eA);
+bool RoleMapping(const vk::ComponentMapping& mapping, DlssTemporalChannels channels) {
+    return DlssTemporalMappingPreservesConsumedChannels(
+        static_cast<const VkComponentMapping&>(mapping), channels);
 }
 vk::ImageAspectFlags Aspects(vk::Format f) {
     return f == vk::Format::eD32SfloatS8Uint ? vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil :
@@ -313,15 +312,16 @@ struct TemporalDlss::State {
             r.cb_bytes, adjustment, static_cast<unsigned long long>(result.serial));
         return result;
     }
-    Image& Role(const PreparedBindings& bindings, uint32_t index, DlssExtent extent, bool written) {
+    Image& Role(const PreparedBindings& bindings, uint32_t index, DlssExtent extent, bool written,
+                DlssTemporalChannels channels = DlssTemporalChannels::ColorRgba) {
         auto& image = context.GetTextureCache().GetImage(bindings.images[index].image_id);
         const auto& view = bindings.images[index].desc.view_info;
         Require(image.backing.image && image.backing.mip_levels == 1 && image.backing.layers == 1 &&
                 view.base_level == 0 && view.base_layer == 0 && view.level_count == 1 && view.layer_count == 1 &&
-                view.min_lod == 0 && IdentityMapping(view.mapping) && view.format == image.backing.format &&
+                view.min_lod == 0 && RoleMapping(view.mapping, channels) && view.format == image.backing.format &&
                 image.backing.extent == vk::Extent3D{extent.width, extent.height, 1} &&
                 view.aspect == (NativeDepth(image.backing.format) ? vk::ImageAspectFlagBits::eDepth : vk::ImageAspectFlagBits::eColor) &&
-                bindings.images[index].image_view, "role must be an exact identity full image");
+                bindings.images[index].image_view, "role must preserve consumed channels of an exact full image");
         Require(written ? bool(image.backing.usage & vk::ImageUsageFlagBits::eStorage) :
                           bool(image.backing.usage & vk::ImageUsageFlagBits::eTransferSrc), "role usage unsupported");
         return image;
@@ -339,7 +339,9 @@ struct TemporalDlss::State {
         std::array<Image*, 3> sources{};
         uint64_t bytes = uint64_t(r.configuration.output.width) * r.configuration.output.height * 8;
         for (size_t i = 0; i < 3; ++i) {
-            sources[i] = &Role(bindings, roles[i], r.configuration.render, false);
+            constexpr std::array channels{DlssTemporalChannels::ColorRgba,
+                DlssTemporalChannels::DepthR, DlssTemporalChannels::MotionRg};
+            sources[i] = &Role(bindings, roles[i], r.configuration.render, false, channels[i]);
             const auto format = sources[i]->backing.format;
             Require(i == 0 ? format == vk::Format::eR16G16B16A16Sfloat :
                     i == 1 ? (NativeDepth(format) || format == vk::Format::eR32Sfloat) :
