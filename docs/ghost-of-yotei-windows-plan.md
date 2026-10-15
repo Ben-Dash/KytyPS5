@@ -1,6 +1,48 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: real temporal snapshots and shader math; game DLSS inactive, 2026-10-15
+## Current checkpoint: live temporal provider wired; NGX starts, loader guard blocks game, 2026-10-15
+
+Source f5d5db0f includes e5f3e1f9 live explicit temporal provider and85b5a0d5
+role-channel correction. Native installed core26F95B7679610F7D60D75072E73A9EBADEB23E82301FF2C7144A04E3B6CD2D81
+is in `_Build/analysis/yotei-dlss-activation-20261015/runtime` (built on85b5a0d5
+WIP, committed unchanged). External recipe is
+`_Build/analysis/yotei-dlss-capture-20261015/temporal-dlss-live-metadata.json`.
+Do not claim active game DLSS yet: run193625/59f5aa initializes NGX successfully,
+then exits321 before gameplay at RuntimeLinker::Relocate2041: fixed internal
+unresolved-object guard allocation0x840000000 returns0. Next: independent
+occupied-preferred-address guard regression, preserve NoAccess semantics and
+allocate a relocatable internal guard if the preferred address is unavailable.
+
+The first live provider retry190729/fd8f87 failed in vkCreateDevice. A native
+actual-core no-ELF synthetic156MiB directory reproduces192638/ace881 exit321;
+staged device preparation before guest VA reservations passes193149/7c9ad0
+exit0 with NGXinit0, memory/placeholder self-tests and normal teardown. Renderer,
+input and memory callbacks still initialize after Memory/Controller. Ordinary
+metadata-OFF and full game-config host-only controls initialize their devices,
+but no-guest teardown sometimes hangs until the bound (also before the fix);
+do not call those full passes. Full presenter193510/ece776 passes real NGX,
+ownership/readback and final validation0; CPU contracts193510/3f32dd pass4/4.
+Channel guard intendedRED192856/3be7ac→GREEN192944/af4a05 covers7203 mappings.
+
+Provider now copies actual prep color/depth/motion, associates immutable
+bound-host constants and writes NGX RGB into two actual accumulation outputs
+while preserving each alpha and the auxiliary R8. Own merge/association native
+RED/GREEN, descriptor-retirement neighbor and real saved-input NGX validation
+are recorded in [the integration record](dlss-temporal-pass-integration.md).
+Exposure1, complete motion coverage and continuous temporal quality remain
+experimental. Current bound constants only support actual ActiveStream; a
+cached-buffer binding is safely refused and may need a native immutable
+snapshot. Do not read current guest backing to bypass that restriction.
+
+Title now reports `DLSS GPU:N (+delta)` from completed NGX+merge GPU ticks;
+zero is not active DLSS and this counter is not a presented/world marker.
+Reusable local launcher is
+`_Build/analysis/yotei-dlss-activation-20261015/start-yotei-dlss.ps1`.
+WSL remains stopped. Keep original game/save/cache/captures/user untracked
+prefetch fixture. Root serializes native execution, three agents inspect/test
+offline. No FPS sample or new game-DLSS world proof exists yet. No push/post.
+
+## Previous checkpoint: real temporal snapshots and shader math; game DLSS inactive, 2026-10-15
 
 Continue from diagnostic source b4aa51cb, coreBB06268F83F9F0F45351BAF07268C74F3D81826689FD974BCCD99D7C6F4D4AF4
 (built on a78a6dbd WIP later committed unchanged; embedded a78a6db-dirty).
