@@ -1,31 +1,5 @@
 # Integration test debt
 
-## Batch immutable native temporal constants, 2026-10-15
-
-Actual DLSS currently synchronously snapshots144B at prep and accumulation,
-each forcing a native submit/wait. Equal descriptor identity does not prove
-equal contents: BufferCache generation is not a per-write content version.
-Required synthetic native cost regression queues two exact-bound snapshots
-around an overwrite of the SAME buffer/range, proves independently read A/B
-and continued recording/lifetimes, then requires one submit for each pair.
-Baseline queue extraction calls the unchanged synchronous helper; intended RED
-is two submits after all byte/validation controls pass. Equal-pair, immutable
-host-stream zero-submit, invalid batch/output bounds and max-three neighbors
-must pass unchanged. Only after RED split queue from resolution, retaining
-each staging allocation until its actual GPU tick and checking all outputs
-before any write. Never substitute current guest backing or descriptor identity.
-Native intendedRED204549/79d40b exits1 only at cost2/2 after independent
-A/B bytes, overwritten-same-descriptor, continuation, already-submitted ticks,
-stream/invalid/max-three and final validation0 controls. Same unchanged oracle
-SHA F242364F passes GREEN204934/c112a8 recorder0 and204935/1fc33b recorder1:
-cost1/1, exact bytes, no extra finish submit for prior ticks, final validation0.
-Old unchanged synchronous reader oracle2891EDD1 also passes204936/4de1bf with
-recordingthread1 and9 invalid no-submit neighbors, final validation0.
-Provider now queues producer constants before the prep pass and resolves the
-two actual snapshots together at accumulation, preserving all equality/range
-guards and original rendering on refusal. Core build/game FPS pending; native
-cost proof alone does not establish a game speed improvement.
-
 ## Actual bound temporal image view, 2026-10-15
 
 Game200706/5b82c5 reaches a visible world/cinematic with NGX initialized but

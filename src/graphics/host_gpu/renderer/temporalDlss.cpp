@@ -228,7 +228,6 @@ struct Tuple {
     std::shared_ptr<Counters> counters;
     std::array<std::unique_ptr<PrivateImage>, 4> images; // color, raw depth, raw motion, private NGX output.
     Constants constants;
-    DlssBoundConstantSnapshot constant_snapshot;
     ImageId color_id;
     uint64_t color_generation = 0, sequence = 0;
     uint32_t guest_frame = 0;
@@ -249,7 +248,7 @@ struct TemporalDlss::State {
     std::optional<uint64_t> last_serial;
     std::optional<uint32_t> prep_frame;
     bool disabled = false, merge_ready = false, reset_required = true;
-    uint32_t refusals = 0, constant_reads = 0, role_diagnostics = 0, constant_batches = 0;
+    uint32_t refusals = 0, constant_reads = 0, role_diagnostics = 0;
     State(RenderContext& c, std::shared_ptr<DlssVulkan> b) : context(c), backend(std::move(b)) {
         if (Metadata() && backend && backend->Initialized() && !backend->FeatureCreated()) recipe = &*Metadata();
     }
@@ -274,7 +273,7 @@ struct TemporalDlss::State {
         }
         return true;
     }
-    DlssBoundConstantSnapshot QueueConstants(const ShaderComputeInputInfo& input, const PreparedBindings& bindings) {
+    Constants ReadConstants(const ShaderComputeInputInfo& input, const PreparedBindings& bindings) {
         const auto& r = *recipe;
         Require(r.cb_slot < bindings.buffer_sources.size() && !input.stage.program->info.buffers[r.cb_slot].written,
                 "constant buffer must be declared read-only");
@@ -287,14 +286,10 @@ struct TemporalDlss::State {
         Require(dword < bindings.shader_data.size(), "constant adjustment outside prepared shader data");
         const auto adjustment = (bindings.shader_data[static_cast<size_t>(dword)] >> ((r.cb_slot % 4u) * 8u)) & 0xffu;
         const auto& view = bindings.buffers[r.cb_slot];
-        DlssBoundConstantSnapshot snapshot;
-        const auto status = QueueDlssBoundConstants(context, view, adjustment, r.cb_bytes, snapshot);
-        Require(bool(status), status.message);
-        return snapshot;
-    }
-    Constants ParseConstants(std::span<const uint8_t> bytes) {
-        const auto& r = *recipe;
-        Require(bytes.size() == r.cb_bytes, "constant snapshot extent mismatch");
+        std::array<uint8_t, 1024> bytes{};
+        const auto snapshot = ReadDlssBoundConstants(context, view, adjustment,
+            std::span<uint8_t>(bytes.data(), r.cb_bytes));
+        Require(bool(snapshot), snapshot.message);
         const auto read = [&](uint32_t offset) { float value; std::memcpy(&value, bytes.data() + offset, 4); return value; };
         Constants result;
         for (size_t i = 0; i < 2; ++i) { result.jitter[i] = read(r.jitter_offsets[i]) * r.jitter_scale[i]; Require(std::isfinite(result.jitter[i]), "non-finite jitter"); }
@@ -303,8 +298,8 @@ struct TemporalDlss::State {
         Require(std::isfinite(serial) && serial >= 0 && serial <= 16777216.0f && std::trunc(serial) == serial &&
                 std::isfinite(result.dt_ms) && result.dt_ms > 0, "invalid temporal serial/frame time");
         result.serial = static_cast<uint64_t>(serial);
-        if (constant_reads++ < 4) std::printf("temporal-dlss: constants=actual-bound-batch bytes=%u serial=%llu\n",
-            r.cb_bytes, static_cast<unsigned long long>(result.serial));
+        if (constant_reads++ < 4) std::printf("temporal-dlss: constants=actual-bound-snapshot bytes=%u adjustment=%u serial=%llu\n",
+            r.cb_bytes, adjustment, static_cast<unsigned long long>(result.serial));
         return result;
     }
     Image& Role(const PreparedBindings& bindings, uint32_t index, DlssExtent extent, bool written,
@@ -341,8 +336,7 @@ struct TemporalDlss::State {
         prep_frame = frame; pending.reset();
         Require(counters->inflight.load() < r.max_inflight, "private frame lease bound reached");
         auto tuple = std::make_shared<Tuple>(counters);
-        tuple->constant_snapshot = QueueConstants(input, bindings);
-        tuple->guest_frame = frame; tuple->sequence = sequence;
+        tuple->constants = ReadConstants(input, bindings); tuple->guest_frame = frame; tuple->sequence = sequence;
         tuple->color_id = bindings.images[r.prep_color].image_id;
         tuple->color_generation = context.GetTextureCache().ImageGeneration(tuple->color_id);
         const std::array<uint32_t, 3> roles{r.prep_color, r.depth, r.motion};
@@ -428,21 +422,7 @@ bool TemporalDlss::BeforeDispatch(const ShaderComputeInputInfo& input, const Pre
         }
         if (!s.Match(s.recipe->accum, input, bindings, groups)) return false;
         Require(s.pending && s.pending->guest_frame == frame, "no unique same-frame private prep tuple");
-        const auto consumer_snapshot = s.QueueConstants(input, bindings);
-        std::array<uint8_t, 1024> producer_bytes{}, consumer_bytes{};
-        const std::array reads{
-            DlssBoundConstantRead{&s.pending->constant_snapshot,
-                std::span<uint8_t>(producer_bytes.data(), s.recipe->cb_bytes)},
-            DlssBoundConstantRead{&consumer_snapshot,
-                std::span<uint8_t>(consumer_bytes.data(), s.recipe->cb_bytes)}};
-        const auto before_tick = s.context.GetCommandScheduler().CurrentTick();
-        const auto resolved = FinishDlssBoundConstants(s.context, reads);
-        Require(bool(resolved), resolved.message);
-        s.pending->constants = s.ParseConstants(std::span<const uint8_t>(producer_bytes.data(), s.recipe->cb_bytes));
-        const auto constants = s.ParseConstants(std::span<const uint8_t>(consumer_bytes.data(), s.recipe->cb_bytes));
-        if (s.constant_batches++ < 4) std::printf("temporal-dlss: constant-batch snapshots=2 submits=%llu serial=%llu\n",
-            static_cast<unsigned long long>(s.context.GetCommandScheduler().CurrentTick() - before_tick),
-            static_cast<unsigned long long>(constants.serial));
+        const auto constants = s.ReadConstants(input, bindings);
         Require(constants.serial == s.pending->constants.serial && constants.jitter == s.pending->constants.jitter &&
                 constants.dt_ms == s.pending->constants.dt_ms, "producer/consumer constants differ");
         auto& cache = s.context.GetTextureCache();
