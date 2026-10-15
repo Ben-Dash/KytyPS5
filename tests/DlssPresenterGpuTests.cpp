@@ -714,9 +714,12 @@ void CaptureRenderDocBootstrap(GraphicContext& graphics, const std::filesystem::
 }
 #include "DlssHostStartupTests.inc"
 #include "DlssBoundConstantsTests.inc"
+#include "DlssBoundConstantsBatchTests.inc"
 } // namespace
 
 int main(int argc, char** argv) {
+    if (const auto* batch_constants = std::getenv("KYTY_DLSS_BOUND_CONSTANTS_BATCH_TEST");
+        batch_constants && std::strcmp(batch_constants, "1") == 0) return RunBoundConstantsBatchTest();
     if (const auto* host_startup = std::getenv("KYTY_DLSS_HOST_STARTUP_TEST");
         host_startup && host_startup[0] == '1') return RunHostStartupTest();
     if (const auto* bound_constants = std::getenv("KYTY_DLSS_BOUND_CONSTANTS_TEST");
