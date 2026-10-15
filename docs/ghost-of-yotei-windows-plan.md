@@ -1,6 +1,58 @@
 # Ghost of Yōtei: active integration and session resume
 
-## Current checkpoint: live temporal provider wired; NGX starts, loader guard blocks game, 2026-10-15
+## Current checkpoint: DLSS actually evaluates and merges into the visible game world, 2026-10-15
+
+Source0a02979a retires early-device startup, enables native host ASLR and keeps
+ordinary Memory-first initialization. CoreFED1A83B run200706/5b82c5 initializes
+NGX, reads actual GPU-bound temporal constants and reaches a visually confirmed
+night village cinematic/world (world-phase-diagnostic.png), then exits0. Its
+20s title sample after frame1107 averages2.5375FPS; DLSS GPU remains0. This is
+NOT active DLSS or a demonstrated performance improvement. Loader guard and
+guest-memory corrections and their independent RED/GREEN evidence are in the
+test debt. ASLR no-ELF ownership/canary probe200127/64ea68 exits0; final default
+probe200606/709b17 passes mapping but hits existing no-guest teardown timeout.
+
+Current sourceccd7b8a7 fixes actual bound-view selection. Diagnostic201352/ce483a
+confirmed original depth requestformat100/aspect1 versus backingformat130,
+with correct full1920x1080/mip1/layer1. CPU intendedRED201620/aa29ae then
+unchangedGREEN201654/8a43fb prove selecting exact native cached metadata;
+neighbors201709/96f067 pass5/5. All existing role guards remain in place.
+Installed core SHA256
+`FC3467A8FED58B7C738368F7B0907B90C133DB5BF536A9F821E8801329872426`
+is `_Build/analysis/yotei-dlss-activation-20261015/runtime/kyty_emulator.exe`.
+It is built from committed production contents (embeddedccd7b8a-dirty comes
+from pending documentation, not a different production patch).
+
+Run `_Build/runs/game-20261015-201809-dlss-bound-native-view-live-81ad05`
+exits0 with no memory/timeout guard. Actual native NGX evaluation+two-output
+RGB merge begins guestframe313/serial1/reset1; serial2..8 continue reset0 and
+GPU completion logs confirm retirement. Title reaches DLSS GPU200 atframe537.
+Root viewed `dlss-live-first-world.png`: nighttime village cinematic, buildings,
+people and horses are visible with counter46. This proves game-integrated
+processing and visible downstream world, not controllable gameplay, complete
+temporal quality, or a new publication milestone. Game validation was OFF;
+earlier independent merge/readback fixtures have final Vulkan validation0.
+
+`verified-world-title-sample.json` records a20s title-only window afterframe400:
+18observations, frames401..452, mean2.7667FPS, min2.6/max2.9; completedDLSS
+grows64→115. This is NOT a matched performance gain: original temporal CS
+still runs for alpha/auxiliary output, then NGX+merge adds work. Next performance
+work must remove duplicated work only after proving dependent outputs, or lower
+the actual upstream render workload; window1080p alone does not change the
+1920x1080 input→3840x2160 temporal output. Exposure1/full motion/history quality
+remain experimental. Keep ASLR, bound-GPU CB snapshots and exact native views.
+
+External metadata SHA256CEDB4ECF remains
+`_Build/analysis/yotei-dlss-capture-20261015/temporal-dlss-live-metadata.json`.
+Reusable manual launcher (explicit DLSS environment, no automatic buttons):
+`_Build/analysis/yotei-dlss-activation-20261015/start-yotei-dlss.ps1`.
+The normal launcher without this metadata does not implicitly enable DLSS.
+All measured game workers are closed. WSL shutdown requested again; preserve
+original game/save/cache/captures and user untracked prefetch fixture. No push
+or issue comment. Separate intermittent AMPR loading memcpy crash201257/ba6dfa
+remains debt; an identical-artifact retry passed, so do not attribute it to DLSS.
+
+## Previous checkpoint: live temporal provider wired; NGX starts, loader guard blocks game, 2026-10-15
 
 Source f5d5db0f includes e5f3e1f9 live explicit temporal provider and85b5a0d5
 role-channel correction. Native installed core26F95B7679610F7D60D75072E73A9EBADEB23E82301FF2C7144A04E3B6CD2D81

@@ -9,7 +9,8 @@ The declaration supplies semantic roles; resource formats/counts only validate i
 The provider copies the declared producer's real color, native device depth and
 raw motion into private images. It associates those immutable inputs with the
 same-frame reconstruction through the current color identity/generation and
-actual bound host-stream constants. Current guest backing is not a substitute
+actual bound native-buffer constants (immutable stream or synchronized GPU
+snapshot). Current guest backing is not a substitute
 for the buffer slice bound to the GPU. Unsupported storage paths, mismatched
 resources, repeated serials and ambiguous producers are refused explicitly.
 
@@ -56,7 +57,25 @@ Records are under `_Build/analysis/dlss-integration-20261015/checks/`.
   built on8326dad9 WIP. Initial190116/b070d7 compile errors were corrected and
   are not emulator regression REDs. CPU contracts190630/5b91bc pass3/3.
 
-Actual in-game activation, visible downstream result and matched title FPS are
-pending the native retry. A successful SDK return or offline image is not a
-presented game DLSS frame. First retry uses copied byte-verified saves/cache in
-`_Build/analysis/yotei-dlss-activation-20261015/runtime`; originals are preserved.
+Game-integrated activation is now verified on sourceccd7b8a7/coreFC3467A8,
+run `_Build/runs/game-20261015-201809-dlss-bound-native-view-live-81ad05`:
+native NGX+RGB merges and GPU retirements startframe313/serial1; title reports
+200 completed uses byframe537. Root viewed the nighttime village cinematic
+with people/horses/buildings and counter46. Original game saves/cache remain
+untouched in their source location; the run uses the copied activation runtime.
+This proves processing in the game and visible downstream world, not full
+temporal quality or controllable gameplay. Native D32S8 is exercised by this
+game run with validationOFF; previous offline uploads used R32F depth.
+
+The20s title-only window afterframe400 averages2.7667FPS (2.6..2.9), completed
+DLSS64→115. A matched FPS improvement is unproved; retaining the original CS
+and adding NGX does not reduce upstream render work. Exposure1/full motion
+coverage/continuous history remain experimental. See the launch checkpoint
+for exact executable, metadata, screenshot and test references.
+
+Actual activation required three independent mechanism corrections: native host
+ASLR with ordinary guest-memory-first startup, immutable snapshots of the actual
+bound GPU constant buffer, and exact cached VkImageView metadata rather than an
+unnormalized descriptor request (R32/COLOR may become D32S8/DEPTH). Exact-view
+CPU RED201620/aa29ae→unchangedGREEN201654/8a43fb passes;5/5 neighboring
+contracts201709/96f067 pass. No title/hash/path selectors were introduced.

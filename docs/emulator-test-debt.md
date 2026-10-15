@@ -16,7 +16,12 @@ passes null/color controls then fails native depth selection. Same unchanged
 oracle (SHA1C53FC30) GREEN201654/8a43fb passes normalized depth, exact-handle,
 foreign/empty cache, stencil and property-preservation neighbors. Production
 now copies metadata from that exact bound view before the unchanged guards.
-Game retry pending. Preceding201257/ba6dfa failed before prep in loading memcpy,
+Game retry201809/81ad05 exits0: actual NGX evaluation+two-output RGB merge and
+GPU retirement startframe313/serial1; counter200 byframe537. Root visually
+confirms village cinematic/world with completedcounter46, not player control.
+Native D32S8 is exercised with game validationOFF; prior offline fixtures used
+R32F, so full native-depth validation/readback remains a coverage limit.
+Preceding201257/ba6dfa failed before prep in loading memcpy,
 so is not evidence about role admission. Offline PDB identifies the AMPR worker
 as nearest calling function; its raw file-read destination only has null/overflow
 checks, with mapping/permissions/lifetime validation still separate test debt.
