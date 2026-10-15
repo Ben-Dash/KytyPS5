@@ -231,8 +231,10 @@ static uint64_t g_invalid_memory    = 0;
 uint64_t AllocateUnresolvedObjectGuard() {
 	// Relocations use the returned address. A host driver may own the preferred
 	// location, so the internal inaccessible guard can occupy another owned page.
-	return Libs::LibKernel::Memory::AllocateRuntimeMemory(
+	const auto guard = Libs::LibKernel::Memory::AllocateRuntimeMemory(
 	    INVALID_MEMORY, 4096, Common::VirtualMemory::Mode::NoAccess, "invalid_memory", false);
+	LOGF("Loader unresolved-object guard: address=0x%016" PRIx64 "\n", guard);
+	return guard;
 }
 
 static Program*              g_tls_main_program        = nullptr;
@@ -940,6 +942,9 @@ static bool RelocateRecord(uint32_t index, Elf64_Rela* r, Program* program, bool
 			                 ri.dbg_name).c_str());
 		}
 		if (ri.type == SymbolType::Object) {
+			LOGF("Unresolved object: slot=0x%016" PRIx64 " guard=0x%016" PRIx64
+			     " bind=%s name=%s debug=%s\n", ri.vaddr, g_invalid_memory,
+			     magic_enum::enum_name(ri.bind).data(), ri.name.c_str(), ri.dbg_name.c_str());
 			value = g_invalid_memory;
 		} else {
 			value   = RegisterStubbedImport(index, program, ri);
