@@ -722,6 +722,7 @@ if(BUILD_TESTING)
 		vdecsw_tests
 		bit_array_tests
 		lru_cache_tests
+		host_thread_tests
 		shader_vertex_metadata_tests
 		resource_materialization_tests
 		resource_tracking_tests
