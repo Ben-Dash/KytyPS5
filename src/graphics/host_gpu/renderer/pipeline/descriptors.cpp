@@ -237,6 +237,42 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::BufferInvalidate);
 		context.GetTextureCache().InvalidateMemoryFromGPU(address, size);
 	}
+	if (size == 124224 && address != 0) {
+		auto check_and_restore_slice = [&](uint32_t parent_bone, uint32_t start_bone, uint32_t end_bone) {
+			std::array<uint8_t, 48> parent_data {};
+			if (!Libs::LibKernel::Memory::TryReadBacking(address + parent_bone * 48u, parent_data.data(), 48u)) {
+				return;
+			}
+			bool parent_nonzero = false;
+			for (uint8_t b : parent_data) {
+				if (b != 0) { parent_nonzero = true; break; }
+			}
+			if (!parent_nonzero) return;
+
+			std::array<uint8_t, 48> child_data {};
+			if (!Libs::LibKernel::Memory::TryReadBacking(address + start_bone * 48u, child_data.data(), 48u)) {
+				return;
+			}
+			bool child_nonzero = false;
+			for (uint8_t b : child_data) {
+				if (b != 0) { child_nonzero = true; break; }
+			}
+			if (!child_nonzero) {
+				for (uint32_t r = start_bone; r <= end_bone; ++r) {
+					Libs::LibKernel::Memory::TryWriteBacking(address + r * 48u, parent_data.data(), 48u);
+				}
+				static uint32_t s_cpu_log = 0;
+				if (s_cpu_log++ < 20) {
+					std::printf("\x1b[92m[PALETTE-SANITIZE-CPU] Restored prop bones %u..%u from parent %u (including leaf 2097 & 2098) at 0x%016" PRIx64 "\x1b[0m\n",
+					            start_bone, end_bone, parent_bone, static_cast<uint64_t>(address));
+					std::fflush(stdout);
+				}
+			}
+		};
+		check_and_restore_slice(1049u, 1050u, 1113u);
+		check_and_restore_slice(1561u, 1562u, 1625u);
+		check_and_restore_slice(2073u, 2074u, 2137u);
+	}
 	return result;
 }
 
@@ -2966,6 +3002,7 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		entry[1]    = static_cast<uint32_t>(address >> 32u);
 		entry[2]    = static_cast<uint32_t>(bytes);
 		entry[3]    = buffer_offset;
+		prepared.buffers.push_back(info);
 	}
 	for (uint32_t i = 0; i < program.info.buffers.size() && !layout.table; i++) {
 		uint32_t buffer_offset = 0;
