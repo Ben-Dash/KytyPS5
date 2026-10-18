@@ -128,7 +128,7 @@ static void PrintUsage() {
 	::printf("  --gpu-frames-ahead <0-3>             Frames the game may build ahead of the GPU "
 	         "thread. 0 waits for idle. Default: 2.\n");
 	::printf("  --label-flush-interval-us <us>       Minimum time between RELEASE_MEM submits. "
-	         "Default: 2000.\n");
+	         "Default: 200.\n");
 	::printf("  --gpu-timestamp-scale <25-500>       Stretch GPU time the game measures, in "
 	         "percent, so dynamic resolution keeps headroom (below 100: aims higher). Default: 100 (off).\n");
 	::printf("  --pipeline-libraries <true|false>    Build new graphics pipelines from cached, "

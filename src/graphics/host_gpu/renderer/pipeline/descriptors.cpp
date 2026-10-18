@@ -3292,10 +3292,6 @@ void RenderExecutor::PrepareGraphicsBindings(std::span<PreparedBindings* const> 
 		FindBuffers(*stage);
 		uses_dma |= stage->runtime->program->info.uses_dma;
 	}
-	if (uses_dma) {
-		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::Bda);
-		m_context.PrepareBda();
-	}
 	g_draw_phases.Mark(DrawPhaseTimer::FindBuffers);
 	for (auto* stage: stages) {
 		RebindImages(*stage);

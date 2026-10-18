@@ -2394,6 +2394,33 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 	FunctionProfile::Scope function_profile(FunctionProfile::Site::GetGraphicsPrograms);
 	WaitForPrecompile();
 	const bool   tess_active = user_config.GetPrimType() == Prospero::PrimitiveType::kPatch;
+
+	thread_local struct GpuLastDrawPrepared {
+		bool                   valid = false;
+		GraphicsStageRegisters registers;
+		uint64_t               shader_map_version = 0;
+		VertexTableReads       vertex_tables;
+		ShaderVertexInputInfo  vertex_info;
+		ShaderPixelInputInfo   pixel_info;
+		GraphicsPrograms       programs;
+	} t_gpu_last_draw;
+
+	if (t_gpu_last_draw.valid && !tess_active && wait != ProgramWait::Prefetch &&
+	    ShaderMapVersion() == t_gpu_last_draw.shader_map_version &&
+	    SameGraphicsStageRegisters(t_gpu_last_draw.registers, vertex_regs, pixel_regs, sh, context,
+	                              user_config, target_export_mapping, pixel_active) &&
+	    VertexTableReadsUnchanged(t_gpu_last_draw.vertex_tables)) {
+		CopyVertexInputInfo(vertex_info[0], t_gpu_last_draw.vertex_info);
+		if (pixel_active) {
+			pixel_info = t_gpu_last_draw.pixel_info;
+		}
+		g_draw_phases.Mark(DrawPhaseTimer::VertexParams);
+		g_draw_phases.Mark(DrawPhaseTimer::PixelParams);
+		g_draw_phases.Mark(DrawPhaseTimer::PixelProgram);
+		g_draw_phases.Mark(DrawPhaseTimer::VertexProgram);
+		return t_gpu_last_draw.programs;
+	}
+
 	ShaderParams pixel_params;
 	std::array<ShaderParams, 3> vertex_params;
 	// The draw speculation's prepared stage inputs, when the registers they were prepared from, the
@@ -2459,11 +2486,18 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 		m_program_cache->speculation.inputs_taken++;
 		return draw;
 	};
+	VertexTableReads live_vertex_tables {};
 	const auto* prepared = take_prepared();
-	if (prepared == nullptr) {
+	if (prepared != nullptr) {
+		live_vertex_tables = prepared->prepared.vertex_tables;
+	} else {
+		live_vertex_tables.complete = true;
+		VertexTableReads* const prev_table_reads = t_vertex_table_reads;
+		t_vertex_table_reads = &live_vertex_tables;
 		vertex_params = PrepareGraphicsStages(m_graphics, vertex_regs, pixel_regs, sh, context,
 		                                      user_config, target_export_mapping, pixel_active,
 		                                      vertex_info, pixel_info, pixel_params);
+		t_vertex_table_reads = prev_table_reads;
 	}
 	const void* known_vertex =
 	    prepared != nullptr ? prepared->stages[SpeculatedDraw::Vertex].source : nullptr;
@@ -2517,6 +2551,20 @@ PipelineCache::GraphicsPrograms PipelineCache::GetGraphicsPrograms(
 		}
 	}
 	g_draw_phases.Mark(DrawPhaseTimer::VertexProgram);
+	if (!tess_active && !result.pending && (result.pixel || !pixel_active) && result.vertex[0]) {
+		t_gpu_last_draw.valid = true;
+		CaptureGraphicsStageRegisters(t_gpu_last_draw.registers, vertex_regs, pixel_regs, sh, context,
+		                              user_config, target_export_mapping, pixel_active);
+		t_gpu_last_draw.shader_map_version = ShaderMapVersion();
+		t_gpu_last_draw.vertex_tables      = live_vertex_tables;
+		CopyVertexInputInfo(t_gpu_last_draw.vertex_info, vertex_info[0]);
+		if (pixel_active) {
+			t_gpu_last_draw.pixel_info = pixel_info;
+		}
+		t_gpu_last_draw.programs = result;
+	} else {
+		t_gpu_last_draw.valid = false;
+	}
 	return result;
 }
 
@@ -3311,6 +3359,15 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 
 	EXIT_IF(!compute_program);
 
+	thread_local struct LastComputePipelineHit {
+		uint64_t program_id = 0;
+		PipelineCache::Pipeline* pipeline = nullptr;
+	} t_last_pipeline;
+
+	if (t_last_pipeline.pipeline != nullptr && t_last_pipeline.program_id == compute_program.id) {
+		return *t_last_pipeline.pipeline;
+	}
+
 	const auto                            wait_start = std::chrono::steady_clock::now();
 	std::shared_future<vk::Pipeline>      result;
 	std::shared_ptr<std::atomic<int64_t>> compile_us;
@@ -3319,6 +3376,8 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 		Common::LockGuard lock(m_mutex);
 		if (auto iter = m_compute_pipelines.find(compute_program.id);
 		    iter != m_compute_pipelines.end()) {
+			t_last_pipeline.program_id = compute_program.id;
+			t_last_pipeline.pipeline   = iter->second.get();
 			return *iter->second;
 		}
 		if (graphics_debug_dump_enabled()) {
@@ -3400,6 +3459,8 @@ PipelineCache::GetComputePipeline(const ShaderComputeInputInfo& input_info,
 	auto [iter, inserted] = m_compute_pipelines.emplace(compute_program.id, std::move(cached));
 	EXIT_IF(!inserted);
 
+	t_last_pipeline.program_id = compute_program.id;
+	t_last_pipeline.pipeline   = iter->second.get();
 	return *iter->second;
 }
 

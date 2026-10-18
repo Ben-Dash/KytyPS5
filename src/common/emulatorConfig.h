@@ -99,7 +99,7 @@ struct ConfigOptions {
 	bool                   async_submit_enabled        = true;
 	bool                   gpu_mesh_indirect_enabled   = true;
 	uint32_t               gpu_frames_ahead            = 2;
-	uint32_t               label_flush_interval_us     = 2000;
+	uint32_t               label_flush_interval_us     = 200;
 	uint32_t               gpu_timestamp_scale_percent = 100;
 	bool                   pipeline_libraries_enabled  = true;
 	bool                   async_pipelines_enabled     = false;
