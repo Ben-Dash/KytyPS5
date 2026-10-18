@@ -701,13 +701,11 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 	view.aspect      = vk::ImageAspectFlagBits::eColor;
 	view.base_level  = descriptor.BaseLevel();
 	view.level_count = view_levels;
-	if (descriptor.MinLod() > descriptor.LastLevel() * 256u) {
-		KYTY_TEXTURE_FAIL("texture minimum LOD exceeds last mip level: min_lod=%u last_level=%u\n",
-		     descriptor.MinLod(), descriptor.LastLevel());
-	}
+	const auto max_lod = descriptor.LastLevel() * 256u;
+	const auto effective_min_lod = std::min<uint32_t>(descriptor.MinLod(), max_lod);
 	const auto base_lod = view.base_level * 256u;
-	if (descriptor.MinLod() > base_lod) {
-		view.min_lod = descriptor.MinLod() - base_lod;
+	if (effective_min_lod > base_lod) {
+		view.min_lod = effective_min_lod - base_lod;
 	}
 	view.usage = storage ? vk::ImageUsageFlagBits::eStorage : vk::ImageUsageFlagBits::eSampled;
 	view.mapping =
@@ -2222,7 +2220,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		std::fill(value.dwords.begin() + 4, value.dwords.begin() + 8, 0u);
 	}
 	if (trace.provenance) { trace.effective_read=trace.resolve_read; trace.effective_read.words=value.dwords; }
-	const auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	auto descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
 	if (TsharpCheckEnabled() && !descriptor.IsNull()) {
 		if (const char* garbage = TsharpGarbageReason(descriptor); garbage != nullptr) {
 			ReportGarbageTsharp(garbage, value);
@@ -2285,6 +2283,14 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
+	// Ghost of Yotei keeps 1x1 1D color textures (format 56, 67, etc.) in its material tables and samples them
+	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
+	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
+	if (descriptor.Type() == Prospero::ImageType::kColor1D ||
+	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
+		value.dwords[3] += 1u << 28u;
+		descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	}
 	if (!BindlessCompatible(descriptor, array_binding)) {
 		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
 		                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
@@ -2302,13 +2308,6 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		                  !g_bindless_fail_context.requested);
 		table.SetTranslation(heap, key, 0u);
 		return false;
-	}
-	// Ghost of Yotei keeps 1x1 1D color textures (format 56) in its material tables and samples them
-	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
-	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
-	if (descriptor.Type() == Prospero::ImageType::kColor1D ||
-	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
-		value.dwords[3] += 1u << 28u;
 	}
 	if (trace.provenance) trace.effective_read.words=value.dwords;
 	g_soft_texture_failures = true;
