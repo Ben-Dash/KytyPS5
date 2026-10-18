@@ -270,9 +270,10 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 			}
 		};
 		if (size >= 102624) {
-			check_and_restore_slice(1049u, 1050u, 1113u);
-			check_and_restore_slice(1561u, 1562u, 1625u);
-			check_and_restore_slice(2073u, 2074u, 2137u);
+			const uint32_t total_rows = static_cast<uint32_t>(size / 48u);
+			for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
+				check_and_restore_slice(start_row - 1u, start_row, start_row + 63u);
+			}
 		}
 	}
 	return result;
@@ -2280,6 +2281,27 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
 		value.dwords[3] += 1u << 28u;
 		descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+	}
+	// Ghost of Yotei stores opacity/detail masks as integer formats (k8UInt=5, k8SInt=6, etc.)
+	// in bindless tables sampled through float texture arrays (binding 0/1/2). In Vulkan, float
+	// sampler arrays require float/normalized formats; promote them to UNorm/SNorm so they resolve
+	// to eR8Unorm/eR8Snorm instead of dropping to zero placeholders.
+	if (BindlessArrayClass(array_binding) == Prospero::TextureNumericClass::Float) {
+		auto promoted_format = descriptor.Format();
+		switch (descriptor.Format()) {
+			case Prospero::BufferFormat::k8UInt: promoted_format = Prospero::BufferFormat::k8UNorm; break;
+			case Prospero::BufferFormat::k8SInt: promoted_format = Prospero::BufferFormat::k8SNorm; break;
+			case Prospero::BufferFormat::k8_8UInt: promoted_format = Prospero::BufferFormat::k8_8UNorm; break;
+			case Prospero::BufferFormat::k8_8SInt: promoted_format = Prospero::BufferFormat::k8_8SNorm; break;
+			case Prospero::BufferFormat::k16UInt: promoted_format = Prospero::BufferFormat::k16UNorm; break;
+			case Prospero::BufferFormat::k16SInt: promoted_format = Prospero::BufferFormat::k16SNorm; break;
+			default: break;
+		}
+		if (promoted_format != descriptor.Format()) {
+			value.dwords[1] = (value.dwords[1] & ~(0x1FFu << 20u)) |
+			                  (static_cast<uint32_t>(promoted_format) << 20u);
+			descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
+		}
 	}
 	if (!BindlessCompatible(descriptor, array_binding)) {
 		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",

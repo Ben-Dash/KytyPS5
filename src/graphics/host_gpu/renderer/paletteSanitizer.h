@@ -61,34 +61,24 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		    vk::PipelineStageFlagBits::eTransfer,
 		    {}, 0, nullptr, 1, &pre_barrier, 0, nullptr);
 
+		const uint32_t total_rows = static_cast<uint32_t>(palette_size / 48u);
 		std::vector<vk::BufferCopy> copies;
-		copies.reserve(192);
+		copies.reserve(std::max(192u, (total_rows / 512u + 1u) * 64u));
 
+		// Prop bones occur in 64-row slices spaced every 512 rows starting at row 1050:
 		// Slice 0: rows 1050..1113 inherit row 1049
-		for (uint32_t r = 1050; r <= 1113; ++r) {
-			copies.push_back(vk::BufferCopy {
-			    .srcOffset = base_offset + 1049u * 48u,
-			    .dstOffset = base_offset + r * 48u,
-			    .size = 48u
-			});
-		}
-
 		// Slice 1: rows 1562..1625 inherit row 1561
-		for (uint32_t r = 1562; r <= 1625; ++r) {
-			copies.push_back(vk::BufferCopy {
-			    .srcOffset = base_offset + 1561u * 48u,
-			    .dstOffset = base_offset + r * 48u,
-			    .size = 48u
-			});
-		}
-
-		// Slice 2: rows 2074..2137 inherit row 2073 (Atsu hand/wrist, contains leaf bones 2097 & 2098)
-		for (uint32_t r = 2074; r <= 2137; ++r) {
-			copies.push_back(vk::BufferCopy {
-			    .srcOffset = base_offset + 2073u * 48u,
-			    .dstOffset = base_offset + r * 48u,
-			    .size = 48u
-			});
+		// Slice 2: rows 2074..2137 inherit row 2073 (Atsu hand/wrist, leaf bones 2097 & 2098)
+		// Slices 3..N: cutscenes feature multiple characters and props in subsequent 512-row blocks
+		for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
+			const uint32_t base_row = start_row - 1u;
+			for (uint32_t r = start_row; r < start_row + 64u; ++r) {
+				copies.push_back(vk::BufferCopy {
+				    .srcOffset = base_offset + base_row * 48u,
+				    .dstOffset = base_offset + r * 48u,
+				    .size = 48u
+				});
+			}
 		}
 
 		vk_buffer.copyBuffer(b_info.buffer, b_info.buffer, static_cast<uint32_t>(copies.size()), copies.data());
