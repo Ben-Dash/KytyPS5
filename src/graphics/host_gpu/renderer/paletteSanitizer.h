@@ -4,6 +4,7 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <vector>
 
@@ -12,12 +13,42 @@ namespace Libs::Graphics {
 inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const PreparedBindings& bindings) {
 	for (size_t b_idx = 0; b_idx < bindings.buffers.size(); ++b_idx) {
 		const auto& b_info = bindings.buffers[b_idx];
-		const bool is_palette = (b_info.buffer != nullptr &&
-		    (b_info.range == 124224 ||
-		     (b_idx < bindings.buffer_sources.size() && bindings.buffer_sources[b_idx].size == 124224)));
-		if (!is_palette) {
+		if (b_info.buffer == nullptr) {
 			continue;
 		}
+
+		bool is_palette = false;
+		uint64_t palette_size = 0;
+		if (b_idx < bindings.buffer_sources.size()) {
+			const auto src_size = bindings.buffer_sources[b_idx].size;
+			if (src_size == 124224 || src_size == 579024 || (src_size >= 102624 && src_size % 48 == 0)) {
+				is_palette = true;
+				palette_size = src_size;
+			}
+		}
+		if (!is_palette && b_info.range >= 102624) {
+			if (b_info.range == 124224 || b_info.range == 579024 || (b_info.range % 48 == 0)) {
+				is_palette = true;
+				palette_size = b_info.range;
+			} else if (b_info.range >= 102624 + 16 && (b_info.range - 16) % 48 == 0) {
+				is_palette = true;
+				palette_size = b_info.range - 16;
+			} else if (b_info.range >= 102624 + 32 && (b_info.range - 32) % 48 == 0) {
+				is_palette = true;
+				palette_size = b_info.range - 32;
+			} else if (b_info.range >= 102624 + 48 && (b_info.range - 48) % 48 == 0) {
+				is_palette = true;
+				palette_size = b_info.range - 48;
+			}
+		}
+		if (!is_palette || palette_size < 102624) {
+			continue;
+		}
+
+		// Calculate exact base offset accounting for storage alignment adjustments
+		const vk::DeviceSize adjustment = (b_info.range > palette_size) ? (b_info.range - palette_size) : 0u;
+		const vk::DeviceSize base_offset = b_info.offset + adjustment;
+		const vk::DeviceSize barrier_size = (palette_size > 0) ? palette_size : b_info.range;
 
 		// Pre-copy barrier: ensure compute/transfer writes are available to transfer reads
 		vk::BufferMemoryBarrier pre_barrier {};
@@ -26,8 +57,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		pre_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		pre_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		pre_barrier.buffer = b_info.buffer;
-		pre_barrier.offset = b_info.offset;
-		pre_barrier.size = 124224;
+		pre_barrier.offset = base_offset;
+		pre_barrier.size = barrier_size;
 		vk_buffer.pipelineBarrier(
 		    vk::PipelineStageFlagBits::eComputeShader | vk::PipelineStageFlagBits::eTransfer | vk::PipelineStageFlagBits::eAllCommands,
 		    vk::PipelineStageFlagBits::eTransfer,
@@ -39,8 +70,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		// Slice 0: rows 1050..1113 inherit row 1049
 		for (uint32_t r = 1050; r <= 1113; ++r) {
 			copies.push_back(vk::BufferCopy {
-			    .srcOffset = b_info.offset + 1049u * 48u,
-			    .dstOffset = b_info.offset + r * 48u,
+			    .srcOffset = base_offset + 1049u * 48u,
+			    .dstOffset = base_offset + r * 48u,
 			    .size = 48u
 			});
 		}
@@ -48,8 +79,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		// Slice 1: rows 1562..1625 inherit row 1561
 		for (uint32_t r = 1562; r <= 1625; ++r) {
 			copies.push_back(vk::BufferCopy {
-			    .srcOffset = b_info.offset + 1561u * 48u,
-			    .dstOffset = b_info.offset + r * 48u,
+			    .srcOffset = base_offset + 1561u * 48u,
+			    .dstOffset = base_offset + r * 48u,
 			    .size = 48u
 			});
 		}
@@ -57,8 +88,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		// Slice 2: rows 2074..2137 inherit row 2073 (Atsu hand/wrist, contains leaf bones 2097 & 2098)
 		for (uint32_t r = 2074; r <= 2137; ++r) {
 			copies.push_back(vk::BufferCopy {
-			    .srcOffset = b_info.offset + 2073u * 48u,
-			    .dstOffset = b_info.offset + r * 48u,
+			    .srcOffset = base_offset + 2073u * 48u,
+			    .dstOffset = base_offset + r * 48u,
 			    .size = 48u
 			});
 		}
@@ -72,8 +103,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		post_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		post_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		post_barrier.buffer = b_info.buffer;
-		post_barrier.offset = b_info.offset;
-		post_barrier.size = 124224;
+		post_barrier.offset = base_offset;
+		post_barrier.size = barrier_size;
 		vk_buffer.pipelineBarrier(
 		    vk::PipelineStageFlagBits::eTransfer,
 		    vk::PipelineStageFlagBits::eVertexShader | vk::PipelineStageFlagBits::eComputeShader | vk::PipelineStageFlagBits::eAllCommands,
@@ -81,7 +112,8 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 
 		static uint32_t s_log_count = 0;
 		if (s_log_count++ < 20) {
-			std::printf("\x1b[92m[PALETTE-SANITIZE] Restored 192 bone matrix rows (including leaf/poster bones 2097 & 2098)\x1b[0m\n");
+			std::printf("\x1b[92m[PALETTE-SANITIZE] Restored 192 bone matrix rows (including leaf/poster bones 2097 & 2098, size=%" PRIu64 ")\x1b[0m\n",
+			            palette_size);
 			std::fflush(stdout);
 		}
 	}
