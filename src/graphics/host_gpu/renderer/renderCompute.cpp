@@ -1021,6 +1021,9 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	if (program.info.uses_dma && !disable_rt) {
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);
 	}
+	if (program.info.uses_dma) {
+		m_context.PrepareBda();
+	}
 	if (program.shader_hash == 0x380bb9d636390baeull && BvhCheckEnabled()) [[unlikely]] {
 		static uint32_t described = 0;
 		const auto&     user      = resources.user_data;

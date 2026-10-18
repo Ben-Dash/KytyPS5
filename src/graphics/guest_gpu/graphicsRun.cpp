@@ -450,6 +450,7 @@ void CommandProcessor::BufferFlush() {
 }
 
 void CommandProcessor::BufferFlushIfGpuIdle() {
+	m_renderer.GetBufferCache().RecordEagerReadbacks();
 	auto& scheduler = GetScheduler();
 	// An idle GPU finishes a label's few draws in tens of microseconds, so submitting at every
 	// idle label made hundreds of tiny submits a frame whose CPU cost starved the GPU. Batch
@@ -457,17 +458,16 @@ void CommandProcessor::BufferFlushIfGpuIdle() {
 	const bool batched =
 	    scheduler.MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs();
 	if (batched && scheduler.IsFree(scheduler.CurrentTick() - 1)) {
-		m_renderer.GetBufferCache().RecordEagerReadbacks();
 		scheduler.Flush();
 	}
 }
 
 void CommandProcessor::BufferFlushForInterrupt() {
+	m_renderer.GetBufferCache().RecordEagerReadbacks();
 	// An interrupt fires when its tick completes, so that tick must be submitted. Within the
 	// minimum interval it batches instead: the end of the submission slice submits at the latest.
 	auto& scheduler = GetScheduler();
 	if (scheduler.MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs()) {
-		m_renderer.GetBufferCache().RecordEagerReadbacks();
 		scheduler.Flush();
 	}
 }
@@ -964,11 +964,9 @@ bool GuestGpu::Process(Submission& submission) {
 				}
 			}
 			if (progressed) {
-				if (!complete || m_submission_count == 0 ||
-				    m_renderer.GetCommandScheduler().MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs()) {
-					cp.BufferFlush();
-				}
+				cp.BufferFlush();
 			}
+			m_renderer.RunGarbageCollector();
 			break;
 		}
 		case SubmissionType::Compute: {
@@ -988,11 +986,9 @@ bool GuestGpu::Process(Submission& submission) {
 			complete = cp.Process(submission.command_execution, submission.commands) ==
 			           Pm4ProcessResult::Complete;
 			if (submission.command_execution.MadeProgress()) {
-				if (!complete || m_submission_count == 0 ||
-				    m_renderer.GetCommandScheduler().MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs()) {
-					cp.BufferFlush();
-				}
+				cp.BufferFlush();
 			}
+			m_renderer.RunGarbageCollector();
 			break;
 		}
 		case SubmissionType::FlipPreparation:

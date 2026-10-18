@@ -335,12 +335,15 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		if (!g_defer_dispatches_given) {
 			options.config.defer_dispatches_enabled = false;
 		}
-		options.config.relaxed_readback_enabled = true;
+		options.config.relaxed_readback_enabled  = false;
+		options.config.speculative_draws_enabled = true;
+		options.config.record_thread_enabled     = true;
 		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
 		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
 		KYTY_SET_DEFAULT_SWITCH("KYTY_READBACK_TARGETED_PUBLICATION", "1");
 		KYTY_SET_DEFAULT_SWITCH("KYTY_READBACK_READY_AFTER_WAIT", "1");
 		KYTY_SET_DEFAULT_SWITCH("KYTY_DISABLE_RAY_TRACING", "1");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_GPU_PALETTE_SANITIZE", "1");
 		// Raw storage reads synchronized with GPU image aliases (user 2026-10-10): with it, a2dfc83f's
 		// R16 moonlight tiles hold the same nonzero values in 3 runs instead of zeros, the grey haze
 		// at the Torii is gone, fps unchanged (7-7.5).
@@ -348,11 +351,12 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 			options.config.sync_raw_image_buffers = true;
 		}
 		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, tessellation, compute chain, perf preset, timestamp-scale %u, "
-		                     "async-pipelines %s, defer-dispatches %s, relaxed-readback, RT disabled, "
+		                     "async-pipelines %s, defer-dispatches %s, relaxed-readback %s, RT disabled, "
 		                     "sync raw image buffers %s\n",
 		                     title_id.c_str(), options.config.gpu_timestamp_scale_percent,
 		                     options.config.async_pipelines_enabled ? "on" : "off",
 		                     options.config.defer_dispatches_enabled ? "on" : "off",
+		                     options.config.relaxed_readback_enabled ? "on" : "off",
 		                     options.config.sync_raw_image_buffers ? "on" : "off");
 	}
 	// Without --dualsense-fix nothing goes to the DualSense: no vibration, no adaptive trigger

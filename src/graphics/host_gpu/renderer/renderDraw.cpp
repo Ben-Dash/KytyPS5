@@ -3165,6 +3165,11 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 			                        gpu_output, {.index_limit = index_limit, .plain = true});
 		}
 	}
+	for (const auto* stage : stages) {
+		if (stage != nullptr) {
+			SanitizeSkinningPaletteBuffer(m_context, buffer, *stage, submit_id);
+		}
+	}
 	if (!mesh_active) {
 		CommitVertexBuffers(vk_buffer, vertex_bindings);
 	}
@@ -3172,11 +3177,6 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x300u);
 	}
 	CommitBindings(buffer, vk::PipelineBindPoint::eGraphics, pipeline, stages);
-	for (const auto* stage : stages) {
-		if (stage != nullptr) {
-			SanitizeSkinningPaletteBuffer(buffer, *stage, submit_id);
-		}
-	}
 	if (!mesh_active) {
 		CommitIndexBuffer(vk_buffer, index_binding);
 	}
