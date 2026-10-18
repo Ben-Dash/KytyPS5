@@ -659,13 +659,8 @@ uint32_t EmitFPRecipIFlag32(EmitterState& state, uint32_t arg0) {
 }
 
 uint32_t EmitFPRecipSqrt32(EmitterState& state, uint32_t arg0) {
-	const auto source = EmitFlushF32DenormToSignedZero(state, arg0);
-	const auto zero = ConstantF32(state, 0x00000000u);
-	const auto is_positive = Binary(state, spv::OpFOrdGreaterThan, TypeBool(state), source, zero);
-	const auto safe_source = EmitExt(state, TypeF32(state), GLSLstd450FMax,
-	                                 {source, ConstantF32(state, 0x00800000u)});
-	const auto rsq = EmitExt(state, TypeF32(state), GLSLstd450InverseSqrt, {safe_source});
-	return Select(state, TypeF32(state), is_positive, rsq, zero);
+	return EmitExt(state, TypeF32(state), GLSLstd450InverseSqrt,
+	               {EmitFlushF32DenormToSignedZero(state, arg0)});
 }
 
 uint32_t EmitFPSqrt(EmitterState& state, uint32_t arg0) {

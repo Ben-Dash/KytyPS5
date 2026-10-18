@@ -21,27 +21,24 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		uint64_t palette_size = 0;
 		if (b_idx < bindings.buffer_sources.size()) {
 			const auto src_size = bindings.buffer_sources[b_idx].size;
-			if (src_size == 124224 || src_size == 579024 || (src_size >= 102624 && src_size % 48 == 0)) {
+			if (src_size == 124224 || src_size == 579024) {
 				is_palette = true;
 				palette_size = src_size;
 			}
 		}
-		if (!is_palette && b_info.range >= 102624) {
-			if (b_info.range == 124224 || b_info.range == 579024 || (b_info.range % 48 == 0)) {
+		if (!is_palette) {
+			if (b_info.range == 124224 || b_info.range == 579024) {
 				is_palette = true;
 				palette_size = b_info.range;
-			} else if (b_info.range >= 102624 + 16 && (b_info.range - 16) % 48 == 0) {
+			} else if (b_info.range >= 124224 && b_info.range <= 124224 + 256) {
 				is_palette = true;
-				palette_size = b_info.range - 16;
-			} else if (b_info.range >= 102624 + 32 && (b_info.range - 32) % 48 == 0) {
+				palette_size = 124224;
+			} else if (b_info.range >= 579024 && b_info.range <= 579024 + 256) {
 				is_palette = true;
-				palette_size = b_info.range - 32;
-			} else if (b_info.range >= 102624 + 48 && (b_info.range - 48) % 48 == 0) {
-				is_palette = true;
-				palette_size = b_info.range - 48;
+				palette_size = 579024;
 			}
 		}
-		if (!is_palette || palette_size < 102624) {
+		if (!is_palette) {
 			continue;
 		}
 

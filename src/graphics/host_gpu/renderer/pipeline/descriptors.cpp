@@ -237,7 +237,7 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::BufferInvalidate);
 		context.GetTextureCache().InvalidateMemoryFromGPU(address, size);
 	}
-	if ((size == 124224 || size == 579024 || (size >= 102624 && size % 48 == 0)) && address != 0) {
+	if ((size == 124224 || size == 579024) && address != 0) {
 		auto check_and_restore_slice = [&](uint32_t parent_bone, uint32_t start_bone, uint32_t end_bone) {
 			std::array<uint8_t, 48> parent_data {};
 			if (!Libs::LibKernel::Memory::TryReadBacking(address + parent_bone * 48u, parent_data.data(), 48u)) {
