@@ -76,12 +76,12 @@ static void LogTimestampWrite(const char* kind, uint32_t event, uint64_t dst, ui
 	            index, kind, event, dst, value);
 }
 
-// Guest GPU timestamps are the reference clock at the time Thread_Gpu parses the packet, which
-// includes the emulator's own stalls. With --gpu-timestamp-scale above 100, time since the last
-// flip is stretched by that percentage, so a game that sizes its dynamic resolution from GPU
-// timestamps sees more GPU time and leaves headroom. Each flip returns to the real clock, so
-// values never drift from it by more than a frame's stretch.
-static std::atomic<uint64_t> g_timestamp_anchor {0};
+// Guest GPU timestamps are scaled monotonically by --gpu-timestamp-scale (above 100).
+// Stretches time monotonically across all frames so Dynamic Resolution Scaling
+// sees higher GPU load and reduces internal rendering resolution without backward clock jumps.
+static std::mutex g_timestamp_mutex;
+static uint64_t   g_last_real_timestamp {0};
+static uint64_t   g_virtual_gpu_timestamp {0};
 
 // Debugging aid: KYTY_DEBUG_FRAME_LIMIT_MS=<ms> makes each flip wait until <ms> have passed since
 // the previous one, as a slow render thread would, to see how the game's timing copes with low
@@ -173,11 +173,22 @@ void DebugDumpRecentPm4() {
 static uint64_t GuestGpuTimestamp() {
 	const uint64_t percent = Config::GetGpuTimestampScalePercent();
 	const auto     now     = Sync::ReadReferenceClock();
-	const auto     anchor  = g_timestamp_anchor.load(std::memory_order_relaxed);
-	if (percent == 100 || anchor == 0 || now <= anchor) {
+	if (percent == 100) {
 		return now;
 	}
-	return anchor + (now - anchor) * percent / 100u;
+	std::lock_guard lock(g_timestamp_mutex);
+	if (g_last_real_timestamp == 0) {
+		g_last_real_timestamp   = now;
+		g_virtual_gpu_timestamp = now;
+		return now;
+	}
+	if (now > g_last_real_timestamp) {
+		const uint64_t delta_real    = now - g_last_real_timestamp;
+		const uint64_t delta_virtual = delta_real * percent / 100u;
+		g_last_real_timestamp        = now;
+		g_virtual_gpu_timestamp += delta_virtual;
+	}
+	return g_virtual_gpu_timestamp;
 }
 
 struct DrawIndirectArgs {
@@ -2516,7 +2527,6 @@ void CommandProcessor::Flip() {
 	}
 
 	const auto flip_time = Sync::ReadReferenceClock();
-	g_timestamp_anchor.store(flip_time, std::memory_order_relaxed);
 	LogTimestampWrite("flip", 0, 0, flip_time, false);
 	auto& command = CurrentBuffer();
 	m_renderer.GetOcclusionQueries().OnFrame();
