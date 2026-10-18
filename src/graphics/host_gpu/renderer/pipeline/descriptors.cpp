@@ -237,7 +237,7 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::BufferInvalidate);
 		context.GetTextureCache().InvalidateMemoryFromGPU(address, size);
 	}
-	if ((size == 124224 || size == 579024) && address != 0) {
+	if (size == 124224 && address != 0) {
 		auto check_and_restore_slice = [&](uint32_t parent_bone, uint32_t start_bone, uint32_t end_bone) {
 			std::array<uint8_t, 48> parent_data {};
 			if (!Libs::LibKernel::Memory::TryReadBacking(address + parent_bone * 48u, parent_data.data(), 48u)) {
@@ -269,12 +269,9 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 				}
 			}
 		};
-		if (size >= 102624) {
-			const uint32_t total_rows = static_cast<uint32_t>(size / 48u);
-			for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
-				check_and_restore_slice(start_row - 1u, start_row, start_row + 63u);
-			}
-		}
+		check_and_restore_slice(1049u, 1050u, 1113u);
+		check_and_restore_slice(1561u, 1562u, 1625u);
+		check_and_restore_slice(2073u, 2074u, 2137u);
 	}
 	return result;
 }

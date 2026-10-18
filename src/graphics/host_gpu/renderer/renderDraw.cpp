@@ -24,7 +24,6 @@
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
 #include "graphics/host_gpu/renderer/meshDispatch.h"
 #include "graphics/host_gpu/renderer/meshIndirect.h"
-#include "graphics/host_gpu/renderer/paletteSanitizer.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
@@ -3172,11 +3171,6 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		SetDrawDebugPhase(buffer, submit_id, draw, 0x300u);
 	}
 	CommitBindings(buffer, vk::PipelineBindPoint::eGraphics, pipeline, stages);
-	for (const auto* stage : stages) {
-		if (stage != nullptr) {
-			SanitizeSkinningPaletteBuffer(vk_buffer, *stage);
-		}
-	}
 	if (!mesh_active) {
 		CommitIndexBuffer(vk_buffer, index_binding);
 	}

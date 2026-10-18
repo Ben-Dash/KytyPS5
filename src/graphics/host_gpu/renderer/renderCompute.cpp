@@ -19,7 +19,6 @@
 #include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/imageInfo.h"
-#include "graphics/host_gpu/renderer/paletteSanitizer.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
@@ -1091,7 +1090,6 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
 	vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
 	m_context.GetCommandScheduler().NoteCommandRecorded();
-	SanitizeSkinningPaletteBuffer(vk_buffer, bindings);
 
 	// The removed host fence also ordered read-only dispatches before later writers.
 	if (chain) {
@@ -1256,7 +1254,6 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
 	vk_buffer.dispatchIndirect(args_buffer->Handle(), args_offset);
 	m_context.GetCommandScheduler().NoteCommandRecorded();
-	SanitizeSkinningPaletteBuffer(vk_buffer, bindings);
 	if (chain) {
 		buffer.ContinueComputeChain();
 	} else {
