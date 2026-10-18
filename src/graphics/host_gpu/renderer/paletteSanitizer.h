@@ -10,11 +10,33 @@
 
 namespace Libs::Graphics {
 
-inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const PreparedBindings& bindings) {
+inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const PreparedBindings& bindings, uint64_t submit_id = 0) {
+	static const bool s_enabled = [] {
+		const char* text = KYTY_GETENV("KYTY_GPU_PALETTE_SANITIZE");
+		return text != nullptr && std::strcmp(text, "0") != 0;
+	}();
+	if (!s_enabled) {
+		return;
+	}
+
+	static uint64_t s_last_submit_id = UINT64_MAX;
+	static std::vector<vk::Buffer> s_sanitized_buffers;
+
+	if (submit_id != 0 && submit_id != s_last_submit_id) {
+		s_last_submit_id = submit_id;
+		s_sanitized_buffers.clear();
+	}
+
 	for (size_t b_idx = 0; b_idx < bindings.buffers.size(); ++b_idx) {
 		const auto& b_info = bindings.buffers[b_idx];
 		if (b_info.buffer == nullptr) {
 			continue;
+		}
+
+		if (submit_id != 0) {
+			if (std::find(s_sanitized_buffers.begin(), s_sanitized_buffers.end(), b_info.buffer) != s_sanitized_buffers.end()) {
+				continue;
+			}
 		}
 
 		bool is_palette = false;
@@ -102,6 +124,9 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 			std::printf("\x1b[92m[PALETTE-SANITIZE] Restored 192 bone matrix rows (including leaf/poster bones 2097 & 2098, size=%" PRIu64 ")\x1b[0m\n",
 			            palette_size);
 			std::fflush(stdout);
+		}
+		if (submit_id != 0) {
+			s_sanitized_buffers.push_back(b_info.buffer);
 		}
 	}
 }
