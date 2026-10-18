@@ -1797,8 +1797,8 @@ vk::PipelineCache PipelineCache::LoadDriverCacheShard(const std::filesystem::pat
 		return nullptr;
 	}
 	if (!initial_data.empty()) {
-		PipelineCacheLog("Vulkan pipeline cache: loaded {} bytes from {}", initial_data.size(),
-		                 path);
+		PipelineCacheLog("Vulkan pipeline cache: loaded {:.2f} MB from {}",
+		                 static_cast<double>(initial_data.size()) / 1'000'000.0, path);
 	} else {
 		PipelineCacheLog("Vulkan pipeline cache: initialized empty {}", path);
 	}
