@@ -13,7 +13,7 @@ namespace Libs::Graphics {
 inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const PreparedBindings& bindings, uint64_t submit_id = 0) {
 	static const bool s_enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_GPU_PALETTE_SANITIZE");
-		return text != nullptr && std::strcmp(text, "0") != 0;
+		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	if (!s_enabled) {
 		return;

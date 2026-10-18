@@ -170,6 +170,50 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	if (size > graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange) {
 		EXIT("storage buffer range is unsupported\n");
 	}
+	if ((size == 124224 || size == 579024) && address != 0) {
+		const uint32_t total_rows = static_cast<uint32_t>(size / 48u);
+		bool any_restored = false;
+		for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
+			const uint32_t parent_bone = start_row - 1u;
+			std::array<uint8_t, 48> parent_data {};
+			bool parent_nonzero = false;
+			if (Libs::LibKernel::Memory::TryReadBacking(address + parent_bone * 48u, parent_data.data(), 48u)) {
+				for (uint8_t b : parent_data) {
+					if (b != 0) { parent_nonzero = true; break; }
+				}
+			}
+			static const float s_identity_3x4[12] = {
+				1.0f, 0.0f, 0.0f, 0.0f,
+				0.0f, 1.0f, 0.0f, 0.0f,
+				0.0f, 0.0f, 1.0f, 0.0f
+			};
+			const void* fallback_matrix = parent_nonzero ? static_cast<const void*>(parent_data.data())
+			                                             : static_cast<const void*>(s_identity_3x4);
+
+			for (uint32_t r = start_row; r < start_row + 64u; ++r) {
+				std::array<uint8_t, 48> child_data {};
+				if (Libs::LibKernel::Memory::TryReadBacking(address + r * 48u, child_data.data(), 48u)) {
+					bool child_nonzero = false;
+					for (uint8_t b : child_data) {
+						if (b != 0) { child_nonzero = true; break; }
+					}
+					if (!child_nonzero) {
+						Libs::LibKernel::Memory::TryWriteBacking(address + r * 48u, fallback_matrix, 48u);
+						any_restored = true;
+					}
+				}
+			}
+		}
+		if (any_restored) {
+			context.GetBufferCache().InvalidateMemory(address, size);
+			static uint32_t s_cpu_log = 0;
+			if (s_cpu_log++ < 20) {
+				std::printf("\x1b[92m[PALETTE-SANITIZE-CPU] Restored zero bone matrices at 0x%016" PRIx64 " (size=%" PRIu64 ")\x1b[0m\n",
+				            static_cast<uint64_t>(address), static_cast<uint64_t>(size));
+				std::fflush(stdout);
+			}
+		}
+	}
 	std::optional<DrawPhaseTimer::ProbeScope> obtain_probe;
 	obtain_probe.emplace(g_draw_phases, resource.written ? DrawPhaseTimer::BufferWritten
 	                                                     : DrawPhaseTimer::BufferRead);
@@ -236,43 +280,6 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	if (resource.written) {
 		DrawPhaseTimer::ProbeScope probe(g_draw_phases, DrawPhaseTimer::BufferInvalidate);
 		context.GetTextureCache().InvalidateMemoryFromGPU(address, size);
-	}
-	if ((size == 124224 || size == 579024) && address != 0) {
-		auto check_and_restore_slice = [&](uint32_t parent_bone, uint32_t start_bone, uint32_t end_bone) {
-			std::array<uint8_t, 48> parent_data {};
-			if (!Libs::LibKernel::Memory::TryReadBacking(address + parent_bone * 48u, parent_data.data(), 48u)) {
-				return;
-			}
-			bool parent_nonzero = false;
-			for (uint8_t b : parent_data) {
-				if (b != 0) { parent_nonzero = true; break; }
-			}
-			if (!parent_nonzero) return;
-
-			std::array<uint8_t, 48> child_data {};
-			if (!Libs::LibKernel::Memory::TryReadBacking(address + start_bone * 48u, child_data.data(), 48u)) {
-				return;
-			}
-			bool child_nonzero = false;
-			for (uint8_t b : child_data) {
-				if (b != 0) { child_nonzero = true; break; }
-			}
-			if (!child_nonzero) {
-				for (uint32_t r = start_bone; r <= end_bone; ++r) {
-					Libs::LibKernel::Memory::TryWriteBacking(address + r * 48u, parent_data.data(), 48u);
-				}
-				static uint32_t s_cpu_log = 0;
-				if (s_cpu_log++ < 20) {
-					std::printf("\x1b[92m[PALETTE-SANITIZE-CPU] Restored prop bones %u..%u from parent %u (including leaf 2097 & 2098) at 0x%016" PRIx64 " (size=%" PRIu64 ")\x1b[0m\n",
-					            start_bone, end_bone, parent_bone, static_cast<uint64_t>(address), static_cast<uint64_t>(size));
-					std::fflush(stdout);
-				}
-			}
-		};
-		const uint32_t total_rows = static_cast<uint32_t>(size / 48u);
-		for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
-			check_and_restore_slice(start_row - 1u, start_row, start_row + 63u);
-		}
 	}
 	return result;
 }
