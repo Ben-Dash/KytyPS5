@@ -696,7 +696,9 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
                                      uint32_t layer_offset = 0) {
 	ImageViewInfo view {};
 	// The image may start at the view's first layer (see DescribeTexture): layers count from there.
-	const uint32_t base_array = descriptor.BaseArray5() - layer_offset;
+	const uint32_t base_array = descriptor.BaseArray5() > layer_offset
+	                                ? descriptor.BaseArray5() - layer_offset
+	                                : 0u;
 	view.format      = format;
 	view.aspect      = vk::ImageAspectFlagBits::eColor;
 	view.base_level  = descriptor.BaseLevel();
@@ -714,20 +716,14 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 	        : TextureGetComponentMapping(descriptor.DstSelXYZW(), surface_format.host_to_storage);
 	switch (resource.dimension) {
 		case ShaderRecompiler::Decoder::ImageDimension::Dim1D:
-			view.type       = vk::ImageViewType::e1D;
-			view.base_layer = base_array;
-			if (view.base_layer >= image_layers) {
-				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
-			}
+			view.type        = vk::ImageViewType::e1D;
+			view.base_layer  = (image_layers > 0) ? std::min(base_array, image_layers - 1u) : 0u;
 			view.layer_count = 1;
 			break;
 		case ShaderRecompiler::Decoder::ImageDimension::Dim1DArray:
-			view.type       = vk::ImageViewType::e1DArray;
-			view.base_layer = base_array;
-			if (view.base_layer >= image_layers) {
-				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
-			}
-			view.layer_count = image_layers - view.base_layer;
+			view.type        = vk::ImageViewType::e1DArray;
+			view.base_layer  = (image_layers > 0) ? std::min(base_array, image_layers - 1u) : 0u;
+			view.layer_count = (image_layers > view.base_layer) ? (image_layers - view.base_layer) : 1u;
 			break;
 		case ShaderRecompiler::Decoder::ImageDimension::Dim3D:
 			view.type        = vk::ImageViewType::e3D;
@@ -736,20 +732,14 @@ static ImageViewInfo TextureViewInfo(const ShaderRecompiler::IR::ImageResource& 
 			break;
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DArray:
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaaArray:
-			view.type       = vk::ImageViewType::e2DArray;
-			view.base_layer = base_array;
-			if (view.base_layer >= image_layers) {
-				KYTY_TEXTURE_FAIL("texture array base layer is out of bounds\n");
-			}
-			view.layer_count = image_layers - view.base_layer;
+			view.type        = vk::ImageViewType::e2DArray;
+			view.base_layer  = (image_layers > 0) ? std::min(base_array, image_layers - 1u) : 0u;
+			view.layer_count = (image_layers > view.base_layer) ? (image_layers - view.base_layer) : 1u;
 			break;
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2D:
 		case ShaderRecompiler::Decoder::ImageDimension::Dim2DMsaa:
-			view.type       = vk::ImageViewType::e2D;
-			view.base_layer = base_array;
-			if (view.base_layer >= image_layers) {
-				KYTY_TEXTURE_FAIL("texture base layer is out of bounds\n");
-			}
+			view.type        = vk::ImageViewType::e2D;
+			view.base_layer  = (image_layers > 0) ? std::min(base_array, image_layers - 1u) : 0u;
 			view.layer_count = 1;
 			break;
 		default: KYTY_TEXTURE_FAIL("unsupported texture view dimension\n");

@@ -129,7 +129,7 @@ static void PrintUsage() {
 	         "thread. 0 waits for idle. Default: 0.\n");
 	::printf("  --label-flush-interval-us <us>       Minimum time between RELEASE_MEM submits. "
 	         "Default: 2000.\n");
-	::printf("  --gpu-timestamp-scale <25-200>       Stretch GPU time the game measures, in "
+	::printf("  --gpu-timestamp-scale <25-500>       Stretch GPU time the game measures, in "
 	         "percent, so dynamic resolution keeps headroom (below 100: aims higher). Default: 100 (off).\n");
 	::printf("  --pipeline-libraries <true|false>    Build new graphics pipelines from cached, "
 	         "separately compiled parts where the driver supports it. Default: true.\n");
@@ -680,8 +680,8 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			uint32_t percent = 0;
 			auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), percent);
 			if (error != std::errc {} || end != value.data() + value.size() || percent < 25 ||
-			    percent > 200) {
-				::printf("invalid gpu-timestamp-scale (25-200): %s\n", value.c_str());
+			    percent > 500) {
+				::printf("invalid gpu-timestamp-scale (25-500): %s\n", value.c_str());
 				return false;
 			}
 			options.config.gpu_timestamp_scale_percent = percent;
