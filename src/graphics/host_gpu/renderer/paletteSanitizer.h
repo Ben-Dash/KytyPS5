@@ -4,13 +4,17 @@
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 
+#include "graphics/host_gpu/renderer/render.h"
+
+#include <algorithm>
 #include <cinttypes>
 #include <cstdio>
+#include <utility>
 #include <vector>
 
 namespace Libs::Graphics {
 
-inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const PreparedBindings& bindings, uint64_t submit_id = 0) {
+inline void SanitizeSkinningPaletteBuffer(CommandBuffer& buffer, const PreparedBindings& bindings, uint64_t submit_id = 0) {
 	static const bool s_enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_GPU_PALETTE_SANITIZE");
 		return text == nullptr || std::strcmp(text, "0") != 0;
@@ -20,23 +24,17 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 	}
 
 	static uint64_t s_last_submit_id = UINT64_MAX;
-	static std::vector<vk::Buffer> s_sanitized_buffers;
+	static std::vector<std::pair<VkBuffer, vk::DeviceSize>> s_sanitized_ranges;
 
 	if (submit_id != 0 && submit_id != s_last_submit_id) {
 		s_last_submit_id = submit_id;
-		s_sanitized_buffers.clear();
+		s_sanitized_ranges.clear();
 	}
 
 	for (size_t b_idx = 0; b_idx < bindings.buffers.size(); ++b_idx) {
 		const auto& b_info = bindings.buffers[b_idx];
 		if (b_info.buffer == nullptr) {
 			continue;
-		}
-
-		if (submit_id != 0) {
-			if (std::find(s_sanitized_buffers.begin(), s_sanitized_buffers.end(), b_info.buffer) != s_sanitized_buffers.end()) {
-				continue;
-			}
 		}
 
 		bool is_palette = false;
@@ -68,6 +66,21 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 		const vk::DeviceSize adjustment = (b_info.range > palette_size) ? (b_info.range - palette_size) : 0u;
 		const vk::DeviceSize base_offset = b_info.offset + adjustment;
 		const vk::DeviceSize barrier_size = (palette_size > 0) ? palette_size : b_info.range;
+
+		const auto range_key = std::make_pair(VkBuffer(b_info.buffer), base_offset);
+		if (submit_id != 0) {
+			if (std::find(s_sanitized_ranges.begin(), s_sanitized_ranges.end(), range_key) != s_sanitized_ranges.end()) {
+				continue;
+			}
+		}
+
+		// Vulkan dynamic rendering compliance: transfer commands (vkCmdCopyBuffer and transfer barriers)
+		// MUST be recorded outside of a render pass.
+		if (buffer.IsRendering()) {
+			buffer.EndRendering();
+		}
+
+		auto vk_buffer = buffer.Handle();
 
 		// Pre-copy barrier: ensure compute/transfer writes are available to transfer reads
 		vk::BufferMemoryBarrier pre_barrier {};
@@ -126,7 +139,7 @@ inline void SanitizeSkinningPaletteBuffer(vk::CommandBuffer vk_buffer, const Pre
 			std::fflush(stdout);
 		}
 		if (submit_id != 0) {
-			s_sanitized_buffers.push_back(b_info.buffer);
+			s_sanitized_ranges.push_back(range_key);
 		}
 	}
 }

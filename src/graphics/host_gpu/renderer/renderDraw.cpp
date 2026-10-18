@@ -3174,7 +3174,7 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 	CommitBindings(buffer, vk::PipelineBindPoint::eGraphics, pipeline, stages);
 	for (const auto* stage : stages) {
 		if (stage != nullptr) {
-			SanitizeSkinningPaletteBuffer(vk_buffer, *stage, submit_id);
+			SanitizeSkinningPaletteBuffer(buffer, *stage, submit_id);
 		}
 	}
 	if (!mesh_active) {
