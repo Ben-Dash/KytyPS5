@@ -2446,7 +2446,10 @@ void RenderExecutor::ResolveBindlessRequests() {
 	}
 	table.ConsumeSnapshot();
 	// Each texture may upload and detile; spread first sight of a scene over a few frames.
-	constexpr uint32_t Budget   = 128;
+	static const uint32_t budget = [] {
+		const char* text = KYTY_GETENV("KYTY_BINDLESS_BUDGET");
+		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 1024u;
+	}();
 	uint32_t           resolved = 0;
 	for (auto& heap: m_context.GetBindlessTable().Heaps()) {
 		m_bindless_requests.clear();
@@ -2455,7 +2458,7 @@ void RenderExecutor::ResolveBindlessRequests() {
 			if (heap.settled[key] != 0) {
 				continue;
 			}
-			if (resolved >= Budget) {
+			if (resolved >= budget) {
 				break; // still pending: the next frame flags it again
 			}
 			g_bindless_fail_context.requested = true;
@@ -2623,7 +2626,11 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		// A table of material records is rewritten at a new address every frame, so its heap
 		// is new each frame and the shader's feedback would name its keys only after the heap
 		// is gone. A small one is resolved completely right away.
-		if (use.record_stride != 32u && entries <= 512u) {
+		static const uint32_t material_eager_limit = [] {
+			const char* text = KYTY_GETENV("KYTY_BINDLESS_MATERIAL_LIMIT");
+			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 4096u;
+		}();
+		if (use.record_stride != 32u && entries <= material_eager_limit) {
 			for (uint32_t key = 0; key < entries && key < heap->settled.size(); key++) {
 				if (heap->settled[key] == 0) {
 					(void)ResolveBindlessKey(*heap, key);
