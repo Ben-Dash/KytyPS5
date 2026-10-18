@@ -112,8 +112,8 @@ private:
 	std::shared_ptr<ReadbackNotification> m_readback_notification =
 	    std::make_shared<ReadbackNotification>();
 	// Completion callbacks can outlive GuestGpu during renderer shutdown.
-	std::shared_ptr<std::binary_semaphore> m_suspend_point_ready =
-	    std::make_shared<std::binary_semaphore>(1);
+	std::shared_ptr<std::counting_semaphore<16>> m_suspend_point_ready =
+	    std::make_shared<std::counting_semaphore<16>>(1);
 
 	std::unique_ptr<CommandProcessor>                                m_gfx_cp;
 	std::array<std::unique_ptr<CommandProcessor>, ComputeQueueCount> m_compute_cp;

@@ -212,6 +212,9 @@ GuestGpu::GuestGpu(RenderContext& renderer): m_renderer(renderer) {
 	m_gfx_cp = std::make_unique<CommandProcessor>(renderer, 0);
 	m_gfx_cp->Reset();
 	m_readback_notification->m_owner = this;
+	const auto frames_ahead = std::min(Config::GetGpuFramesAhead(), 15u);
+	m_suspend_point_ready =
+	    std::make_shared<std::counting_semaphore<16>>(1 + frames_ahead);
 	m_thread = std::jthread(ThreadRun, this);
 }
 
@@ -229,6 +232,9 @@ void GuestGpu::Shutdown() {
 		m_accepting = false;
 		m_stopping  = true;
 		m_work_available.SignalAll();
+	}
+	if (m_suspend_point_ready) {
+		m_suspend_point_ready->release();
 	}
 	if (m_thread.joinable()) {
 		m_thread.join();
@@ -346,9 +352,15 @@ void GuestGpu::SubmitFlipPreparation(uint64_t request_id) {
 
 void GuestGpu::SuspendPoint() {
 	EXIT_IF(IsGpuThread() || CommandScheduler::InDeferredOperation());
+	if (IsStopping()) {
+		return;
+	}
 	// Do not hold a queue lock while waiting: asynchronous work may be needed to
 	// finish the preceding graphics frame. The first point returns immediately.
 	m_suspend_point_ready->acquire();
+	if (IsStopping()) {
+		return;
+	}
 	Submission submission;
 	submission.type = SubmissionType::SuspendPoint;
 	Enqueue(std::move(submission));

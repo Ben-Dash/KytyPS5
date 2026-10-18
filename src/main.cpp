@@ -126,7 +126,7 @@ static void PrintUsage() {
 	::printf("  --gpu-mesh-indirect <true|false>     Build mesh-emulated indirect draws on the GPU. "
 	         "Default: true.\n");
 	::printf("  --gpu-frames-ahead <0-3>             Frames the game may build ahead of the GPU "
-	         "thread. 0 waits for idle. Default: 0.\n");
+	         "thread. 0 waits for idle. Default: 2.\n");
 	::printf("  --label-flush-interval-us <us>       Minimum time between RELEASE_MEM submits. "
 	         "Default: 2000.\n");
 	::printf("  --gpu-timestamp-scale <25-500>       Stretch GPU time the game measures, in "
