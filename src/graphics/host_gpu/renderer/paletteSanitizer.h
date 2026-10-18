@@ -41,21 +41,18 @@ inline void SanitizeSkinningPaletteBuffer(CommandBuffer& buffer, const PreparedB
 		uint64_t palette_size = 0;
 		if (b_idx < bindings.buffer_sources.size()) {
 			const auto src_size = bindings.buffer_sources[b_idx].size;
-			if (src_size == 124224 || src_size == 579024) {
+			if (src_size == 124224) {
 				is_palette = true;
 				palette_size = src_size;
 			}
 		}
 		if (!is_palette) {
-			if (b_info.range == 124224 || b_info.range == 579024) {
+			if (b_info.range == 124224) {
 				is_palette = true;
 				palette_size = b_info.range;
 			} else if (b_info.range >= 124224 && b_info.range <= 124224 + 256) {
 				is_palette = true;
 				palette_size = 124224;
-			} else if (b_info.range >= 579024 && b_info.range <= 579024 + 256) {
-				is_palette = true;
-				palette_size = 579024;
 			}
 		}
 		if (!is_palette) {
@@ -96,25 +93,26 @@ inline void SanitizeSkinningPaletteBuffer(CommandBuffer& buffer, const PreparedB
 		    vk::PipelineStageFlagBits::eTransfer,
 		    {}, 0, nullptr, 1, &pre_barrier, 0, nullptr);
 
-		const uint32_t total_rows = static_cast<uint32_t>(palette_size / 48u);
 		std::vector<vk::BufferCopy> copies;
-		copies.reserve(std::max(192u, (total_rows / 512u + 1u) * 64u));
+		copies.reserve(192);
 
-		// Prop bones occur in 64-row slices spaced every 512 rows starting at row 1050:
-		// Slice 0: rows 1050..1113 inherit row 1049
-		// Slice 1: rows 1562..1625 inherit row 1561
-		// Slice 2: rows 2074..2137 inherit row 2073 (Atsu hand/wrist, leaf bones 2097 & 2098)
-		// Slices 3..N: cutscenes feature multiple characters and props in subsequent 512-row blocks
-		for (uint32_t start_row = 1050u; start_row + 64u <= total_rows; start_row += 512u) {
-			const uint32_t base_row = start_row - 1u;
-			for (uint32_t r = start_row; r < start_row + 64u; ++r) {
+		// Prop bones in character palette (size 124224, 2588 bones):
+		// Slice 0: rows 1050..1113 inherit parent row 1049
+		// Slice 1: rows 1562..1625 inherit parent row 1561
+		// Slice 2: rows 2074..2137 inherit parent row 2073 (Atsu hand/wrist -> leaf/poster bones 2097 & 2098)
+		// Body bones (rows 0..1048) and character meshes are strictly preserved and untouched!
+		auto add_slice = [&](uint32_t parent_bone, uint32_t start_bone, uint32_t end_bone) {
+			for (uint32_t r = start_bone; r <= end_bone; ++r) {
 				copies.push_back(vk::BufferCopy {
-				    .srcOffset = base_offset + base_row * 48u,
+				    .srcOffset = base_offset + parent_bone * 48u,
 				    .dstOffset = base_offset + r * 48u,
 				    .size = 48u
 				});
 			}
-		}
+		};
+		add_slice(1049u, 1050u, 1113u);
+		add_slice(1561u, 1562u, 1625u);
+		add_slice(2073u, 2074u, 2137u);
 
 		vk_buffer.copyBuffer(b_info.buffer, b_info.buffer, static_cast<uint32_t>(copies.size()), copies.data());
 
@@ -133,9 +131,9 @@ inline void SanitizeSkinningPaletteBuffer(CommandBuffer& buffer, const PreparedB
 		    {}, 0, nullptr, 1, &post_barrier, 0, nullptr);
 
 		static uint32_t s_log_count = 0;
-		if (s_log_count++ < 20) {
-			std::printf("\x1b[92m[PALETTE-SANITIZE] Restored 192 bone matrix rows (including leaf/poster bones 2097 & 2098, size=%" PRIu64 ")\x1b[0m\n",
-			            palette_size);
+		if (s_log_count++ < 30) {
+			std::printf("\x1b[92m[PALETTE-SANITIZE] Restored 192 prop bone rows (size=124224, leaf bones 2097 & 2098) at offset 0x%" PRIx64 "\x1b[0m\n",
+			            static_cast<uint64_t>(base_offset));
 			std::fflush(stdout);
 		}
 		if (submit_id != 0) {
