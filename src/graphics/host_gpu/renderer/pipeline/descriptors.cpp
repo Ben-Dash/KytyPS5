@@ -1993,7 +1993,7 @@ static bool BindlessCompatible(const ShaderTextureResource& descriptor, uint32_t
 static bool TsharpCheckEnabled() {
 	static const bool enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_BINDLESS_TSHARP_CHECK");
-		return text != nullptr && std::strcmp(text, "0") != 0;
+		return text == nullptr || std::strcmp(text, "0") != 0;
 	}();
 	return enabled;
 }
