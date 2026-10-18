@@ -835,6 +835,12 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	}();
 	if (!compute_program) {
 		// Temporary until RT is implemented.
+		static uint32_t null_prog_count = 0;
+		if (null_prog_count++ < 30) {
+			std::printf("\x1b[91m[DISPATCH-SKIP] null compute program for cs_data_addr=0x%016" PRIx64 "\x1b[0m\n",
+			            static_cast<uint64_t>(cs_regs.cs_regs.data_addr));
+			std::fflush(stdout);
+		}
 		return true;
 	}
 	// Nothing is recorded or bound before this point, so the packet can run again later.

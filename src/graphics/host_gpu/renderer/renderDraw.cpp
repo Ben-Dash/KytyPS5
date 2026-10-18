@@ -1757,16 +1757,34 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	RefreshShaders(buffer, draw, color_output_mask, state);
 	if (state.programs.pending) {
 		// Asynchronous pipelines: a shader is still translating; skip the draw until it is ready.
+		static uint32_t pending_log_count = 0;
+		if (pending_log_count++ < 30) {
+			std::printf("\x1b[93m[DRAW-SKIP] pending pipeline: stage_count=%u ps_active=%d index_count=%u\x1b[0m\n",
+			            state.programs.VertexStageCount(), state.ps_active, draw.index_count);
+			std::fflush(stdout);
+		}
 		return false;
 	}
 	// A stage the recompiler skipped (unsupported instruction or resources) has no program: skip
 	// the draw.
 	for (uint32_t stage = 0; stage < state.programs.VertexStageCount(); stage++) {
 		if (!state.programs.vertex[stage]) {
+			static uint32_t v_log_count = 0;
+			if (v_log_count++ < 30) {
+				std::printf("\x1b[91m[DRAW-SKIP] stage %u missing program (index_count=%u)\x1b[0m\n",
+				            stage, draw.index_count);
+				std::fflush(stdout);
+			}
 			return false;
 		}
 	}
 	if (state.ps_active && !state.programs.pixel) {
+		static uint32_t p_log_count = 0;
+		if (p_log_count++ < 30) {
+			std::printf("\x1b[91m[DRAW-SKIP] pixel shader active but missing program (index_count=%u)\x1b[0m\n",
+			            draw.index_count);
+			std::fflush(stdout);
+		}
 		return false;
 	}
 	if (DebugSkipShader(state.ps_active ? state.ps_input_info.stage.program->shader_hash : 0,
