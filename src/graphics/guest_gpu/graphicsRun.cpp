@@ -76,12 +76,18 @@ static void LogTimestampWrite(const char* kind, uint32_t event, uint64_t dst, ui
 	            index, kind, event, dst, value);
 }
 
-// Guest GPU timestamps are scaled monotonically by --gpu-timestamp-scale (above 100).
-// Stretches time monotonically across all frames so Dynamic Resolution Scaling
-// sees higher GPU load and reduces internal rendering resolution without backward clock jumps.
-static std::mutex g_timestamp_mutex;
-static uint64_t   g_last_real_timestamp {0};
-static uint64_t   g_virtual_gpu_timestamp {0};
+// Guest GPU timestamps are the reference clock at the time Thread_Gpu parses the packet, which
+// includes the emulator's own stalls. With --gpu-timestamp-scale above 100, time since the last
+// flip is stretched by that percentage, so a game that sizes its dynamic resolution from GPU
+// timestamps sees more GPU time and leaves headroom. Each flip returns to the real clock, so
+// values never drift from it by more than a frame's stretch.
+static std::atomic<uint64_t> g_timestamp_anchor {0};
+
+static void RecordFlipTimestamp() {
+	const auto flip_time = Sync::ReadReferenceClock();
+	g_timestamp_anchor.store(flip_time, std::memory_order_release);
+	LogTimestampWrite("flip", 0, 0, flip_time, false);
+}
 
 // Debugging aid: KYTY_DEBUG_FRAME_LIMIT_MS=<ms> makes each flip wait until <ms> have passed since
 // the previous one, as a slow render thread would, to see how the game's timing copes with low
@@ -173,22 +179,11 @@ void DebugDumpRecentPm4() {
 static uint64_t GuestGpuTimestamp() {
 	const uint64_t percent = Config::GetGpuTimestampScalePercent();
 	const auto     now     = Sync::ReadReferenceClock();
-	if (percent == 100) {
+	const auto     anchor  = g_timestamp_anchor.load(std::memory_order_acquire);
+	if (percent == 100 || anchor == 0 || now <= anchor) {
 		return now;
 	}
-	std::lock_guard lock(g_timestamp_mutex);
-	if (g_last_real_timestamp == 0) {
-		g_last_real_timestamp   = now;
-		g_virtual_gpu_timestamp = now;
-		return now;
-	}
-	if (now > g_last_real_timestamp) {
-		const uint64_t delta_real    = now - g_last_real_timestamp;
-		const uint64_t delta_virtual = delta_real * percent / 100u;
-		g_last_real_timestamp        = now;
-		g_virtual_gpu_timestamp += delta_virtual;
-	}
-	return g_virtual_gpu_timestamp;
+	return anchor + (now - anchor) * percent / 100u;
 }
 
 struct DrawIndirectArgs {
@@ -958,12 +953,10 @@ bool GuestGpu::Process(Submission& submission) {
 				}
 			}
 			if (progressed) {
-				if (complete) {
-					m_renderer.RunGarbageCollector();
+				if (!complete || m_submission_count == 0 ||
+				    m_renderer.GetCommandScheduler().MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs()) {
+					cp.BufferFlush();
 				}
-				cp.BufferFlush();
-			} else if (complete) {
-				m_renderer.RunGarbageCollector();
 			}
 			break;
 		}
@@ -984,12 +977,10 @@ bool GuestGpu::Process(Submission& submission) {
 			complete = cp.Process(submission.command_execution, submission.commands) ==
 			           Pm4ProcessResult::Complete;
 			if (submission.command_execution.MadeProgress()) {
-				if (complete) {
-					m_renderer.RunGarbageCollector();
+				if (!complete || m_submission_count == 0 ||
+				    m_renderer.GetCommandScheduler().MicrosSinceSubmit() >= Config::GetLabelFlushIntervalUs()) {
+					cp.BufferFlush();
 				}
-				cp.BufferFlush();
-			} else if (complete) {
-				m_renderer.RunGarbageCollector();
 			}
 			break;
 		}
@@ -2526,8 +2517,7 @@ void CommandProcessor::Flip() {
 		LOGF("CommandProcessor::Flip()\n");
 	}
 
-	const auto flip_time = Sync::ReadReferenceClock();
-	LogTimestampWrite("flip", 0, 0, flip_time, false);
+	RecordFlipTimestamp();
 	auto& command = CurrentBuffer();
 	m_renderer.GetOcclusionQueries().OnFrame();
 	auto request = Sync::PrepareVideoOutFlip(command, m_flip.handle, m_flip.index, m_flip.flip_mode,
@@ -2549,6 +2539,7 @@ void CommandProcessor::Flip(void* dst_gpu_addr, uint32_t value) {
 		     reinterpret_cast<uint64_t>(dst_gpu_addr), value);
 	}
 
+	RecordFlipTimestamp();
 	std::memcpy(dst_gpu_addr, &value, sizeof(value));
 	m_renderer.GetOcclusionQueries().OnFrame();
 	auto request = Sync::PrepareVideoOutFlip(command, m_flip.handle, m_flip.index, m_flip.flip_mode,
@@ -2577,6 +2568,7 @@ void CommandProcessor::FlipWithInterrupt(uint32_t eop_event_type, uint32_t cache
 	if (eop_event_type != 0x00000004 || cache_action != 0x00000038) {
 		EXIT("unknown event type\n");
 	}
+	RecordFlipTimestamp();
 	std::memcpy(dst_gpu_addr, &value, sizeof(value));
 	m_renderer.GetOcclusionQueries().OnFrame();
 	auto request = Sync::PrepareVideoOutFlip(command, m_flip.handle, m_flip.index, m_flip.flip_mode,
@@ -2599,6 +2591,7 @@ void CommandProcessor::PrepareCpuFlip(uint64_t request_id) {
 	};
 	ProcessorScope processor_scope(*this);
 
+	RecordFlipTimestamp();
 	m_renderer.GetVideoOut().PrepareFlip(request_id, command);
 	GetScheduler().DeferPriorityOperation(
 	    [this, request_id] { m_renderer.GetVideoOut().CompleteFlip(request_id); });
