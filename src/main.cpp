@@ -320,7 +320,7 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		// Ghost of Yotei: heap-indexed textures need the bindless arrays. No shader is skipped (user
 		// 2026-10-09): the former skip list (RENDERWORLD clear pair, terrain splat pair) runs.
 		options.config.bindless_images_enabled = true;
-		options.config.tessellation_enabled = true;
+		options.config.tessellation_enabled = false;
 		if (options.config.game_preset_priority == 0) {
 			options.config.game_preset_priority = 1; // Performance mode
 		}
@@ -340,18 +340,14 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		options.config.record_thread_enabled     = true;
 		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
 		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
-		KYTY_SET_DEFAULT_SWITCH("KYTY_READBACK_TARGETED_PUBLICATION", "1");
-		KYTY_SET_DEFAULT_SWITCH("KYTY_READBACK_READY_AFTER_WAIT", "1");
-		KYTY_SET_DEFAULT_SWITCH("KYTY_DISABLE_RAY_TRACING", "1");
-		KYTY_SET_DEFAULT_SWITCH("KYTY_GPU_PALETTE_SANITIZE", "1");
 		// Raw storage reads synchronized with GPU image aliases (user 2026-10-10): with it, a2dfc83f's
 		// R16 moonlight tiles hold the same nonzero values in 3 runs instead of zeros, the grey haze
 		// at the Torii is gone, fps unchanged (7-7.5).
 		if (!g_sync_raw_given) {
 			options.config.sync_raw_image_buffers = true;
 		}
-		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, tessellation, compute chain, perf preset, timestamp-scale %u, "
-		                     "async-pipelines %s, defer-dispatches %s, relaxed-readback %s, RT disabled, "
+		KYTY_INTERNAL_PRINTF("Title profile %s: bindless, compute chain, perf preset, timestamp-scale %u, "
+		                     "async-pipelines %s, defer-dispatches %s, relaxed-readback %s, "
 		                     "sync raw image buffers %s\n",
 		                     title_id.c_str(), options.config.gpu_timestamp_scale_percent,
 		                     options.config.async_pipelines_enabled ? "on" : "off",

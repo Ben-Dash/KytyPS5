@@ -964,9 +964,13 @@ bool GuestGpu::Process(Submission& submission) {
 				}
 			}
 			if (progressed) {
+				if (complete) {
+					m_renderer.RunGarbageCollector();
+				}
 				cp.BufferFlush();
+			} else if (complete) {
+				m_renderer.RunGarbageCollector();
 			}
-			m_renderer.RunGarbageCollector();
 			break;
 		}
 		case SubmissionType::Compute: {
@@ -986,9 +990,13 @@ bool GuestGpu::Process(Submission& submission) {
 			complete = cp.Process(submission.command_execution, submission.commands) ==
 			           Pm4ProcessResult::Complete;
 			if (submission.command_execution.MadeProgress()) {
+				if (complete) {
+					m_renderer.RunGarbageCollector();
+				}
 				cp.BufferFlush();
+			} else if (complete) {
+				m_renderer.RunGarbageCollector();
 			}
-			m_renderer.RunGarbageCollector();
 			break;
 		}
 		case SubmissionType::FlipPreparation:

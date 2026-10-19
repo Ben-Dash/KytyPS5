@@ -1016,7 +1016,7 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
 	DebugDumpDispatchInputs(m_context, input_info.stage);
 	static const bool disable_rt = [] {
 		const char* env = KYTY_GETENV("KYTY_DISABLE_RAY_TRACING");
-		return env == nullptr || std::strcmp(env, "0") != 0;
+		return env != nullptr && std::strcmp(env, "1") == 0;
 	}();
 	if (program.info.uses_dma && !disable_rt) {
 		PrefetchBvhs(m_context.GetBufferCache(), *input_info.stage.resources);

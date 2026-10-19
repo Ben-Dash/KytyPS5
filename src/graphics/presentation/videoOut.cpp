@@ -1911,11 +1911,11 @@ KYTY_SYSV_ABI int VideoOutGetOutputStatus(int handle, VideoOutOutputStatus* stat
 	Loader::SystemContentParamSfoGetInt("ATTRIBUTE3", &attribute3);
 	ctx->mutex.Lock();
 	const char* force_1080p_env = KYTY_GETENV("KYTY_FORCE_1080P");
-	const bool force_1080p = (force_1080p_env != nullptr && std::strcmp(force_1080p_env, "1") == 0) ||
-	                         (ctx->width <= 1920 && ctx->height <= 1080);
+	const bool force_1080p = (force_1080p_env != nullptr && std::strcmp(force_1080p_env, "1") == 0);
 	if (force_1080p) {
 		status->resolution = 1u; // SCE_VIDEO_OUT_RESOLUTION_1080P (1920x1080)
 	} else {
+		// Primary output reports 4K unless param.json Video-out Info enables resolution detection.
 		status->resolution =
 		    ((attribute3 & 4) != 0 && ctx->width < 3840 && ctx->height < 2160 ? 1u : 2u);
 	}

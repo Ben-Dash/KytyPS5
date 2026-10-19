@@ -603,10 +603,10 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 	static std::unordered_set<std::string> seen;
 	static const bool strict   = KYTY_GETENV("KYTY_STRICT_TEXTURES") != nullptr;
 	const auto&       context  = g_bindless_fail_context;
-	auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={} shader={:016x}): {}",
-	                        context.requested ? "requested by a shader" : "unrequested slot",
-	                        context.heap_base, context.binding, context.key, context.shader, reason);
 	if (strict && context.requested) {
+		auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={} shader={:016x}): {}",
+		                        context.requested ? "requested by a shader" : "unrequested slot",
+		                        context.heap_base, context.binding, context.key, context.shader, reason);
 		EXIT("%s", line.c_str());
 	}
 	const std::lock_guard lock(mutex);
@@ -627,6 +627,9 @@ static void ReportPlaceholder(const char* reason, bool quiet = false) {
 	}
 	// Once per distinct T# and reason: the same record shows up in many heaps and keys.
 	if (seen.size() < 4096 && seen.insert(reason).second) {
+		auto line = fmt::format("bindless: texture kept as placeholder ({} heap=0x{:x} binding={} key={} shader={:016x}): {}",
+		                        context.requested ? "requested by a shader" : "unrequested slot",
+		                        context.heap_base, context.binding, context.key, context.shader, reason);
 		std::printf("\x1b[91m%s\x1b[0m", line.c_str());
 		std::fflush(stdout);
 	}
@@ -2014,7 +2017,7 @@ static const char* TsharpGarbageReason(const ShaderTextureResource& descriptor) 
 static void ReportGarbageTsharp(const char* reason, const ShaderRecompiler::IR::DescriptorValue& value) {
 	TraceRequestedBindlessFailure(reason);
 	static std::mutex                               mutex;
-	static std::map<std::tuple<uint64_t, std::string, bool>, uint64_t> counts;
+	static std::map<std::tuple<uint64_t, const char*, bool>, uint64_t> counts;
 	static auto                                     next = std::chrono::steady_clock::now();
 	const auto&                                     context = g_bindless_fail_context;
 	const std::lock_guard lock(mutex);
@@ -2026,6 +2029,7 @@ static void ReportGarbageTsharp(const char* reason, const ShaderRecompiler::IR::
 		            static_cast<unsigned long long>(context.heap_base), context.binding, context.key,
 		            static_cast<unsigned long long>(context.shader), reason, value.dwords[0],
 		            value.dwords[1], value.dwords[2], value.dwords[3]);
+		std::fflush(stdout);
 	}
 	if (const auto now = std::chrono::steady_clock::now(); now >= next) {
 		next = now + std::chrono::seconds(30);
@@ -2033,10 +2037,10 @@ static void ReportGarbageTsharp(const char* reason, const ShaderRecompiler::IR::
 			std::printf("\x1b[91mbindless: shader %016llx: %llu %s records are not image T#s: %s\x1b[0m\n",
 			            static_cast<unsigned long long>(std::get<0>(where)),
 			            static_cast<unsigned long long>(total),
-			            std::get<2>(where) ? "requested" : "unrequested", std::get<1>(where).c_str());
+			            std::get<2>(where) ? "requested" : "unrequested", std::get<1>(where));
 		}
+		std::fflush(stdout);
 	}
-	std::fflush(stdout);
 }
 
 // A pointer heap with layers (sub_keys): key = record * sub_keys + layer, and the layer's T# lies
@@ -2159,7 +2163,7 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 	const bool target_ok=Libs::LibKernel::Memory::TryReadBacking(address,value.dwords.data(),32u);
 	if (trace.provenance) { trace.resolve_read.target=address; trace.resolve_read.target_ok=target_ok; if (target_ok) trace.resolve_read.words=value.dwords; const auto& buffers=m_context.GetBufferCache(); trace.dirty_hints[2]=buffers.IsPageGpuDirtyHint(address); if (address<=UINT64_MAX-31u) trace.dirty_hints[3]=buffers.IsPageGpuDirtyHint(address+31u); }
 	if (!target_ok) {
-		ReportPlaceholder(fmt::format("T# at 0x{:x} is unreadable\n", address).c_str(), true);
+		ReportPlaceholder("T# target is unreadable\n", true);
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
@@ -2236,178 +2240,40 @@ bool RenderExecutor::ResolveBindlessKey(BindlessTable::Heap& heap, uint32_t key)
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
-	// Ghost of Yotei keeps 1x1 1D color textures (format 56, 67, etc.) in its material tables and samples them
-	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
-	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
-	if (descriptor.Type() == Prospero::ImageType::kColor1D ||
-	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
-		value.dwords[3] += 1u << 28u;
-		descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-	}
-	// Ghost of Yotei stores opacity/detail masks as integer formats (k8UInt=5, k8SInt=6, etc.)
-	// in bindless tables sampled through float texture arrays (binding 0/1/2). In Vulkan, float
-	// sampler arrays require float/normalized formats; promote them to UNorm/SNorm so they resolve
-	// to eR8Unorm/eR8Snorm instead of dropping to zero placeholders.
-	if (BindlessArrayClass(array_binding) == Prospero::TextureNumericClass::Float) {
-		auto promoted_format = descriptor.Format();
-		switch (descriptor.Format()) {
-			case Prospero::BufferFormat::k8UInt: promoted_format = Prospero::BufferFormat::k8UNorm; break;
-			case Prospero::BufferFormat::k8SInt: promoted_format = Prospero::BufferFormat::k8SNorm; break;
-			case Prospero::BufferFormat::k8UScaled: promoted_format = Prospero::BufferFormat::k8UNorm; break;
-			case Prospero::BufferFormat::k8SScaled: promoted_format = Prospero::BufferFormat::k8SNorm; break;
-			case Prospero::BufferFormat::k8_8UInt: promoted_format = Prospero::BufferFormat::k8_8UNorm; break;
-			case Prospero::BufferFormat::k8_8SInt: promoted_format = Prospero::BufferFormat::k8_8SNorm; break;
-			case Prospero::BufferFormat::k8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8UNorm; break;
-			case Prospero::BufferFormat::k8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8SNorm; break;
-			case Prospero::BufferFormat::k8_8_8_8UInt: promoted_format = Prospero::BufferFormat::k8_8_8_8UNorm; break;
-			case Prospero::BufferFormat::k8_8_8_8SInt: promoted_format = Prospero::BufferFormat::k8_8_8_8SNorm; break;
-			case Prospero::BufferFormat::k8_8_8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8UNorm; break;
-			case Prospero::BufferFormat::k8_8_8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8SNorm; break;
-			case Prospero::BufferFormat::k16UInt: promoted_format = Prospero::BufferFormat::k16UNorm; break;
-			case Prospero::BufferFormat::k16SInt: promoted_format = Prospero::BufferFormat::k16SNorm; break;
-			case Prospero::BufferFormat::k16UScaled: promoted_format = Prospero::BufferFormat::k16UNorm; break;
-			case Prospero::BufferFormat::k16SScaled: promoted_format = Prospero::BufferFormat::k16SNorm; break;
-			case Prospero::BufferFormat::k16_16UInt: promoted_format = Prospero::BufferFormat::k16_16UNorm; break;
-			case Prospero::BufferFormat::k16_16SInt: promoted_format = Prospero::BufferFormat::k16_16SNorm; break;
-			case Prospero::BufferFormat::k16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16UNorm; break;
-			case Prospero::BufferFormat::k16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16SNorm; break;
-			case Prospero::BufferFormat::k16_16_16_16UInt: promoted_format = Prospero::BufferFormat::k16_16_16_16UNorm; break;
-			case Prospero::BufferFormat::k16_16_16_16SInt: promoted_format = Prospero::BufferFormat::k16_16_16_16SNorm; break;
-			case Prospero::BufferFormat::k16_16_16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16UNorm; break;
-			case Prospero::BufferFormat::k16_16_16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16SNorm; break;
-			case Prospero::BufferFormat::k32UInt: promoted_format = Prospero::BufferFormat::k32Float; break;
-			case Prospero::BufferFormat::k32SInt: promoted_format = Prospero::BufferFormat::k32Float; break;
-			case Prospero::BufferFormat::k32_32UInt: promoted_format = Prospero::BufferFormat::k32_32Float; break;
-			case Prospero::BufferFormat::k32_32SInt: promoted_format = Prospero::BufferFormat::k32_32Float; break;
-			case Prospero::BufferFormat::k32_32_32UInt: promoted_format = Prospero::BufferFormat::k32_32_32Float; break;
-			case Prospero::BufferFormat::k32_32_32SInt: promoted_format = Prospero::BufferFormat::k32_32_32Float; break;
-			case Prospero::BufferFormat::k32_32_32_32UInt: promoted_format = Prospero::BufferFormat::k32_32_32_32Float; break;
-			case Prospero::BufferFormat::k32_32_32_32SInt: promoted_format = Prospero::BufferFormat::k32_32_32_32Float; break;
-			case Prospero::BufferFormat::k10_10_10_2UInt: promoted_format = Prospero::BufferFormat::k10_10_10_2UNorm; break;
-			case Prospero::BufferFormat::k10_10_10_2UScaled: promoted_format = Prospero::BufferFormat::k10_10_10_2UNorm; break;
-			case Prospero::BufferFormat::k2_10_10_10UInt: promoted_format = Prospero::BufferFormat::k2_10_10_10UNorm; break;
-			case Prospero::BufferFormat::k2_10_10_10UScaled: promoted_format = Prospero::BufferFormat::k2_10_10_10UNorm; break;
-			default: break;
-		}
-		if (promoted_format != descriptor.Format()) {
-			value.dwords[1] = (value.dwords[1] & ~(0x1FFu << 20u)) |
-			                  (static_cast<uint32_t>(promoted_format) << 20u);
-			descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-		}
-	} else if (BindlessArrayClass(array_binding) == Prospero::TextureNumericClass::Uint) {
-		auto promoted_format = descriptor.Format();
-		switch (descriptor.Format()) {
-			case Prospero::BufferFormat::k8UNorm: promoted_format = Prospero::BufferFormat::k8UInt; break;
-			case Prospero::BufferFormat::k8SNorm: promoted_format = Prospero::BufferFormat::k8UInt; break;
-			case Prospero::BufferFormat::k8SInt: promoted_format = Prospero::BufferFormat::k8UInt; break;
-			case Prospero::BufferFormat::k8UScaled: promoted_format = Prospero::BufferFormat::k8UInt; break;
-			case Prospero::BufferFormat::k8SScaled: promoted_format = Prospero::BufferFormat::k8UInt; break;
-			case Prospero::BufferFormat::k8_8UNorm: promoted_format = Prospero::BufferFormat::k8_8UInt; break;
-			case Prospero::BufferFormat::k8_8SNorm: promoted_format = Prospero::BufferFormat::k8_8UInt; break;
-			case Prospero::BufferFormat::k8_8SInt: promoted_format = Prospero::BufferFormat::k8_8UInt; break;
-			case Prospero::BufferFormat::k8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8UInt; break;
-			case Prospero::BufferFormat::k8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8UInt; break;
-			case Prospero::BufferFormat::k8_8_8_8UNorm: promoted_format = Prospero::BufferFormat::k8_8_8_8UInt; break;
-			case Prospero::BufferFormat::k8_8_8_8SNorm: promoted_format = Prospero::BufferFormat::k8_8_8_8UInt; break;
-			case Prospero::BufferFormat::k8_8_8_8SInt: promoted_format = Prospero::BufferFormat::k8_8_8_8UInt; break;
-			case Prospero::BufferFormat::k8_8_8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8UInt; break;
-			case Prospero::BufferFormat::k8_8_8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8UInt; break;
-			case Prospero::BufferFormat::k16UNorm: promoted_format = Prospero::BufferFormat::k16UInt; break;
-			case Prospero::BufferFormat::k16SNorm: promoted_format = Prospero::BufferFormat::k16UInt; break;
-			case Prospero::BufferFormat::k16SInt: promoted_format = Prospero::BufferFormat::k16UInt; break;
-			case Prospero::BufferFormat::k16UScaled: promoted_format = Prospero::BufferFormat::k16UInt; break;
-			case Prospero::BufferFormat::k16SScaled: promoted_format = Prospero::BufferFormat::k16UInt; break;
-			case Prospero::BufferFormat::k16_16UNorm: promoted_format = Prospero::BufferFormat::k16_16UInt; break;
-			case Prospero::BufferFormat::k16_16SNorm: promoted_format = Prospero::BufferFormat::k16_16UInt; break;
-			case Prospero::BufferFormat::k16_16SInt: promoted_format = Prospero::BufferFormat::k16_16UInt; break;
-			case Prospero::BufferFormat::k16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16UInt; break;
-			case Prospero::BufferFormat::k16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16UInt; break;
-			case Prospero::BufferFormat::k16_16_16_16UNorm: promoted_format = Prospero::BufferFormat::k16_16_16_16UInt; break;
-			case Prospero::BufferFormat::k16_16_16_16SNorm: promoted_format = Prospero::BufferFormat::k16_16_16_16UInt; break;
-			case Prospero::BufferFormat::k16_16_16_16SInt: promoted_format = Prospero::BufferFormat::k16_16_16_16UInt; break;
-			case Prospero::BufferFormat::k16_16_16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16UInt; break;
-			case Prospero::BufferFormat::k16_16_16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16UInt; break;
-			case Prospero::BufferFormat::k32Float: promoted_format = Prospero::BufferFormat::k32UInt; break;
-			case Prospero::BufferFormat::k32SInt: promoted_format = Prospero::BufferFormat::k32UInt; break;
-			case Prospero::BufferFormat::k32_32Float: promoted_format = Prospero::BufferFormat::k32_32UInt; break;
-			case Prospero::BufferFormat::k32_32SInt: promoted_format = Prospero::BufferFormat::k32_32UInt; break;
-			case Prospero::BufferFormat::k32_32_32Float: promoted_format = Prospero::BufferFormat::k32_32_32UInt; break;
-			case Prospero::BufferFormat::k32_32_32SInt: promoted_format = Prospero::BufferFormat::k32_32_32UInt; break;
-			case Prospero::BufferFormat::k32_32_32_32Float: promoted_format = Prospero::BufferFormat::k32_32_32_32UInt; break;
-			case Prospero::BufferFormat::k32_32_32_32SInt: promoted_format = Prospero::BufferFormat::k32_32_32_32UInt; break;
-			default: break;
-		}
-		if (promoted_format != descriptor.Format()) {
-			value.dwords[1] = (value.dwords[1] & ~(0x1FFu << 20u)) |
-			                  (static_cast<uint32_t>(promoted_format) << 20u);
-			descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-		}
-	} else if (BindlessArrayClass(array_binding) == Prospero::TextureNumericClass::Sint) {
-		auto promoted_format = descriptor.Format();
-		switch (descriptor.Format()) {
-			case Prospero::BufferFormat::k8UNorm: promoted_format = Prospero::BufferFormat::k8SInt; break;
-			case Prospero::BufferFormat::k8SNorm: promoted_format = Prospero::BufferFormat::k8SInt; break;
-			case Prospero::BufferFormat::k8UInt: promoted_format = Prospero::BufferFormat::k8SInt; break;
-			case Prospero::BufferFormat::k8UScaled: promoted_format = Prospero::BufferFormat::k8SInt; break;
-			case Prospero::BufferFormat::k8SScaled: promoted_format = Prospero::BufferFormat::k8SInt; break;
-			case Prospero::BufferFormat::k8_8UNorm: promoted_format = Prospero::BufferFormat::k8_8SInt; break;
-			case Prospero::BufferFormat::k8_8SNorm: promoted_format = Prospero::BufferFormat::k8_8SInt; break;
-			case Prospero::BufferFormat::k8_8UInt: promoted_format = Prospero::BufferFormat::k8_8SInt; break;
-			case Prospero::BufferFormat::k8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8SInt; break;
-			case Prospero::BufferFormat::k8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8SInt; break;
-			case Prospero::BufferFormat::k8_8_8_8UNorm: promoted_format = Prospero::BufferFormat::k8_8_8_8SInt; break;
-			case Prospero::BufferFormat::k8_8_8_8SNorm: promoted_format = Prospero::BufferFormat::k8_8_8_8SInt; break;
-			case Prospero::BufferFormat::k8_8_8_8UInt: promoted_format = Prospero::BufferFormat::k8_8_8_8SInt; break;
-			case Prospero::BufferFormat::k8_8_8_8UScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8SInt; break;
-			case Prospero::BufferFormat::k8_8_8_8SScaled: promoted_format = Prospero::BufferFormat::k8_8_8_8SInt; break;
-			case Prospero::BufferFormat::k16UNorm: promoted_format = Prospero::BufferFormat::k16SInt; break;
-			case Prospero::BufferFormat::k16SNorm: promoted_format = Prospero::BufferFormat::k16SInt; break;
-			case Prospero::BufferFormat::k16UInt: promoted_format = Prospero::BufferFormat::k16SInt; break;
-			case Prospero::BufferFormat::k16UScaled: promoted_format = Prospero::BufferFormat::k16SInt; break;
-			case Prospero::BufferFormat::k16SScaled: promoted_format = Prospero::BufferFormat::k16SInt; break;
-			case Prospero::BufferFormat::k16_16UNorm: promoted_format = Prospero::BufferFormat::k16_16SInt; break;
-			case Prospero::BufferFormat::k16_16SNorm: promoted_format = Prospero::BufferFormat::k16_16SInt; break;
-			case Prospero::BufferFormat::k16_16UInt: promoted_format = Prospero::BufferFormat::k16_16SInt; break;
-			case Prospero::BufferFormat::k16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16SInt; break;
-			case Prospero::BufferFormat::k16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16SInt; break;
-			case Prospero::BufferFormat::k16_16_16_16UNorm: promoted_format = Prospero::BufferFormat::k16_16_16_16SInt; break;
-			case Prospero::BufferFormat::k16_16_16_16SNorm: promoted_format = Prospero::BufferFormat::k16_16_16_16SInt; break;
-			case Prospero::BufferFormat::k16_16_16_16UInt: promoted_format = Prospero::BufferFormat::k16_16_16_16SInt; break;
-			case Prospero::BufferFormat::k16_16_16_16UScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16SInt; break;
-			case Prospero::BufferFormat::k16_16_16_16SScaled: promoted_format = Prospero::BufferFormat::k16_16_16_16SInt; break;
-			case Prospero::BufferFormat::k32Float: promoted_format = Prospero::BufferFormat::k32SInt; break;
-			case Prospero::BufferFormat::k32UInt: promoted_format = Prospero::BufferFormat::k32SInt; break;
-			case Prospero::BufferFormat::k32_32Float: promoted_format = Prospero::BufferFormat::k32_32SInt; break;
-			case Prospero::BufferFormat::k32_32UInt: promoted_format = Prospero::BufferFormat::k32_32SInt; break;
-			case Prospero::BufferFormat::k32_32_32Float: promoted_format = Prospero::BufferFormat::k32_32_32SInt; break;
-			case Prospero::BufferFormat::k32_32_32UInt: promoted_format = Prospero::BufferFormat::k32_32_32SInt; break;
-			case Prospero::BufferFormat::k32_32_32_32Float: promoted_format = Prospero::BufferFormat::k32_32_32_32SInt; break;
-			case Prospero::BufferFormat::k32_32_32_32UInt: promoted_format = Prospero::BufferFormat::k32_32_32_32SInt; break;
-			default: break;
-		}
-		if (promoted_format != descriptor.Format()) {
-			value.dwords[1] = (value.dwords[1] & ~(0x1FFu << 20u)) |
-			                  (static_cast<uint32_t>(promoted_format) << 20u);
-			descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
-		}
-	}
 	if (!BindlessCompatible(descriptor, array_binding)) {
-		ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
-		                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
-		                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str(),
-		                  !PlausibleImageDescriptor(descriptor));
+		const bool quiet = !PlausibleImageDescriptor(descriptor);
+		if (quiet) {
+			ReportPlaceholder("T# does not fit the shader's texture array\n", true);
+		} else {
+			ReportPlaceholder(fmt::format("T# does not fit the shader's texture array (format {} type {}) dwords={:08x},{:08x},{:08x},{:08x}\n",
+			                              static_cast<uint32_t>(descriptor.Format()), static_cast<uint32_t>(descriptor.Type()),
+			                              value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]).c_str(),
+			                  false);
+		}
 		table.SetTranslation(heap, key, 0u);
 		return false;
 	}
 	// The reserved component selectors 2 and 3 only appear in records that hold other data
 	// (Ghost of Yotei tutorial: "unknown swizzle: 3" stopped the emulator on such a record).
 	if (!IsValidImageSwizzle(descriptor.DstSelXYZW())) {
-		ReportPlaceholder(fmt::format("T# has a reserved component swizzle 0x{:03x} dwords={:08x},{:08x},{:08x},{:08x}\n",
-		                              descriptor.DstSelXYZW(), value.dwords[0], value.dwords[1],
-		                              value.dwords[2], value.dwords[3]).c_str(),
-		                  !g_bindless_fail_context.requested);
+		if (!g_bindless_fail_context.requested) {
+			ReportPlaceholder("T# has a reserved component swizzle\n", true);
+		} else {
+			ReportPlaceholder(fmt::format("T# has a reserved component swizzle 0x{:03x} dwords={:08x},{:08x},{:08x},{:08x}\n",
+			                              descriptor.DstSelXYZW(), value.dwords[0], value.dwords[1],
+			                              value.dwords[2], value.dwords[3]).c_str(),
+			                  false);
+		}
 		table.SetTranslation(heap, key, 0u);
 		return false;
+	}
+	// Ghost of Yotei keeps 1x1 1D color textures (format 56) in its material tables and samples them
+	// with 2D coordinates; the GPU reads a 1D texture as a 2D one of height 1, so it is resolved as
+	// that (type 8 -> 9, 12 -> 13 in dword 3 bits 28-31).
+	if (descriptor.Type() == Prospero::ImageType::kColor1D ||
+	    descriptor.Type() == Prospero::ImageType::kColor1DArray) {
+		value.dwords[3] += 1u << 28u;
+		descriptor = DecodeNativeDescriptor<ShaderTextureResource>(value);
 	}
 	if (trace.provenance) trace.effective_read.words=value.dwords;
 	g_soft_texture_failures = true;
@@ -2585,7 +2451,7 @@ void RenderExecutor::ResolveBindlessRequests() {
 	// Each texture may upload and detile; spread first sight of a scene over a few frames.
 	static const uint32_t budget = [] {
 		const char* text = KYTY_GETENV("KYTY_BINDLESS_BUDGET");
-		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 1024u;
+		return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 128u;
 	}();
 	uint32_t           resolved = 0;
 	for (auto& heap: m_context.GetBindlessTable().Heaps()) {
@@ -2765,7 +2631,7 @@ void RenderExecutor::PrepareBindlessHeaps(const ShaderStageRuntime& runtime,
 		// is gone. A small one is resolved completely right away.
 		static const uint32_t material_eager_limit = [] {
 			const char* text = KYTY_GETENV("KYTY_BINDLESS_MATERIAL_LIMIT");
-			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 4096u;
+			return text != nullptr ? static_cast<uint32_t>(std::strtoul(text, nullptr, 10)) : 512u;
 		}();
 		if (use.record_stride != 32u && entries <= material_eager_limit) {
 			for (uint32_t key = 0; key < entries && key < heap->settled.size(); key++) {
