@@ -19,7 +19,6 @@
 #include "graphics/host_gpu/renderer/dispatchSnapshot.h"
 #include "graphics/host_gpu/renderer/gpuZones.h"
 #include "graphics/host_gpu/renderer/image/imageInfo.h"
-#include "graphics/host_gpu/renderer/paletteSanitizer.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
@@ -1105,7 +1104,6 @@ bool RenderExecutor::DispatchDirect(uint64_t submit_id, CommandBuffer& buffer,
         temporal_dlss->AfterDispatch(input_info, bindings,
             {thread_group_x, thread_group_y, thread_group_z}, m_context.GetGpu().GetFrameNum());
     }
-	SanitizeSkinningPaletteBuffer(m_context, buffer, bindings);
 	if (snapshot.id != 0) [[unlikely]] {
 		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}
@@ -1264,7 +1262,6 @@ bool RenderExecutor::DispatchIndirect(uint64_t submit_id, CommandBuffer& buffer,
 	} else {
 		ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 	}
-	SanitizeSkinningPaletteBuffer(m_context, buffer, bindings);
 	if (snapshot.id != 0) [[unlikely]] {
 		DispatchSnapshot::CaptureOutputs(m_context, snapshot, input_info, bindings);
 	}

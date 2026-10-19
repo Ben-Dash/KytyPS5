@@ -266,7 +266,7 @@ inline void SanitizeSkinningPaletteBuffer(RenderContext& context, CommandBuffer&
                                           const PreparedBindings& bindings, uint64_t submit_id = 0) {
 	static const bool s_enabled = [] {
 		const char* text = KYTY_GETENV("KYTY_GPU_PALETTE_SANITIZE");
-		return text == nullptr || std::strcmp(text, "0") != 0;
+		return text != nullptr && std::strcmp(text, "1") == 0;
 	}();
 	if (!s_enabled) {
 		return;
@@ -277,11 +277,12 @@ inline void SanitizeSkinningPaletteBuffer(RenderContext& context, CommandBuffer&
 	static vk::DescriptorSetLayout s_descriptor_layout {};
 	static vk::PipelineLayout s_pipeline_layout {};
 	static vk::Pipeline s_pipeline {};
+	static uint64_t s_last_tick = UINT64_MAX;
+	static std::vector<std::pair<VkBuffer, vk::DeviceSize>> s_sanitized_ranges;
 
 	auto& graphics = context.GetGraphics();
 	auto& scheduler = context.GetCommandScheduler();
-
-	std::vector<std::pair<VkBuffer, vk::DeviceSize>> sanitized_in_this_dispatch;
+	const uint64_t current_tick = scheduler.CurrentTick();
 
 	for (size_t b_idx = 0; b_idx < bindings.buffers.size(); ++b_idx) {
 		const auto& b_info = bindings.buffers[b_idx];
@@ -318,14 +319,18 @@ inline void SanitizeSkinningPaletteBuffer(RenderContext& context, CommandBuffer&
 		}
 
 		const auto range_key = std::make_pair(VkBuffer(b_info.buffer), base_offset);
-		if (std::find(sanitized_in_this_dispatch.begin(), sanitized_in_this_dispatch.end(), range_key) !=
-		    sanitized_in_this_dispatch.end()) {
-			continue;
-		}
-		sanitized_in_this_dispatch.push_back(range_key);
-
 		{
 			std::lock_guard<std::mutex> lock(s_mutex);
+			if (current_tick != s_last_tick) {
+				s_last_tick = current_tick;
+				s_sanitized_ranges.clear();
+			}
+			if (std::find(s_sanitized_ranges.begin(), s_sanitized_ranges.end(), range_key) !=
+			    s_sanitized_ranges.end()) {
+				continue;
+			}
+			s_sanitized_ranges.push_back(range_key);
+
 			if (s_pipeline == nullptr || s_device != graphics.device) {
 				s_device = graphics.device;
 				const vk::DescriptorSetLayoutBinding layout_binding {
