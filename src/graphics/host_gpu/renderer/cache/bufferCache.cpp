@@ -1416,10 +1416,6 @@ BufferId BufferCache::FindBuffer(uint64_t vaddr, uint64_t size) {
 	if (owner != nullptr && *owner) {
 		auto& buffer = m_slot_buffers[*owner];
 		if (buffer.IsInBounds(vaddr, size)) {
-			// Discovery is a use: buffers reached only through device addresses (DMA roots, SRT
-			// reads, fault-buffer pages) are never obtained, and without this the GC retired
-			// them and zeroed their page-table entries while shaders still read them.
-			TouchBuffer(buffer);
 			return *owner;
 		}
 	}
@@ -1604,8 +1600,6 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, uint64_t vaddr, uint64_t siz
 		}
 	}
 	if (source) {
-		// An upload is a use, also for owners only BDA passes synchronize (never obtained).
-		TouchBuffer(buffer);
 		auto& command = m_scheduler.Current();
 		if (!is_written && !is_texel_buffer && command.UploadBatchActive()) {
 			ClampBufferCopies(copies, source == m_staging_buffer.Handle() ? m_staging_buffer.Size() : 0,
