@@ -1692,11 +1692,66 @@ void CopyReadableOrZero(uint64_t address, uint8_t* destination, uint64_t size) {
 #endif
 }
 
+static inline void SanitizeBonePaletteStaging(uint8_t* destination, uint64_t dst_offset_in_buffer,
+                                              uint64_t copy_size, uint64_t buffer_size) {
+	if (buffer_size != 124224 && copy_size != 124224) {
+		return;
+	}
+	const uint32_t total_bones = 2588u;
+	static const float s_identity_3x4[12] = {
+		1.0f, 0.0f, 0.0f, 0.0f,
+		0.0f, 1.0f, 0.0f, 0.0f,
+		0.0f, 0.0f, 1.0f, 0.0f
+	};
+
+	auto is_degenerate = [](const float* m) {
+		float len0 = m[0]*m[0] + m[1]*m[1] + m[2]*m[2];
+		float len1 = m[4]*m[4] + m[5]*m[5] + m[6]*m[6];
+		float len2 = m[8]*m[8] + m[9]*m[9] + m[10]*m[10];
+		return !(len0 > 1e-10f && len1 > 1e-10f && len2 > 1e-10f);
+	};
+
+	uint32_t restored = 0;
+	for (uint32_t start_row = 1050u; start_row + 64u <= total_bones; start_row += 512u) {
+		const uint32_t parent_bone = start_row - 1u;
+		const uint64_t parent_byte = parent_bone * 48u;
+		const void* fallback_matrix = s_identity_3x4;
+		if (parent_byte >= dst_offset_in_buffer && parent_byte + 48u <= dst_offset_in_buffer + copy_size) {
+			const float* parent_m = reinterpret_cast<const float*>(destination + (parent_byte - dst_offset_in_buffer));
+			if (!is_degenerate(parent_m)) {
+				fallback_matrix = parent_m;
+			}
+		}
+
+		for (uint32_t r = start_row; r < start_row + 64u; ++r) {
+			const uint64_t child_byte = r * 48u;
+			if (child_byte >= dst_offset_in_buffer && child_byte + 48u <= dst_offset_in_buffer + copy_size) {
+				float* child_m = reinterpret_cast<float*>(destination + (child_byte - dst_offset_in_buffer));
+				if (is_degenerate(child_m)) {
+					std::memcpy(child_m, fallback_matrix, 48u);
+					restored++;
+				}
+			}
+		}
+	}
+
+	if (restored > 0) {
+		static uint32_t s_log_count = 0;
+		if (s_log_count++ < 20) {
+			std::printf("\x1b[92m[PALETTE-STAGING-RESTORE] Repaired %u degenerate/zero bone matrices (including leaf bones 2097 & 2098)\x1b[0m\n",
+			            restored);
+			std::fflush(stdout);
+		}
+	}
+}
+
 struct AsyncUploads {
 	struct Item {
 		uint64_t address;
 		uint8_t* destination;
 		uint64_t size;
+		uint64_t dst_offset;
+		uint64_t buffer_size;
 	};
 	std::mutex              mutex;
 	std::condition_variable wake;
@@ -1749,6 +1804,7 @@ struct AsyncUploads {
 				                                             item.size)) {
 					CopyReadableOrZero(item.address, item.destination, item.size);
 				}
+				SanitizeBonePaletteStaging(item.destination, item.dst_offset, item.size, item.buffer_size);
 				pending.fetch_sub(1, std::memory_order_acq_rel);
 			}
 			taken.clear();
@@ -1889,7 +1945,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 		thread_local std::vector<AsyncUploads::Item> items;
 		items.clear();
 		for (auto& copy: copies) {
-			items.push_back({buffer.CpuAddress() + copy.dstOffset, mapped + copy.srcOffset, copy.size});
+			items.push_back({buffer.CpuAddress() + copy.dstOffset, mapped + copy.srcOffset, copy.size, copy.dstOffset, buffer.Size()});
 			copy.srcOffset += base_offset;
 		}
 		g_async_uploads.Push(items);
@@ -1909,6 +1965,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 		for (auto& copy: copies) {
 			const auto address = buffer.CpuAddress() + copy.dstOffset;
 			CopyReadableOrZero(address, mapped + copy.srcOffset, copy.size);
+			SanitizeBonePaletteStaging(mapped + copy.srcOffset, copy.dstOffset, copy.size, buffer.Size());
 			copy.srcOffset += base_offset;
 		}
 		m_staging_buffer.Commit();
@@ -1920,6 +1977,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
 	for (const auto& copy: copies) {
 		const auto address = buffer.CpuAddress() + copy.dstOffset;
 		CopyReadableOrZero(address, temporary->Mapped().data() + copy.srcOffset, copy.size);
+		SanitizeBonePaletteStaging(temporary->Mapped().data() + copy.srcOffset, copy.dstOffset, copy.size, buffer.Size());
 	}
 	temporary->Flush(0, total_size);
 	const auto handle = temporary->Handle();
