@@ -6,6 +6,7 @@
 #include "graphics/host_gpu/renderer/renderContext.h"
 #include "graphics/host_gpu/renderer/temporalDlss.h"
 
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
 #include "common/logging/log.h"
@@ -14,10 +15,12 @@
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/drainStats.h"
 #include "graphics/presentation/videoOut.h"
+#include "kernel/memory.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -314,7 +317,28 @@ void RenderContext::CacheDmaBases(const ShaderStageRuntime& runtime) {
 	EXIT_IF(!runtime);
 	const auto& program = *runtime.program;
 	const auto& user_data = runtime.resources->user_data;
+	// KYTY_DMA_POINTER_PREFETCH=0 disables the pointer-chain pre-acquisition below.
+	static const bool prefetch_pointers = [] {
+		const char* text = KYTY_GETENV("KYTY_DMA_POINTER_PREFETCH");
+		return text == nullptr || std::strcmp(text, "0") != 0;
+	}();
 	std::shared_lock lock(m_mapped_ranges_mutex);
+	const auto acquire = [this](uint64_t address, uint64_t bytes) {
+		m_mapped_ranges.ForEachInRange(address, bytes, [this](uint64_t start, uint64_t end) {
+			(void)m_buffer_cache.FindBuffer(start, end - start);
+		});
+	};
+	// A qword that is an aligned address inside a GPU mapping. Stay within its caching page so
+	// a guessed pointer never merges neighbouring owners.
+	const auto pointer_window = [this](uint64_t pointer, uint64_t wanted) -> uint64_t {
+		if (pointer < 0x10000u || (pointer & 7u) != 0 || !GuestRange {pointer, 8}.Valid() ||
+		    !m_mapped_ranges.Contains(pointer, 8)) {
+			return 0;
+		}
+		const auto page_end = Common::AlignDown(pointer, BufferCache::CACHING_PAGESIZE) +
+		                      BufferCache::CACHING_PAGESIZE;
+		return std::min(wanted, page_end - pointer);
+	};
 	for (const auto& source: program.info.dma_base_registers) {
 		if (source.reg < program.user_data_base) continue;
 		const auto index = static_cast<uint64_t>(source.reg) - program.user_data_base;
@@ -328,6 +352,35 @@ void RenderContext::CacheDmaBases(const ShaderStageRuntime& runtime) {
 		    [this](uint64_t start, uint64_t end) {
 			    (void)m_buffer_cache.FindBuffer(start, end - start);
 		    });
+		if (!prefetch_pointers || !m_mapped_ranges.Contains(base, 8)) continue;
+		// Ghost of Yotei's rig shaders (da4ff1222c09f131) follow raw pointers stored in guest
+		// memory: root+24 -> child, child+136/+152 -> bone data, all in per-frame allocations.
+		// Neither the root page nor the SRT reads cover them, so the first access faulted to
+		// the zero page and the page was registered only after the submission, when the next
+		// frame's chain already lived elsewhere: the character's palette read zeros. Acquire
+		// what the root's first 512 bytes point to, and one level further.
+		std::array<uint64_t, 64> root {};
+		const auto root_bytes = std::min<uint64_t>(sizeof(root), pointer_window(base, sizeof(root)));
+		if (root_bytes < 8 || !LibKernel::Memory::TryReadBacking(base, root.data(), root_bytes)) {
+			continue;
+		}
+		uint32_t children = 0;
+		for (uint64_t i = 0; i < root_bytes / 8u; ++i) {
+			const auto child       = root[i];
+			const auto child_bytes = pointer_window(child, 256);
+			if (child_bytes == 0) continue;
+			acquire(child, child_bytes);
+			if (children++ >= 16u) continue;
+			std::array<uint64_t, 32> leaf {};
+			if (child_bytes < 8 || !LibKernel::Memory::TryReadBacking(child, leaf.data(), child_bytes)) {
+				continue;
+			}
+			for (uint64_t j = 0; j < child_bytes / 8u; ++j) {
+				if (const auto bytes = pointer_window(leaf[j], 256); bytes != 0) {
+					acquire(leaf[j], bytes);
+				}
+			}
+		}
 	}
 }
 
