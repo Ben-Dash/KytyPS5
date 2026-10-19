@@ -340,6 +340,7 @@ static void ApplyTitleProfile(RunOptions& options, const std::string& title_id) 
 		options.config.record_thread_enabled     = true;
 		// Measured 8.2-8.4 instead of 5.3-5.6 fps, no new image errors (2026-10-07).
 		KYTY_SET_DEFAULT_SWITCH("KYTY_COMPUTE_CHAIN", "1");
+		KYTY_SET_DEFAULT_SWITCH("KYTY_READBACK_TARGETED_PUBLICATION", "1");
 		// Raw storage reads synchronized with GPU image aliases (user 2026-10-10): with it, a2dfc83f's
 		// R16 moonlight tiles hold the same nonzero values in 3 runs instead of zeros, the grey haze
 		// at the Torii is gone, fps unchanged (7-7.5).

@@ -2969,7 +2969,6 @@ void RenderExecutor::RebindBuffers(PreparedBindings& prepared) {
 		entry[1]    = static_cast<uint32_t>(address >> 32u);
 		entry[2]    = static_cast<uint32_t>(bytes);
 		entry[3]    = buffer_offset;
-		prepared.buffers.push_back(info);
 	}
 	for (uint32_t i = 0; i < program.info.buffers.size() && !layout.table; i++) {
 		uint32_t buffer_offset = 0;

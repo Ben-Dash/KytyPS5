@@ -24,7 +24,6 @@
 #include "graphics/host_gpu/renderer/image/textureCommon.h"
 #include "graphics/host_gpu/renderer/meshDispatch.h"
 #include "graphics/host_gpu/renderer/meshIndirect.h"
-#include "graphics/host_gpu/renderer/paletteSanitizer.h"
 #include "graphics/host_gpu/renderer/pipeline/bindlessTable.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
 #include "graphics/host_gpu/renderer/pipeline/shaderResourceBarrier.h"
@@ -3163,11 +3162,6 @@ void RenderExecutor::ExecutePreparedDraw(uint64_t submit_id, CommandBuffer& buff
 		} else {
 			m_mesh_indirect->Record(vk_buffer, *gpu_arguments.first, gpu_arguments.second, records,
 			                        gpu_output, {.index_limit = index_limit, .plain = true});
-		}
-	}
-	for (const auto* stage : stages) {
-		if (stage != nullptr) {
-			SanitizeSkinningPaletteBuffer(m_context, buffer, *stage, submit_id);
 		}
 	}
 	if (!mesh_active) {

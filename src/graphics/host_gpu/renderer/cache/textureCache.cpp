@@ -556,6 +556,16 @@ void TextureCache::DeleteImage(ImageId id, std::vector<ImageId>* retired) {
 		EXIT("TextureCache: deleting a GPU-modified image without resolving its contents\n");
 	}
 	m_download_images.erase(id);
+	if (image->info.HasMetadata()) {
+		const auto metadata = m_surface_metas.find(image->info.metadata.range.address);
+		if (metadata != m_surface_metas.end() &&
+		    image->info.metadata.kind == ImageMetadataKind::Htile &&
+		    metadata->second.type == MetaDataInfo::Type::HTile) {
+			// A later binding may have reused this address for another metadata type.
+			m_surface_metas.erase(metadata);
+			m_surface_meta_generation.fetch_add(1, std::memory_order_release);
+		}
+	}
 	UnregisterImage(id);
 	if (retired != nullptr) {
 		retired->push_back(id);
@@ -1127,14 +1137,6 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested, BindingTyp
 					                  "no kept stencil, cleared to 0", true);
 				}
 			}
-		}
-	}
-	if (requested.IsDepth() && requested.metadata.kind == ImageMetadataKind::Htile) {
-		// Copied depth supersedes pending clears from the previous native image.
-		const auto metadata = m_surface_metas.find(requested.metadata.range.address);
-		if (metadata != m_surface_metas.end()) {
-			metadata->second.clear_mask = 0;
-			std::ranges::fill(metadata->second.high_clear_masks, 0u);
 		}
 	}
 	FreeImage(cached_id);
@@ -3448,7 +3450,6 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, uint64_t vaddr, uin
 		}
 	}
 	m_texture_cache.DownloadImage(image, buffer, buf_offset, copy_size, std::move(transfer));
-	image.MarkBufferModified();
 	return true;
 }
 
@@ -3583,8 +3584,7 @@ void TextureCache::InvalidateMemoryFromGPU(uint64_t address, uint64_t size,
 			continue;
 		}
 		if (exact && (image.info.data.address < address ||
-		              image.info.data.End() > address + size ||
-		              (image.info.IsTiled() && image.info.data.size != size))) {
+		              image.info.data.End() > address + size)) {
 			continue;
 		}
 		if (GpuZones::Enabled()) [[unlikely]] {
