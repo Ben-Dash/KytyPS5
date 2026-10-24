@@ -185,6 +185,9 @@ static uint64_t GuestGpuTimestamp() {
 	}
 	return anchor + (now - anchor) * percent / 100u;
 }
+// Shader translation runs on this thread and recurses with the shader's structure, so give it the
+// same stack on every host.
+constexpr size_t GpuThreadStackSize = size_t {64} << 20u;
 
 struct DrawIndirectArgs {
 	uint32_t vertex_count_per_instance;
@@ -215,7 +218,7 @@ GuestGpu::GuestGpu(RenderContext& renderer): m_renderer(renderer) {
 	const auto frames_ahead = std::min(Config::GetGpuFramesAhead(), 15u);
 	m_suspend_point_ready =
 	    std::make_shared<std::counting_semaphore<16>>(1 + frames_ahead);
-	m_thread = std::jthread(ThreadRun, this);
+	m_thread = std::make_unique<Common::ThreadWithStack>(ThreadRun, this, GpuThreadStackSize);
 }
 
 GuestGpu::~GuestGpu() {
@@ -236,8 +239,8 @@ void GuestGpu::Shutdown() {
 	if (m_suspend_point_ready) {
 		m_suspend_point_ready->release();
 	}
-	if (m_thread.joinable()) {
-		m_thread.join();
+	if (m_thread) {
+		m_thread->Join();
 	}
 	// Detach only after the dispatcher joined; a callback already notifying is serialized.
 	{

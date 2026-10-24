@@ -742,6 +742,12 @@ if(WIN32)
 endif()
 target_include_directories(sync_on_address_tests PRIVATE ${inc_headers})
 
+add_executable(host_thread_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/HostThreadTests.cpp"
+)
+target_link_libraries(host_thread_tests common)
+target_include_directories(host_thread_tests PRIVATE ${inc_headers})
+
 add_executable(image_page_table_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/ImagePageTableTests.cpp"
 )
@@ -830,6 +836,7 @@ if(BUILD_TESTING)
 	add_test(NAME mesh_dispatch COMMAND $<TARGET_FILE:mesh_dispatch_tests>)
 	add_test(NAME shader_precompile_record COMMAND $<TARGET_FILE:shader_precompile_record_tests>)
 	add_test(NAME lru_cache COMMAND $<TARGET_FILE:lru_cache_tests>)
+	add_test(NAME host_thread COMMAND $<TARGET_FILE:host_thread_tests>)
 	add_test(NAME shader_vertex_metadata COMMAND $<TARGET_FILE:shader_vertex_metadata_tests>)
 	add_test(NAME resource_materialization COMMAND $<TARGET_FILE:resource_materialization_tests>)
 	add_test(NAME srt_read_residency COMMAND $<TARGET_FILE:resource_materialization_tests> --srt-residency-only)
