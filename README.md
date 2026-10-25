@@ -11,35 +11,48 @@
 
 ## 🎮 Guia de Execução do Jogo (Ghost of Yōtei - PPSA26344)
 
-### 1. Visão Geral da Estrutura
+### 1. Visão Geral da Estrutura de Arquivos
 
-| Caminho | Descrição |
-| --- | --- |
-| `F:\KytyPS5-Windows-x64\` | Diretório principal de execução do emulador no Windows. |
-| `F:\KytyPS5-Windows-x64\kyty_emulator.exe` | Executável compilado do emulador com suporte a 64 MiB de stack na GPU thread e patches de bringup. |
-| `F:\GOI\PPSA26344-app\` | Diretório contendo os arquivos extraídos (dump legítimo) do jogo Ghost of Yōtei. |
-| `F:\KytyPS5-Windows-x64\_PipelineCache\` | Cache persistente de shaders compilados (`PPSA26344.bin` e journal `PPSA26344.v9.shaders`). |
-| `F:\KytyPS5-Windows-x64\run_yotei.bat` | Script principal para inicialização configurada do jogo. |
-| `F:\KytyPS5-Windows-x64\precompile_yotei_shaders.bat` | Script para pré-compilar a biblioteca de shaders offline antes de iniciar a gameplay. |
+Para total clareza, os arquivos envolvidos são divididos em três categorias:
+
+#### 📁 A. Arquivos Versionados no Repositório (Já presentes no projeto)
+* [`scripts/run_yotei.bat`](scripts/run_yotei.bat): Script flexível que localiza automaticamente o executável (seja em `_Build\windows-custom` ou em `F:\KytyPS5-Windows-x64`), configura o ambiente e inicia o jogo.
+* [`scripts/precompile_yotei_shaders.bat`](scripts/precompile_yotei_shaders.bat): Script para pré-compilar offline os pipelines Vulkan gravados.
+* [`scripts/kyty_settings.ini`](scripts/kyty_settings.ini): Arquivo de configuração com os presets ideais de DRS e sincronização.
+* [`docs/yotei-fork.md`](docs/yotei-fork.md): Documentação técnica completa de todas as flags e switches do emulador.
+
+#### ⚙️ B. Arquivos Gerados pelo Build (Compilados localmente)
+* `_Build\windows-custom\kyty_emulator.exe`: O executável do emulador gerado pela compilação com Clang-CL e Ninja.
+* `F:\KytyPS5-Windows-x64\kyty_emulator.exe`: Cópia de distribuição do executável para execução isolada.
+
+#### 📦 C. Arquivos de Dados do Usuário (Externos ao repositório git)
+* `F:\GOI\PPSA26344-app`: Diretório contendo os arquivos extraídos (dump legítimo) do jogo Ghost of Yōtei (~60 GB). Por direitos autorais, **não é distribuído no repositório**.
+* `_PipelineCache\PPSA26344.bin`: Cache Vulkan binário da sua placa de vídeo (~1.65 GB). Gerado dinamicamente durante a execução.
+* `_SaveData\`: Diretório contendo os arquivos de progresso e savegame do usuário.
 
 ---
 
 ### 2. Passo a Passo para Executar
 
-#### Passo A: Pré-compilar os Shaders (Opcional, mas Altamente Recomendado)
+#### Passo 1: Compilar o Executável (se ainda não compilou)
+No terminal Windows (PowerShell ou CMD):
+```powershell
+cmd.exe /c "set PATH=C:\winlibs\mingw64\bin;%PATH% && ninja -C C:\Users\Anderson\KytyPS5\_Build\windows-custom kyty_emulator"
+```
+*(Opcional: copie o binário gerado para a sua pasta `F:\KytyPS5-Windows-x64` se preferir rodar de lá).*
+
+#### Passo 2: Pré-compilar os Shaders (Opcional, mas Altamente Recomendado)
 Evita congelamentos e travamentos (*stutters*) durante as cutscenes e na abertura de mundo:
 ```cmd
-cd /d "F:\KytyPS5-Windows-x64"
-precompile_yotei_shaders.bat
+scripts\precompile_yotei_shaders.bat
 ```
-Esse comando lê o arquivo `_PipelineCache\PPSA26344.v9.shaders` e aquece o cache Vulkan da GPU (`PPSA26344.bin`).
 
-#### Passo B: Iniciar o Jogo
-Execute diretamente o script configurado:
+#### Passo 3: Iniciar o Jogo
+Execute diretamente pelo script do repositório ou pelo atalho do drive F:
 ```cmd
-cd /d "F:\KytyPS5-Windows-x64"
-run_yotei.bat
+scripts\run_yotei.bat
 ```
+*(Ou `F:\KytyPS5-Windows-x64\run_yotei.bat`).*
 
 ---
 
@@ -112,35 +125,6 @@ kyty_emulator.exe ^
   Separa o parsing de pacotes PM4 em uma thread secundária dedicada, liberando a thread principal da GPU.
 * **`--amd-cpu`**  
   Aplica otimizações e instruções compatíveis com arquiteturas AMD Ryzen (Zen 2 / Zen 3 / Zen 4), ajustando flags de escalonamento e tratamento de instruções x86-64.
-
----
-
-### 3. Estrutura de Diretórios de Runtime
-
-* **`_PipelineCache/`**: Onde os shaders compilados para a GPU são armazenados.
-  - `PPSA26344.bin`: Cache binário Vulkan proprietário já compilado pelo driver da placa de vídeo.
-  - `PPSA26344.v9.shaders`: Registro (journal) de instruções de shaders extraídas diretamente do jogo.
-* **`_SaveData/`**: Armazena os arquivos de savegame e configurações de progresso do jogador.
-* **`_TempData/`**: Armazenamento volátil de dumps e alocações dinâmicas temporárias.
-
----
-
-## 🛠️ Como Compilar o Emulador a partir do Código-Fonte
-
-Caso você faça alterações no código em C++, siga o procedimento abaixo para gerar o binário atualizado:
-
-1. **Abrir o Terminal com as Ferramentas de Build (Clang-CL + MinGW/Ninja)**:
-   ```powershell
-   cmd.exe /c "set PATH=C:\winlibs\mingw64\bin;%PATH% && ninja -C C:\Users\Anderson\KytyPS5\_Build\windows-custom kyty_emulator"
-   ```
-2. **Copiar o Novo Executável para a Pasta de Jogo**:
-   ```powershell
-   Copy-Item "C:\Users\Anderson\KytyPS5\_Build\windows-custom\kyty_emulator.exe" "F:\KytyPS5-Windows-x64\kyty_emulator.exe" -Force
-   ```
-3. **Executar o Jogo**:
-   ```cmd
-   F:\KytyPS5-Windows-x64\run_yotei.bat
-   ```
 
 ---
 
