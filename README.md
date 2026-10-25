@@ -1,7 +1,7 @@
 # KytyPS5
 
-[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-0078D4.svg)](#requisitos-do-sistema)
-[![Status](https://img.shields.io/badge/status-yotei--bringup-brightgreen.svg)](#guia-de-execução-do-jogo)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux%20x64-0078D4.svg)](#-requisitos-de-sistema-recomendados)
+[![Status](https://img.shields.io/badge/status-yotei--bringup-brightgreen.svg)](#-guia-completo-de-execução)
 [![License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 
 > [!IMPORTANT]
@@ -9,77 +9,141 @@
 
 ---
 
-## 🎮 Guia de Execução do Jogo (Ghost of Yōtei - PPSA26344)
-
-### 1. Visão Geral da Estrutura de Arquivos
-
-Para total clareza, os arquivos envolvidos são divididos em três categorias:
-
-#### 📁 A. Arquivos Versionados no Repositório (Já presentes no projeto)
-* [`scripts/run_yotei.bat`](scripts/run_yotei.bat): Script flexível que localiza automaticamente o executável (seja em `_Build\windows-custom` ou em `F:\KytyPS5-Windows-x64`), configura o ambiente e inicia o jogo.
-* [`scripts/precompile_yotei_shaders.bat`](scripts/precompile_yotei_shaders.bat): Script para pré-compilar offline os pipelines Vulkan gravados.
-* [`scripts/kyty_settings.ini`](scripts/kyty_settings.ini): Arquivo de configuração com os presets ideais de DRS e sincronização.
-* [`docs/yotei-fork.md`](docs/yotei-fork.md): Documentação técnica completa de todas as flags e switches do emulador.
-
-#### ⚙️ B. Arquivos Gerados pelo Build (Compilados localmente)
-* `_Build\windows-custom\kyty_emulator.exe`: O executável do emulador gerado pela compilação com Clang-CL e Ninja.
-* `F:\KytyPS5-Windows-x64\kyty_emulator.exe`: Cópia de distribuição do executável para execução isolada.
-
-#### 📦 C. Arquivos de Dados do Usuário (Externos ao repositório git)
-* `F:\GOI\PPSA26344-app`: Diretório contendo os arquivos extraídos (dump legítimo) do jogo Ghost of Yōtei (~60 GB). Por direitos autorais, **não é distribuído no repositório**.
-* `_PipelineCache\PPSA26344.bin`: Cache Vulkan binário da sua placa de vídeo (~1.65 GB). Gerado dinamicamente durante a execução.
-* `_SaveData\`: Diretório contendo os arquivos de progresso e savegame do usuário.
+## 📑 Índice
+1. [Requisitos de Sistema e Ferramentas](#-requisitos-de-sistema-e-ferramentas)
+2. [Passo a Passo de Compilação (Build from Source)](#-passo-a-passo-de-compilação-build-from-source)
+3. [Guia Completo de Execução](#-guia-completo-de-execução)
+4. [Detalhamento de Cada Parte da Configuração](#-detalhamento-de-cada-parte-da-configuração)
+5. [Solução de Problemas (Troubleshooting)](#-solução-de-problemas-troubleshooting)
 
 ---
 
-### 2. Passo a Passo para Executar
+## 💻 Requisitos de Sistema e Ferramentas
 
-#### Passo 1: Compilar o Executável (se ainda não compilou)
-No terminal Windows (PowerShell ou CMD):
+### Hardware Recomendado
+* **Processador**: AMD Ryzen 5 5600 / Intel Core i5-12400 (6 núcleos / 12 threads) ou superior.
+* **Memória RAM**: 16 GB a 32 GB DDR4 / DDR5.
+* **Placa de Vídeo**: NVIDIA GeForce RTX 3070 (8 GB VRAM) / RTX 4070 ou superior com suporte a Vulkan 1.3+.
+* **Armazenamento**: SSD NVMe (necessário para streaming rápido de texturas e malhas).
+* **Sistema Operacional**: Windows 11 x64 (Build 22H2 ou superior).
+
+### Ferramentas de Compilação Necessárias (Windows)
+1. **Visual Studio 2022** (Community ou Build Tools) com a carga *"Desenvolvimento para Desktop com C++"* e o Windows 11 SDK instalados.
+2. **LLVM Clang (`clang-cl`)**: versão 18 ou superior ([Download LLVM](https://github.com/llvm/llvm-project/releases)).
+3. **CMake**: versão 3.25 ou superior.
+4. **Ninja Build**: executável `ninja.exe` acessível pelo PATH (incluso em MinGW/WinLibs ou no Visual Studio).
+5. **Vulkan SDK**: versão 1.3.x ou 1.4.x instalada ([LunarG Vulkan SDK](https://vulkan.lunarg.com/)).
+6. **Python**: versão 3.10 ou superior instalada e adicionada ao PATH.
+
+---
+
+## 🛠️ Passo a Passo de Compilação (Build from Source)
+
+Siga este procedimento caso você esteja clonando o repositório do zero ou queira recompilar o emulador após efetuar modificações no código-fonte.
+
+### 1. Clonar o Repositório com Submódulos
 ```powershell
-cmd.exe /c "set PATH=C:\winlibs\mingw64\bin;%PATH% && ninja -C C:\Users\Anderson\KytyPS5\_Build\windows-custom kyty_emulator"
+git clone --recursive -b yotei-bringup https://github.com/andsouzam/KytyPS5.git
+cd KytyPS5
 ```
-*(Opcional: copie o binário gerado para a sua pasta `F:\KytyPS5-Windows-x64` se preferir rodar de lá).*
 
-#### Passo 2: Pré-compilar os Shaders (Opcional, mas Altamente Recomendado)
-Evita congelamentos e travamentos (*stutters*) durante as cutscenes e na abertura de mundo:
+### 2. Configurar o Projeto com CMake (Geração dos Arquivos de Build)
+Abra um terminal (PowerShell ou Prompt de Comando do Desenvolvedor) e execute a configuração inicial apontando para o compilador `clang-cl` e o gerador `Ninja`:
+
+```powershell
+cmake -B _Build/windows-custom -G "Ninja" `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_C_COMPILER="clang-cl" `
+  -DCMAKE_CXX_COMPILER="clang-cl" `
+  -DKYTY_BUILD_LAUNCHER=OFF `
+  -DKYTY_WINDOWS_HOST_ASLR=ON `
+  -DKYTY_SHADER_CACHE_KEY=aaeb0f01f465c27db0fbd0ab9b1a10b14748c69242cb1cce102d130a28aeba4b
+```
+> [!NOTE]
+> A flag `-DKYTY_SHADER_CACHE_KEY=...` fixa a chave de cache para garantir que os shaders pré-compilados salvos em disco (`.bin`) permaneçam 100% válidos entre compilações.
+
+### 3. Compilar o Executável
+Execute o Ninja para compilar o executável `kyty_emulator`:
+
+```powershell
+cmd.exe /c "set PATH=C:\winlibs\mingw64\bin;%PATH% && ninja -C _Build\windows-custom kyty_emulator"
+```
+O executável compilado será gerado em:
+`C:\Users\Anderson\KytyPS5\_Build\windows-custom\kyty_emulator.exe`
+
+### 4. (Opcional) Copiar para a Pasta Dedicada de Runtime
+Caso utilize uma pasta dedicada de execução no drive `F:`:
+```powershell
+Copy-Item "_Build\windows-custom\kyty_emulator.exe" "F:\KytyPS5-Windows-x64\kyty_emulator.exe" -Force
+```
+
+---
+
+## 🎮 Guia Completo de Execução
+
+### 1. Entendendo a Estrutura de Arquivos
+
+| Categoria | Arquivo / Diretório | Descrição |
+| --- | --- | --- |
+| **Projeto (Git)** | [`scripts/run_yotei.bat`](scripts/run_yotei.bat) | Script que inicia o jogo, configurando automaticamente ambiente, flags e caminhos. |
+| **Projeto (Git)** | [`scripts/precompile_yotei_shaders.bat`](scripts/precompile_yotei_shaders.bat) | Script para pré-compilar a biblioteca de shaders offline antes da partida. |
+| **Projeto (Git)** | [`scripts/kyty_settings.ini`](scripts/kyty_settings.ini) | Presets de sincronização, limites de buffer e DRS. |
+| **Compilado** | `_Build\windows-custom\kyty_emulator.exe` | Executável compilado pelo Ninja. |
+| **Dados (Local)** | `F:\GOI\PPSA26344-app\` | Dump legítimo dos arquivos do jogo Ghost of Yōtei (~60 GB). *(Não incluso no Git)*. |
+| **Dados (Local)** | `_PipelineCache\PPSA26344.bin` | Cache Vulkan binário da placa de vídeo (~1,65 GB). *(Não incluso no Git)*. |
+| **Dados (Local)** | `_PipelineCache\PPSA26344.v9.shaders` | Journal de shaders extraídos para pré-compilação (~22,5 MB). |
+| **Dados (Local)** | `_SaveData\` | Saves e progresso de jogo do usuário. |
+
+---
+
+### 2. Executando o Jogo
+
+#### Passo A: Pré-compilar os Shaders (Recomendado)
+A pré-compilação aquece o driver Vulkan da GPU com os pipelines salvos no journal, eliminando engasgos (*stutters*) severos e congelamentos na abertura de mundo:
 ```cmd
 scripts\precompile_yotei_shaders.bat
 ```
 
-#### Passo 3: Iniciar o Jogo
-Execute diretamente pelo script do repositório ou pelo atalho do drive F:
+#### Passo B: Iniciar o Jogo
+Você pode executar o jogo de duas formas equivalentes:
+
+* **Opção 1 (Direto pelo repositório)**:
+  ```cmd
+  scripts\run_yotei.bat
+  ```
+  *(O script localiza automaticamente o executável em `_Build\windows-custom` ou em `F:\KytyPS5-Windows-x64`).*
+
+* **Opção 2 (Pelo diretório de instalação do drive F:)**:
+  ```cmd
+  F:\KytyPS5-Windows-x64\run_yotei.bat
+  ```
+
+#### Customização de Caminho do Jogo
+Se os arquivos do jogo estiverem em outra pasta ou unidade, basta definir a variável `YOTEI_GAME_PATH` antes da chamada:
 ```cmd
+set YOTEI_GAME_PATH=D:\Jogos\PPSA26344-app
 scripts\run_yotei.bat
 ```
-*(Ou `F:\KytyPS5-Windows-x64\run_yotei.bat`).*
 
 ---
 
-## 🔍 O Que é Cada Parte da Configuração de Execução
+## 🔍 Detalhamento de Cada Parte da Configuração
 
-O comando de execução em `run_yotei.bat` combina variáveis de ambiente do runtime e parâmetros de linha de comando. Abaixo está o detalhamento completo do que cada flag faz:
+O comando executado internamente por `run_yotei.bat` combina variáveis de runtime do emulador e argumentos de linha de comando:
 
-### 1. Variáveis de Ambiente (`set KYTY_*`)
+### 1. Variáveis de Ambiente do Runtime (`set KYTY_*`)
 
-* **`KYTY_COMPUTE_CHAIN=1`**  
-  Permite que dispatches de computação consecutivos rodem em cadeia contínua na GPU sem emitir barreiras redundantes no host Vulkan, reduzindo drasticamente o overhead de CPU.
-* **`KYTY_READBACK_QUEUE=0`**  
-  Desativa a fila genérica de readback lento, garantindo que leituras críticas da memória de vídeo não sofram latência cumulativa.
-* **`KYTY_READBACK_TARGETED_PUBLICATION=1`**  
-  Publica leituras de buffers específicos de forma direcionada, eliminando esperas globais e stalls desnecessários na GPU.
-* **`KYTY_GPU_PALETTE_SANITIZE=0`**  
-  Desativa a sanitização agressiva da GPU sobre buffers de ossos, garantindo a integridade anatômica da malha 3D da protagonista (Atsu) sem deformações de vértices.
-* **`KYTY_BINDLESS_KEY_BOUNDS=1`**  
-  Restringe a carga de tabelas de texturas bindless estritamente aos descritores alcançáveis pelos shaders em execução. Previne crashes de `VK_ERROR_DEVICE_LOST` no portão Torii e nas transições de cena.
-* **`KYTY_BINDLESS_EAGER=1`**  
-  Carrega tabelas de texturas de compute raros de forma imediata (eager) em vez de atrasar por 1 frame, evitando artefatos pretos.
-* **`KYTY_BINDLESS_TSHARP_CHECK=1`**  
-  Valida os registradores de descritores de textura `T#` antes de submeter ao pipeline Vulkan, substituindo entradas corrompidas por fallbacks seguros em vez de causar encerramento inesperado.
-* **`KYTY_AVPLAYER_RECYCLE=1`**  
-  Recicla e reutiliza buffers de vídeo decodificados (`AvPlayer`) imediatamente, prevenindo vazamentos de memória e travamentos na reprodução de vídeos/cinemáticas.
-* **`KYTY_PRESENT_WHEN_READY=1`**  
-  Apresenta o quadro renderizado ao display assim que a GPU termina a fila de comandos, eliminando quedas artificiais de taxa de quadros (*frame drops*).
+| Variável | Valor | Finalidade |
+| --- | :---: | --- |
+| `KYTY_COMPUTE_CHAIN` | `1` | Encadeia dispatches consecutivos de computação sem barreiras redundantes no host Vulkan, diminuindo o overhead de CPU. |
+| `KYTY_READBACK_QUEUE` | `0` | Desativa a fila genérica de readback lento, garantindo publicação imediata de dados essenciais para o guest. |
+| `KYTY_READBACK_TARGETED_PUBLICATION` | `1` | Publica leituras de buffers específicos de forma direcionada, eliminando esperas globais e travamentos de GPU. |
+| `KYTY_GPU_PALETTE_SANITIZE` | `0` | Desativa a sanitização forçada na GPU sobre buffers de ossos, preservando a malha anatômica da protagonista (Atsu) sem deformações de vértices. |
+| `KYTY_BINDLESS_KEY_BOUNDS` | `1` | Carrega apenas as entradas de textura bindless alcançáveis pelo shader em execução, prevenindo crash de `DEVICE_LOST` no Torii. |
+| `KYTY_BINDLESS_EAGER` | `1` | Carrega tabelas de texturas de compute raros imediatamente no mesmo quadro, evitando artefatos pretos. |
+| `KYTY_BINDLESS_TSHARP_CHECK` | `1` | Valida registradores de textura `T#` antes de enviar à Vulkan, ignorando dados corrompidos de buffers liberados. |
+| `KYTY_AVPLAYER_RECYCLE` | `1` | Recicla e reutiliza buffers do decodificador de vídeo (`AvPlayer`), prevenindo estouro de memória nas cutscenes. |
+| `KYTY_PRESENT_WHEN_READY` | `1` | Apresenta o quadro renderizado assim que a fila gráfica termina, eliminando drops artificiais de frames. |
 
 ---
 
@@ -102,34 +166,39 @@ kyty_emulator.exe ^
 ```
 
 * **`--game "F:\GOI\PPSA26344-app"`**  
-  Indica o diretório raiz do aplicativo do jogo extraído no host.
+  Caminho absoluto ou relativo para o diretório raiz do dump do jogo PS5.
 * **`--screen-width 1920 --screen-height 1080`**  
-  Define a resolução da janela e do render target de saída para 1080p (Full HD), aliviando o uso de memória VRAM em placas de 8 GB.
+  Define a resolução da janela e do render target de saída para 1080p (Full HD), mantendo a alocação de VRAM sob controle em placas de 8 GB (RTX 3070).
 * **`--game-preset-priority Performance`**  
-  Prioriza os perfis internos do jogo voltados a desempenho e taxa de quadros fluida.
+  Força as configurações internas da engine do jogo a priorizarem taxa de quadros (*Performance Mode*).
 * **`--gpu-frames-ahead 0`**  
-  Trava a antecipação de quadros na fila do processador gráfico da CPU, sincronizando com semáforos atômicos. Evita sobrescrita de anel de memória (*ring-buffer clobbering*) e atrasos de entrada.
+  Sincroniza o processador gráfico da CPU diretamente com os pontos de suspensão da GPU via semáforo atômico, eliminando atrasos e sobrescrita de comandos em ring-buffer.
 * **`--gpu-timestamp-scale 200`**  
-  Ajusta a escala de tempo virtual reportada para a engine do jogo. Faz o Dynamic Resolution Scaling (DRS) entender que a GPU precisa de margem livre, mantendo a resolução adaptativa e a estabilidade visual.
+  Escala os timestamps de GPU reportados para a engine. Faz o Dynamic Resolution Scaling (DRS) entender que a GPU precisa de margem livre, estabilizando os quadros sem quedas bruscas de resolução.
 * **`--label-flush-interval-us 2000`**  
-  Controla a frequência (em microssegundos) de sincronização e flush dos labels de execução de GPU.
+  Intervalo em microssegundos (2 ms) para descarga periódica dos labels de sincronização da GPU.
 * **`--async-pipelines false`**  
-  Força compilação determinística e síncrona dos pipelines gráficos essenciais, garantindo que nenhum efeito ou shader apareça incompleto durante a gameplay.
+  Força a compilação síncrona determinística de variantes gráficas essenciais para evitar artefatos ou elementos invisíveis.
 * **`--defer-dispatches false`**  
-  Processa comandos de computação no momento exato em que são submetidos pela CPU guest.
+  Execução imediata de comandos de computação para manter sincronismo de física e animação.
 * **`--relaxed-readback false`**  
-  Garante coerência estrita de sincronização entre escritas da GPU e leituras da CPU guest.
+  Garante coerência estrita entre as leituras de memória da CPU e escritas da GPU.
 * **`--speculative-draws true`**  
-  Alimenta antecipadamente o escalonador de chamadas de desenho (*draw calls*) para manter as filas da GPU cheias e evitar ociosidade.
+  Alimenta chamadas de desenho de forma especulativa para mitigar bolhas de ociosidade no pipeline gráfico.
 * **`--record-thread true`**  
-  Separa o parsing de pacotes PM4 em uma thread secundária dedicada, liberando a thread principal da GPU.
+  Transfere a gravação e parsing de comandos PM4 para uma thread de suporte dedicada, liberando a thread principal de renderização.
 * **`--amd-cpu`**  
-  Aplica otimizações e instruções compatíveis com arquiteturas AMD Ryzen (Zen 2 / Zen 3 / Zen 4), ajustando flags de escalonamento e tratamento de instruções x86-64.
+  Aplica otimizações para processadores AMD Ryzen (Zen 3 / 5600), otimizando o patch de instruções de CPU guest para x86-64 do host.
 
 ---
 
-## 📌 Requisitos de Sistema Recomendados
-* **Processador**: AMD Ryzen 5 5600 / Intel Core i5-12400 ou superior.
-* **Memória RAM**: 16 GB ou 32 GB DDR4/DDR5.
-* **Placa de Vídeo**: NVIDIA GeForce RTX 3070 (8 GB) / RTX 4070 ou superior com drivers Vulkan 1.3 atualizados.
-* **Sistema Operacional**: Windows 11 x64 (Build 22H2 ou superior).
+## ❓ Solução de Problemas (Troubleshooting)
+
+* **Estouro de Pilha / Crash Silencioso ao Carregar Shaders**:  
+  Certifique-se de estar utilizando a versão atualizada da branch `yotei-bringup` com o patch `ThreadWithStack` (64 MiB reservados para a GPU thread). No Windows, threads padrão com apenas 1 MiB sofrem overflow ao processar a árvore de shaders do RDNA2.
+* **Vértices Explodindo na Personagem (Atsu)**:  
+  Verifique se a variável `KYTY_GPU_PALETTE_SANITIZE=0` está ativa. A sanitização agressiva antiga corrompia matrizes de pele (*skinning*) legítimas.
+* **Quedas Bruscas de FPS ou Travamento em Telas Pretas**:  
+  Execute sempre o script `scripts\precompile_yotei_shaders.bat` antes de rodar o jogo para garantir que o cache `_PipelineCache\PPSA26344.bin` esteja preenchido.
+* **Falta de Memória VRAM (Out of Device Memory)**:  
+  Mantenha a resolução em 1080p (`--screen-width 1920 --screen-height 1080`). Resoluções 4K excedem facilmente o limite de 8 GB da RTX 3070.
